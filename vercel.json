@@ -1,8 +1,12 @@
 {
   "rewrites": [
     {
+      "source": "/sw.js",
+      "destination": "/sw.js"
+    },
+    {
       "source": "/(.*)",
-      "destination": "/"
+      "destination": "/index.html"
     }
   ]
 }

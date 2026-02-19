@@ -19,7 +19,11 @@ export default defineConfig(({ mode }) => {
       mode === "development" && componentTagger(),
 
       VitePWA({
+        strategies: "injectManifest",
+        srcDir: "src",
+        filename: "sw.js",
         registerType: "autoUpdate",
+
         manifest: {
           name: "Chamô",
           short_name: "Chamô",
@@ -40,6 +44,14 @@ export default defineConfig(({ mode }) => {
               type: "image/png",
             },
           ],
+        },
+
+        injectManifest: {
+          globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+        },
+
+        devOptions: {
+          enabled: true,
         },
       }),
     ].filter(Boolean),

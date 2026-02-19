@@ -34,6 +34,39 @@ async function asaasRequest(path: string, method: string, body?: unknown) {
   return data;
 }
 
+// 🔥 FUNÇÃO QUE GARANTE CUSTOMER NO ASAAS
+async function findOrCreateCustomer(
+  supabase: ReturnType<typeof createClient>,
+  userId: string
+) {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("full_name, email, cpf, cnpj, phone")
+    .eq("user_id", userId)
+    .single();
+
+  if (!profile) throw new Error("Perfil não encontrado.");
+
+  const cpfCnpj = profile.cnpj || profile.cpf;
+  if (!cpfCnpj) throw new Error("Cadastre seu CPF ou CNPJ.");
+
+  const clean = cpfCnpj.replace(/\D/g, "");
+
+  const search = await asaasRequest(`/customers?cpfCnpj=${clean}`, "GET");
+
+  if (search.data?.length > 0) {
+    return search.data[0].id;
+  }
+
+  const customer = await asaasRequest("/customers", "POST", {
+    name: profile.full_name,
+    email: profile.email,
+    cpfCnpj: clean,
+  });
+
+  return customer.id;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -80,13 +113,15 @@ serve(async (req) => {
       throw new Error("Service request not found");
     }
 
+    const customerId = await findOrCreateCustomer(supabase, user.id);
+
     const totalAmount = Number(amount);
     const platformFee = Number((totalAmount * 0.1).toFixed(2));
     const professionalNet = Number((totalAmount - platformFee).toFixed(2));
 
     // 🔥 CRIA PAGAMENTO PIX
     const asaasPayment = await asaasRequest("/payments", "POST", {
-      customer: serviceReq.client_id,
+      customer: customerId,
       billingType: "PIX",
       value: totalAmount,
       dueDate: new Date().toISOString().split("T")[0],
@@ -105,7 +140,7 @@ serve(async (req) => {
       total_amount: totalAmount,
       platform_fee: platformFee,
       professional_net: professionalNet,
-      asaas_payment_id: asaasPayment.id, // ESSENCIAL
+      asaas_payment_id: asaasPayment.id,
       status: "pending",
     });
 

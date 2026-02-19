@@ -117,32 +117,32 @@ serve(async (req) => {
     const body = await req.json();
     const { action } = body;
 
-    // ===============================
-    // CREATE SERVICE PAYMENT
-    // ===============================
-
     if (action === "create_service_payment") {
       const { request_id, amount, billing_type, credit_card, credit_card_holder_info } = body;
 
       if (!request_id || !amount)
         throw new Error("request_id and amount are required");
 
+      // 🔥 BUSCA service_request + professionals.user_id
       const { data: serviceReq, error: serviceError } = await supabase
         .from("service_requests")
-        .select("*")
+        .select(`
+          *,
+          professionals (
+            user_id
+          )
+        `)
         .eq("id", request_id)
         .eq("client_id", user.id)
         .single();
 
-      if (serviceError || !serviceReq) {
-        console.error(serviceError);
+      if (serviceError || !serviceReq)
         throw new Error("Service request not found");
-      }
 
-      if (!serviceReq.professional_id) {
-        console.error("Missing professional_id", serviceReq);
-        throw new Error("Professional ID missing");
-      }
+      if (!serviceReq.professionals?.user_id)
+        throw new Error("Professional user_id not found");
+
+      const professionalUserId = serviceReq.professionals.user_id;
 
       const customerId = await findOrCreateCustomer(supabase, user.id);
 
@@ -150,7 +150,7 @@ serve(async (req) => {
       const platformFee = Number((totalAmount * 0.1).toFixed(2));
       const professionalNet = Number((totalAmount - platformFee).toFixed(2));
 
-      // PIX
+      // ================= PIX =================
       if (billing_type === "PIX") {
         const asaasPayment = await asaasRequest("/payments", "POST", {
           customer: customerId,
@@ -169,17 +169,15 @@ serve(async (req) => {
           .from("transactions")
           .insert({
             client_id: user.id,
-            professional_id: serviceReq.professional_id,
+            professional_id: professionalUserId,
             total_amount: totalAmount,
             platform_fee: platformFee,
             professional_net: professionalNet,
             status: "pending",
           });
 
-        if (insertError) {
-          console.error("Insert error:", insertError);
+        if (insertError)
           throw new Error("Erro ao salvar transação");
-        }
 
         return new Response(
           JSON.stringify({
@@ -193,7 +191,7 @@ serve(async (req) => {
         );
       }
 
-      // CARTÃO
+      // ================= CARTÃO =================
       const asaasPayment = await asaasRequest("/payments", "POST", {
         customer: customerId,
         billingType: "CREDIT_CARD",
@@ -220,7 +218,7 @@ serve(async (req) => {
         .from("transactions")
         .insert({
           client_id: user.id,
-          professional_id: serviceReq.professional_id,
+          professional_id: professionalUserId,
           total_amount: totalAmount,
           platform_fee: platformFee,
           professional_net: professionalNet,
@@ -231,10 +229,8 @@ serve(async (req) => {
               : "pending",
         });
 
-      if (insertError) {
-        console.error("Insert error:", insertError);
+      if (insertError)
         throw new Error("Erro ao salvar transação");
-      }
 
       return new Response(
         JSON.stringify({

@@ -1,0 +1,2 @@
+ALTER TABLE public.coupons DROP CONSTRAINT coupons_source_check;
+ALTER TABLE public.coupons ADD CONSTRAINT coupons_source_check CHECK (source = ANY (ARRAY['registration', 'payment', 'bonus', 'admin']));

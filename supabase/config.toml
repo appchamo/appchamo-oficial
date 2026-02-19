@@ -1,0 +1,10 @@
+project_id = "mrfippvowbudtctahgag"
+
+[functions.create_payment]
+verify_jwt = false
+
+[functions.complete-signup]
+verify_jwt = false
+
+[functions.admin-manage]
+verify_jwt = false

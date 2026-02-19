@@ -1,29 +1,43 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
+
     <title>Chamô</title>
     <meta name="description" content="Chamô - Encontre profissionais qualificados">
     <meta name="author" content="Chamô" />
-    <link rel="icon" href="/favicon.png" type="image/png" />
-    <link rel="apple-touch-icon" href="/favicon.png" />
 
-    <!-- TODO: Update og:title to match your application name -->
-    
-    
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+
+    <!-- Open Graph -->
     <meta property="og:type" content="website" />
+    <meta property="og:title" content="Chamô">
+    <meta property="og:description" content="Chamô - Encontre profissionais qualificados">
     <meta property="og:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/e1a2cc5d-f542-468f-9141-48ff6994e2e7/id-preview-c80d84c6--1ecfeae5-55ce-4582-bc71-48e6f143a2e7.lovable.app-1771221132486.png">
 
+    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
+    <meta name="twitter:title" content="Chamô">
+    <meta name="twitter:description" content="Chamô - Encontre profissionais qualificados">
     <meta name="twitter:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/e1a2cc5d-f542-468f-9141-48ff6994e2e7/id-preview-c80d84c6--1ecfeae5-55ce-4582-bc71-48e6f143a2e7.lovable.app-1771221132486.png">
-    <meta property="og:title" content="Chamô">
-  <meta name="twitter:title" content="Chamô">
-  <meta property="og:description" content="Chamô - Encontre profissionais qualificados">
-  <meta name="twitter:description" content="Chamô - Encontre profissionais qualificados">
-</head>
+
+    <!-- OneSignal SDK -->
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+          appId: "COLE_SEU_APP_ID_AQUI",
+          notifyButton: {
+            enable: false
+          }
+        });
+      });
+    </script>
+
+  </head>
 
   <body>
     <div id="root"></div>

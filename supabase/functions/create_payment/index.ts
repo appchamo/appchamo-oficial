@@ -144,15 +144,17 @@ serve(async (req) => {
    const { error: insertError } = await supabase
   .from("transactions")
   .insert({
-    client_id: user.id,
-    professional_id: professionalId,
-    request_id: request_id, // 👈 ESSENCIAL
-    total_amount: totalAmount,
-    platform_fee: platformFee,
-    professional_net: professionalNet,
-    asaas_payment_id: asaasPayment.id,
-    status: "pending",
-  });
+  client_id: user.id,
+  professional_id: professionalId,
+  request_id: request_id,
+  total_amount: totalAmount,
+  platform_fee: platformFee,
+  professional_net: professionalNet,
+  asaas_payment_id: asaasPayment.id,
+  pix_qr_code: pixData.encodedImage,
+  pix_copy_paste: pixData.payload,
+  status: "pending",
+});
 
     if (insertError) {
       console.error("Transaction insert error:", insertError);

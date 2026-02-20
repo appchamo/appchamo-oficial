@@ -121,6 +121,30 @@ serve(async (req) => {
     console.log("Professional ID enviado:", serviceReq.professional_id);
 
     const professionalId = serviceReq.professional_id;
+    // 🔎 Verifica se já existe pagamento pendente
+const { data: existingTx } = await supabase
+  .from("transactions")
+  .select("*")
+  .eq("request_id", request_id)
+  .eq("status", "pending")
+  .maybeSingle();
+
+if (existingTx) {
+  console.log("Pagamento pendente encontrado, reutilizando.");
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      payment_id: existingTx.asaas_payment_id,
+      pix_qr_code: existingTx.pix_qr_code,
+      pix_copy_paste: existingTx.pix_copy_paste,
+      reused: true
+    }),
+    {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    }
+  );
+}
 
     const totalAmount = Number(amount);
     const platformFee = Number((totalAmount * 0.1).toFixed(2));

@@ -480,7 +480,7 @@ const MessageThread = () => {
   try {
     const finalAmount = getDiscountedAmount();
 
-    // 🔎 1️⃣ Verifica se já existe pagamento pendente
+    // 🔎 Verifica se já existe pagamento pendente
     const { data: existingTx } = await supabase
       .from("transactions")
       .select("*")
@@ -493,7 +493,7 @@ const MessageThread = () => {
     let res;
 
     if (existingTx && existingTx.asaas_payment_id) {
-      // 🔁 2️⃣ Reutiliza pagamento existente
+      // 🔁 Reutiliza pagamento existente
       res = await supabase.functions.invoke("create_payment", {
         body: {
           request_id: threadId,
@@ -502,7 +502,7 @@ const MessageThread = () => {
         }
       });
     } else {
-      // 🆕 3️⃣ Cria novo pagamento
+      // 🆕 Cria novo pagamento
       res = await supabase.functions.invoke("create_payment", {
         body: {
           request_id: threadId,
@@ -532,7 +532,7 @@ const MessageThread = () => {
       variant: "destructive"
     });
   }
-};;
+};
 
 
   const handleSubmitRating = async () => {

@@ -169,6 +169,46 @@ const MessageThread = () => {
       if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
     };
   }, []);
+  // Realtime: listen payment status change
+useEffect(() => {
+  if (!pixData?.paymentId) return;
+
+  const channel = supabase
+    .channel(`pix-status-${pixData.paymentId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "transactions",
+        filter: `asaas_payment_id=eq.${pixData.paymentId}`,
+      },
+      async (payload) => {
+        const updated = payload.new as any;
+
+        if (updated.status === "completed") {
+          setPixOpen(false);
+          setPaymentConfirmed(true);
+
+          toast({
+            title: "Pagamento confirmado!",
+          });
+
+          // enviar mensagem automática no chat
+          await supabase.from("chat_messages").insert({
+            request_id: threadId,
+            sender_id: userId,
+            content: "✅ PAGAMENTO CONFIRMADO\nO pagamento foi aprovado com sucesso.",
+          });
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [pixData?.paymentId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -479,7 +519,7 @@ const MessageThread = () => {
 
   try {
     const finalAmount = getDiscountedAmount();
-    
+
 
 const res = await supabase.functions.invoke("create_payment", {
   body: {

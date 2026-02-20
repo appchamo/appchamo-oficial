@@ -22,10 +22,13 @@ Deno.serve(async (req) => {
       body;
 
     if (!userId || !accountType || !basicData) {
-      return new Response(JSON.stringify({ error: "Missing required fields" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: "Missing required fields" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     const { data: authUser, error: authError } =
@@ -36,31 +39,6 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Usuário não encontrado." }),
         {
           status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    let profileExists = false;
-    for (let i = 0; i < 5; i++) {
-      const { data } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (data) {
-        profileExists = true;
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-
-    if (!profileExists) {
-      return new Response(
-        JSON.stringify({ error: "Perfil não foi criado." }),
-        {
-          status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
@@ -92,18 +70,29 @@ Deno.serve(async (req) => {
     if (profileData?.avatarUrl)
       profileUpdates.avatar_url = profileData.avatarUrl;
 
+    // 🔥 UPSERT (resolve corrida de trigger)
     const { error: profileError } = await supabase
       .from("profiles")
-      .update(profileUpdates)
-      .eq("user_id", userId);
+      .upsert(
+        {
+          user_id: userId,
+          email: authUser.user.email,
+          ...profileUpdates,
+        },
+        { onConflict: "user_id" }
+      );
 
     if (profileError) {
-      return new Response(JSON.stringify({ error: profileError.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: profileError.message }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
+    // 🔥 Fluxo profissional
     if (accountType === "professional") {
       const needsAnalysis = planId === "vip" || planId === "business";
       const profileStatus = needsAnalysis ? "pending" : "approved";
@@ -117,13 +106,15 @@ Deno.serve(async (req) => {
       });
 
       if (proError) {
-        return new Response(JSON.stringify({ error: proError.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ error: proError.message }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
 
-      // 🔥 Upload no bucket PUBLIC salvando URL completa
       if (docFiles && docFiles.length > 0) {
         const { data: proData } = await supabase
           .from("professionals")
@@ -154,7 +145,6 @@ Deno.serve(async (req) => {
               continue;
             }
 
-            // 🔥 GERAR URL COMPLETA
             const projectUrl = Deno.env.get("PROJECT_URL")!;
             const publicUrl = `${projectUrl}/storage/v1/object/public/uploads/${filePath}`;
 
@@ -181,9 +171,12 @@ Deno.serve(async (req) => {
     });
   } catch (err: any) {
     console.error("complete-signup error:", err);
-    return new Response(JSON.stringify({ error: err?.message ?? String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: err?.message ?? String(err) }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 });

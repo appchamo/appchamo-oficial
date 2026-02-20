@@ -41,7 +41,7 @@ async function findOrCreateCustomer(
 ) {
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, email, cpf, cnpj, phone")
+    .select("full_name, email, cpf, cnpj")
     .eq("user_id", userId)
     .single();
 
@@ -133,23 +133,12 @@ serve(async (req) => {
       "GET"
     );
 
-    // 🔥 CONVERTE user_id -> professionals.id
-    const { data: professional } = await supabase
-      .from("professionals")
-      .select("id")
-      .eq("user_id", serviceReq.professional_id)
-      .single();
-
-    if (!professional) {
-      throw new Error("Profissional não encontrado");
-    }
-
     // 🔥 SALVA TRANSACTION
     const { error: insertError } = await supabase
       .from("transactions")
       .insert({
         client_id: user.id,
-        professional_id: professional.id, // AGORA CORRETO
+        professional_id: serviceReq.professional_id, // CORRETO
         total_amount: totalAmount,
         platform_fee: platformFee,
         professional_net: professionalNet,

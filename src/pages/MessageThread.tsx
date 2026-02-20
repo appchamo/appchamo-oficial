@@ -472,7 +472,7 @@ const MessageThread = () => {
     return options;
   };
 
-  const handleConfirmPayment = async () => {
+ const handleConfirmPayment = async () => {
   if (!paymentData || !userId || !threadId) return;
 
   setProcessingPayment(true);
@@ -480,19 +480,41 @@ const MessageThread = () => {
   try {
     const finalAmount = getDiscountedAmount();
 
-    // 🔥 CHAMADA SIMPLES COMPATÍVEL COM SUA EDGE FUNCTION
-    const res = await supabase.functions.invoke("create_payment", {
-      body: {
-        request_id: threadId,
-        amount: finalAmount
-      }
-    });
+    // 🔎 1️⃣ Verifica se já existe pagamento pendente
+    const { data: existingTx } = await supabase
+      .from("transactions")
+      .select("*")
+      .eq("request_id", threadId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let res;
+
+    if (existingTx && existingTx.asaas_payment_id) {
+      // 🔁 2️⃣ Reutiliza pagamento existente
+      res = await supabase.functions.invoke("create_payment", {
+        body: {
+          request_id: threadId,
+          amount: finalAmount,
+          reuse_payment_id: existingTx.asaas_payment_id
+        }
+      });
+    } else {
+      // 🆕 3️⃣ Cria novo pagamento
+      res = await supabase.functions.invoke("create_payment", {
+        body: {
+          request_id: threadId,
+          amount: finalAmount
+        }
+      });
+    }
 
     if (res.error || res.data?.error) {
       throw new Error(res.data?.error || "Erro ao gerar pagamento");
     }
 
-    // 🔥 Abre PIX QR Code
     setPixData({
       qrCode: res.data.pix_qr_code,
       copyPaste: res.data.pix_copy_paste,
@@ -510,9 +532,7 @@ const MessageThread = () => {
       variant: "destructive"
     });
   }
-};
-
-
+};;
 
 
   const handleSubmitRating = async () => {

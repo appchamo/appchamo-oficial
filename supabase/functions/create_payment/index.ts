@@ -34,7 +34,6 @@ async function asaasRequest(path: string, method: string, body?: unknown) {
   return data;
 }
 
-// 🔥 GARANTE CUSTOMER NO ASAAS
 async function findOrCreateCustomer(
   supabase: ReturnType<typeof createClient>,
   userId: string
@@ -102,24 +101,33 @@ serve(async (req) => {
       throw new Error("request_id and amount required");
     }
 
-    const { data: serviceReq } = await supabase
+    const { data: serviceReq, error: serviceError } = await supabase
       .from("service_requests")
       .select("*")
       .eq("id", request_id)
       .eq("client_id", user.id)
       .single();
 
+    if (serviceError) {
+      console.error("Service request error:", serviceError);
+      throw new Error(serviceError.message);
+    }
+
     if (!serviceReq) {
       throw new Error("Service request not found");
     }
 
-    const customerId = await findOrCreateCustomer(supabase, user.id);
+    console.log("Service Request:", serviceReq);
+    console.log("Professional ID enviado:", serviceReq.professional_id);
+
+    const professionalId = serviceReq.professional_id;
 
     const totalAmount = Number(amount);
     const platformFee = Number((totalAmount * 0.1).toFixed(2));
     const professionalNet = Number((totalAmount - platformFee).toFixed(2));
 
-    // 🔥 CRIA PAGAMENTO PIX NO ASAAS
+    const customerId = await findOrCreateCustomer(supabase, user.id);
+
     const asaasPayment = await asaasRequest("/payments", "POST", {
       customer: customerId,
       billingType: "PIX",
@@ -133,12 +141,11 @@ serve(async (req) => {
       "GET"
     );
 
-    // 🔥 SALVA TRANSACTION
     const { error: insertError } = await supabase
       .from("transactions")
       .insert({
         client_id: user.id,
-        professional_id: serviceReq.professional_id, // CORRETO
+        professional_id: professionalId,
         total_amount: totalAmount,
         platform_fee: platformFee,
         professional_net: professionalNet,
@@ -148,7 +155,7 @@ serve(async (req) => {
 
     if (insertError) {
       console.error("Transaction insert error:", insertError);
-      throw new Error("Erro ao salvar transação");
+      throw new Error(insertError.message);
     }
 
     return new Response(
@@ -162,7 +169,7 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error("create_payment error:", error.message);
     return new Response(
       JSON.stringify({ error: error.message }),

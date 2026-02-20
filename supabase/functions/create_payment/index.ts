@@ -34,7 +34,7 @@ async function asaasRequest(path: string, method: string, body?: unknown) {
   return data;
 }
 
-// 🔥 FUNÇÃO QUE GARANTE CUSTOMER NO ASAAS
+// 🔥 GARANTE CUSTOMER NO ASAAS
 async function findOrCreateCustomer(
   supabase: ReturnType<typeof createClient>,
   userId: string
@@ -119,7 +119,7 @@ serve(async (req) => {
     const platformFee = Number((totalAmount * 0.1).toFixed(2));
     const professionalNet = Number((totalAmount - platformFee).toFixed(2));
 
-    // 🔥 CRIA PAGAMENTO PIX
+    // 🔥 CRIA PAGAMENTO PIX NO ASAAS
     const asaasPayment = await asaasRequest("/payments", "POST", {
       customer: customerId,
       billingType: "PIX",
@@ -133,23 +133,34 @@ serve(async (req) => {
       "GET"
     );
 
-    // 🔥 SALVA TRANSACTION COM ASAAS_PAYMENT_ID
-  const { error: insertError } = await supabase
-  .from("transactions")
-  .insert({
-    client_id: user.id,
-    professional_id: serviceReq.professional_id,
-    total_amount: totalAmount,
-    platform_fee: platformFee,
-    professional_net: professionalNet,
-    asaas_payment_id: asaasPayment.id,
-    status: "pending",
-  });
+    // 🔥 CONVERTE user_id -> professionals.id
+    const { data: professional } = await supabase
+      .from("professionals")
+      .select("id")
+      .eq("user_id", serviceReq.professional_id)
+      .single();
 
-if (insertError) {
-  console.error("Transaction insert error:", insertError);
-  throw new Error("Erro ao salvar transação");
-}
+    if (!professional) {
+      throw new Error("Profissional não encontrado");
+    }
+
+    // 🔥 SALVA TRANSACTION
+    const { error: insertError } = await supabase
+      .from("transactions")
+      .insert({
+        client_id: user.id,
+        professional_id: professional.id, // AGORA CORRETO
+        total_amount: totalAmount,
+        platform_fee: platformFee,
+        professional_net: professionalNet,
+        asaas_payment_id: asaasPayment.id,
+        status: "pending",
+      });
+
+    if (insertError) {
+      console.error("Transaction insert error:", insertError);
+      throw new Error("Erro ao salvar transação");
+    }
 
     return new Response(
       JSON.stringify({
@@ -162,7 +173,7 @@ if (insertError) {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
-  } catch (error) {
+  } catch (error: any) {
     console.error("create_payment error:", error.message);
     return new Response(
       JSON.stringify({ error: error.message }),

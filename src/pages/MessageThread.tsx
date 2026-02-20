@@ -479,8 +479,7 @@ const MessageThread = () => {
 
   try {
     const finalAmount = getDiscountedAmount();
-
-const finalAmount = getDiscountedAmount();
+    
 
 const res = await supabase.functions.invoke("create_payment", {
   body: {

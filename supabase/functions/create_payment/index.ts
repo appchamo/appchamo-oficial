@@ -141,6 +141,9 @@ serve(async (req) => {
       "GET"
     ); 
     console.log("PIX DATA:", pixData);
+    if (!pixData?.encodedImage) {
+  throw new Error("PIX não retornou encodedImage");
+}
 
    const { error: insertError } = await supabase
   .from("transactions")

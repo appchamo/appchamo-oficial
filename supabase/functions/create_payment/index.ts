@@ -139,7 +139,8 @@ serve(async (req) => {
     const pixData = await asaasRequest(
       `/payments/${asaasPayment.id}/pixQrCode`,
       "GET"
-    );
+    ); 
+    console.log("PIX DATA:", pixData);
 
    const { error: insertError } = await supabase
   .from("transactions")

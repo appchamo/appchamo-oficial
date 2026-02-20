@@ -473,201 +473,44 @@ const MessageThread = () => {
   };
 
   const handleConfirmPayment = async () => {
-    if (!paymentMethod || !paymentData || !userId || !threadId) return;
+  if (!paymentData || !userId || !threadId) return;
 
-    if (paymentMethod === "card") {
-      if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) {
-        toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
-        return;
-      }
-      if (cardForm.number.replace(/\s/g, "").length < 16) {
-        toast({ title: "Número do cartão inválido", variant: "destructive" });
-        return;
-      }
-      // Check address — profile or form
-      const { data: profileCheck } = await supabase.
-      from("profiles").
-      select("address_zip, address_number").
-      eq("user_id", userId).
-      single();
-      const hasAddress = (profileCheck?.address_zip || cardForm.postalCode) && (profileCheck?.address_number || cardForm.addressNumber);
-      if (!hasAddress) {
-        toast({ title: "Preencha o CEP e número do endereço", variant: "destructive" });
-        return;
-      }
-    }
+  setProcessingPayment(true);
 
-    setProcessingPayment(true);
-    try {
-      if (paymentMethod === "card") {
-        const expiryParts = cardForm.expiry.split("/");
-        const { data: profile } = await supabase.
-        from("profiles").
-        select("full_name, email, cpf, cnpj, phone, address_zip, address_number").
-        eq("user_id", userId).
-        single();
+  try {
+    const finalAmount = getDiscountedAmount();
 
-        if (!profile?.cpf && !profile?.cnpj) {
-          toast({
-            title: "Cadastre seu CPF ou CNPJ no perfil antes de realizar pagamentos.",
-            description: "Acesse seu perfil para atualizar seus dados.",
-            variant: "destructive"
-          });
-          setProcessingPayment(false);
-          setPaymentOpen(false);
-          navigate("/profile");
-          return;
-        }
-
-        const finalAmount = getDiscountedAmount();
-        const res = await supabase.functions.invoke("create_payment", {
-          body: {
-            action: "create_service_payment",
-            request_id: threadId,
-            amount: finalAmount,
-            installment_count: parseInt(installments),
-            credit_card: {
-              holder_name: cardForm.name,
-              number: cardForm.number,
-              expiry_month: expiryParts[0],
-              expiry_year: `20${expiryParts[1]}`,
-              cvv: cardForm.cvv
-            },
-            credit_card_holder_info: {
-              name: profile?.full_name || cardForm.name,
-              email: profile?.email || "",
-              cpf_cnpj: profile?.cpf || profile?.cnpj || "",
-              postal_code: profile?.address_zip || cardForm.postalCode || "",
-              address_number: profile?.address_number || cardForm.addressNumber || "",
-              phone: profile?.phone || ""
-            }
-          }
-        });
-
-        if (res.error || res.data?.error) {
-          throw new Error(res.data?.error || "Erro ao processar pagamento");
-        }
-      } else if (paymentMethod === "pix") {
-        // PIX payment
-        const { data: profile } = await supabase.
-        from("profiles").
-        select("cpf, cnpj").
-        eq("user_id", userId).
-        single();
-
-        if (!profile?.cpf && !profile?.cnpj) {
-          toast({
-            title: "Cadastre seu CPF ou CNPJ no perfil antes de realizar pagamentos.",
-            variant: "destructive"
-          });
-          setProcessingPayment(false);
-          setPaymentOpen(false);
-          navigate("/profile");
-          return;
-        }
-
-        const finalAmount = getDiscountedAmount();
-        const res = await supabase.functions.invoke("create_payment", {
-          body: {
-            action: "create_service_payment",
-            request_id: threadId,
-            amount: finalAmount,
-            billing_type: "PIX"
-          }
-        });
-
-        if (res.error || res.data?.error) {
-          throw new Error(res.data?.error || "Erro ao gerar PIX");
-        }
-
-        // Show PIX QR code dialog
-        setPixData({
-          qrCode: res.data.pix_qr_code,
-          copyPaste: res.data.pix_copy_paste,
-          paymentId: res.data.payment_id
-        });
-        setProcessingPayment(false);
-        setPaymentOpen(false);
-        setPixOpen(true);
-        setPixCopied(false);
-
-        // Start polling for payment confirmation
-        setPixPolling(true);
-        if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
-        pixIntervalRef.current = setInterval(async () => {
-          try {
-            const check = await supabase.functions.invoke("create_payment", {
-              body: { action: "check_payment_status", payment_id: res.data.payment_id }
-            });
-            if (check.data?.confirmed) {
-              if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
-              setPixPolling(false);
-              setPixOpen(false);
-
-              // Send confirmation message
-              const discountNote = couponDiscount ?
-              `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
-              "";
-              const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX`;
-
-              await supabase.from("chat_messages").insert({
-                request_id: threadId,
-                sender_id: userId,
-                content: confirmContent
-              });
-
-              if (selectedCouponId) {
-                await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
-              }
-
-              toast({ title: "Pagamento PIX confirmado!" });
-              setRatingStars(0);
-              setRatingComment("");
-              setRatingOpen(true);
-            }
-          } catch (err) {
-            console.error("PIX polling error:", err);
-          }
-        }, 5000); // Poll every 5 seconds
-
-        return; // Don't continue to card confirmation flow
-      } else {
-        setProcessingPayment(false);
-        return;
-      }
-
-      const finalAmount = getDiscountedAmount();
-      const methodLabel = `Cartão de crédito (${installments}x)`;
-      const discountNote = couponDiscount ?
-      `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
-      "";
-      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: ${methodLabel}`;
-
-      await supabase.from("chat_messages").insert({
+    // 🔥 CHAMADA SIMPLES COMPATÍVEL COM SUA EDGE FUNCTION
+    const res = await supabase.functions.invoke("create_payment", {
+      body: {
         request_id: threadId,
-        sender_id: userId,
-        content: confirmContent
-      });
-
-      // Mark coupon as used
-      if (selectedCouponId) {
-        await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
+        amount: finalAmount
       }
+    });
 
-      setProcessingPayment(false);
-      setPaymentConfirmed(true);
-      setPaymentOpen(false);
-      toast({ title: "Pagamento confirmado!" });
-
-      // Open rating
-      setRatingStars(0);
-      setRatingComment("");
-      setRatingOpen(true);
-    } catch (err: any) {
-      setProcessingPayment(false);
-      toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
+    if (res.error || res.data?.error) {
+      throw new Error(res.data?.error || "Erro ao gerar pagamento");
     }
-  };
+
+    // 🔥 Abre PIX QR Code
+    setPixData({
+      qrCode: res.data.pix_qr_code,
+      copyPaste: res.data.pix_copy_paste,
+      paymentId: res.data.payment_id
+    });
+
+    setProcessingPayment(false);
+    setPaymentOpen(false);
+    setPixOpen(true);
+
+  } catch (err: any) {
+    setProcessingPayment(false);
+    toast({
+      title: err.message || "Erro ao processar pagamento",
+      variant: "destructive"
+    });
+  }
+};
 
 
 

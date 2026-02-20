@@ -134,15 +134,22 @@ serve(async (req) => {
     );
 
     // 🔥 SALVA TRANSACTION COM ASAAS_PAYMENT_ID
-    await supabase.from("transactions").insert({
-      client_id: user.id,
-      professional_id: serviceReq.professional_id,
-      total_amount: totalAmount,
-      platform_fee: platformFee,
-      professional_net: professionalNet,
-      asaas_payment_id: asaasPayment.id,
-      status: "pending",
-    });
+  const { error: insertError } = await supabase
+  .from("transactions")
+  .insert({
+    client_id: user.id,
+    professional_id: serviceReq.professional_id,
+    total_amount: totalAmount,
+    platform_fee: platformFee,
+    professional_net: professionalNet,
+    asaas_payment_id: asaasPayment.id,
+    status: "pending",
+  });
+
+if (insertError) {
+  console.error("Transaction insert error:", insertError);
+  throw new Error("Erro ao salvar transação");
+}
 
     return new Response(
       JSON.stringify({

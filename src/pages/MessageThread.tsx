@@ -480,39 +480,17 @@ const MessageThread = () => {
   try {
     const finalAmount = getDiscountedAmount();
 
-    // 🔎 Verifica se já existe pagamento pendente
-    const { data: existingTx } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("request_id", threadId)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+const finalAmount = getDiscountedAmount();
 
-   let res;
+const res = await supabase.functions.invoke("create_payment", {
+  body: {
+    request_id: threadId,
+    amount: finalAmount
+  }
+});
 
-if (existingTx && existingTx.asaas_payment_id) {
-  console.log("Reutilizando pagamento existente:", existingTx.asaas_payment_id);
-
-  // NÃO chama create_payment novamente
-  res = {
-    data: {
-      success: true,
-      payment_id: existingTx.asaas_payment_id,
-      reuse: true
-    }
-  };
-
-} else {
-  console.log("Criando novo pagamento");
-
-  res = await supabase.functions.invoke("create_payment", {
-    body: {
-      request_id: threadId,
-      amount: finalAmount
-    }
-  });
+if (res.error || res.data?.error) {
+  throw new Error(res.data?.error || "Erro ao gerar pagamento");
 }
 
     if (res.error || res.data?.error) {

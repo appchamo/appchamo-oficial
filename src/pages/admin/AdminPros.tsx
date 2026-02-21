@@ -234,7 +234,7 @@ const AdminPros = () => {
 
         // ✅ CÓDIGO NOVO: Muda o tipo de usuário para "Empresa" se o plano for business
         if (pro.plan_id === 'business') {
-          await supabase.from("profiles").update({ user_type: "enterprise" }).eq("user_id", pro.user_id);
+          await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", pro.user_id);
         }
 
         if (pro.profile_status === "pending") {

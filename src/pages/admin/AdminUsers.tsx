@@ -101,7 +101,6 @@ const AdminUsers = () => {
 
   const openPlanModal = async (user: Profile) => {
     setPlanUser(user);
-    // Busca o plano atual do usuário antes de abrir o modal
     const { data: sub } = await supabase
       .from("subscriptions")
       .select("plan_id")
@@ -120,15 +119,15 @@ const AdminUsers = () => {
       await supabase.from("subscriptions").insert({ user_id: planUser.user_id, plan_id: selectedPlan, status: "active" });
     }
     
-    // Se mudou para business e o usuário for profissional, muda para empresa
+    // Corrigido para usar "company" ao invés de "enterprise"
     if (selectedPlan === 'business' && planUser.user_type === 'professional') {
-        await supabase.from("profiles").update({ user_type: "enterprise" }).eq("user_id", planUser.user_id);
+        await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", planUser.user_id);
     }
 
     await logAction("change_plan", "user", planUser.user_id);
     toast({ title: `Plano alterado para ${selectedPlan === "free" ? "Grátis" : selectedPlan === "pro" ? "Pro" : selectedPlan === "vip" ? "Vip" : "Empresarial"}` });
     setPlanUser(null);
-    fetchUsers(); // Atualiza a lista caso o tipo de usuário tenha mudado
+    fetchUsers(); 
   };
 
   const openDocs = async (user: Profile) => {
@@ -172,56 +171,60 @@ const AdminUsers = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((user) => (
-                  <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="p-3 font-medium text-foreground">{user.full_name || "—"}</td>
-                    <td className="p-3 text-muted-foreground">{user.email}</td>
-                    <td className="p-3">
-                      <Select value={user.user_type} onValueChange={(v) => handleChangeUserType(user, v)}>
-                        <SelectTrigger className="h-7 w-[130px] text-xs rounded-lg">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="client">Cliente</SelectItem>
-                          <SelectItem value="professional">Profissional</SelectItem>
-                          <SelectItem value="company">Empresa</SelectItem>
-                          <SelectItem value="enterprise">Empresa (Plano)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="p-3">
-                      {user.is_blocked ? (
-                        <span className="inline-flex items-center gap-1 text-destructive text-xs"><Ban className="w-3 h-3" /> Bloqueado</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: "hsl(var(--success))" }}><CheckCircle className="w-3 h-3" /> Ativo</span>
-                      )}
-                    </td>
-                    <td className="p-3 text-muted-foreground text-xs">{new Date(user.created_at).toLocaleDateString("pt-BR")}</td>
-                    <td className="p-3">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                            <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => toggleBlock(user)}>
-                            {user.is_blocked ? <><CheckCircle className="w-3.5 h-3.5 mr-2" /> Desbloquear</> : <><Ban className="w-3.5 h-3.5 mr-2" /> Bloquear</>}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openDocs(user)}>
-                            <FileText className="w-3.5 h-3.5 mr-2" /> Ver documentos
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openPlanModal(user)}>
-                            <CreditCard className="w-3.5 h-3.5 mr-2" /> Alterar plano
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setDeleteId(user.id)} className="text-destructive">
-                            <Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((user) => {
+                  // Trava de segurança: converte enterprise do teste anterior para company visualmente
+                  const safeUserType = user.user_type === 'enterprise' ? 'company' : user.user_type;
+
+                  return (
+                    <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="p-3 font-medium text-foreground">{user.full_name || "—"}</td>
+                      <td className="p-3 text-muted-foreground">{user.email}</td>
+                      <td className="p-3">
+                        <Select value={safeUserType} onValueChange={(v) => handleChangeUserType(user, v)}>
+                          <SelectTrigger className="h-7 w-[130px] text-xs rounded-lg">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="client">Cliente</SelectItem>
+                            <SelectItem value="professional">Profissional</SelectItem>
+                            <SelectItem value="company">Empresa</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="p-3">
+                        {user.is_blocked ? (
+                          <span className="inline-flex items-center gap-1 text-destructive text-xs"><Ban className="w-3 h-3" /> Bloqueado</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: "hsl(var(--success))" }}><CheckCircle className="w-3 h-3" /> Ativo</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-muted-foreground text-xs">{new Date(user.created_at).toLocaleDateString("pt-BR")}</td>
+                      <td className="p-3">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                              <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => toggleBlock(user)}>
+                              {user.is_blocked ? <><CheckCircle className="w-3.5 h-3.5 mr-2" /> Desbloquear</> : <><Ban className="w-3.5 h-3.5 mr-2" /> Bloquear</>}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openDocs(user)}>
+                              <FileText className="w-3.5 h-3.5 mr-2" /> Ver documentos
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openPlanModal(user)}>
+                              <CreditCard className="w-3.5 h-3.5 mr-2" /> Alterar plano
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDeleteId(user.id)} className="text-destructive">
+                              <Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  )
+                })}
                 {filtered.length === 0 && (
                   <tr><td colSpan={6} className="p-8 text-center text-muted-foreground text-sm">Nenhum usuário encontrado</td></tr>
                 )}

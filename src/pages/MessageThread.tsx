@@ -522,46 +522,68 @@ useEffect(() => {
   };
 
  const handleConfirmPayment = async () => {
-  if (!paymentData || !userId || !threadId) return;
+  if (!paymentData || !userId || !threadId || !paymentMethod) return;
 
   setProcessingPayment(true);
 
   try {
     const finalAmount = getDiscountedAmount();
 
-
-const res = await supabase.functions.invoke("create_payment", {
-  body: {
-    request_id: threadId,
-    amount: finalAmount
-  }
-});
-
-if (res.error || res.data?.error) {
-  throw new Error(res.data?.error || "Erro ao gerar pagamento");
-}
+    const res = await supabase.functions.invoke("create_payment", {
+      body: {
+        request_id: threadId,
+        amount: finalAmount,
+        method: paymentMethod,
+        installments: paymentMethod === "card" ? installments : 1,
+        cardData: paymentMethod === "card" ? cardForm : null
+      }
+    });
 
     if (res.error || res.data?.error) {
       throw new Error(res.data?.error || "Erro ao gerar pagamento");
     }
 
-    setPixData({
-      qrCode: res.data.pix_qr_code,
-      copyPaste: res.data.pix_copy_paste,
-      paymentId: res.data.payment_id
-    });
+    // 🔵 PIX → abre QR
+    if (paymentMethod === "pix") {
+      setPixData({
+        qrCode: res.data.pix_qr_code,
+        copyPaste: res.data.pix_copy_paste,
+        paymentId: res.data.payment_id
+      });
 
-    setProcessingPayment(false);
-    setPaymentOpen(false);
-    setPixOpen(true);
+      setPaymentOpen(false);
+      setPixOpen(true);
+    }
+
+    // 🟢 CARTÃO → confirma direto
+    if (paymentMethod === "card") {
+
+      toast({ title: "Pagamento aprovado!" });
+
+      await supabase.from("chat_messages").insert({
+        request_id: threadId,
+        sender_id: userId,
+        content:
+          "✅ PAGAMENTO CONFIRMADO\nPagamento no cartão aprovado com sucesso.",
+      });
+
+      setPaymentOpen(false);
+
+      setTimeout(() => {
+        setRatingStars(0);
+        setRatingComment("");
+        setRatingOpen(true);
+      }, 350);
+    }
 
   } catch (err: any) {
-    setProcessingPayment(false);
     toast({
       title: err.message || "Erro ao processar pagamento",
       variant: "destructive"
     });
   }
+
+  setProcessingPayment(false);
 };
 
 

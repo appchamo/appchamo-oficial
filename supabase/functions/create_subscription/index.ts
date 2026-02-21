@@ -17,18 +17,20 @@ serve(async (req) => {
     const body = await req.json();
     console.log("BODY RECEIVED:", body);
 
-    const {
-      value,
-      holderName,
-      number,
-      expiryMonth,
-      expiryYear,
-      ccv,
-      email,
-      cpfCnpj,
-      postalCode,
-      addressNumber,
-    } = body;
+const {
+  value,
+  holderName,
+  number,
+  expiryMonth,
+  expiryYear,
+  ccv,
+  email,
+  cpfCnpj,
+  postalCode,
+  addressNumber,
+  userId,
+  planId,
+} = body;
 
     // 🔎 Validação
     if (
@@ -150,8 +152,8 @@ await fetch(`${SUPABASE_URL}/rest/v1/subscriptions`, {
     Prefer: "return=minimal",
   },
   body: JSON.stringify({
-    user_id: body.userId,
-    plan_id: body.planId,
+    user_id: userId,
+    plan_id: planId,
     status: "pending",
     asaas_subscription_id: subscriptionData.id,
     asaas_customer_id: customerId,

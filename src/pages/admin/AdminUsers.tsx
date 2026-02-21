@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Shield, Eye, FileText } from "lucide-react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Shield, Eye, FileText, CreditCard } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -15,7 +15,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard } from "lucide-react";
 
 interface Profile {
   id: string;
@@ -62,7 +61,6 @@ const AdminUsers = () => {
     const { error } = await supabase.from("profiles").update({ user_type: newType }).eq("id", user.id);
     if (error) { toast({ title: "Erro ao alterar tipo", description: translateError(error.message), variant: "destructive" }); return; }
 
-    // If changing to professional or company, ensure a professionals record exists
     if (newType === "professional" || newType === "company") {
       const { data: existingPro } = await supabase.from("professionals").select("id").eq("user_id", user.user_id).maybeSingle();
       if (!existingPro) {
@@ -101,7 +99,17 @@ const AdminUsers = () => {
     }
   };
 
-  const typeLabel = (t: string) => t === "company" ? "Empresa" : t === "professional" ? "Profissional" : "Cliente";
+  const openPlanModal = async (user: Profile) => {
+    setPlanUser(user);
+    // Busca o plano atual do usuário antes de abrir o modal
+    const { data: sub } = await supabase
+      .from("subscriptions")
+      .select("plan_id")
+      .eq("user_id", user.user_id)
+      .maybeSingle();
+    
+    setSelectedPlan(sub?.plan_id || "free");
+  };
 
   const handleChangePlan = async () => {
     if (!planUser) return;
@@ -111,9 +119,16 @@ const AdminUsers = () => {
     } else {
       await supabase.from("subscriptions").insert({ user_id: planUser.user_id, plan_id: selectedPlan, status: "active" });
     }
+    
+    // Se mudou para business e o usuário for profissional, muda para empresa
+    if (selectedPlan === 'business' && planUser.user_type === 'professional') {
+        await supabase.from("profiles").update({ user_type: "enterprise" }).eq("user_id", planUser.user_id);
+    }
+
     await logAction("change_plan", "user", planUser.user_id);
     toast({ title: `Plano alterado para ${selectedPlan === "free" ? "Grátis" : selectedPlan === "pro" ? "Pro" : selectedPlan === "vip" ? "Vip" : "Empresarial"}` });
     setPlanUser(null);
+    fetchUsers(); // Atualiza a lista caso o tipo de usuário tenha mudado
   };
 
   const openDocs = async (user: Profile) => {
@@ -170,6 +185,7 @@ const AdminUsers = () => {
                           <SelectItem value="client">Cliente</SelectItem>
                           <SelectItem value="professional">Profissional</SelectItem>
                           <SelectItem value="company">Empresa</SelectItem>
+                          <SelectItem value="enterprise">Empresa (Plano)</SelectItem>
                         </SelectContent>
                       </Select>
                     </td>
@@ -195,7 +211,7 @@ const AdminUsers = () => {
                           <DropdownMenuItem onClick={() => openDocs(user)}>
                             <FileText className="w-3.5 h-3.5 mr-2" /> Ver documentos
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => { setPlanUser(user); setSelectedPlan("free"); }}>
+                          <DropdownMenuItem onClick={() => openPlanModal(user)}>
                             <CreditCard className="w-3.5 h-3.5 mr-2" /> Alterar plano
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setDeleteId(user.id)} className="text-destructive">

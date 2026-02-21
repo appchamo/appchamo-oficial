@@ -232,6 +232,11 @@ const AdminPros = () => {
           throw new Error(res.data?.error || "Erro ao aprovar assinatura no Asaas");
         }
 
+        // ✅ CÓDIGO NOVO: Muda o tipo de usuário para "Empresa" se o plano for business
+        if (pro.plan_id === 'business') {
+          await supabase.from("profiles").update({ user_type: "enterprise" }).eq("user_id", pro.user_id);
+        }
+
         if (pro.profile_status === "pending") {
           await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", pro.id);
           await supabase.from("notifications").insert({

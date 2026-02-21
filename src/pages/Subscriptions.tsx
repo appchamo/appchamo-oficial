@@ -277,7 +277,7 @@ const Subscriptions = () => {
         return;
       }
 
-      const res = await supabase.functions.invoke("create_payment", {
+      const res = await supabase.functions.invoke("create_subscription", {
         body: {
           action: "create_subscription_payment",
           plan_id: selectedPlanId,

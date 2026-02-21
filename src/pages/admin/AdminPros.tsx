@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard } from "lucide-react";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -7,7 +7,7 @@ import { translateError } from "@/lib/errorMessages";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 
@@ -33,7 +33,7 @@ interface Professional {
   max_calls: number;
   city: string | null;
   state: string | null;
-  subscription_status?: string; // Novo campo para status da assinatura
+  subscription_status?: string;
 }
 
 interface Category {
@@ -65,7 +65,11 @@ const AdminPros = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [processingSub, setProcessingSub] = useState<string | null>(null);
 
-  // Bonus calls dialog
+  // Estados para o Modal de Recusa de Assinatura
+  const [rejectSubOpen, setRejectSubOpen] = useState(false);
+  const [rejectSubPro, setRejectSubPro] = useState<Professional | null>(null);
+  const [rejectSubReason, setRejectSubReason] = useState("");
+
   const [bonusOpen, setBonusOpen] = useState(false);
   const [bonusTarget, setBonusTarget] = useState<"individual" | "category">("individual");
   const [bonusProId, setBonusProId] = useState<string>("");
@@ -73,7 +77,6 @@ const AdminPros = () => {
   const [bonusAmount, setBonusAmount] = useState("10");
   const [bonusSaving, setBonusSaving] = useState(false);
 
-  // Reviews management
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [reviewsPro, setReviewsPro] = useState<Professional | null>(null);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -107,7 +110,6 @@ const AdminPros = () => {
     const profileMap = new Map((profilesRes.data || []).map((p) => [p.user_id, p]));
     const subsMap = new Map((subsRes.data || []).map((s) => [s.user_id, { plan_id: s.plan_id, status: s.status }]));
     
-    // Count calls per professional
     const callCountMap = new Map<string, number>();
     (callsRes.data || []).forEach((r: any) => {
       callCountMap.set(r.professional_id, (callCountMap.get(r.professional_id) || 0) + 1);
@@ -176,7 +178,7 @@ const AdminPros = () => {
     await supabase.from("notifications").insert({
       user_id: detailPro.user_id,
       title: "Cadastro não aprovado",
-      message: rejectReason || "Seu cadastro profissional não foi aprovado. Verifique seus documentos e tente novamente.",
+      message: rejectReason || "Seu cadastro não foi aprovado. Verifique seus documentos e tente novamente.",
       type: "rejection",
       link: "/profile",
     });
@@ -186,7 +188,7 @@ const AdminPros = () => {
     fetchPros();
   };
 
-  // Funções para gerenciar assinaturas via Asaas
+  // FLUXO DE ASSINATURA: APROVAR
   const handleApproveSubscription = async (pro: Professional) => {
     if (confirm(`Tem certeza que deseja APROVAR a assinatura de ${pro.full_name} e cobrar o cartão agora?`)) {
       setProcessingSub(pro.id);
@@ -198,8 +200,20 @@ const AdminPros = () => {
         if (res.error || res.data?.error) {
           throw new Error(res.data?.error || "Erro ao aprovar assinatura no Asaas");
         }
+
+        // Se o perfil estava pendente, aprova ele também automaticamente
+        if (pro.profile_status === "pending") {
+          await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", pro.id);
+          await supabase.from("notifications").insert({
+            user_id: pro.user_id,
+            title: "Assinatura e Cadastro Aprovados! 🎉",
+            message: "Sua assinatura foi ativada com sucesso e seu perfil já está visível para os clientes.",
+            type: "approval",
+            link: "/pro",
+          });
+        }
         
-        toast({ title: "Assinatura aprovada e cobrança enviada!" });
+        toast({ title: "Assinatura aprovada e cobrança ativada!" });
         fetchPros();
       } catch (err: any) {
         toast({ title: err.message, variant: "destructive" });
@@ -209,26 +223,48 @@ const AdminPros = () => {
     }
   };
 
-  const handleRejectSubscription = async (pro: Professional) => {
-    if (confirm(`Tem certeza que deseja RECUSAR a assinatura de ${pro.full_name}? Isso cancelará o plano no Asaas.`)) {
-      setProcessingSub(pro.id);
-      try {
-        const res = await supabase.functions.invoke("admin-manage", {
-          body: { action: "reject_subscription", userId: pro.user_id },
-        });
-        
-        if (res.error || res.data?.error) {
-          throw new Error(res.data?.error || "Erro ao cancelar assinatura no Asaas");
-        }
-        
-        toast({ title: "Assinatura recusada e cancelada com sucesso!" });
-        fetchPros();
-      } catch (err: any) {
-        toast({ title: err.message, variant: "destructive" });
-      }
-      setProcessingSub(null);
-      if (detailPro?.id === pro.id) setDetailPro(null);
+  // FLUXO DE ASSINATURA: RECUSAR (Abre o modal)
+  const openRejectSubscriptionModal = (pro: Professional) => {
+    setRejectSubPro(pro);
+    setRejectSubReason("");
+    setRejectSubOpen(true);
+  };
+
+  // FLUXO DE ASSINATURA: CONFIRMAR RECUSA
+  const confirmRejectSubscription = async () => {
+    if (!rejectSubPro) return;
+    if (!rejectSubReason.trim()) {
+      toast({ title: "Digite um motivo para a recusa.", variant: "destructive" });
+      return;
     }
+
+    setProcessingSub(rejectSubPro.id);
+    try {
+      const res = await supabase.functions.invoke("admin-manage", {
+        body: { action: "reject_subscription", userId: rejectSubPro.user_id, reason: rejectSubReason },
+      });
+      
+      if (res.error || res.data?.error) {
+        throw new Error(res.data?.error || "Erro ao cancelar assinatura no Asaas");
+      }
+
+      // Envia notificação detalhada pro profissional
+      await supabase.from("notifications").insert({
+        user_id: rejectSubPro.user_id,
+        title: "Assinatura Recusada",
+        message: `Houve um problema com sua assinatura. Motivo: ${rejectSubReason}. Entre em contato com o suporte para corrigir.`,
+        type: "rejection",
+        link: "/support",
+      });
+      
+      toast({ title: "Assinatura cancelada com sucesso!" });
+      fetchPros();
+    } catch (err: any) {
+      toast({ title: err.message, variant: "destructive" });
+    }
+    setProcessingSub(null);
+    setRejectSubOpen(false);
+    if (detailPro?.id === rejectSubPro.id) setDetailPro(null);
   };
 
   const handleChangeCategory = async (pro: Professional, categoryId: string) => {
@@ -314,7 +350,6 @@ const AdminPros = () => {
   const deleteReview = async (reviewId: string, proId: string) => {
     await supabase.from("reviews").delete().eq("id", reviewId);
     await logAction("delete_review", "review", reviewId);
-    // Recalculate pro stats
     const { data: remaining } = await supabase.from("reviews").select("rating").eq("professional_id", proId);
     const total = remaining?.length || 0;
     const avg = total > 0 ? remaining!.reduce((sum, r) => sum + r.rating, 0) / total : 0;
@@ -361,9 +396,9 @@ const AdminPros = () => {
                     }`}>
                       {planLabel[pro.plan_id] || pro.plan_id}
                     </span>
-                    {/* Indicador de Status da Assinatura no Asaas (se existir) */}
-                    {pro.plan_id !== "free" && pro.subscription_status === "PENDING" && (
-                      <span className="ml-2 px-1.5 py-0.5 bg-yellow-100 text-yellow-800 text-[9px] rounded-full uppercase">Pendente</span>
+                    {/* Indicador Pendente */}
+                    {pro.plan_id !== "free" && pro.subscription_status !== "ACTIVE" && (
+                      <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] rounded-full uppercase font-bold animate-pulse">Pendente</span>
                     )}
                   </td>
                   <td className="p-3">
@@ -393,7 +428,7 @@ const AdminPros = () => {
                           </a>
                         </DropdownMenuItem>
                         
-                        {/* Novas opções para aprovação de assinatura */}
+                        {/* Botões de Assinatura - Só aparecem se o status não for ACTIVE */}
                         {pro.plan_id !== "free" && pro.subscription_status !== "ACTIVE" && (
                           <>
                             <DropdownMenuSeparator />
@@ -401,7 +436,7 @@ const AdminPros = () => {
                               <CheckCircle className="w-3.5 h-3.5 mr-2 text-green-500" /> 
                               {processingSub === pro.id ? "Aprovando..." : "Aprovar Assinatura"}
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleRejectSubscription(pro)} disabled={processingSub === pro.id}>
+                            <DropdownMenuItem onClick={() => openRejectSubscriptionModal(pro)} disabled={processingSub === pro.id}>
                               <XCircle className="w-3.5 h-3.5 mr-2 text-red-500" /> 
                               {processingSub === pro.id ? "Recusando..." : "Recusar Assinatura"}
                             </DropdownMenuItem>
@@ -474,7 +509,7 @@ const AdminPros = () => {
         </Tabs>
       )}
 
-      {/* Detail Dialog */}
+      {/* Modal de Detalhes */}
       <Dialog open={!!detailPro} onOpenChange={(o) => !o && setDetailPro(null)}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Detalhes do Profissional</DialogTitle></DialogHeader>
@@ -494,25 +529,6 @@ const AdminPros = () => {
                     {detailPro.bonus_calls > 0 && <span className="text-primary">(+{detailPro.bonus_calls} bônus)</span>}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <label className="text-xs font-medium text-muted-foreground">Categoria:</label>
-                  <div className="relative">
-                    <select
-                      value={detailPro.category_id || ""}
-                      onChange={(e) => {
-                        handleChangeCategory(detailPro, e.target.value);
-                        setDetailPro({ ...detailPro, category_id: e.target.value, category_name: categories.find(c => c.id === e.target.value)?.name || "—" });
-                      }}
-                      className="border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30 appearance-none pr-6"
-                    >
-                      <option value="">Sem categoria</option>
-                      {categories.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-                  </div>
-                </div>
               </div>
 
               {/* Bloco de Gestão da Assinatura no Painel de Detalhes */}
@@ -525,7 +541,7 @@ const AdminPros = () => {
                      <button onClick={() => handleApproveSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors">
                        {processingSub === detailPro.id ? "Aprovando..." : "✅ Aprovar e Cobrar"}
                      </button>
-                     <button onClick={() => handleRejectSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 py-1.5 rounded-lg border border-red-200 text-red-600 bg-red-50 text-xs font-medium hover:bg-red-100 transition-colors">
+                     <button onClick={() => { setDetailPro(null); openRejectSubscriptionModal(detailPro); }} disabled={processingSub === detailPro.id} className="flex-1 py-1.5 rounded-lg border border-red-200 text-red-600 bg-red-50 text-xs font-medium hover:bg-red-100 transition-colors">
                        {processingSub === detailPro.id ? "Recusando..." : "❌ Recusar Plano"}
                      </button>
                    </div>
@@ -544,41 +560,13 @@ const AdminPros = () => {
                 <ExternalLink className="w-3 h-3" /> Ver perfil público
               </a>
 
-              {/* Visibility control */}
-              <div className="flex items-center gap-2 pt-2 border-t">
-                <label className="text-xs font-medium text-muted-foreground">Visibilidade:</label>
-                <button onClick={() => { toggleVisibility(detailPro); setDetailPro({ ...detailPro, availability_status: detailPro.availability_status === "unavailable" ? "available" : "unavailable" }); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    detailPro.availability_status === "unavailable" ? "bg-destructive/10 text-destructive" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                  }`}>
-                  {detailPro.availability_status === "unavailable" ? <><EyeOff className="w-3 h-3" /> Oculto</> : <><Eye className="w-3 h-3" /> Visível</>}
-                </button>
-              </div>
-
-              {/* Quick bonus calls */}
-              <div className="flex items-center gap-2 pt-2 border-t">
-                <label className="text-xs font-medium text-muted-foreground">Bonificar:</label>
-                <input type="number" min="1" value={bonusAmount} onChange={e => setBonusAmount(e.target.value)}
-                  className="w-16 border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                <button onClick={() => { setBonusProId(detailPro.id); setBonusTarget("individual"); handleBonusCalls(); }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
-                  <Gift className="w-3 h-3" /> Dar chamadas
-                </button>
-              </div>
-
               {docs.length > 0 && (
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-2">Documentos</p>
                   {docs.map((d: any) => {
                     const publicUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${d.file_url}`;
                     return (
-                      <a
-                        key={d.id}
-                        href={publicUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-xs text-primary hover:underline mb-1"
-                      >
+                      <a key={d.id} href={publicUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline mb-1">
                         <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
                       </a>
                     );
@@ -586,11 +574,12 @@ const AdminPros = () => {
                 </div>
               )}
 
-              {detailPro.profile_status === "pending" && (
+              {/* Botões antigos de aprovação de perfil (mantidos para quem é plano Free) */}
+              {detailPro.profile_status === "pending" && detailPro.plan_id === "free" && (
                 <div className="space-y-3 pt-2 border-t">
                   <div className="flex gap-2">
                     <button onClick={handleApprove} className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1">
-                      <CheckCircle className="w-4 h-4" /> Aprovar Cadastro
+                      <CheckCircle className="w-4 h-4" /> Aprovar Cadastro Livre
                     </button>
                     <button onClick={handleReject} className="flex-1 py-2 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors flex items-center justify-center gap-1">
                       <XCircle className="w-4 h-4" /> Reprovar Cadastro
@@ -605,9 +594,51 @@ const AdminPros = () => {
         </DialogContent>
       </Dialog>
 
+      {/* MODAL PARA RECUSAR ASSINATURA COM MOTIVO */}
+      <Dialog open={rejectSubOpen} onOpenChange={setRejectSubOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-destructive" /> 
+              Recusar Assinatura
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-muted-foreground">
+              A assinatura de <strong>{rejectSubPro?.full_name}</strong> será cancelada no Asaas e nenhuma cobrança será feita.
+            </p>
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1 block">Motivo da Recusa (obrigatório)</label>
+              <textarea 
+                value={rejectSubReason} 
+                onChange={(e) => setRejectSubReason(e.target.value)}
+                placeholder="Ex: Documento inválido, dados incorretos..."
+                className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 min-h-[80px] resize-none"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                O profissional receberá uma notificação com este motivo e será orientado a chamar o suporte.
+              </p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setRejectSubOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
+                Cancelar
+              </button>
+              <button 
+                onClick={confirmRejectSubscription} 
+                disabled={!rejectSubReason.trim() || processingSub === rejectSubPro?.id} 
+                className="flex-1 py-2.5 rounded-xl bg-destructive text-destructive-foreground font-semibold text-sm hover:bg-destructive/90 transition-colors disabled:opacity-50"
+              >
+                {processingSub === rejectSubPro?.id ? "Cancelando..." : "Confirmar Recusa"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Bonus Calls Dialog */}
       <Dialog open={bonusOpen} onOpenChange={setBonusOpen}>
         <DialogContent className="max-w-sm">
+           {/* Conteúdo mantido igual */}
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Gift className="w-5 h-5 text-primary" /> Bonificar chamadas</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="flex gap-2">

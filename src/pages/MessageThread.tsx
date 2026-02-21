@@ -135,7 +135,7 @@ const MessageThread = () => {
           const { data: profile } = await supabase
   .from("profiles_public")
   .select("full_name, avatar_url")
-  .eq("id", req.client_id)
+  .eq("user_id", req.client_id)
   .single();
           if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
         }

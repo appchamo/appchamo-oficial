@@ -250,6 +250,7 @@ const Subscriptions = () => {
     
     try {
       let proofUrl = "";
+      // Definição do endereço completo
       const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
 
       if (selectedPlanId === "business" && proofFile && user) {
@@ -314,6 +315,7 @@ const Subscriptions = () => {
         plan_id: selectedPlanId,
         status: finalStatus,
         business_cnpj: businessData.cnpj || null,
+        // Correção da gravação do endereço
         business_address: fullAddress || null,
         business_proof_url: proofUrl || null
       });
@@ -468,16 +470,16 @@ const Subscriptions = () => {
                     
                     <div className="space-y-3">
                       <div>
-                        <label className="text-[10px] font-bold text-muted-foreground uppercase">CNPJ</label>
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase mb-1 block">CNPJ</label>
                         <input 
                           value={businessData.cnpj} 
                           onChange={(e) => setBusinessData(d => ({ ...d, cnpj: formatCNPJ(e.target.value) }))}
                           placeholder="00.000.../0001-00"
-                          className="w-full border-b bg-transparent py-1 text-sm outline-none"
+                          className="w-full border-b bg-transparent py-1 text-sm outline-none focus:border-violet-500"
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1 mb-1 block">
                           CEP {searchingCep && <Clock className="w-2 h-2 animate-spin" />}
                         </label>
                         <input 
@@ -485,7 +487,7 @@ const Subscriptions = () => {
                           onChange={(e) => handleCepChange(e.target.value)}
                           placeholder="00000-000"
                           maxLength={9}
-                          className="w-full border-b bg-transparent py-1 text-sm outline-none"
+                          className="w-full border-b bg-transparent py-1 text-sm outline-none focus:border-violet-500"
                         />
                       </div>
                     </div>

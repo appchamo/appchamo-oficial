@@ -105,10 +105,13 @@ const Signup = () => {
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: basicData.email,
         password: basicData.password,
-        options: {
-          emailRedirectTo: window.location.origin,
-          data: { full_name: basicData.name },
-        },
+       options: {
+  emailRedirectTo: window.location.origin,
+  data: { 
+    full_name: basicData.name,
+    user_type: accountType, // 👈 ESSENCIAL
+  },
+},
       });
 
       if (authError) {

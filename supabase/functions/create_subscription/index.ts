@@ -2,14 +2,16 @@ import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
 serve(async (req) => {
   // CORS
-  if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, content-type",
-      },
-    });
-  }
+if (req.method === "OPTIONS") {
+  return new Response("ok", {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers":
+        "authorization, x-client-info, apikey, content-type",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+    },
+  });
+}
 
   try {
     const body = await req.json();

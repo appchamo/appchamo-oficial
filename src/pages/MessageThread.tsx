@@ -1,4 +1,3 @@
-
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
@@ -91,7 +90,6 @@ const MessageThread = () => {
 
       // Get request details
       const { data: req } = await supabase.from("service_requests").select("*").eq("id", threadId!).maybeSingle();
-      console.log("REQ COMPLETO:", req);
       if (req && user) {
         setRequestStatus(req.status);
         setRequestProtocol((req as any).protocol || null);
@@ -118,34 +116,18 @@ const MessageThread = () => {
         if (isClient) {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
-            const { data: profile } = await supabase
-  .from("profiles_public")
-  .select("full_name, avatar_url")
-  .eq("user_id", pro.user_id)
-  .single();
+            const { data: profile } = await supabase.from("profiles_public").select("full_name, avatar_url").eq("user_id", pro.user_id).single();
             if (profile) {
-  console.log("Avatar no chat:", profile.avatar_url);
-  setOtherParty({
-    name: profile.full_name || "Profissional",
-    avatar_url: profile.avatar_url,
-  });
-}
+              setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
+            }
           }
         } else {
-          const { data: profile } = await supabase
-  .from("profiles_public")
-  .select("full_name, avatar_url")
-  .eq("user_id", req.client_id)
-  .single();
+          const { data: profile } = await supabase.from("profiles_public").select("full_name, avatar_url").eq("user_id", req.client_id).single();
           if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
         }
       }
 
-      const { data } = await supabase.
-      from("chat_messages").
-      select("*").
-      eq("request_id", threadId!).
-      order("created_at");
+      const { data } = await supabase.from("chat_messages").select("*").eq("request_id", threadId!).order("created_at");
       setMessages(data as Message[] || []);
     };
     if (threadId) load();
@@ -154,28 +136,22 @@ const MessageThread = () => {
   // Realtime: chat messages
   useEffect(() => {
     if (!threadId) return;
-    const channel = supabase.
-    channel(`chat-${threadId}`).
-    on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
+    const channel = supabase.channel(`chat-${threadId}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
     (payload) => {
       setMessages((prev) => [...prev, payload.new as Message]);
-    }).
-    subscribe();
+    }).subscribe();
     return () => {supabase.removeChannel(channel);};
   }, [threadId]);
 
-  // Realtime: service_request status changes (close/reject syncs instantly)
+  // Realtime: service_request status changes
   useEffect(() => {
     if (!threadId) return;
-    const channel = supabase.
-    channel(`req-status-${threadId}`).
-    on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests", filter: `id=eq.${threadId}` },
+    const channel = supabase.channel(`req-status-${threadId}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests", filter: `id=eq.${threadId}` },
     (payload) => {
       const updated = payload.new as any;
       setRequestStatus(updated.status);
       if (updated.protocol) setRequestProtocol(updated.protocol);
-    }).
-    subscribe();
+    }).subscribe();
     return () => {supabase.removeChannel(channel);};
   }, [threadId]);
 
@@ -185,58 +161,82 @@ const MessageThread = () => {
       if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
     };
   }, []);
-// Realtime: listen payment status change
-useEffect(() => {
-  if (!pixData?.paymentId) return;
 
-  const channel = supabase
-    .channel(`pix-status-${pixData.paymentId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "UPDATE",
-        schema: "public",
-        table: "transactions",
-        filter: `asaas_payment_id=eq.${pixData.paymentId}`,
-      },
-      async (payload) => {
-        const updated = payload.new as any;
+  // Realtime + Polling Backup para Pagamento do PIX (Garante que vai fechar o modal)
+  useEffect(() => {
+    if (!pixData?.paymentId || paymentConfirmed) return;
 
-        if (updated.status === "completed") {
+    let isPollingActive = true;
+    setPixPolling(true);
 
-          setPixOpen(false);
-          setPaymentConfirmed(true);
+    const checkPaymentStatus = async () => {
+      if (!isPollingActive) return;
+      try {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("status")
+          .eq("asaas_payment_id", pixData.paymentId)
+          .single();
 
-          toast({
-            title: "Pagamento confirmado!",
-          });
-
-          await supabase.from("chat_messages").insert({
-            request_id: threadId,
-            sender_id: userId,
-            content:
-              "✅ PAGAMENTO CONFIRMADO\nO pagamento foi aprovado com sucesso.",
-          });
-
-          // 🔥 ABRE O MODAL DE AVALIAÇÃO
-          setTimeout(() => {
-            setRatingStars(0);
-            setRatingComment("");
-            setRatingOpen(true);
-          }, 350);
+        if (data && data.status === "paid" || data?.status === "completed") {
+          handlePixSuccess();
         }
+      } catch (err) {
+        console.error("Polling check failed", err);
       }
-    )
-    .subscribe();
+    };
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [pixData?.paymentId]);
+    const handlePixSuccess = async () => {
+      if (paymentConfirmed) return;
+      isPollingActive = false;
+      if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
+      
+      setPixPolling(false);
+      setPixOpen(false);
+      setPaymentConfirmed(true);
+
+      toast({ title: "Pagamento confirmado! 🎉" });
+
+      await supabase.from("chat_messages").insert({
+        request_id: threadId,
+        sender_id: userId,
+        content: "✅ PAGAMENTO CONFIRMADO\nO pagamento via PIX foi aprovado com sucesso.",
+      });
+
+      setTimeout(() => {
+        setRatingStars(0);
+        setRatingComment("");
+        setRatingOpen(true);
+      }, 500);
+    };
+
+    // 1. Liga o espião no Realtime
+    const channel = supabase
+      .channel(`pix-status-${pixData.paymentId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "transactions", filter: `asaas_payment_id=eq.${pixData.paymentId}` },
+        async (payload) => {
+          const updated = payload.new as any;
+          if (updated.status === "paid" || updated.status === "completed") {
+            handlePixSuccess();
+          }
+        }
+      )
+      .subscribe();
+
+    // 2. Liga o Polling de segurança (olha o banco a cada 3 segundos)
+    pixIntervalRef.current = setInterval(checkPaymentStatus, 3000);
+
+    return () => {
+      isPollingActive = false;
+      if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [pixData?.paymentId, paymentConfirmed]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    // Mark thread as read
     if (threadId && userId) {
       supabase.from("chat_read_status" as any).upsert(
         { request_id: threadId, user_id: userId, last_read_at: new Date().toISOString() },
@@ -253,8 +253,8 @@ useEffect(() => {
       sender_id: userId,
       content: text.trim()
     });
-    if (error) toast({ title: "Erro ao enviar mensagem", variant: "destructive" });else
-    setText("");
+    if (error) toast({ title: "Erro ao enviar mensagem", variant: "destructive" });
+    else setText("");
     setSending(false);
   };
 
@@ -326,9 +326,7 @@ useEffect(() => {
     }
 
     const fileName = `audio/${userId}/${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabase.storage.
-    from("uploads").
-    upload(fileName, blob, { contentType: mimeType, upsert: true });
+    const { error: uploadError } = await supabase.storage.from("uploads").upload(fileName, blob, { contentType: mimeType, upsert: true });
 
     if (uploadError) {
       toast({ title: "Erro ao enviar áudio", variant: "destructive" });
@@ -353,7 +351,6 @@ useEffect(() => {
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  // Load fee settings when billing opens
   const loadFeeSettings = async () => {
     const { data } = await supabase.from("platform_settings").select("key, value");
     if (data) {
@@ -408,7 +405,6 @@ useEffect(() => {
     return options;
   };
 
-  // Professional sends billing
   const handleSendBilling = async () => {
     if (!billingAmount || !userId || !threadId || !billingMethod) return;
     const amount = parseFloat(billingAmount);
@@ -424,8 +420,8 @@ useEffect(() => {
       sender_id: userId,
       content: billingContent
     });
-    if (error) toast({ title: "Erro ao enviar cobrança", variant: "destructive" });else
-    {
+    if (error) toast({ title: "Erro ao enviar cobrança", variant: "destructive" });
+    else {
       setBillingOpen(false);
       setBillingAmount("");
       setBillingDesc("");
@@ -435,23 +431,19 @@ useEffect(() => {
     }
   };
 
-  // Parse billing messages (supports old and new format)
   const parseBilling = (content: string) => {
-    // New format: [COBRAR:amount:desc:method:installments]
     const matchNew = content.match(/\[COBRAR:([0-9.]+):(.+?):(\w+):(\d+)\]/);
     if (matchNew) return { amount: matchNew[1], desc: matchNew[2], method: matchNew[3] as "pix" | "card", installments: matchNew[4] };
-    // Old format: [COBRAR:amount:desc]
     const match = content.match(/\[COBRAR:([0-9.]+):(.+?)\]/);
     if (match) return { amount: match[1], desc: match[2], method: null, installments: "1" };
     return null;
   };
 
-  // Client opens payment
   const openPayment = async (msg: Message) => {
     const billing = parseBilling(msg.content);
     if (!billing) return;
     setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id });
-    // Pre-select method from billing
+    
     if (billing.method) {
       setPaymentMethod(billing.method);
       if (billing.method === "card") {
@@ -464,6 +456,7 @@ useEffect(() => {
       setPaymentMethod(null);
       setCardStep(false);
     }
+    
     setPaymentConfirmed(false);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
     if (!billing.method) setInstallments("1");
@@ -471,15 +464,8 @@ useEffect(() => {
     setCouponDiscount(null);
     setPaymentOpen(true);
 
-    // Load available discount coupons
     if (userId) {
-      const { data } = await supabase.
-      from("coupons").
-      select("*").
-      eq("user_id", userId).
-      eq("coupon_type", "discount").
-      eq("used", false).
-      order("created_at", { ascending: false });
+      const { data } = await supabase.from("coupons").select("*").eq("user_id", userId).eq("coupon_type", "discount").eq("used", false).order("created_at", { ascending: false });
       const valid = (data || []).filter((c: any) => !c.expires_at || new Date(c.expires_at) > new Date());
       setAvailableCoupons(valid);
     }
@@ -536,77 +522,63 @@ useEffect(() => {
     return options;
   };
 
- const handleConfirmPayment = async () => {
-  if (!paymentData || !userId || !threadId || !paymentMethod) return;
+  const handleConfirmPayment = async () => {
+    if (!paymentData || !userId || !threadId || !paymentMethod) return;
 
-  setProcessingPayment(true);
+    setProcessingPayment(true);
 
-  try {
-    const finalAmount = getDiscountedAmount();
+    try {
+      const finalAmount = getDiscountedAmount();
+      const res = await supabase.functions.invoke("create_payment", {
+        body: {
+          request_id: threadId,
+          amount: finalAmount,
+          method: paymentMethod,
+          installments: paymentMethod === "card" ? installments : 1,
+          cardData: paymentMethod === "card" ? cardForm : null
+        }
+      });
 
-    const res = await supabase.functions.invoke("create_payment", {
-      body: {
-        request_id: threadId,
-        amount: finalAmount,
-        method: paymentMethod,
-        installments: paymentMethod === "card" ? installments : 1,
-        cardData: paymentMethod === "card" ? cardForm : null
+      if (res.error || res.data?.error) {
+        throw new Error(res.data?.error || "Erro ao gerar pagamento");
       }
-    });
 
-    if (res.error || res.data?.error) {
-      throw new Error(res.data?.error || "Erro ao gerar pagamento");
+      if (paymentMethod === "pix") {
+        setPixData({
+          qrCode: res.data.pix_qr_code,
+          copyPaste: res.data.pix_copy_paste,
+          paymentId: res.data.payment_id
+        });
+        setPaymentOpen(false);
+        setPixOpen(true);
+      }
+
+      if (paymentMethod === "card") {
+        toast({ title: "Pagamento aprovado!" });
+        await supabase.from("chat_messages").insert({
+          request_id: threadId,
+          sender_id: userId,
+          content: "✅ PAGAMENTO CONFIRMADO\nPagamento no cartão aprovado com sucesso.",
+        });
+        setPaymentOpen(false);
+        setTimeout(() => {
+          setRatingStars(0);
+          setRatingComment("");
+          setRatingOpen(true);
+        }, 350);
+      }
+
+    } catch (err: any) {
+      toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
     }
 
-    // 🔵 PIX → abre QR
-    if (paymentMethod === "pix") {
-      setPixData({
-        qrCode: res.data.pix_qr_code,
-        copyPaste: res.data.pix_copy_paste,
-        paymentId: res.data.payment_id
-      });
-
-      setPaymentOpen(false);
-      setPixOpen(true);
-    }
-
-    // 🟢 CARTÃO → confirma direto
-    if (paymentMethod === "card") {
-
-      toast({ title: "Pagamento aprovado!" });
-
-      await supabase.from("chat_messages").insert({
-        request_id: threadId,
-        sender_id: userId,
-        content:
-          "✅ PAGAMENTO CONFIRMADO\nPagamento no cartão aprovado com sucesso.",
-      });
-
-      setPaymentOpen(false);
-
-      setTimeout(() => {
-        setRatingStars(0);
-        setRatingComment("");
-        setRatingOpen(true);
-      }, 350);
-    }
-
-  } catch (err: any) {
-    toast({
-      title: err.message || "Erro ao processar pagamento",
-      variant: "destructive"
-    });
-  }
-
-  setProcessingPayment(false);
-};
-
+    setProcessingPayment(false);
+  };
 
   const handleSubmitRating = async () => {
     if (ratingStars === 0) {toast({ title: "Selecione uma nota", variant: "destructive" });return;}
     if (!userId || !threadId) return;
 
-    // Update professional stats and mark request completed via secure RPC
     const { error } = await supabase.rpc("submit_review", {
       _request_id: threadId,
       _rating: ratingStars,
@@ -624,22 +596,16 @@ useEffect(() => {
     setHasRated(true);
     toast({ title: "Avaliação enviada! Obrigado!" });
 
-    // Award random coupon after rating
     await awardPostPaymentCoupon();
   };
 
   const awardPostPaymentCoupon = async () => {
     if (!userId) return;
     try {
-      // Randomly choose raffle or discount
       const isDiscount = Math.random() > 0.5;
 
       if (isDiscount) {
-        // Fetch admin discount settings
-        const { data: settingsData } = await supabase.
-        from("platform_settings").
-        select("key, value").
-        in("key", ["discount_coupon_percent", "discount_coupon_validity_days"]);
+        const { data: settingsData } = await supabase.from("platform_settings").select("key, value").in("key", ["discount_coupon_percent", "discount_coupon_validity_days"]);
         const settings: Record<string, any> = {};
         (settingsData || []).forEach((s: any) => {settings[s.key] = s.value;});
         const percent = parseFloat(settings.discount_coupon_percent) || 10;
@@ -656,7 +622,6 @@ useEffect(() => {
 
         setRewardCoupon({ type: "discount", value: percent });
       } else {
-        // Raffle coupon
         await supabase.from("coupons").insert({
           user_id: userId,
           coupon_type: "raffle",
@@ -692,7 +657,6 @@ useEffect(() => {
       return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={isMine} />;
     }
 
-    // Protocol message - render as system card
     if (isProtocol) {
       return (
         <div className="text-center w-full">
@@ -701,10 +665,8 @@ useEffect(() => {
             <p className="text-[10px] text-muted-foreground mt-0.5">Guarde este número para referência</p>
           </div>
         </div>);
-
     }
 
-    // System close message
     if (isSystemClose) {
       return (
         <div className="text-center w-full">
@@ -712,7 +674,6 @@ useEffect(() => {
             <p className="text-xs font-semibold text-foreground">{msg.content}</p>
           </div>
         </div>);
-
     }
 
     if (isBilling && billing) {
@@ -728,12 +689,10 @@ useEffect(() => {
           <button
             onClick={() => openPayment(msg)}
             className="mt-1 w-full py-2 rounded-lg bg-background/20 backdrop-blur-sm text-xs font-semibold hover:bg-background/30 transition-colors border border-current/20">
-
               Pagar agora
             </button>
           }
         </div>);
-
     }
 
     if (isPaymentConfirm) {
@@ -744,15 +703,12 @@ useEffect(() => {
           <p key={i} className="text-xs opacity-80">{line}</p>
           )}
         </div>);
-
     }
 
-    // Hide rating messages completely
     if (isRating) {
       return null;
     }
 
-    // Render images inline from photo URLs
     const imageUrlRegex = /(https?:\/\/[^\s]+?\.(png|jpg|jpeg|webp|gif))/gi;
     const parts = msg.content.split("\n");
     const hasImages = imageUrlRegex.test(msg.content);
@@ -769,13 +725,11 @@ useEffect(() => {
                   <img key={j} src={url} alt="Foto do serviço" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
                   )}
                 </div>);
-
             }
             if (line.startsWith("Fotos:")) return null;
             return line.trim() ? <p key={i}>{line}</p> : null;
           })}
         </div>);
-
     }
 
     return <p className="whitespace-pre-wrap">{msg.content}</p>;
@@ -785,7 +739,6 @@ useEffect(() => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
-      {/* Header with avatar */}
       <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b">
         <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
           <Link to="/messages" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
@@ -793,7 +746,6 @@ useEffect(() => {
           </Link>
           {otherParty.avatar_url ?
           <img src={otherParty.avatar_url} alt={otherParty.name} className="w-9 h-9 rounded-full object-cover" /> :
-
           <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
               {otherInitials}
             </div>
@@ -802,13 +754,11 @@ useEffect(() => {
             <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
             <p className="text-[10px] text-muted-foreground">online</p>
           </div>
-          {/* Billing button for professionals */}
           {isProfessional && requestStatus === "accepted" &&
           <>
               <button
               onClick={async () => {await loadFeeSettings();setBillingOpen(true);}}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-primary text-primary-foreground">
-
                 <BadgeDollarSign className="w-3.5 h-3.5" /> Cobrar
               </button>
               <button
@@ -827,7 +777,6 @@ useEffect(() => {
               }}
               disabled={closingCall}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors">
-
                 <LogOut className="w-3.5 h-3.5" /> Encerrar
               </button>
             </>
@@ -835,9 +784,7 @@ useEffect(() => {
         </div>
       </header>
 
-      {/* Messages */}
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
-        {/* Accept/Reject buttons for professional when pending */}
         {isProfessional && requestStatus === "pending" &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2">
             <p className="text-sm font-semibold text-foreground text-center">Nova solicitação de serviço</p>
@@ -855,7 +802,6 @@ useEffect(() => {
                 toast({ title: "Chamada recusada e chat encerrado" });
               }}
               className="flex-1 py-2.5 rounded-xl border-2 border-destructive text-destructive font-semibold text-sm hover:bg-destructive/10 transition-colors">
-
                 Recusar
               </button>
               <button
@@ -870,7 +816,6 @@ useEffect(() => {
                 toast({ title: "Chamada aceita!" });
               }}
               className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-
                 Aceitar
               </button>
             </div>
@@ -886,20 +831,17 @@ useEffect(() => {
         }
         {messages.map((msg) => {
           const isMine = msg.sender_id === userId;
-          // Skip rating messages entirely
           const isRatingMsg = msg.content.includes("AVALIAÇÃO:") || msg.content.includes("avaliou seu atendimento com");
           if (isRatingMsg) return null;
           const rendered = renderMessageContent(msg);
           if (rendered === null) return null;
 
-          // Protocol and system messages - render centered without bubble
           const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA");
           if (isSystemMsg) {
             return (
               <div key={msg.id} className="flex justify-center">
                 {rendered}
               </div>);
-
           }
 
           return (
@@ -907,11 +849,9 @@ useEffect(() => {
               {!isMine && (
               otherParty.avatar_url ?
               <img src={otherParty.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover mt-1 flex-shrink-0" /> :
-
               <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary mt-1 flex-shrink-0">
                     {otherInitials}
                   </div>)
-
               }
               <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
               isMine ?
@@ -924,24 +864,20 @@ useEffect(() => {
                 </p>
               </div>
             </div>);
-
         })}
         <div ref={bottomRef} />
       </main>
 
-      {/* Input bar */}
       {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" ?
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
           <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
             <p className="text-sm text-muted-foreground">
               {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : "Serviço finalizado — chat encerrado"}
             </p>
-            {/* Show rating button for client only after payment (not on rejected calls) */}
             {!isProfessional && !hasRated && requestStatus !== "rejected" && messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial")) &&
           <button
             onClick={() => {setRatingStars(0);setRatingComment("");setRatingOpen(true);}}
             className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center gap-1.5">
-
                 <Star className="w-4 h-4" /> Avaliar profissional
               </button>
           }
@@ -974,20 +910,17 @@ useEffect(() => {
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
                 <span className="text-sm text-muted-foreground">Enviando áudio...</span>
               </div> :
-
           <>
                 <input
               type="text" value={text} onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
               placeholder="Digite sua mensagem..."
               className="flex-1 bg-card border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-
                 {text.trim() ?
             <button onClick={handleSend} disabled={sending}
             className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-50">
                     <Send className="w-4 h-4" />
                   </button> :
-
             <button onClick={startRecording}
             className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors">
                     <Mic className="w-4 h-4" />
@@ -1018,7 +951,6 @@ useEffect(() => {
             <button
               onClick={() => setBillingStep("app_form")}
               className="w-full py-4 rounded-xl border-2 hover:border-primary/50 transition-all flex items-center gap-3 px-4 group">
-
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                     <DollarSign className="w-5 h-5 text-primary" />
                   </div>
@@ -1050,7 +982,6 @@ useEffect(() => {
               <button
               onClick={() => setBillingStep("presencial_confirm")}
               className="w-full py-4 rounded-xl border-2 hover:border-primary/50 transition-all flex items-center gap-3 px-4 group">
-
                 <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
                   <Handshake className="w-5 h-5 text-muted-foreground" />
                 </div>
@@ -1073,13 +1004,11 @@ useEffect(() => {
               onClick={async () => {
                 if (!userId || !threadId) return;
                 setClosingCall(true);
-                // Send presencial message
                 await supabase.from("chat_messages").insert({
                   request_id: threadId,
                   sender_id: userId,
                   content: "🤝 Pagamento presencial — combinado diretamente com o cliente."
                 });
-                // Close the call
                 await supabase.from("chat_messages").insert({
                   request_id: threadId,
                   sender_id: userId,
@@ -1093,14 +1022,12 @@ useEffect(() => {
               }}
               disabled={closingCall}
               className="w-full py-3 rounded-xl bg-destructive text-destructive-foreground font-semibold text-sm hover:bg-destructive/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
-
                 <LogOut className="w-4 h-4" />
                 {closingCall ? "Encerrando..." : "Encerrar chamada"}
               </button>
               <button
               onClick={() => setBillingStep("choose_type")}
               className="w-full py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-
                 Voltar
               </button>
             </div>
@@ -1114,7 +1041,6 @@ useEffect(() => {
                 value={billingAmount} onChange={(e) => setBillingAmount(e.target.value)}
                 type="number" step="0.01" placeholder="0,00"
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Descrição</label>
@@ -1122,16 +1048,13 @@ useEffect(() => {
                 value={billingDesc} onChange={(e) => setBillingDesc(e.target.value)}
                 placeholder="Ex: Instalação elétrica"
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-
               </div>
 
-              {/* Payment method selection */}
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground">Forma de pagamento *</p>
                 <button
                 onClick={() => {setBillingMethod("pix");setBillingInstallments("1");}}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${billingMethod === "pix" ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}>
-
                   <span className="text-lg">📱</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">PIX</p>
@@ -1141,7 +1064,6 @@ useEffect(() => {
                 <button
                 onClick={() => setBillingMethod("card")}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${billingMethod === "card" ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}>
-
                   <span className="text-lg">💳</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">Cartão de crédito</p>
@@ -1150,7 +1072,6 @@ useEffect(() => {
                 </button>
               </div>
 
-              {/* Fee display */}
               {billingMethod && billingAmount && parseFloat(billingAmount) > 0 &&
             <div className="bg-muted/50 border rounded-xl p-3">
                   {billingMethod === "card" &&
@@ -1160,7 +1081,6 @@ useEffect(() => {
                   value={billingInstallments}
                   onChange={(e) => setBillingInstallments(e.target.value)}
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-
                         {getBillingInstallmentOptions().map((opt) =>
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                   )}
@@ -1179,7 +1099,6 @@ useEffect(() => {
                 <button
                 onClick={() => {setBillingStep("choose_type");setBillingMethod(null);}}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-
                   Voltar
                 </button>
                 <button onClick={handleSendBilling} disabled={!billingMethod}
@@ -1209,7 +1128,6 @@ useEffect(() => {
                       Desconto de {couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`} aplicado
                     </p>
                   </> :
-
               <p className="text-2xl font-bold text-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
               }
                 <p className="text-xs text-muted-foreground mt-1">{paymentData.desc}</p>
@@ -1247,12 +1165,10 @@ useEffect(() => {
                       </button>
                 )}
                   </div> :
-
               <p className="text-xs text-muted-foreground py-2">Nenhum cupom disponível</p>
               }
               </div>
 
-              {/* Payment method - show only what the professional selected, or both if old format */}
               {paymentMethod ?
             <div className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground">Método de pagamento:</p>
@@ -1270,7 +1186,6 @@ useEffect(() => {
                   <button
                 onClick={() => handleSelectMethod("pix")}
                 className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-border hover:border-primary/30 transition-colors">
-
                     <span className="text-lg">📱</span>
                     <div className="text-left">
                       <p className="text-sm font-semibold text-foreground">PIX</p>
@@ -1280,7 +1195,6 @@ useEffect(() => {
                   <button
                 onClick={() => handleSelectMethod("card")}
                 className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-border hover:border-primary/30 transition-colors">
-
                     <span className="text-lg">💳</span>
                     <div className="text-left">
                       <p className="text-sm font-semibold text-foreground">Cartão de crédito</p>
@@ -1295,7 +1209,6 @@ useEffect(() => {
               onClick={handleConfirmPayment}
               disabled={processingPayment}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-
                   {processingPayment ? "Processando..." : "Confirmar pagamento via PIX"}
                 </button>
             }
@@ -1304,7 +1217,6 @@ useEffect(() => {
             <button
               onClick={() => setCardStep(true)}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-
                   Prosseguir com cartão
                 </button>
             }
@@ -1320,11 +1232,9 @@ useEffect(() => {
                     <p className="text-sm line-through text-muted-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
                     <p className="text-xl font-bold text-primary">R$ {getDiscountedAmount().toFixed(2).replace(".", ",")}</p>
                   </> :
-
               <p className="text-xl font-bold text-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
               }
               </div>
-
 
               <div className="space-y-3">
                 <div>
@@ -1335,7 +1245,6 @@ useEffect(() => {
                   placeholder="0000 0000 0000 0000"
                   maxLength={19}
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Nome no cartão</label>
@@ -1344,7 +1253,6 @@ useEffect(() => {
                   onChange={(e) => setCardForm((f) => ({ ...f, name: e.target.value.toUpperCase() }))}
                   placeholder="NOME COMPLETO"
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
-
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1355,7 +1263,6 @@ useEffect(() => {
                     placeholder="MM/AA"
                     maxLength={5}
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
@@ -1366,7 +1273,6 @@ useEffect(() => {
                     maxLength={4}
                     type="password"
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
                   </div>
                 </div>
                 <div>
@@ -1375,7 +1281,6 @@ useEffect(() => {
                   value={installments}
                   onChange={(e) => setInstallments(e.target.value)}
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-
                     {getInstallmentOptions().map((opt) =>
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                   )}
@@ -1390,7 +1295,6 @@ useEffect(() => {
                     placeholder="00000000"
                     maxLength={8}
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Nº endereço</label>
@@ -1399,7 +1303,6 @@ useEffect(() => {
                     onChange={(e) => setCardForm((f) => ({ ...f, addressNumber: e.target.value }))}
                     placeholder="123"
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-
                   </div>
                 </div>
               </div>
@@ -1408,14 +1311,12 @@ useEffect(() => {
                 <button
                 onClick={() => {setCardStep(false);setPaymentMethod(null);}}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-
                   Voltar
                 </button>
                 <button
                 onClick={handleConfirmPayment}
                 disabled={processingPayment}
                 className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-
                   {processingPayment ? "Processando..." : "Pagar"}
                 </button>
               </div>
@@ -1450,7 +1351,6 @@ useEffect(() => {
               onClick={handleSubmitRating}
               disabled={ratingStars === 0}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-
               Enviar avaliação
             </button>
           </div>
@@ -1464,7 +1364,6 @@ useEffect(() => {
             <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
               {rewardCoupon?.type === "discount" ?
               <Ticket className="w-8 h-8 text-primary" /> :
-
               <Star className="w-8 h-8 text-primary fill-primary" />
               }
             </div>
@@ -1477,7 +1376,6 @@ useEffect(() => {
                 <p className="text-2xl font-extrabold text-primary">{rewardCoupon.value}% OFF</p>
                 <p className="text-xs text-muted-foreground mt-1">Cupom de desconto para o próximo serviço</p>
               </div> :
-
             <div className="bg-primary/5 border border-primary/20 rounded-xl p-4">
                 <p className="text-lg font-bold text-primary">🎟️ Cupom de Sorteio</p>
                 <p className="text-xs text-muted-foreground mt-1">Você está concorrendo ao sorteio mensal!</p>
@@ -1486,7 +1384,6 @@ useEffect(() => {
             <button
               onClick={() => setRewardOpen(false)}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-
               Entendido!
             </button>
           </div>
@@ -1514,7 +1411,6 @@ useEffect(() => {
                   src={`data:image/png;base64,${pixData.qrCode}`}
                   alt="PIX QR Code"
                   className="w-48 h-48 mx-auto" />
-
                 </div>
               </div>
 
@@ -1526,7 +1422,6 @@ useEffect(() => {
                   value={pixData.copyPaste}
                   rows={3}
                   className="w-full border rounded-xl px-3 py-2.5 text-xs bg-muted/50 text-foreground resize-none font-mono" />
-
                   <button
                   onClick={() => {
                     navigator.clipboard.writeText(pixData.copyPaste);
@@ -1535,10 +1430,8 @@ useEffect(() => {
                     setTimeout(() => setPixCopied(false), 3000);
                   }}
                   className="absolute top-2 right-2 p-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 transition-colors">
-
                     {pixCopied ?
                   <CheckCircle2 className="w-4 h-4 text-primary" /> :
-
                   <Copy className="w-4 h-4 text-primary" />
                   }
                   </button>
@@ -1548,7 +1441,7 @@ useEffect(() => {
               {pixPolling &&
             <div className="flex items-center justify-center gap-2 py-2">
                   <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">Aguardando confirmação do pagamento...</span>
+                  <span className="text-xs text-muted-foreground">Aguardando confirmação...</span>
                 </div>
             }
             </div>
@@ -1556,7 +1449,6 @@ useEffect(() => {
         </DialogContent>
       </Dialog>
     </div>);
-
 };
 
 export default MessageThread;

@@ -277,27 +277,23 @@ const Subscriptions = () => {
         return;
       }
 
-      const res = await supabase.functions.invoke("create_subscription", {
-        body: {
-          action: "create_subscription_payment",
-          plan_id: selectedPlanId,
-          credit_card: {
-            holder_name: cardForm.name,
-            number: cardForm.number,
-            expiry_month: expiryParts[0],
-            expiry_year: `20${expiryParts[1]}`,
-            cvv: cardForm.cvv,
-          },
-          credit_card_holder_info: {
-            name: profileData?.full_name || cardForm.name,
-            email: profileData?.email || "",
-            cpf_cnpj: profileData?.cnpj || profileData?.cpf || "",
-            postal_code: profileData?.address_zip || cardForm.address || "",
-            address_number: profileData?.address_number || "",
-            phone: profileData?.phone || "",
-          },
-        },
-      });
+     const res = await supabase.functions.invoke("create_subscription", {
+  body: {
+    customer: profileData?.asaas_customer_id,
+    value: 39.9,
+
+    holderName: cardForm.name,
+    number: cardForm.number.replace(/\s/g, ""),
+    expiryMonth: expiryParts[0],
+    expiryYear: `20${expiryParts[1]}`,
+    ccv: cardForm.cvv,
+
+    email: profileData?.email,
+    cpfCnpj: profileData?.cnpj || profileData?.cpf,
+    postalCode: profileData?.address_zip,
+    addressNumber: profileData?.address_number,
+  },
+});
 
       if (res.error || res.data?.error) {
         throw new Error(res.data?.error || "Erro ao processar pagamento");

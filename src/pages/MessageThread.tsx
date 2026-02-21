@@ -121,7 +121,7 @@ const MessageThread = () => {
             const { data: profile } = await supabase
   .from("profiles_public")
   .select("full_name, avatar_url")
-  .eq("id", pro.user_id)
+  .eq("user_id", pro.user_id)
   .single();
             if (profile) {
   console.log("Avatar no chat:", profile.avatar_url);

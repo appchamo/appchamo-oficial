@@ -603,13 +603,13 @@ const AdminPros = () => {
                   <p className="text-xs font-bold text-muted-foreground uppercase mb-2">Documentos</p>
                   
                  {/* Documentos de Identidade (Cadastro inicial) */}
-                  <div className="space-y-1.5 mb-3">
-                    {docs.map((d: any) => (
-                      <a key={d.id} href={d.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline">
-                        <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
-                      </a>
-                    ))}
-                  </div>
+<div className="space-y-1.5 mb-3">
+  {docs.map((d: any) => (
+    <a key={d.id} href={d.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline">
+      <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+    </a>
+  ))}
+</div>
 
                   {/* Documentos do Plano Business (Cartão CNPJ) */}
                   {detailPro.plan_id === 'business' && detailPro.subscription_status !== 'ACTIVE' && (

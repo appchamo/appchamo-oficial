@@ -6,6 +6,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ===============================
+// 🔁 Ambiente Asaas 
+// ===============================
+const ASAAS_ENV = Deno.env.get("ASAAS_ENV") ?? "sandbox";
+const ASAAS_BASE_URL = ASAAS_ENV === "production" ? "https://api.asaas.com/v3" : "https://sandbox.asaas.com/api/v3";
+const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -170,8 +177,100 @@ serve(async (req) => {
       });
     }
 
+    // ==========================================
+    // ✅ AÇÃO: APROVAR ASSINATURA (NOVO)
+    // ==========================================
+    if (action === "approve_subscription") {
+      const caller = await verifyAdmin();
+      const { userId } = body;
+      
+      if (!userId) throw new Error("userId é obrigatório.");
+      if (!ASAAS_API_KEY) throw new Error("Chave do Asaas não configurada.");
+
+      const { data: subData, error: subError } = await supabase
+        .from("subscriptions")
+        .select("asaas_subscription_id")
+        .eq("user_id", userId)
+        .single();
+
+      if (subError || !subData?.asaas_subscription_id) {
+        throw new Error("Assinatura não encontrada no banco de dados da Chamô.");
+      }
+
+      const today = new Date().toISOString().split("T")[0];
+
+      const response = await fetch(`${ASAAS_BASE_URL}/subscriptions/${subData.asaas_subscription_id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "access_token": ASAAS_API_KEY,
+        },
+        body: JSON.stringify({
+          nextDueDate: today
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.errors?.[0]?.description || "Erro ao atualizar Asaas");
+
+      await supabase
+        .from("subscriptions")
+        .update({ status: "ACTIVE" })
+        .eq("user_id", userId);
+        
+      await supabase.from("admin_logs").insert({
+        admin_user_id: caller.id, action: "approve_subscription", target_type: "user", target_id: userId,
+      });
+
+      return new Response(JSON.stringify({ success: true, message: "Assinatura aprovada e cobrada!" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ==========================================
+    // ❌ AÇÃO: RECUSAR ASSINATURA (NOVO)
+    // ==========================================
+    if (action === "reject_subscription") {
+      const caller = await verifyAdmin();
+      const { userId, reason } = body;
+      
+      if (!userId) throw new Error("userId é obrigatório.");
+      if (!ASAAS_API_KEY) throw new Error("Chave do Asaas não configurada.");
+
+      const { data: subData, error: subError } = await supabase
+        .from("subscriptions")
+        .select("asaas_subscription_id")
+        .eq("user_id", userId)
+        .single();
+
+      if (subError || !subData?.asaas_subscription_id) {
+        throw new Error("Assinatura não encontrada no banco de dados da Chamô.");
+      }
+
+      const response = await fetch(`${ASAAS_BASE_URL}/subscriptions/${subData.asaas_subscription_id}`, {
+        method: "DELETE",
+        headers: { "access_token": ASAAS_API_KEY },
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.errors?.[0]?.description || "Erro ao cancelar no Asaas");
+
+      await supabase
+        .from("subscriptions")
+        .update({ status: "CANCELED", plan_id: "free" })
+        .eq("user_id", userId);
+        
+      await supabase.from("admin_logs").insert({
+        admin_user_id: caller.id, action: "reject_subscription", target_type: "user", target_id: userId, details: { reason }
+      });
+
+      return new Response(JSON.stringify({ success: true, message: "Assinatura cancelada!" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     throw new Error("Invalid action");
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[admin-manage] Error: ${error.message}`);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },

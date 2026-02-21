@@ -247,22 +247,19 @@ const Subscriptions = () => {
     }
     
     setProcessing(true);
-    
     try {
       let proofUrl = "";
-      // Definição do endereço completo
+      // 1. Gera o endereço completo formatado
       const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
 
+      // 2. Upload do comprovante (Só para Plano Business)
       if (selectedPlanId === "business" && proofFile && user) {
         const fileExt = proofFile.name.split('.').pop();
         const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-        
         const { error: uploadError } = await supabase.storage
           .from("business-proofs")
           .upload(fileName, proofFile);
-
         if (uploadError) throw new Error("Erro ao enviar o comprovante de CNPJ.");
-        
         const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(fileName);
         proofUrl = urlData.publicUrl;
       }
@@ -273,16 +270,17 @@ const Subscriptions = () => {
 
       const { data: profileData } = await supabase
         .from("profiles")
-        .select("full_name, email, cpf, cnpj, phone, address_zip, address_number, asaas_customer_id")
+        .select("full_name, email, cpf, cnpj, phone, address_zip, address_number")
         .eq("user_id", session.user.id)
         .single();
 
       if (!profileData?.cpf && !profileData?.cnpj) {
-        toast({ title: "Cadastre seu CPF ou CNPJ no perfil antes de assinar um plano.", variant: "destructive" });
+        toast({ title: "Cadastre seu CPF ou CNPJ no perfil antes de assinar.", variant: "destructive" });
         setProcessing(false);
         return;
       }
 
+      // 3. Envia para a Edge Function (Pagamento Asaas)
       const res = await supabase.functions.invoke("create_subscription", {
         body: {
           userId: session.user.id,
@@ -304,25 +302,19 @@ const Subscriptions = () => {
         },
       });
 
-      if (res.error || res.data?.error) {
-        throw new Error(res.data?.error || "Erro ao processar pagamento no Asaas");
-      }
+      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no pagamento");
 
       const finalStatus = selectedPlanId === "pro" ? "ACTIVE" : "PENDING";
       
+      // 4. Salva no Banco de Dados (subscriptions)
       await supabase.from("subscriptions").upsert({
         user_id: session.user.id,
         plan_id: selectedPlanId,
         status: finalStatus,
         business_cnpj: businessData.cnpj || null,
-        // Correção da gravação do endereço
         business_address: fullAddress || null,
         business_proof_url: proofUrl || null
       });
-      
-      if (finalStatus === "ACTIVE") {
-        toast({ title: "Plano Pro Ativado!", description: "Seu pagamento foi processado e o plano já está liberado." });
-      } else {
         toast({ title: "Assinatura pré-aprovada!", description: "Seu plano entrará em vigor após aprovação do administrador." });
       }
       

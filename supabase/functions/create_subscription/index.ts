@@ -1,8 +1,7 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
 serve(async (req) => {
-
-  // ===== CORS =====
+  // 🔓 CORS
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       headers: {
@@ -16,72 +15,137 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-console.log("BODY RECEIVED:", body);
-const {
-  value,
-  holderName,
-  number,
-  expiryMonth,
-  expiryYear,
-  ccv,
-  email,
-  cpfCnpj,
-  postalCode,
-  addressNumber,
-} = body;
+    console.log("BODY RECEIVED:", body);
 
-if (!value || !holderName || !number || !expiryMonth || !expiryYear || !ccv) {
-  return new Response(
-    JSON.stringify({ error: "Missing required fields" }),
-    {
-      status: 400,
-      headers: { "Access-Control-Allow-Origin": "*" },
+    const {
+      value,
+      holderName,
+      number,
+      expiryMonth,
+      expiryYear,
+      ccv,
+      email,
+      cpfCnpj,
+      postalCode,
+      addressNumber,
+    } = body;
+
+    // 🔎 Validação
+    if (
+      !value ||
+      !holderName ||
+      !number ||
+      !expiryMonth ||
+      !expiryYear ||
+      !ccv ||
+      !email ||
+      !cpfCnpj ||
+      !postalCode ||
+      !addressNumber
+    ) {
+      return new Response(
+        JSON.stringify({ error: "Missing required fields" }),
+        {
+          status: 400,
+          headers: { "Access-Control-Allow-Origin": "*" },
+        }
+      );
     }
-  );
-}
 
-    // ⚠️ AQUI VOCÊ PRECISA DEFINIR O VALOR DO PLANO
-    // Temporariamente vamos fixar para teste:
-    const planValue = 39.9; 
+    const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
 
-    // ⚠️ IMPORTANTE:
-    // Você precisa ter criado o customer antes no Asaas
-    // Aqui estamos usando cpfCnpj como exemplo
-    const customerId = credit_card_holder_info.cpf_cnpj;
+    if (!ASAAS_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "ASAAS_API_KEY not configured" }),
+        {
+          status: 500,
+          headers: { "Access-Control-Allow-Origin": "*" },
+        }
+      );
+    }
 
-    const response = await fetch("https://api.asaas.com/v3/subscriptions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "access_token": Deno.env.get("ASAAS_API_KEY")!,
-      },
-      body: JSON.stringify({
-        customer: customerId,
-        billingType: "CREDIT_CARD",
-        value: planValue,
-        cycle: "MONTHLY",
-        description: `Plano ${plan_id}`,
-        creditCard: {
-          holderName: credit_card.holder_name,
-          number: credit_card.number,
-          expiryMonth: credit_card.expiry_month,
-          expiryYear: credit_card.expiry_year,
-          ccv: credit_card.cvv,
+    // ===============================
+    // 1️⃣ Criar cliente no Asaas
+    // ===============================
+    const customerResponse = await fetch(
+      "https://api.asaas.com/v3/customers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          access_token: ASAAS_API_KEY,
         },
-        creditCardHolderInfo: credit_card_holder_info,
-      }),
-    });
+        body: JSON.stringify({
+          name: holderName,
+          email: email,
+          cpfCnpj: cpfCnpj,
+          postalCode: postalCode,
+          addressNumber: addressNumber,
+        }),
+      }
+    );
 
-    const data = await response.json();
+    const customerData = await customerResponse.json();
+    console.log("CUSTOMER RESPONSE:", customerData);
 
-    return new Response(JSON.stringify(data), {
-      status: response.status,
+    if (!customerResponse.ok) {
+      return new Response(JSON.stringify(customerData), {
+        status: customerResponse.status,
+        headers: { "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
+    const customerId = customerData.id;
+
+    // ===============================
+    // 2️⃣ Criar assinatura
+    // ===============================
+    const subscriptionResponse = await fetch(
+      "https://api.asaas.com/v3/subscriptions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          access_token: ASAAS_API_KEY,
+        },
+        body: JSON.stringify({
+          customer: customerId,
+          billingType: "CREDIT_CARD",
+          value: value,
+          cycle: "MONTHLY",
+          description: "Plano Chamô",
+          creditCard: {
+            holderName: holderName,
+            number: number,
+            expiryMonth: expiryMonth,
+            expiryYear: expiryYear,
+            ccv: ccv,
+          },
+          creditCardHolderInfo: {
+            name: holderName,
+            email: email,
+            cpfCnpj: cpfCnpj,
+            postalCode: postalCode,
+            addressNumber: addressNumber,
+          },
+        }),
+      }
+    );
+
+    const subscriptionData = await subscriptionResponse.json();
+    console.log("SUBSCRIPTION RESPONSE:", subscriptionData);
+
+    return new Response(JSON.stringify(subscriptionData), {
+      status: subscriptionResponse.status,
       headers: { "Access-Control-Allow-Origin": "*" },
     });
 
-  } catch (error: any) {
+  } catch (error) {
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({
+        error: "Internal Server Error",
+        message: error.message,
+      }),
       {
         status: 500,
         headers: { "Access-Control-Allow-Origin": "*" },

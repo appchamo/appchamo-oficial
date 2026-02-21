@@ -100,6 +100,9 @@ serve(async (req) => {
     // ===============================
     // 2️⃣ Criar assinatura
     // ===============================
+    const futureDate = new Date();
+futureDate.setDate(futureDate.getDate() + 30);
+const nextDueDate = futureDate.toISOString().split("T")[0];
     const subscriptionResponse = await fetch(
       "https://api.asaas.com/v3/subscriptions",
       {
@@ -113,6 +116,7 @@ serve(async (req) => {
           billingType: "CREDIT_CARD",
           value: value,
           cycle: "MONTHLY",
+          nextDueDate: nextDueDate, // Definindo a próxima data de vencimento para 30 dias a partir de hoje
           description: "Plano Chamô",
           creditCard: {
             holderName: holderName,

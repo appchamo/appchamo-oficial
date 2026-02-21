@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { DollarSign, TrendingUp, Users, Search, Crown, Calendar, CreditCard, ChevronDown, ChevronUp, Settings2, Save, Loader2, X, FileText, Landmark } from "lucide-react";
+import { DollarSign, TrendingUp, Users, Search, Crown, Calendar, CreditCard, ChevronDown, ChevronUp, Settings2, Save, Loader2, X, FileText, Landmark, Check } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -50,7 +50,6 @@ const TransactionDetail = ({ tx, onClose }: { tx: Transaction; onClose: () => vo
 
   useEffect(() => {
     const fetch = async () => {
-      // Find related service_request via client+professional
       if (tx.client_id) {
         const { data: p } = await supabase.from("profiles").select("full_name").eq("user_id", tx.client_id).maybeSingle();
         if (p) setClientName(p.full_name);
@@ -62,7 +61,6 @@ const TransactionDetail = ({ tx, onClose }: { tx: Transaction; onClose: () => vo
           if (p) setProName(p.full_name);
         }
       }
-      // Try to find protocol
       if (tx.client_id && tx.professional_id) {
         const { data: sr } = await supabase.from("service_requests")
           .select("protocol")
@@ -108,7 +106,6 @@ const SubscriberDetail = ({ sub, onClose }: { sub: Subscriber; onClose: () => vo
 
   useEffect(() => {
     const fetch = async () => {
-      // Get professional id for this user
       const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", sub.user_id).maybeSingle();
       if (pro) {
         const { data } = await supabase.from("transactions")
@@ -170,12 +167,22 @@ const SubscriberDetail = ({ sub, onClose }: { sub: Subscriber; onClose: () => vo
 const FinancialConfig = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [planPrices, setPlanPrices] = useState<Record<string, string>>({});
+  const [planFeatures, setPlanFeatures] = useState<Record<string, string[]>>({});
+  const [expandedPlan, setExpandedPlan] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Textos padrões caso o banco esteja vazio
+  const defaultFeatures = {
+    free: ["Até 3 chamadas por conta", "1 dispositivo simultâneo", "Acesso básico à plataforma", "Apenas cobrança presencial"],
+    pro: ["Chamadas ilimitadas", "Receba pagamentos pelo app", "Suporte no app", "Até 2 dispositivos simultâneos"],
+    vip: ["Tudo do Pro", "Selo de verificado", "Aparece em destaque na Home", "Até 10 dispositivos simultâneos"],
+    business: ["Tudo do VIP", "Consultoria personalizada", "Suporte 24h", "Catálogo de produtos", "Publicar vagas de emprego", "Acesso VIP ao Chamô Event", "Até 20 dispositivos simultâneos"]
+  };
+
   useEffect(() => {
     const fetch = async () => {
-      // Busca taxas da plataforma
+      // Busca taxas
       const { data: platformData } = await supabase.from("platform_settings").select("*");
       if (platformData) {
         const map: Record<string, string> = {};
@@ -186,15 +193,21 @@ const FinancialConfig = () => {
         setSettings(map);
       }
 
-      // ✅ Busca preço dos planos da tabela "plans"
-      const { data: plansData } = await supabase.from("plans").select("id, price_monthly");
+      // Busca preço e benefícios da tabela "plans"
+      const { data: plansData } = await supabase.from("plans").select("id, price_monthly, features");
       if (plansData) {
         const plansMap: Record<string, string> = {};
+        const featsMap: Record<string, string[]> = {};
+        
         plansData.forEach(p => {
-          // Troca ponto por vírgula para exibir de forma amigável no input
           plansMap[p.id] = p.price_monthly.toString().replace('.', ',');
+          
+          // Se já tem salvo no banco, usa. Se não, preenche com os textos padrão.
+          featsMap[p.id] = p.features && p.features.length > 0 ? p.features : defaultFeatures[p.id as keyof typeof defaultFeatures];
         });
+        
         setPlanPrices(plansMap);
+        setPlanFeatures(featsMap);
       }
 
       setLoading(false);
@@ -205,12 +218,25 @@ const FinancialConfig = () => {
   const set = (key: string, value: string) => setSettings(prev => ({ ...prev, [key]: value }));
   const setPlanPrice = (id: string, value: string) => setPlanPrices(prev => ({ ...prev, [id]: value }));
   
+  const toggleExpand = (id: string) => setExpandedPlan(prev => ({ ...prev, [id]: !prev[id] }));
+  const addFeature = (id: string) => setPlanFeatures(prev => ({ ...prev, [id]: [...(prev[id] || []), ""] }));
+  const updateFeature = (id: string, index: number, value: string) => {
+    const arr = [...(planFeatures[id] || [])];
+    arr[index] = value;
+    setPlanFeatures(prev => ({ ...prev, [id]: arr }));
+  };
+  const removeFeature = (id: string, index: number) => {
+    const arr = [...(planFeatures[id] || [])];
+    arr.splice(index, 1);
+    setPlanFeatures(prev => ({ ...prev, [id]: arr }));
+  };
+
   const inputCls = "w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30";
 
   const handleSave = async () => {
     setSaving(true);
     
-    // 1. Salva Taxas Financeiras
+    // Salva Taxas
     const feeKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed", "max_installments",
       "transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct",
       ...Array.from({ length: 11 }, (_, i) => `installment_fee_${i + 2}x`)];
@@ -221,15 +247,24 @@ const FinancialConfig = () => {
       }
     }
 
-    // 2. ✅ Salva Preço dos Planos (Converte vírgula para ponto e salva em "plans")
-    for (const planId of ['pro', 'vip', 'business']) {
-        if(planPrices[planId] !== undefined) {
+    // Salva Preço e Benefícios dos Planos
+    for (const planId of ['free', 'pro', 'vip', 'business']) {
+        const updateData: any = {};
+
+        // Preços (o plano free fica fixo em 0)
+        if(planId !== 'free' && planPrices[planId] !== undefined) {
             const rawValue = String(planPrices[planId]).replace(',', '.');
             const numericPrice = parseFloat(rawValue);
+            if (!isNaN(numericPrice)) updateData.price_monthly = numericPrice;
+        }
 
-            if (!isNaN(numericPrice)) {
-              await supabase.from("plans").update({ price_monthly: numericPrice }).eq("id", planId);
-            }
+        // Benefícios (Limpa campos vazios antes de salvar)
+        if(planFeatures[planId] !== undefined) {
+            updateData.features = planFeatures[planId].filter(f => f.trim() !== "");
+        }
+
+        if (Object.keys(updateData).length > 0) {
+           await supabase.from("plans").update(updateData).eq("id", planId);
         }
     }
 
@@ -237,8 +272,56 @@ const FinancialConfig = () => {
     if (session) {
       await supabase.from("admin_logs").insert({ admin_user_id: session.user.id, action: "update_financial_settings", target_type: "settings" });
     }
-    toast({ title: "Configurações financeiras salvas!" });
+    toast({ title: "Configurações salvas com sucesso!" });
     setSaving(false);
+  };
+
+  const renderPlanEditor = (id: string, name: string, color: string) => {
+    const isExpanded = expandedPlan[id];
+    const features = planFeatures[id] || [];
+
+    return (
+      <div className="space-y-3 pb-6 border-b last:border-0 last:pb-0 border-border">
+        {id !== 'free' && (
+           <div>
+             <label className={`text-xs font-bold ${color} mb-1.5 block`}>{name}</label>
+             <input type="text" placeholder="Ex: 99,90" value={planPrices[id] || ""} onChange={(e) => setPlanPrice(id, e.target.value)} className={inputCls} />
+           </div>
+        )}
+        {id === 'free' && (
+           <label className={`text-xs font-bold ${color} block`}>{name}</label>
+        )}
+
+        <div>
+          <button onClick={() => toggleExpand(id)} className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 transition-colors">
+            Benefícios 
+            <span className="text-[10px] text-muted-foreground font-normal flex items-center">
+              {isExpanded ? <>Ver menos <ChevronUp className="w-3 h-3 ml-0.5"/></> : <>Ver mais <ChevronDown className="w-3 h-3 ml-0.5"/></>}
+            </span>
+          </button>
+          
+          {isExpanded && (
+            <div className="mt-3 space-y-3 animate-in fade-in slide-in-from-top-2">
+              {features.map((feat, idx) => (
+                <div key={idx}>
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Campo {idx + 1}</label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Check className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${color}`} />
+                      <input value={feat} onChange={(e) => updateFeature(id, idx, e.target.value)} className="w-full border rounded-xl pl-9 pr-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                    </div>
+                    <button onClick={() => removeFeature(id, idx)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><X className="w-4 h-4"/></button>
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => addFeature(id)} className="text-[11px] font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-colors">
+                + Adicionar benefício
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>;
@@ -292,32 +375,22 @@ const FinancialConfig = () => {
         </div>
       </div>
 
-      {/* Coluna Direita - Novo Bloco de Planos */}
+      {/* Coluna Direita - Blocos de Planos com Benefícios (Accordion) */}
       <div className="w-full md:w-1/2 space-y-5 mt-0">
-         <div className="bg-card border rounded-xl p-4 space-y-3">
-          <div className="flex items-center gap-2 mb-2">
+         <div className="bg-card border rounded-xl p-4 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
             <Crown className="w-5 h-5 text-amber-500" />
-            <h2 className="font-semibold text-foreground text-sm">Preço das Assinaturas</h2>
+            <h2 className="font-semibold text-foreground text-sm">Planos e Benefícios</h2>
           </div>
           <p className="text-[11px] text-muted-foreground mb-4">
-            Defina o valor mensal cobrado por cada plano. Você pode usar vírgula ou ponto (Ex: 99,90).
+            Defina o valor mensal e os textos dos benefícios de cada plano.
           </p>
 
           <div className="space-y-4">
-            <div>
-              <label className="text-xs font-bold text-primary mb-1.5 block">Plano Pro (R$)</label>
-              <input type="text" placeholder="Ex: 39,90" value={planPrices.pro || ""} onChange={(e) => setPlanPrice("pro", e.target.value)} className={inputCls} />
-            </div>
-            
-            <div>
-              <label className="text-xs font-bold text-amber-500 mb-1.5 block">Plano VIP (R$)</label>
-              <input type="text" placeholder="Ex: 69,90" value={planPrices.vip || ""} onChange={(e) => setPlanPrice("vip", e.target.value)} className={inputCls} />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-violet-500 mb-1.5 block">Plano Empresarial (R$)</label>
-              <input type="text" placeholder="Ex: 149,90" value={planPrices.business || ""} onChange={(e) => setPlanPrice("business", e.target.value)} className={inputCls} />
-            </div>
+            {renderPlanEditor('pro', 'Plano Pro (R$)', 'text-primary')}
+            {renderPlanEditor('vip', 'Plano VIP (R$)', 'text-amber-500')}
+            {renderPlanEditor('business', 'Plano Empresarial (R$)', 'text-violet-500')}
+            {renderPlanEditor('free', 'Plano Grátis', 'text-muted-foreground')}
           </div>
         </div>
 
@@ -627,7 +700,7 @@ const AdminTransactions = () => {
           {subsLoading ? (
             <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
           ) : filteredSubs.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground text-sm">Nenhum assinante encontrado</div>
+            <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma assinante encontrado</div>
           ) : (
             <div className="bg-card border rounded-xl overflow-hidden">
               <div className="overflow-x-auto">

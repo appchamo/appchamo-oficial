@@ -267,7 +267,7 @@ const Subscriptions = () => {
 
       const { data: profileData } = await supabase
         .from("profiles")
-        .select("full_name, email, cpf, cnpj, phone, address_zip, address_number")
+        .select("full_name, email, cpf, cnpj, phone, address_zip, address_number, asaas_customer_id")
         .eq("user_id", session.user.id)
         .single();
 
@@ -277,21 +277,20 @@ const Subscriptions = () => {
         return;
       }
 
-     const res = await supabase.functions.invoke("create_subscription", {
+    const res = await supabase.functions.invoke("create_subscription", {
   body: {
-    customer: profileData?.asaas_customer_id,
-    value: 39.9,
-
+    userId: session.user.id,
+    planId: selectedPlanId,
+    value: selectedPlan?.price_monthly || 0,
     holderName: cardForm.name,
     number: cardForm.number.replace(/\s/g, ""),
     expiryMonth: expiryParts[0],
     expiryYear: `20${expiryParts[1]}`,
     ccv: cardForm.cvv,
-
-    email: profileData?.email,
-    cpfCnpj: profileData?.cnpj || profileData?.cpf,
-    postalCode: profileData?.address_zip,
-    addressNumber: profileData?.address_number,
+    email: profileData?.email || "",
+    cpfCnpj: profileData?.cnpj || profileData?.cpf || "",
+    postalCode: profileData?.address_zip || "",
+    addressNumber: profileData?.address_number || "",
   },
 });
 
@@ -332,7 +331,7 @@ const Subscriptions = () => {
 
       const { data: profileData } = await supabase
         .from("profiles")
-        .select("full_name, email, cpf, cnpj, phone, address_zip, address_number")
+        .select("full_name, email, cpf, cnpj, phone, address_zip, address_number, asaas_customer_id")
         .eq("user_id", session.user.id)
         .single();
 

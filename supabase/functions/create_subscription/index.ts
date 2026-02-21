@@ -164,6 +164,7 @@ const nextDueDate = futureDate.toISOString().split("T")[0];
     );
 
     const subscriptionData = await subscriptionResponse.json();
+    console.log("SUBSCRIPTION DATA:", subscriptionData);
 
 if (!subscriptionResponse.ok) {
   console.log("SUBSCRIPTION ERROR:", subscriptionData);

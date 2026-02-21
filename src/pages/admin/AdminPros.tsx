@@ -211,6 +211,15 @@ const AdminPros = () => {
             type: "approval",
             link: "/pro",
           });
+        } else {
+          // CORREÇÃO: Notifica quem já era Free e fez upgrade
+          await supabase.from("notifications").insert({
+            user_id: pro.user_id,
+            title: "Assinatura Aprovada! 👑",
+            message: "Seu novo plano pago foi ativado com sucesso!",
+            type: "approval",
+            link: "/subscriptions",
+          });
         }
         
         toast({ title: "Assinatura aprovada e cobrança ativada!" });

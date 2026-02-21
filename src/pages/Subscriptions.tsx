@@ -224,14 +224,21 @@ const Subscriptions = () => {
         throw new Error(res.data?.error || "Erro ao processar pagamento no Asaas");
       }
 
-      // Atualiza o plano localmente para liberar o acesso ao app
-      const newPlan = plans.find(p => p.id === selectedPlanId);
-      if (newPlan) {
-        await changePlan(selectedPlanId);
-      }
+      // CORREÇÃO: Força o status PENDING no banco para o Header ler corretamente
+      await supabase.from("subscriptions").upsert({
+        user_id: session.user.id,
+        plan_id: selectedPlanId,
+        status: "PENDING"
+      });
       
-      toast({ title: "Assinatura pré-aprovada!", description: "Seu plano foi configurado e entrará em vigor em breve." });
+      toast({ title: "Assinatura pré-aprovada!", description: "Seu plano entrará em vigor após aprovação." });
       setPaymentOpen(false);
+      
+      // Recarrega a página após 2 segundos para o selo amarelo de "Em análise" aparecer no topo
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+
     } catch (err: any) {
       toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
     }

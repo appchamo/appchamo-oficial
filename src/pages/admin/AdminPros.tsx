@@ -1,11 +1,11 @@
 import AdminLayout from "@/components/AdminLayout";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin } from "lucide-react";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -33,6 +33,7 @@ interface Professional {
   max_calls: number;
   city: string | null;
   state: string | null;
+  subscription_status?: string; // Novo campo para status da assinatura
 }
 
 interface Category {
@@ -62,6 +63,7 @@ const AdminPros = () => {
   const [docs, setDocs] = useState<any[]>([]);
   const [rejectReason, setRejectReason] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
+  const [processingSub, setProcessingSub] = useState<string | null>(null);
 
   // Bonus calls dialog
   const [bonusOpen, setBonusOpen] = useState(false);
@@ -98,12 +100,12 @@ const AdminPros = () => {
 
     const [profilesRes, subsRes, callsRes] = await Promise.all([
       supabase.from("profiles").select("user_id, full_name, email, address_city, address_state").in("user_id", userIds),
-      supabase.from("subscriptions").select("user_id, plan_id").in("user_id", userIds),
+      supabase.from("subscriptions").select("user_id, plan_id, status").in("user_id", userIds),
       supabase.from("service_requests").select("professional_id").in("professional_id", proIds),
     ]);
 
     const profileMap = new Map((profilesRes.data || []).map((p) => [p.user_id, p]));
-    const subsMap = new Map((subsRes.data || []).map((s) => [s.user_id, s.plan_id]));
+    const subsMap = new Map((subsRes.data || []).map((s) => [s.user_id, { plan_id: s.plan_id, status: s.status }]));
     
     // Count calls per professional
     const callCountMap = new Map<string, number>();
@@ -112,19 +114,23 @@ const AdminPros = () => {
     });
 
     setPros(
-      professionals.map((p) => ({
-        ...p,
-        bonus_calls: (p as any).bonus_calls || 0,
-        availability_status: (p as any).availability_status || "available",
-        full_name: profileMap.get(p.user_id)?.full_name || "—",
-        email: profileMap.get(p.user_id)?.email || "—",
-        category_name: (p.categories as any)?.name || "—",
-        plan_id: subsMap.get(p.user_id) || "free",
-        calls_used: callCountMap.get(p.id) || 0,
-        max_calls: 3,
-        city: profileMap.get(p.user_id)?.address_city || null,
-        state: profileMap.get(p.user_id)?.address_state || null,
-      }))
+      professionals.map((p) => {
+        const subInfo = subsMap.get(p.user_id) || { plan_id: "free", status: null };
+        return {
+          ...p,
+          bonus_calls: (p as any).bonus_calls || 0,
+          availability_status: (p as any).availability_status || "available",
+          full_name: profileMap.get(p.user_id)?.full_name || "—",
+          email: profileMap.get(p.user_id)?.email || "—",
+          category_name: (p.categories as any)?.name || "—",
+          plan_id: subInfo.plan_id,
+          subscription_status: subInfo.status,
+          calls_used: callCountMap.get(p.id) || 0,
+          max_calls: 3,
+          city: profileMap.get(p.user_id)?.address_city || null,
+          state: profileMap.get(p.user_id)?.address_state || null,
+        }
+      })
     );
     setLoading(false);
   };
@@ -178,6 +184,51 @@ const AdminPros = () => {
     setDetailPro(null);
     setRejectReason("");
     fetchPros();
+  };
+
+  // Funções para gerenciar assinaturas via Asaas
+  const handleApproveSubscription = async (pro: Professional) => {
+    if (confirm(`Tem certeza que deseja APROVAR a assinatura de ${pro.full_name} e cobrar o cartão agora?`)) {
+      setProcessingSub(pro.id);
+      try {
+        const res = await supabase.functions.invoke("admin-manage", {
+          body: { action: "approve_subscription", userId: pro.user_id },
+        });
+        
+        if (res.error || res.data?.error) {
+          throw new Error(res.data?.error || "Erro ao aprovar assinatura no Asaas");
+        }
+        
+        toast({ title: "Assinatura aprovada e cobrança enviada!" });
+        fetchPros();
+      } catch (err: any) {
+        toast({ title: err.message, variant: "destructive" });
+      }
+      setProcessingSub(null);
+      if (detailPro?.id === pro.id) setDetailPro(null);
+    }
+  };
+
+  const handleRejectSubscription = async (pro: Professional) => {
+    if (confirm(`Tem certeza que deseja RECUSAR a assinatura de ${pro.full_name}? Isso cancelará o plano no Asaas.`)) {
+      setProcessingSub(pro.id);
+      try {
+        const res = await supabase.functions.invoke("admin-manage", {
+          body: { action: "reject_subscription", userId: pro.user_id },
+        });
+        
+        if (res.error || res.data?.error) {
+          throw new Error(res.data?.error || "Erro ao cancelar assinatura no Asaas");
+        }
+        
+        toast({ title: "Assinatura recusada e cancelada com sucesso!" });
+        fetchPros();
+      } catch (err: any) {
+        toast({ title: err.message, variant: "destructive" });
+      }
+      setProcessingSub(null);
+      if (detailPro?.id === pro.id) setDetailPro(null);
+    }
   };
 
   const handleChangeCategory = async (pro: Professional, categoryId: string) => {
@@ -310,6 +361,10 @@ const AdminPros = () => {
                     }`}>
                       {planLabel[pro.plan_id] || pro.plan_id}
                     </span>
+                    {/* Indicador de Status da Assinatura no Asaas (se existir) */}
+                    {pro.plan_id !== "free" && pro.subscription_status === "PENDING" && (
+                      <span className="ml-2 px-1.5 py-0.5 bg-yellow-100 text-yellow-800 text-[9px] rounded-full uppercase">Pendente</span>
+                    )}
                   </td>
                   <td className="p-3">
                     <span className="text-xs font-medium text-foreground">{pro.calls_used}</span>
@@ -337,6 +392,23 @@ const AdminPros = () => {
                             <ExternalLink className="w-3.5 h-3.5 mr-2" /> Ver perfil
                           </a>
                         </DropdownMenuItem>
+                        
+                        {/* Novas opções para aprovação de assinatura */}
+                        {pro.plan_id !== "free" && pro.subscription_status !== "ACTIVE" && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => handleApproveSubscription(pro)} disabled={processingSub === pro.id}>
+                              <CheckCircle className="w-3.5 h-3.5 mr-2 text-green-500" /> 
+                              {processingSub === pro.id ? "Aprovando..." : "Aprovar Assinatura"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleRejectSubscription(pro)} disabled={processingSub === pro.id}>
+                              <XCircle className="w-3.5 h-3.5 mr-2 text-red-500" /> 
+                              {processingSub === pro.id ? "Recusando..." : "Recusar Assinatura"}
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        <DropdownMenuSeparator />
+                        
                         <DropdownMenuItem onClick={() => openReviews(pro)}>
                           <Star className="w-3.5 h-3.5 mr-2" /> Avaliações ({pro.total_reviews})
                         </DropdownMenuItem>
@@ -442,6 +514,24 @@ const AdminPros = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Bloco de Gestão da Assinatura no Painel de Detalhes */}
+              {detailPro.plan_id !== "free" && detailPro.subscription_status !== "ACTIVE" && (
+                 <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 my-2">
+                   <p className="text-xs font-semibold text-amber-800 dark:text-amber-400 mb-2 flex items-center gap-1.5">
+                     <CreditCard className="w-4 h-4" /> Assinatura aguardando aprovação
+                   </p>
+                   <div className="flex gap-2">
+                     <button onClick={() => handleApproveSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors">
+                       {processingSub === detailPro.id ? "Aprovando..." : "✅ Aprovar e Cobrar"}
+                     </button>
+                     <button onClick={() => handleRejectSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 py-1.5 rounded-lg border border-red-200 text-red-600 bg-red-50 text-xs font-medium hover:bg-red-100 transition-colors">
+                       {processingSub === detailPro.id ? "Recusando..." : "❌ Recusar Plano"}
+                     </button>
+                   </div>
+                 </div>
+              )}
+
               {(detailPro.city || detailPro.state) && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   <MapPin className="w-3 h-3" /> {[detailPro.city, detailPro.state].filter(Boolean).join(", ")}
@@ -480,21 +570,19 @@ const AdminPros = () => {
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-2">Documentos</p>
                   {docs.map((d: any) => {
-  const publicUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${d.file_url}`;
-
-  return (
-    <a
-      key={d.id}
-      href={publicUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-2 text-xs text-primary hover:underline mb-1"
-    >
-      <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
-    </a>
-  );
-})}
-
+                    const publicUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${d.file_url}`;
+                    return (
+                      <a
+                        key={d.id}
+                        href={publicUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-xs text-primary hover:underline mb-1"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+                      </a>
+                    );
+                  })}
                 </div>
               )}
 
@@ -502,10 +590,10 @@ const AdminPros = () => {
                 <div className="space-y-3 pt-2 border-t">
                   <div className="flex gap-2">
                     <button onClick={handleApprove} className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1">
-                      <CheckCircle className="w-4 h-4" /> Aprovar
+                      <CheckCircle className="w-4 h-4" /> Aprovar Cadastro
                     </button>
                     <button onClick={handleReject} className="flex-1 py-2 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors flex items-center justify-center gap-1">
-                      <XCircle className="w-4 h-4" /> Reprovar
+                      <XCircle className="w-4 h-4" /> Reprovar Cadastro
                     </button>
                   </div>
                   <input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Motivo da reprovação (opcional)"

@@ -16,7 +16,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-
+console.log("BODY RECEIVED:", body);
     const {
       plan_id,
       credit_card,

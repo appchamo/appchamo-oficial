@@ -137,6 +137,26 @@ const nextDueDate = futureDate.toISOString().split("T")[0];
     );
 
     const subscriptionData = await subscriptionResponse.json();
+    // 🔹 Salvar assinatura no Supabase
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+await fetch(`${SUPABASE_URL}/rest/v1/subscriptions`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    apikey: SUPABASE_SERVICE_ROLE,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE}`,
+    Prefer: "return=minimal",
+  },
+  body: JSON.stringify({
+    user_id: body.userId,
+    plan_id: body.planId,
+    status: "pending",
+    asaas_subscription_id: subscriptionData.id,
+    asaas_customer_id: customerId,
+  }),
+});
     console.log("SUBSCRIPTION RESPONSE:", subscriptionData);
 
     return new Response(JSON.stringify(subscriptionData), {

@@ -1,20 +1,39 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// ===============================
+// 🔓 CORS
+// ===============================
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
 
+// ===============================
+// 🔁 Ambiente Asaas
+// ===============================
+const ASAAS_ENV = Deno.env.get("ASAAS_ENV") ?? "sandbox";
+
 const ASAAS_BASE_URL =
-  Deno.env.get("ASAAS_ENV") === "production"
+  ASAAS_ENV === "production"
     ? "https://api.asaas.com/v3"
     : "https://sandbox.asaas.com/api/v3";
 
-const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY")!;
+const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
 
-async function asaasRequest(path: string, method: string, body?: unknown) {
+// ===============================
+// 🔗 Helper Asaas
+// ===============================
+async function asaasRequest(
+  path: string,
+  method: string,
+  body?: unknown
+) {
+  if (!ASAAS_API_KEY) {
+    throw new Error("ASAAS_API_KEY not configured");
+  }
+
   const res = await fetch(`${ASAAS_BASE_URL}${path}`, {
     method,
     headers: {
@@ -34,38 +53,63 @@ async function asaasRequest(path: string, method: string, body?: unknown) {
   return data;
 }
 
+// ===============================
+// 👤 Buscar ou criar customer
+// ===============================
 async function findOrCreateCustomer(
   supabase: ReturnType<typeof createClient>,
   userId: string
 ) {
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, email, cpf, cnpj")
+    .select("full_name, email, cpf, cnpj, asaas_customer_id")
     .eq("user_id", userId)
     .single();
 
   if (!profile) throw new Error("Perfil não encontrado.");
+
+  // Se já existe salvo no banco → usa
+  if (profile.asaas_customer_id) {
+    return profile.asaas_customer_id;
+  }
 
   const cpfCnpj = profile.cnpj || profile.cpf;
   if (!cpfCnpj) throw new Error("Cadastre seu CPF ou CNPJ.");
 
   const clean = cpfCnpj.replace(/\D/g, "");
 
-  const search = await asaasRequest(`/customers?cpfCnpj=${clean}`, "GET");
+  // Verifica no Asaas se já existe
+  const search = await asaasRequest(
+    `/customers?cpfCnpj=${clean}`,
+    "GET"
+  );
+
+  let customerId;
 
   if (search.data?.length > 0) {
-    return search.data[0].id;
+    customerId = search.data[0].id;
+  } else {
+    const customer = await asaasRequest("/customers", "POST", {
+      name: profile.full_name,
+      email: profile.email,
+      cpfCnpj: clean,
+    });
+
+    customerId = customer.id;
   }
 
-  const customer = await asaasRequest("/customers", "POST", {
-    name: profile.full_name,
-    email: profile.email,
-    cpfCnpj: clean,
-  });
+  // Salva no banco
+  await supabase
+    .from("profiles")
+    .update({ asaas_customer_id: customerId })
+    .eq("user_id", userId);
 
-  return customer.id;
+  return customerId;
 }
 
+// ===============================
+// 🚀 Edge Function
+// ===============================
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -101,12 +145,16 @@ serve(async (req) => {
       throw new Error("request_id and amount required");
     }
 
-    const { data: serviceReq, error: serviceError } = await supabase
-      .from("service_requests")
-      .select("*")
-      .eq("id", request_id)
-      .eq("client_id", user.id)
-      .single();
+    // ===============================
+    // Buscar service request
+    // ===============================
+    const { data: serviceReq, error: serviceError } =
+      await supabase
+        .from("service_requests")
+        .select("*")
+        .eq("id", request_id)
+        .eq("client_id", user.id)
+        .single();
 
     if (serviceError) {
       console.error("Service request error:", serviceError);
@@ -117,75 +165,95 @@ serve(async (req) => {
       throw new Error("Service request not found");
     }
 
-    console.log("Service Request:", serviceReq);
-    console.log("Professional ID enviado:", serviceReq.professional_id);
-
     const professionalId = serviceReq.professional_id;
-    // 🔎 Verifica se já existe pagamento pendente
-const { data: existingTx } = await supabase
-  .from("transactions")
-  .select("*")
-  .eq("request_id", request_id)
-  .eq("status", "pending")
-  .maybeSingle();
 
-if (existingTx) {
-  console.log("Pagamento pendente encontrado, reutilizando.");
+    // ===============================
+    // Reutilizar pagamento pendente
+    // ===============================
+    const { data: existingTx } = await supabase
+      .from("transactions")
+      .select("*")
+      .eq("request_id", request_id)
+      .eq("status", "pending")
+      .maybeSingle();
 
-  return new Response(
-    JSON.stringify({
-      success: true,
-      payment_id: existingTx.asaas_payment_id,
-      pix_qr_code: existingTx.pix_qr_code,
-      pix_copy_paste: existingTx.pix_copy_paste,
-      reused: true
-    }),
-    {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (existingTx) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          payment_id: existingTx.asaas_payment_id,
+          pix_qr_code: existingTx.pix_qr_code,
+          pix_copy_paste: existingTx.pix_copy_paste,
+          reused: true,
+        }),
+        {
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
+      );
     }
-  );
-}
 
+    // ===============================
+    // Cálculos
+    // ===============================
     const totalAmount = Number(amount);
     const platformFee = Number((totalAmount * 0.1).toFixed(2));
-    const professionalNet = Number((totalAmount - platformFee).toFixed(2));
+    const professionalNet = Number(
+      (totalAmount - platformFee).toFixed(2)
+    );
 
-    const customerId = await findOrCreateCustomer(supabase, user.id);
+    // ===============================
+    // Customer
+    // ===============================
+    const customerId = await findOrCreateCustomer(
+      supabase,
+      user.id
+    );
 
+    // ===============================
+    // Criar pagamento PIX
+    // ===============================
     const asaasPayment = await asaasRequest("/payments", "POST", {
       customer: customerId,
       billingType: "PIX",
       value: totalAmount,
       dueDate: new Date().toISOString().split("T")[0],
-      description: `Pagamento serviço #${request_id.slice(0, 8)} - Chamô`,
+      description: `Pagamento serviço #${request_id.slice(
+        0,
+        8
+      )} - Chamô`,
     });
 
     const pixData = await asaasRequest(
       `/payments/${asaasPayment.id}/pixQrCode`,
       "GET"
-    ); 
-    console.log("PIX DATA:", pixData);
-    if (!pixData?.encodedImage) {
-  throw new Error("PIX não retornou encodedImage");
-}
+    );
 
-   const { error: insertError } = await supabase
-  .from("transactions")
-  .insert({
-  client_id: user.id,
-  professional_id: professionalId,
-  request_id: request_id,
-  total_amount: totalAmount,
-  platform_fee: platformFee,
-  professional_net: professionalNet,
-  asaas_payment_id: asaasPayment.id,
-  pix_qr_code: pixData.encodedImage,
-  pix_copy_paste: pixData.payload,
-  status: "pending",
-});
+    if (!pixData?.encodedImage) {
+      throw new Error("PIX não retornou encodedImage");
+    }
+
+    // ===============================
+    // Salvar transaction
+    // ===============================
+    const { error: insertError } = await supabase
+      .from("transactions")
+      .insert({
+        client_id: user.id,
+        professional_id: professionalId,
+        request_id: request_id,
+        total_amount: totalAmount,
+        platform_fee: platformFee,
+        professional_net: professionalNet,
+        asaas_payment_id: asaasPayment.id,
+        pix_qr_code: pixData.encodedImage,
+        pix_copy_paste: pixData.payload,
+        status: "pending",
+      });
 
     if (insertError) {
-      console.error("Transaction insert error:", insertError);
       throw new Error(insertError.message);
     }
 
@@ -197,16 +265,23 @@ if (existingTx) {
         pix_copy_paste: pixData.payload,
       }),
       {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
       }
     );
-  } catch (error) {
+  } catch (error: any) {
     console.error("create_payment error:", error.message);
+
     return new Response(
       JSON.stringify({ error: error.message }),
       {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
       }
     );
   }

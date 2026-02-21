@@ -1,6 +1,21 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// ===============================
+// 🔁 Ambiente Asaas (Sandbox / Produção)
+// ===============================
+const ASAAS_ENV = Deno.env.get("ASAAS_ENV") ?? "sandbox";
+
+const ASAAS_BASE_URL =
+  ASAAS_ENV === "production"
+    ? "https://api.asaas.com/v3"
+    : "https://sandbox.asaas.com/api/v3";
+
+const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
+
+// ===============================
+// 🚀 Edge Function
+// ===============================
 serve(async (req) => {
   // 🔓 CORS
   if (req.method === "OPTIONS") {
@@ -18,22 +33,24 @@ serve(async (req) => {
     const body = await req.json();
     console.log("BODY RECEIVED:", body);
 
-const {
-  value,
-  holderName,
-  number,
-  expiryMonth,
-  expiryYear,
-  ccv,
-  email,
-  cpfCnpj,
-  postalCode,
-  addressNumber,
-  userId,
-  planId,
-} = body;
+    const {
+      value,
+      holderName,
+      number,
+      expiryMonth,
+      expiryYear,
+      ccv,
+      email,
+      cpfCnpj,
+      postalCode,
+      addressNumber,
+      userId,
+      planId,
+    } = body;
 
-    // 🔎 Validação
+    // ===============================
+    // 🔎 Validação básica
+    // ===============================
     if (
       !value ||
       !holderName ||
@@ -44,7 +61,9 @@ const {
       !email ||
       !cpfCnpj ||
       !postalCode ||
-      !addressNumber
+      !addressNumber ||
+      !userId ||
+      !planId
     ) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
@@ -54,8 +73,6 @@ const {
         }
       );
     }
-
-    const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
 
     if (!ASAAS_API_KEY) {
       return new Response(
@@ -67,71 +84,72 @@ const {
       );
     }
 
-  
-  // ===============================
-// 1️⃣ Verificar se já existe customer
-// ===============================
+    // ===============================
+    // 🧠 Supabase Admin Client
+    // ===============================
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
 
-const supabase = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-);
+    // ===============================
+    // 1️⃣ Verificar se já existe customer
+    // ===============================
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("asaas_customer_id")
+      .eq("user_id", userId)
+      .single();
 
-// Buscar profile
-const { data: profile } = await supabase
-  .from("profiles")
-  .select("asaas_customer_id")
-  .eq("user_id", userId)
-  .single();
+    let customerId = profile?.asaas_customer_id;
 
-let customerId = profile?.asaas_customer_id;
+    // Se NÃO existir → cria
+    if (!customerId) {
+      const customerResponse = await fetch(
+        `${ASAAS_BASE_URL}/customers`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            access_token: ASAAS_API_KEY,
+          },
+          body: JSON.stringify({
+            name: holderName,
+            email: email,
+            cpfCnpj: cpfCnpj,
+            postalCode: postalCode,
+            addressNumber: addressNumber,
+          }),
+        }
+      );
 
-// Se NÃO existir, cria
-if (!customerId) {
+      const customerData = await customerResponse.json();
 
-  const customerResponse = await fetch(
-    "https://api.asaas.com/v3/customers",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        access_token: ASAAS_API_KEY,
-      },
-      body: JSON.stringify({
-        name: holderName,
-        email: email,
-        cpfCnpj: cpfCnpj,
-        postalCode: postalCode,
-        addressNumber: addressNumber,
-      }),
+      if (!customerResponse.ok) {
+        return new Response(JSON.stringify(customerData), {
+          status: customerResponse.status,
+          headers: { "Access-Control-Allow-Origin": "*" },
+        });
+      }
+
+      customerId = customerData.id;
+
+      // Salvar no profile
+      await supabase
+        .from("profiles")
+        .update({ asaas_customer_id: customerId })
+        .eq("user_id", userId);
     }
-  );
 
-  const customerData = await customerResponse.json();
-
-  if (!customerResponse.ok) {
-    return new Response(JSON.stringify(customerData), {
-      status: customerResponse.status,
-      headers: { "Access-Control-Allow-Origin": "*" },
-    });
-  }
-
-  customerId = customerData.id;
-
-  // Salvar no profile
-  await supabase
-    .from("profiles")
-    .update({ asaas_customer_id: customerId })
-    .eq("user_id", userId);
-}
     // ===============================
     // 2️⃣ Criar assinatura
     // ===============================
     const futureDate = new Date();
-futureDate.setDate(futureDate.getDate() + 30);
-const nextDueDate = futureDate.toISOString().split("T")[0];
+    futureDate.setDate(futureDate.getDate() + 30);
+    const nextDueDate = futureDate.toISOString().split("T")[0];
+
     const subscriptionResponse = await fetch(
-      "https://api.asaas.com/v3/subscriptions",
+      `${ASAAS_BASE_URL}/subscriptions`,
       {
         method: "POST",
         headers: {
@@ -141,9 +159,9 @@ const nextDueDate = futureDate.toISOString().split("T")[0];
         body: JSON.stringify({
           customer: customerId,
           billingType: "CREDIT_CARD",
-          value: 19.90,
+          value: Number(value), // agora usa valor real
           cycle: "MONTHLY",
-          nextDueDate: nextDueDate, // Definindo a próxima data de vencimento para 30 dias a partir de hoje
+          nextDueDate: nextDueDate,
           description: "Plano Chamô",
           creditCard: {
             holderName: holderName,
@@ -166,40 +184,40 @@ const nextDueDate = futureDate.toISOString().split("T")[0];
     const subscriptionData = await subscriptionResponse.json();
     console.log("SUBSCRIPTION DATA:", subscriptionData);
 
-if (!subscriptionResponse.ok) {
-  console.log("SUBSCRIPTION ERROR:", subscriptionData);
-  return new Response(JSON.stringify(subscriptionData), {
-    status: subscriptionResponse.status,
-    headers: { "Access-Control-Allow-Origin": "*" },
-  });
-}
+    if (!subscriptionResponse.ok) {
+      return new Response(JSON.stringify(subscriptionData), {
+        status: subscriptionResponse.status,
+        headers: { "Access-Control-Allow-Origin": "*" },
+      });
+    }
 
-const { error: saveError } = await supabase
-  .from("subscriptions")
-  .upsert(
-    {
-      user_id: userId,
-      plan_id: planId,
-      status: subscriptionData.status,
-      asaas_subscription_id: subscriptionData.id,
-      asaas_customer_id: customerId,
-      started_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" }
-  );
+    // ===============================
+    // 3️⃣ Salvar assinatura no banco
+    // ===============================
+    const { error: saveError } = await supabase
+      .from("subscriptions")
+      .upsert(
+        {
+          user_id: userId,
+          plan_id: planId,
+          status: subscriptionData.status,
+          asaas_subscription_id: subscriptionData.id,
+          asaas_customer_id: customerId,
+          started_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
 
-if (saveError) {
-  console.log("SAVE ERROR:", saveError);
-}
-
-    console.log("SUBSCRIPTION RESPONSE:", subscriptionData);
+    if (saveError) {
+      console.log("SAVE ERROR:", saveError);
+    }
 
     return new Response(JSON.stringify(subscriptionData), {
       status: subscriptionResponse.status,
       headers: { "Access-Control-Allow-Origin": "*" },
     });
 
-  } catch (error) {
+  } catch (error: any) {
     return new Response(
       JSON.stringify({
         error: "Internal Server Error",

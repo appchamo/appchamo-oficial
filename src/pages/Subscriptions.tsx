@@ -249,7 +249,7 @@ const Subscriptions = () => {
     setProcessing(true);
     try {
       let proofUrl = "";
-      // 1. Gera o endereço completo formatado
+      // 1. Gera o endereço completo formatado para ser salvo no banco
       const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
 
       // 2. Upload do comprovante (Só para Plano Business)
@@ -306,7 +306,7 @@ const Subscriptions = () => {
 
       const finalStatus = selectedPlanId === "pro" ? "ACTIVE" : "PENDING";
       
-      // 4. Salva no Banco de Dados (subscriptions)
+      // 4. Salva no Banco de Dados (subscriptions) saindo do estado NULL
       await supabase.from("subscriptions").upsert({
         user_id: session.user.id,
         plan_id: selectedPlanId,
@@ -315,6 +315,10 @@ const Subscriptions = () => {
         business_address: fullAddress || null,
         business_proof_url: proofUrl || null
       });
+
+      if (finalStatus === "ACTIVE") {
+        toast({ title: "Plano Pro Ativado!", description: "Seu pagamento foi processado e o plano já está liberado." });
+      } else {
         toast({ title: "Assinatura pré-aprovada!", description: "Seu plano entrará em vigor após aprovação do administrador." });
       }
       
@@ -592,4 +596,4 @@ const Subscriptions = () => {
   );
 };
 
-export default Subscriptions; 
+export default Subscriptions;

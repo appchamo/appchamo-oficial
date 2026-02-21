@@ -91,6 +91,7 @@ const MessageThread = () => {
 
       // Get request details
       const { data: req } = await supabase.from("service_requests").select("*").eq("id", threadId!).maybeSingle();
+      console.log("REQ COMPLETO:", req);
       if (req && user) {
         setRequestStatus(req.status);
         setRequestProtocol((req as any).protocol || null);

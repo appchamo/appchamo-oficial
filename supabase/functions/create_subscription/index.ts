@@ -17,21 +17,28 @@ serve(async (req) => {
   try {
     const body = await req.json();
 console.log("BODY RECEIVED:", body);
-    const {
-      plan_id,
-      credit_card,
-      credit_card_holder_info,
-    } = body;
+const {
+  value,
+  holderName,
+  number,
+  expiryMonth,
+  expiryYear,
+  ccv,
+  email,
+  cpfCnpj,
+  postalCode,
+  addressNumber,
+} = body;
 
-    if (!plan_id || !credit_card || !credit_card_holder_info) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields" }),
-        {
-          status: 400,
-          headers: { "Access-Control-Allow-Origin": "*" },
-        }
-      );
+if (!value || !holderName || !number || !expiryMonth || !expiryYear || !ccv) {
+  return new Response(
+    JSON.stringify({ error: "Missing required fields" }),
+    {
+      status: 400,
+      headers: { "Access-Control-Allow-Origin": "*" },
     }
+  );
+}
 
     // ⚠️ AQUI VOCÊ PRECISA DEFINIR O VALOR DO PLANO
     // Temporariamente vamos fixar para teste:

@@ -118,7 +118,13 @@ const MessageThread = () => {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
             const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
-            if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
+            if (profile) {
+  console.log("Avatar no chat:", profile.avatar_url);
+  setOtherParty({
+    name: profile.full_name || "Profissional",
+    avatar_url: profile.avatar_url,
+  });
+}
           }
         } else {
           const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};

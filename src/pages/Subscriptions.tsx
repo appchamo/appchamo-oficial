@@ -1,11 +1,11 @@
 import AppLayout from "@/components/AppLayout";
-import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle } from "lucide-react";
+import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const planDetails = [
@@ -64,6 +64,7 @@ const Subscriptions = () => {
   const navigate = useNavigate();
   const { plan: currentPlan, plans, loading, changePlan, callsUsed, callsRemaining, isFreePlan } = useSubscription();
   const { user, profile } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [changing, setChanging] = useState<string | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -71,6 +72,10 @@ const Subscriptions = () => {
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", address: "" });
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
+
+  // Novos campos para o Business
+  const [businessData, setBusinessData] = useState({ cnpj: "", companyAddress: "" });
+  const [proofFile, setProofFile] = useState<File | null>(null);
 
   // Downgrade & Cancel states
   const [downgradeOpen, setDowngradeOpen] = useState(false);
@@ -143,6 +148,8 @@ const Subscriptions = () => {
 
     setSelectedPlanId(planId);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", address: "" });
+    setBusinessData({ cnpj: "", companyAddress: "" });
+    setProofFile(null);
     setPaymentOpen(true);
   };
 
@@ -172,12 +179,28 @@ const Subscriptions = () => {
     setCancelOpen(false);
   };
 
+  const formatCNPJ = (value: string) => {
+    return value
+      .replace(/\D/g, "")
+      .replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5")
+      .slice(0, 18);
+  };
+
   const handlePaymentSubmit = async () => {
     if (!selectedPlanId) return;
     if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) {
       toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
       return;
     }
+
+    // Validação específica para Business
+    if (selectedPlanId === "business") {
+      if (!businessData.cnpj || !businessData.companyAddress || !proofFile) {
+        toast({ title: "Para o plano Business, CNPJ, Endereço e Comprovante são obrigatórios.", variant: "destructive" });
+        return;
+      }
+    }
+
     if (cardForm.number.replace(/\s/g, "").length < 16) {
       toast({ title: "Número do cartão inválido", variant: "destructive" });
       return;
@@ -186,6 +209,23 @@ const Subscriptions = () => {
     setProcessing(true);
     
     try {
+      let proofUrl = "";
+
+      // 1. Upload do arquivo para o plano Business
+      if (selectedPlanId === "business" && proofFile && user) {
+        const fileExt = proofFile.name.split('.').pop();
+        const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from("business-proofs")
+          .upload(fileName, proofFile);
+
+        if (uploadError) throw new Error("Erro ao enviar o comprovante de CNPJ.");
+        
+        const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(fileName);
+        proofUrl = urlData.publicUrl;
+      }
+
       const expiryParts = cardForm.expiry.split("/");
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Não autenticado");
@@ -217,6 +257,10 @@ const Subscriptions = () => {
           postalCode: profileData?.address_zip || "",
           addressNumber: profileData?.address_number || "",
           phone: profileData?.phone || "",
+          // Novos dados enviados para a função
+          cnpjBusiness: businessData.cnpj,
+          addressBusiness: businessData.companyAddress,
+          proofUrl: proofUrl,
         },
       });
 
@@ -230,7 +274,11 @@ const Subscriptions = () => {
       await supabase.from("subscriptions").upsert({
         user_id: session.user.id,
         plan_id: selectedPlanId,
-        status: finalStatus
+        status: finalStatus,
+        // Salva os dados extras no banco de dados local também
+        business_cnpj: businessData.cnpj || null,
+        business_address: businessData.companyAddress || null,
+        business_proof_url: proofUrl || null
       });
       
       if (finalStatus === "ACTIVE") {
@@ -388,11 +436,11 @@ const Subscriptions = () => {
 
         {/* Modal Único de Pagamento */}
         <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-primary" />
-                Dados do cartão
+                Dados do pagamento
               </DialogTitle>
             </DialogHeader>
             {selectedPlan && (
@@ -402,20 +450,64 @@ const Subscriptions = () => {
                   <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
                 </div>
                 
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-1">
-                  <p className="text-xs font-medium text-amber-700">
-                    {selectedPlan.id === "pro" 
-                      ? "💳 O cartão será salvo e a primeira cobrança será feita agora." 
-                      : "💳 O cartão será salvo mas não será cobrado hoje."}
-                  </p>
-                  <p className="text-xs text-amber-600 mt-0.5">
-                    {selectedPlan.id === "pro"
-                      ? "Seu plano será ativado imediatamente após o pagamento."
-                      : "A cobrança efetiva acontecerá após a aprovação do seu plano."}
-                  </p>
-                </div>
+                {/* CAMPOS OBRIGATÓRIOS DO PLANO BUSINESS */}
+                {selectedPlanId === "business" && (
+                  <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4 space-y-3">
+                    <p className="text-[10px] font-bold text-violet-600 uppercase flex items-center gap-1">
+                      <Building2 className="w-3 h-3" /> Verificação Empresarial
+                    </p>
+                    
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase font-bold mb-1 block">CNPJ da Empresa</label>
+                      <input 
+                        value={businessData.cnpj} 
+                        onChange={(e) => setBusinessData(d => ({ ...d, cnpj: formatCNPJ(e.target.value) }))}
+                        placeholder="00.000.000/0000-00"
+                        className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-violet-500/30"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase font-bold mb-1 block">Endereço Comercial</label>
+                      <input 
+                        value={businessData.companyAddress} 
+                        onChange={(e) => setBusinessData(d => ({ ...d, companyAddress: e.target.value }))}
+                        placeholder="Rua, número, Bairro, Cidade"
+                        className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-violet-500/30"
+                      />
+                    </div>
+
+                    <div 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="border-2 border-dashed border-violet-500/30 rounded-xl p-4 text-center cursor-pointer hover:bg-violet-500/10 transition-all"
+                    >
+                      <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        hidden 
+                        accept=".pdf,.png,.jpg,.jpeg" 
+                        onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                      />
+                      {proofFile ? (
+                        <div className="flex flex-col items-center gap-1 text-emerald-600">
+                          <Check className="w-5 h-5" />
+                          <span className="text-[10px] font-bold truncate max-w-[150px]">{proofFile.name}</span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-1">
+                          <Upload className="w-5 h-5 text-violet-500" />
+                          <span className="text-[10px] text-muted-foreground font-bold">ANEXAR COMPROVANTE CNPJ</span>
+                          <span className="text-[8px] text-muted-foreground/60">(PDF, PNG ou JPG)</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-3">
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                    <CreditCard className="w-3 h-3" /> Dados do Cartão
+                  </p>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
                     <input value={cardForm.number} onChange={(e) => setCardForm(f => ({ ...f, number: formatCardNumber(e.target.value) }))} placeholder="0000 0000 0000 0000" maxLength={19} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
@@ -434,17 +526,13 @@ const Subscriptions = () => {
                       <input value={cardForm.cvv} onChange={(e) => setCardForm(f => ({ ...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4) }))} placeholder="123" maxLength={4} type="password" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
                     </div>
                   </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Endereço de cobrança</label>
-                    <input value={cardForm.address} onChange={(e) => setCardForm(f => ({ ...f, address: e.target.value }))} placeholder="Rua, número, cidade" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                  </div>
                 </div>
 
                 <button onClick={handlePaymentSubmit} disabled={processing} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                   {processing ? (
                     <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</>
                   ) : (
-                    <><Lock className="w-4 h-4" /> Configurar Assinatura</>
+                    <><Lock className="w-4 h-4" /> Assinar Plano</>
                   )}
                 </button>
 

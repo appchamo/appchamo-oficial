@@ -142,7 +142,6 @@ const nextDueDate = futureDate.toISOString().split("T")[0];
     // 🔹 Salvar assinatura no Supabase
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
 const saveResponse = await fetch(`${SUPABASE_URL}/rest/v1/subscriptions`, {
   method: "POST",
   headers: {

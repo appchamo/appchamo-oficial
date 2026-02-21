@@ -60,12 +60,11 @@ const planDetails = [
   },
 ];
 
-type EnterpriseStep = "cnpj" | "card";
-
 const Subscriptions = () => {
   const navigate = useNavigate();
   const { plan: currentPlan, plans, loading, changePlan, callsUsed, callsRemaining, isFreePlan } = useSubscription();
   const { user, profile } = useAuth();
+  
   const [changing, setChanging] = useState<string | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -73,27 +72,10 @@ const Subscriptions = () => {
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
 
-  // Enterprise upgrade state
-  const [enterpriseOpen, setEnterpriseOpen] = useState(false);
-  const [enterpriseStep, setEnterpriseStep] = useState<EnterpriseStep>("cnpj");
-  const [enterpriseForm, setEnterpriseForm] = useState({
-    cnpj: "", companyName: "", cadastralStatus: "",
-    addressZip: "", addressStreet: "", addressNumber: "",
-    addressComplement: "", addressNeighborhood: "", addressCity: "", addressState: "",
-  });
-  const [enterpriseCard, setEnterpriseCard] = useState({ number: "", name: "", expiry: "", cvv: "" });
-  const [enterpriseProcessing, setEnterpriseProcessing] = useState(false);
-  const [pendingEnterprise, setPendingEnterprise] = useState(false);
-
-  // VIP upgrade state (similar to enterprise, needs analysis)
-  const [pendingVip, setPendingVip] = useState(false);
-
-  // Downgrade confirmation
+  // Downgrade & Cancel states
   const [downgradeOpen, setDowngradeOpen] = useState(false);
   const [downgradePlanId, setDowngradePlanId] = useState<string | null>(null);
   const [downgrading, setDowngrading] = useState(false);
-
-  // Cancel subscription
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -106,24 +88,6 @@ const Subscriptions = () => {
         .eq("user_id", user.id)
         .maybeSingle();
       if (pro) setProStatus(pro.profile_status);
-
-      // Check if already has pending enterprise request
-      const { data: req } = await supabase
-        .from("enterprise_upgrade_requests" as any)
-        .select("id, status")
-        .eq("user_id", user.id)
-        .eq("status", "pending")
-        .maybeSingle();
-      if (req) setPendingEnterprise(true);
-
-      // Check for pending VIP request (stored as enterprise_upgrade_requests with plan_type = vip)
-      const { data: vipReq } = await supabase
-        .from("enterprise_upgrade_requests" as any)
-        .select("id, status")
-        .eq("user_id", user.id)
-        .eq("status", "pending_vip")
-        .maybeSingle();
-      if (vipReq) setPendingVip(true);
     };
     load();
   }, [user]);
@@ -164,7 +128,6 @@ const Subscriptions = () => {
     const targetPlan = plans.find(p => p.id === planId);
     const isDowngrade = targetPlan && currentPlan && targetPlan.price_monthly < currentPlan.price_monthly;
 
-    // Downgrade confirmation
     if (isDowngrade && planId !== "free") {
       setDowngradePlanId(planId);
       setDowngradeOpen(true);
@@ -177,36 +140,7 @@ const Subscriptions = () => {
       return;
     }
 
-    // Enterprise plan → special flow
-    if (planId === "business") {
-      if (pendingEnterprise) {
-        toast({ title: "Você já possui uma solicitação empresarial em análise." });
-        return;
-      }
-      setEnterpriseStep("cnpj");
-      setEnterpriseForm({
-        cnpj: profile?.cnpj || "", companyName: "", cadastralStatus: "",
-        addressZip: "", addressStreet: "", addressNumber: "",
-        addressComplement: "", addressNeighborhood: "", addressCity: "", addressState: "",
-      });
-      setEnterpriseCard({ number: "", name: "", expiry: "", cvv: "" });
-      setEnterpriseOpen(true);
-      return;
-    }
-
-    // VIP plan → needs analysis like enterprise
-    if (planId === "vip") {
-      if (pendingVip) {
-        toast({ title: "Você já possui uma solicitação VIP em análise." });
-        return;
-      }
-      setEnterpriseStep("card");
-      setEnterpriseCard({ number: "", name: "", expiry: "", cvv: "" });
-      setSelectedPlanId("vip");
-      setEnterpriseOpen(true);
-      return;
-    }
-
+    // Fluxo unificado: Pro, VIP e Business abrem o mesmo modal de pagamento
     setSelectedPlanId(planId);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", address: "" });
     setPaymentOpen(true);
@@ -238,17 +172,6 @@ const Subscriptions = () => {
     setCancelOpen(false);
   };
 
-  const handleChangePlan = async (planId: string) => {
-    setChanging(planId);
-    const ok = await changePlan(planId);
-    if (ok) {
-      toast({ title: "Plano atualizado com sucesso!" });
-    } else {
-      toast({ title: "Erro ao atualizar plano. Tente novamente.", variant: "destructive" });
-    }
-    setChanging(null);
-  };
-
   const handlePaymentSubmit = async () => {
     if (!selectedPlanId) return;
     if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) {
@@ -259,7 +182,9 @@ const Subscriptions = () => {
       toast({ title: "Número do cartão inválido", variant: "destructive" });
       return;
     }
+    
     setProcessing(true);
+    
     try {
       const expiryParts = cardForm.expiry.split("/");
       const { data: { session } } = await supabase.auth.getSession();
@@ -277,182 +202,39 @@ const Subscriptions = () => {
         return;
       }
 
-    const res = await supabase.functions.invoke("create_subscription", {
-  body: {
-    userId: session.user.id,
-    planId: selectedPlanId,
-    value: selectedPlan?.price_monthly || 0,
-    holderName: cardForm.name,
-    number: cardForm.number.replace(/\s/g, ""),
-    expiryMonth: expiryParts[0],
-    expiryYear: `20${expiryParts[1]}`,
-    ccv: cardForm.cvv,
-    email: profileData?.email || "",
-    cpfCnpj: profileData?.cnpj || profileData?.cpf || "",
-    postalCode: profileData?.address_zip || "",
-    addressNumber: profileData?.address_number || "",
-  },
-});
+      const res = await supabase.functions.invoke("create_subscription", {
+        body: {
+          userId: session.user.id,
+          planId: selectedPlanId,
+          value: selectedPlan?.price_monthly || 0,
+          holderName: cardForm.name,
+          number: cardForm.number.replace(/\s/g, ""),
+          expiryMonth: expiryParts[0],
+          expiryYear: `20${expiryParts[1]}`,
+          ccv: cardForm.cvv,
+          email: profileData?.email || "",
+          cpfCnpj: profileData?.cnpj || profileData?.cpf || "",
+          postalCode: profileData?.address_zip || "",
+          addressNumber: profileData?.address_number || "",
+        },
+      });
 
       if (res.error || res.data?.error) {
-        throw new Error(res.data?.error || "Erro ao processar pagamento");
+        throw new Error(res.data?.error || "Erro ao processar pagamento no Asaas");
       }
 
+      // Atualiza o plano localmente para liberar o acesso ao app
       const newPlan = plans.find(p => p.id === selectedPlanId);
       if (newPlan) {
         await changePlan(selectedPlanId);
       }
-      toast({ title: "Assinatura ativada com sucesso!" });
+      
+      toast({ title: "Assinatura pré-aprovada!", description: "Seu plano foi configurado e entrará em vigor em breve." });
       setPaymentOpen(false);
     } catch (err: any) {
       toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
     }
     setProcessing(false);
-  };
-
-  // VIP/Enterprise flow: submit card for analysis
-  const handleVipEnterpriseCardSubmit = async () => {
-    const isVip = selectedPlanId === "vip";
-    const card = enterpriseCard;
-    
-    if (!card.number || !card.name || !card.expiry || !card.cvv) {
-      toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
-      return;
-    }
-    if (card.number.replace(/\s/g, "").length < 16) {
-      toast({ title: "Número do cartão inválido", variant: "destructive" });
-      return;
-    }
-    setEnterpriseProcessing(true);
-    try {
-      const expiryParts = card.expiry.split("/");
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Não autenticado");
-
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("full_name, email, cpf, cnpj, phone, address_zip, address_number, asaas_customer_id")
-        .eq("user_id", session.user.id)
-        .single();
-
-      if (!profileData?.cpf && !profileData?.cnpj) {
-        toast({ title: "Cadastre seu CPF ou CNPJ no perfil antes de prosseguir.", variant: "destructive" });
-        setEnterpriseProcessing(false);
-        return;
-      }
-
-      // Tokenize card without charging
-      const res = await supabase.functions.invoke("create_payment", {
-        body: {
-          action: "tokenize_card_enterprise",
-          cnpj: isVip ? (profileData?.cnpj || profileData?.cpf || "") : enterpriseForm.cnpj,
-          credit_card: {
-            holder_name: card.name,
-            number: card.number,
-            expiry_month: expiryParts[0],
-            expiry_year: `20${expiryParts[1]}`,
-            cvv: card.cvv,
-          },
-          credit_card_holder_info: {
-            name: profileData?.full_name || card.name,
-            email: profileData?.email || "",
-            cpf_cnpj: profileData?.cpf || profileData?.cnpj || "",
-            postal_code: isVip ? (profileData?.address_zip || "") : (enterpriseForm.addressZip || profileData?.address_zip || ""),
-            address_number: isVip ? (profileData?.address_number || "") : (enterpriseForm.addressNumber || profileData?.address_number || ""),
-            phone: profileData?.phone || "",
-          },
-        },
-      });
-
-      if (res.error || res.data?.error) {
-        throw new Error(res.data?.error || "Erro ao tokenizar cartão");
-      }
-
-      if (isVip) {
-        // Save VIP upgrade request
-        await supabase.from("enterprise_upgrade_requests" as any).insert({
-          user_id: session.user.id,
-          cnpj: profileData?.cnpj || profileData?.cpf || "VIP",
-          company_name: profileData?.full_name || "",
-          status: "pending_vip",
-          asaas_customer_id: res.data.customer_id,
-          asaas_credit_card_token: res.data.credit_card_token,
-        } as any);
-
-        // Notify admins
-        const { data: admins } = await supabase.from("user_roles").select("user_id").in("role", ["super_admin"]);
-        if (admins) {
-          for (const admin of admins) {
-            await supabase.from("notifications").insert({
-              user_id: admin.user_id,
-              title: "Nova solicitação VIP",
-              message: `${profileData?.full_name || "Usuário"} solicitou upgrade para o plano VIP e está aguardando análise.`,
-              type: "admin",
-              link: "/admin/pros",
-            });
-          }
-        }
-
-        setPendingVip(true);
-        setEnterpriseOpen(false);
-        toast({ title: "Solicitação enviada!", description: "Seu upgrade para VIP está em análise. Você será notificado quando for aprovado." });
-      } else {
-        // Enterprise flow
-        await supabase.from("enterprise_upgrade_requests" as any).insert({
-          user_id: session.user.id,
-          cnpj: enterpriseForm.cnpj,
-          company_name: enterpriseForm.companyName,
-          cadastral_status: enterpriseForm.cadastralStatus,
-          address_street: enterpriseForm.addressStreet,
-          address_number: enterpriseForm.addressNumber,
-          address_complement: enterpriseForm.addressComplement,
-          address_neighborhood: enterpriseForm.addressNeighborhood,
-          address_city: enterpriseForm.addressCity,
-          address_state: enterpriseForm.addressState,
-          address_zip: enterpriseForm.addressZip,
-          asaas_customer_id: res.data.customer_id,
-          asaas_credit_card_token: res.data.credit_card_token,
-          status: "pending",
-        } as any);
-
-        // Notify admins
-        const { data: admins } = await supabase.from("user_roles").select("user_id").in("role", ["super_admin"]);
-        if (admins) {
-          for (const admin of admins) {
-            await supabase.from("notifications").insert({
-              user_id: admin.user_id,
-              title: "Nova solicitação Empresarial",
-              message: `${profileData?.full_name || "Usuário"} solicitou upgrade para o plano Empresarial e está aguardando análise.`,
-              type: "admin",
-              link: "/admin/enterprise",
-            });
-          }
-        }
-
-        setPendingEnterprise(true);
-        setEnterpriseOpen(false);
-        toast({ title: "Solicitação enviada!", description: "Seu upgrade para Empresarial está em análise. Você será notificado quando for aprovado." });
-      }
-    } catch (err: any) {
-      toast({ title: err.message || "Erro ao processar solicitação", variant: "destructive" });
-    }
-    setEnterpriseProcessing(false);
-  };
-
-  const handleEnterpriseCnpjNext = () => {
-    if (!enterpriseForm.cnpj || enterpriseForm.cnpj.replace(/\D/g, "").length < 14) {
-      toast({ title: "Informe um CNPJ válido", variant: "destructive" });
-      return;
-    }
-    if (!enterpriseForm.cadastralStatus) {
-      toast({ title: "Informe a situação cadastral", variant: "destructive" });
-      return;
-    }
-    if (!enterpriseForm.addressStreet || !enterpriseForm.addressCity || !enterpriseForm.addressState) {
-      toast({ title: "Preencha o endereço completo", variant: "destructive" });
-      return;
-    }
-    setEnterpriseStep("card");
   };
 
   const formatCardNumber = (value: string) => {
@@ -466,23 +248,12 @@ const Subscriptions = () => {
     return digits;
   };
 
-  const formatCnpj = (value: string) => {
-    const digits = value.replace(/\D/g, "").slice(0, 14);
-    return digits
-      .replace(/^(\d{2})(\d)/, "$1.$2")
-      .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
-      .replace(/\.(\d{3})(\d)/, ".$1/$2")
-      .replace(/(\d{4})(\d)/, "$1-$2");
-  };
-
   const formatPrice = (price: number) => {
     if (price === 0) return "Grátis";
     return `R$ ${price.toFixed(2).replace(".", ",")}/mês`;
   };
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId);
-  const businessPlan = plans.find(p => p.id === "business");
-  const vipPlan = plans.find(p => p.id === "vip");
 
   return (
     <AppLayout>
@@ -501,22 +272,6 @@ const Subscriptions = () => {
             {callsRemaining <= 0 && (
               <p className="text-xs text-destructive mt-1">Faça upgrade para continuar atendendo clientes.</p>
             )}
-          </div>
-        )}
-
-        {pendingEnterprise && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-5">
-            <p className="text-sm font-medium text-amber-700 flex items-center gap-2">
-              <Clock className="w-4 h-4" /> Sua solicitação para o plano Empresarial está em análise.
-            </p>
-          </div>
-        )}
-
-        {pendingVip && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-5">
-            <p className="text-sm font-medium text-amber-700 flex items-center gap-2">
-              <Clock className="w-4 h-4" /> Sua solicitação para o plano VIP está em análise.
-            </p>
           </div>
         )}
 
@@ -591,7 +346,7 @@ const Subscriptions = () => {
                   ) : (
                     <button
                       onClick={() => handleSelectPlan(p.id)}
-                      disabled={changing !== null || (p.id === "business" && pendingEnterprise) || (p.id === "vip" && pendingVip)}
+                      disabled={changing !== null}
                       className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
                         isRecommended
                           ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-600 hover:to-amber-700 shadow-lg"
@@ -602,10 +357,6 @@ const Subscriptions = () => {
                     >
                       {changing === p.id
                         ? "Processando..."
-                        : p.id === "business" && pendingEnterprise
-                        ? "Em análise"
-                        : p.id === "vip" && pendingVip
-                        ? "Em análise"
                         : p.price_monthly > (currentPlan?.price_monthly || 0)
                         ? "Fazer upgrade"
                         : "Mudar plano"}
@@ -621,7 +372,7 @@ const Subscriptions = () => {
           A cobrança será processada mensalmente. Cancele a qualquer momento.
         </p>
 
-        {/* Regular Payment Dialog (Pro) */}
+        {/* Modal Único de Pagamento (Pro, VIP e Business) */}
         <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
@@ -636,6 +387,12 @@ const Subscriptions = () => {
                   <p className="text-xs text-muted-foreground">Plano {selectedPlan.name}</p>
                   <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
                 </div>
+                
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-1">
+                  <p className="text-xs font-medium text-amber-700">💳 O cartão será salvo mas <strong>não será cobrado hoje</strong>.</p>
+                  <p className="text-xs text-amber-600 mt-0.5">A cobrança efetiva acontecerá após a aprovação do seu plano.</p>
+                </div>
+
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
@@ -665,7 +422,7 @@ const Subscriptions = () => {
                   {processing ? (
                     <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</>
                   ) : (
-                    <><Lock className="w-4 h-4" /> Assinar agora</>
+                    <><Lock className="w-4 h-4" /> Configurar Assinatura</>
                   )}
                 </button>
 
@@ -677,150 +434,7 @@ const Subscriptions = () => {
           </DialogContent>
         </Dialog>
 
-        {/* VIP / Enterprise Upgrade Dialog */}
-        <Dialog open={enterpriseOpen} onOpenChange={setEnterpriseOpen}>
-          <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {selectedPlanId === "vip" ? (
-                  <><Crown className="w-5 h-5 text-amber-500" /> Upgrade VIP</>
-                ) : (
-                  <><Building2 className="w-5 h-5 text-violet-500" /> {enterpriseStep === "cnpj" ? "Dados da empresa" : "Cadastrar cartão"}</>
-                )}
-              </DialogTitle>
-            </DialogHeader>
-
-            {enterpriseStep === "cnpj" && selectedPlanId !== "vip" && (
-              <div className="space-y-4">
-                <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-3 text-center">
-                  <p className="text-xs text-muted-foreground">Plano Empresarial</p>
-                  {businessPlan && (
-                    <p className="text-xl font-bold text-foreground">R$ {businessPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
-                  )}
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">CNPJ</label>
-                    <input value={enterpriseForm.cnpj} onChange={(e) => setEnterpriseForm(f => ({ ...f, cnpj: formatCnpj(e.target.value) }))} placeholder="00.000.000/0000-00" maxLength={18} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Razão Social</label>
-                    <input value={enterpriseForm.companyName} onChange={(e) => setEnterpriseForm(f => ({ ...f, companyName: e.target.value }))} placeholder="Nome da empresa" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Situação Cadastral</label>
-                    <select value={enterpriseForm.cadastralStatus} onChange={(e) => setEnterpriseForm(f => ({ ...f, cadastralStatus: e.target.value }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-                      <option value="">Selecione</option>
-                      <option value="ativa">Ativa</option>
-                      <option value="suspensa">Suspensa</option>
-                      <option value="inapta">Inapta</option>
-                      <option value="baixada">Baixada</option>
-                    </select>
-                  </div>
-
-                  <div className="border-t pt-3">
-                    <p className="text-xs font-semibold text-foreground mb-2">Endereço da empresa</p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">CEP</label>
-                    <input value={enterpriseForm.addressZip} onChange={(e) => setEnterpriseForm(f => ({ ...f, addressZip: e.target.value.replace(/\D/g, "").slice(0, 8) }))} placeholder="00000000" maxLength={8} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Rua</label>
-                    <input value={enterpriseForm.addressStreet} onChange={(e) => setEnterpriseForm(f => ({ ...f, addressStreet: e.target.value }))} placeholder="Rua / Avenida" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Número</label>
-                      <input value={enterpriseForm.addressNumber} onChange={(e) => setEnterpriseForm(f => ({ ...f, addressNumber: e.target.value }))} placeholder="123" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Complemento</label>
-                      <input value={enterpriseForm.addressComplement} onChange={(e) => setEnterpriseForm(f => ({ ...f, addressComplement: e.target.value }))} placeholder="Sala, andar" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Bairro</label>
-                    <input value={enterpriseForm.addressNeighborhood} onChange={(e) => setEnterpriseForm(f => ({ ...f, addressNeighborhood: e.target.value }))} placeholder="Bairro" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Cidade</label>
-                      <input value={enterpriseForm.addressCity} onChange={(e) => setEnterpriseForm(f => ({ ...f, addressCity: e.target.value }))} placeholder="Cidade" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Estado</label>
-                      <input value={enterpriseForm.addressState} onChange={(e) => setEnterpriseForm(f => ({ ...f, addressState: e.target.value.toUpperCase().slice(0, 2) }))} placeholder="UF" maxLength={2} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
-                    </div>
-                  </div>
-                </div>
-
-                <button onClick={handleEnterpriseCnpjNext} className="w-full py-3 rounded-xl bg-violet-600 text-white font-semibold text-sm hover:bg-violet-700 transition-colors flex items-center justify-center gap-2">
-                  Próximo: cadastrar cartão <ArrowLeft className="w-4 h-4 rotate-180" />
-                </button>
-              </div>
-            )}
-
-            {enterpriseStep === "card" && (
-              <div className="space-y-4">
-                {selectedPlanId === "vip" ? (
-                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Plano VIP</p>
-                    {vipPlan && (
-                      <p className="text-xl font-bold text-foreground">R$ {vipPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
-                    )}
-                  </div>
-                ) : null}
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-1">
-                  <p className="text-xs font-medium text-amber-700">💳 O cartão será salvo mas <strong>não será cobrado agora</strong>.</p>
-                  <p className="text-xs text-amber-600 mt-0.5">A cobrança só será realizada após aprovação da equipe Chamô.</p>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
-                    <input value={enterpriseCard.number} onChange={(e) => setEnterpriseCard(f => ({ ...f, number: formatCardNumber(e.target.value) }))} placeholder="0000 0000 0000 0000" maxLength={19} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Nome no cartão</label>
-                    <input value={enterpriseCard.name} onChange={(e) => setEnterpriseCard(f => ({ ...f, name: e.target.value.toUpperCase() }))} placeholder="NOME COMPLETO" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Validade</label>
-                      <input value={enterpriseCard.expiry} onChange={(e) => setEnterpriseCard(f => ({ ...f, expiry: formatExpiry(e.target.value) }))} placeholder="MM/AA" maxLength={5} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
-                      <input value={enterpriseCard.cvv} onChange={(e) => setEnterpriseCard(f => ({ ...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4) }))} placeholder="123" maxLength={4} type="password" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  {selectedPlanId !== "vip" && (
-                    <button onClick={() => setEnterpriseStep("cnpj")} className="flex-1 py-3 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-                      Voltar
-                    </button>
-                  )}
-                  <button onClick={handleVipEnterpriseCardSubmit} disabled={enterpriseProcessing} className={`${selectedPlanId === "vip" ? "w-full" : "flex-1"} py-3 rounded-xl ${selectedPlanId === "vip" ? "bg-amber-500 hover:bg-amber-600" : "bg-violet-600 hover:bg-violet-700"} text-white font-semibold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2`}>
-                    {enterpriseProcessing ? (
-                      <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Enviando...</>
-                    ) : (
-                      "Enviar solicitação"
-                    )}
-                  </button>
-                </div>
-
-                <p className="text-[10px] text-muted-foreground text-center flex items-center justify-center gap-1">
-                  <Lock className="w-3 h-3" /> Dados seguros e criptografados
-                </p>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Downgrade Confirmation Dialog */}
+        {/* Modal de Confirmação de Downgrade */}
         <Dialog open={downgradeOpen} onOpenChange={setDowngradeOpen}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
@@ -860,7 +474,7 @@ const Subscriptions = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Cancel Subscription Dialog */}
+        {/* Modal de Cancelamento de Assinatura */}
         <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
           <DialogContent className="max-w-sm">
             <DialogHeader>

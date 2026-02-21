@@ -147,7 +147,7 @@ serve(async (req) => {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + 30);
     const nextDueDate = futureDate.toISOString().split("T")[0];
-
+console.log("CUSTOMER ID ENVIADO:", customerId);
     const subscriptionResponse = await fetch(
       `${ASAAS_BASE_URL}/subscriptions`,
       {

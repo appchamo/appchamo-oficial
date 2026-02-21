@@ -169,38 +169,66 @@ const SubscriberDetail = ({ sub, onClose }: { sub: Subscriber; onClose: () => vo
 // Financial settings tab component
 const FinancialConfig = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [planPrices, setPlanPrices] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const fetch = async () => {
-      const { data } = await supabase.from("platform_settings").select("*");
-      if (data) {
+      // Busca taxas
+      const { data: platformData } = await supabase.from("platform_settings").select("*");
+      if (platformData) {
         const map: Record<string, string> = {};
-        for (const s of data) {
+        for (const s of platformData) {
           const val = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
           map[s.key] = val;
         }
         setSettings(map);
       }
+
+      // Busca preço dos planos
+      const { data: plansData } = await supabase.from("subscription_plans").select("id, price_monthly");
+      if (plansData) {
+        const plansMap: Record<string, string> = {};
+        plansData.forEach(p => {
+          plansMap[p.id] = p.price_monthly.toString();
+        });
+        setPlanPrices(plansMap);
+      }
+
       setLoading(false);
     };
     fetch();
   }, []);
 
   const set = (key: string, value: string) => setSettings(prev => ({ ...prev, [key]: value }));
+  const setPlanPrice = (id: string, value: string) => setPlanPrices(prev => ({ ...prev, [id]: value }));
+  
   const inputCls = "w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30";
 
   const handleSave = async () => {
     setSaving(true);
+    
+    // Salva Taxas
     const feeKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed", "max_installments",
       "transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct",
       ...Array.from({ length: 11 }, (_, i) => `installment_fee_${i + 2}x`)];
+    
     for (const key of feeKeys) {
       if (settings[key] !== undefined) {
         await supabase.from("platform_settings").upsert({ key, value: settings[key] as any }, { onConflict: "key" });
       }
     }
+
+    // Salva Preço dos Planos
+    for (const planId of ['pro', 'vip', 'business']) {
+        if(planPrices[planId] !== undefined) {
+            await supabase.from("subscription_plans")
+                .update({ price_monthly: Number(planPrices[planId]) })
+                .eq("id", planId);
+        }
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
       await supabase.from("admin_logs").insert({ admin_user_id: session.user.id, action: "update_financial_settings", target_type: "settings" });
@@ -212,57 +240,89 @@ const FinancialConfig = () => {
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   return (
-    <div className="max-w-lg space-y-5">
-      <div className="bg-card border rounded-xl p-4 space-y-3">
-        <h2 className="font-semibold text-foreground text-sm">Comissão da plataforma</h2>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Comissão (%)</label>
-          <input type="number" value={settings.commission_pct || "10"} onChange={(e) => set("commission_pct", e.target.value)} className={inputCls} />
+    <div className="max-w-4xl space-y-5 flex flex-col md:flex-row gap-5 items-start">
+      {/* Coluna Esquerda - Configurações Existentes */}
+      <div className="w-full md:w-1/2 space-y-5">
+        <div className="bg-card border rounded-xl p-4 space-y-3">
+          <h2 className="font-semibold text-foreground text-sm">Comissão da plataforma</h2>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Comissão (%)</label>
+            <input type="number" value={settings.commission_pct || "10"} onChange={(e) => set("commission_pct", e.target.value)} className={inputCls} />
+          </div>
+        </div>
+
+        <div className="bg-card border rounded-xl p-4 space-y-3">
+          <h2 className="font-semibold text-foreground text-sm">Taxas de Pagamento</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX (%)</label><input type="number" value={settings.pix_fee_pct || "0"} onChange={(e) => set("pix_fee_pct", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX fixo (R$)</label><input type="number" value={settings.pix_fee_fixed || "0"} onChange={(e) => set("pix_fee_fixed", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão à vista (%)</label><input type="number" value={settings.card_fee_pct || "0"} onChange={(e) => set("card_fee_pct", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão fixo (R$)</label><input type="number" value={settings.card_fee_fixed || "0"} onChange={(e) => set("card_fee_fixed", e.target.value)} className={inputCls} /></div>
+          </div>
+        </div>
+
+        <div className="bg-card border rounded-xl p-4 space-y-3">
+          <h2 className="font-semibold text-foreground text-sm">Taxas por Parcela</h2>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Máximo de parcelas</label>
+            <input type="number" min="1" max="12" value={settings.max_installments || "12"} onChange={(e) => set("max_installments", e.target.value)} className={inputCls} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 11 }, (_, i) => i + 2).map(n => (
+              <div key={n}>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{n}x (%)</label>
+                <input type="number" step="0.1" value={settings[`installment_fee_${n}x`] || "0"} onChange={(e) => set(`installment_fee_${n}x`, e.target.value)} className={inputCls} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-card border rounded-xl p-4 space-y-3">
+          <h2 className="font-semibold text-foreground text-sm">Prazos de Repasse</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX (horas)</label><input type="number" value={settings.transfer_period_pix_hours || "48"} onChange={(e) => set("transfer_period_pix_hours", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão sem antecipação (dias úteis)</label><input type="number" value={settings.transfer_period_card_days || "33"} onChange={(e) => set("transfer_period_card_days", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão com antecipação (dias úteis)</label><input type="number" value={settings.transfer_period_card_anticipated_days || "4"} onChange={(e) => set("transfer_period_card_anticipated_days", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Taxa de antecipação (%)</label><input type="number" step="0.1" value={settings.anticipation_fee_pct || "3.5"} onChange={(e) => set("anticipation_fee_pct", e.target.value)} className={inputCls} /></div>
+          </div>
         </div>
       </div>
 
-      <div className="bg-card border rounded-xl p-4 space-y-3">
-        <h2 className="font-semibold text-foreground text-sm">Taxas de Pagamento</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX (%)</label><input type="number" value={settings.pix_fee_pct || "0"} onChange={(e) => set("pix_fee_pct", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX fixo (R$)</label><input type="number" value={settings.pix_fee_fixed || "0"} onChange={(e) => set("pix_fee_fixed", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão à vista (%)</label><input type="number" value={settings.card_fee_pct || "0"} onChange={(e) => set("card_fee_pct", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão fixo (R$)</label><input type="number" value={settings.card_fee_fixed || "0"} onChange={(e) => set("card_fee_fixed", e.target.value)} className={inputCls} /></div>
-        </div>
-      </div>
+      {/* Coluna Direita - Novo Bloco de Planos */}
+      <div className="w-full md:w-1/2 space-y-5 mt-0">
+         <div className="bg-card border rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Crown className="w-5 h-5 text-amber-500" />
+            <h2 className="font-semibold text-foreground text-sm">Preço das Assinaturas</h2>
+          </div>
+          <p className="text-[11px] text-muted-foreground mb-4">
+            Defina o valor mensal cobrado por cada plano. As alterações afetarão apenas as novas assinaturas.
+          </p>
 
-      <div className="bg-card border rounded-xl p-4 space-y-3">
-        <h2 className="font-semibold text-foreground text-sm">Taxas por Parcela</h2>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Máximo de parcelas</label>
-          <input type="number" min="1" max="12" value={settings.max_installments || "12"} onChange={(e) => set("max_installments", e.target.value)} className={inputCls} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          {Array.from({ length: 11 }, (_, i) => i + 2).map(n => (
-            <div key={n}>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{n}x (%)</label>
-              <input type="number" step="0.1" value={settings[`installment_fee_${n}x`] || "0"} onChange={(e) => set(`installment_fee_${n}x`, e.target.value)} className={inputCls} />
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-bold text-primary mb-1.5 block">Plano Pro (R$)</label>
+              <input type="number" step="0.01" value={planPrices.pro || "0"} onChange={(e) => setPlanPrice("pro", e.target.value)} className={inputCls} />
             </div>
-          ))}
-        </div>
-      </div>
+            
+            <div>
+              <label className="text-xs font-bold text-amber-500 mb-1.5 block">Plano VIP (R$)</label>
+              <input type="number" step="0.01" value={planPrices.vip || "0"} onChange={(e) => setPlanPrice("vip", e.target.value)} className={inputCls} />
+            </div>
 
-      {/* Transfer & Anticipation Settings */}
-      <div className="bg-card border rounded-xl p-4 space-y-3">
-        <h2 className="font-semibold text-foreground text-sm">Prazos de Repasse</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX (horas)</label><input type="number" value={settings.transfer_period_pix_hours || "48"} onChange={(e) => set("transfer_period_pix_hours", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão sem antecipação (dias úteis)</label><input type="number" value={settings.transfer_period_card_days || "33"} onChange={(e) => set("transfer_period_card_days", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão com antecipação (dias úteis)</label><input type="number" value={settings.transfer_period_card_anticipated_days || "4"} onChange={(e) => set("transfer_period_card_anticipated_days", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Taxa de antecipação (%)</label><input type="number" step="0.1" value={settings.anticipation_fee_pct || "3.5"} onChange={(e) => set("anticipation_fee_pct", e.target.value)} className={inputCls} /></div>
+            <div>
+              <label className="text-xs font-bold text-violet-500 mb-1.5 block">Plano Empresarial (R$)</label>
+              <input type="number" step="0.01" value={planPrices.business || "0"} onChange={(e) => setPlanPrice("business", e.target.value)} className={inputCls} />
+            </div>
+          </div>
         </div>
-      </div>
 
-      <button onClick={handleSave} disabled={saving}
-        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
-        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-        {saving ? "Salvando..." : "Salvar configurações"}
-      </button>
+        <button onClick={handleSave} disabled={saving}
+          className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {saving ? "Salvando..." : "Salvar todas as configurações"}
+        </button>
+      </div>
     </div>
   );
 };

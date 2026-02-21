@@ -1,6 +1,16 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 
 serve(async (req) => {
+  // CORS
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "authorization, content-type",
+      },
+    });
+  }
+
   try {
     const body = await req.json();
 
@@ -21,7 +31,10 @@ serve(async (req) => {
     if (!customer || !value) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
-        { status: 400 }
+        {
+          status: 400,
+          headers: { "Access-Control-Allow-Origin": "*" }
+        }
       );
     }
 
@@ -56,20 +69,18 @@ serve(async (req) => {
 
     const data = await response.json();
 
-    if (!response.ok) {
-      return new Response(JSON.stringify(data), {
-        status: response.status
-      });
-    }
-
     return new Response(JSON.stringify(data), {
-      status: 200
+      status: response.status,
+      headers: { "Access-Control-Allow-Origin": "*" }
     });
 
   } catch (error) {
     return new Response(
       JSON.stringify({ error: error.message }),
-      { status: 500 }
+      {
+        status: 500,
+        headers: { "Access-Control-Allow-Origin": "*" }
+      }
     );
   }
 });

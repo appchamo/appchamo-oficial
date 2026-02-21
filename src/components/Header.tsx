@@ -9,8 +9,12 @@ const Header = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  
   const [proStatus, setProStatus] = useState<string | null>(null);
   const [planName, setPlanName] = useState<string | null>(null);
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [subStatus, setSubStatus] = useState<string | null>(null);
+  
   const [unreadCount, setUnreadCount] = useState(0);
   const notifSoundRef = useRef<HTMLAudioElement | null>(null);
   const prevUnreadRef = useRef<number>(0);
@@ -61,6 +65,7 @@ const Header = () => {
     if (profile.user_type === "client") return;
 
     const load = async () => {
+      // 1. Pega o status do perfil
       const { data: pro } = await supabase
         .from("professionals")
         .select("profile_status")
@@ -68,20 +73,23 @@ const Header = () => {
         .maybeSingle();
       if (pro) setProStatus(pro.profile_status);
 
-      if (pro?.profile_status === "approved") {
-        const { data: sub } = await supabase
-          .from("subscriptions")
-          .select("plan_id")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        if (sub) {
-          const { data: plan } = await supabase
-            .from("plans")
-            .select("name")
-            .eq("id", sub.plan_id)
-            .single();
-          if (plan) setPlanName(plan.name);
-        }
+      // 2. Pega os dados da assinatura
+      const { data: sub } = await supabase
+        .from("subscriptions")
+        .select("plan_id, status")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      if (sub) {
+        setPlanId(sub.plan_id);
+        setSubStatus(sub.status);
+        
+        const { data: plan } = await supabase
+          .from("plans")
+          .select("name")
+          .eq("id", sub.plan_id)
+          .single();
+        if (plan) setPlanName(plan.name);
       }
     };
     load();
@@ -131,6 +139,10 @@ const Header = () => {
   }, [user, playNotificationSound]);
 
   const isPro = profile && profile.user_type !== "client";
+  
+  // Regra de Exibição do Selo
+  const showPendingBadge = isPro && (proStatus === "pending" || (planId !== "free" && subStatus && subStatus.toUpperCase() !== "ACTIVE"));
+  const showPlanBadge = isPro && proStatus === "approved" && (!subStatus || subStatus.toUpperCase() === "ACTIVE" || planId === "free") && planName;
 
   return (
     <>
@@ -138,13 +150,17 @@ const Header = () => {
         <div className="flex items-center justify-between px-4 py-3 max-w-screen-lg mx-auto">
           <span className="text-2xl font-extrabold text-gradient tracking-tight">Chamô</span>
           <div className="flex items-center gap-2">
-            {isPro && proStatus === "pending" && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30">
+            
+            {/* Selo Em Análise (Aparece para perfil pendente ou pagamento aguardando aprovação) */}
+            {showPendingBadge && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 animate-pulse">
                 <Clock className="w-3.5 h-3.5 text-amber-600" />
                 <span className="text-[11px] font-semibold text-amber-700">Em análise</span>
               </div>
             )}
-            {isPro && proStatus === "approved" && planName && (
+            
+            {/* Selo do Plano (Aparece apenas quando tudo está aprovado e ativo) */}
+            {showPlanBadge && (
               <button
                 onClick={() => navigate("/subscriptions")}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/30 hover:bg-primary/20 transition-colors"
@@ -153,6 +169,7 @@ const Header = () => {
                 <span className="text-[11px] font-semibold text-primary">{planName}</span>
               </button>
             )}
+
             {user && (
               <button
                 onClick={() => navigate("/notifications")}

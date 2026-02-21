@@ -186,12 +186,12 @@ const FinancialConfig = () => {
         setSettings(map);
       }
 
-      // Busca preço dos planos
+      // Busca preço dos planos formatados com vírgula para a tela
       const { data: plansData } = await supabase.from("subscription_plans").select("id, price_monthly");
       if (plansData) {
         const plansMap: Record<string, string> = {};
         plansData.forEach(p => {
-          plansMap[p.id] = p.price_monthly.toString();
+          plansMap[p.id] = p.price_monthly.toString().replace('.', ',');
         });
         setPlanPrices(plansMap);
       }
@@ -220,12 +220,18 @@ const FinancialConfig = () => {
       }
     }
 
-    // Salva Preço dos Planos
+    // Salva Preço dos Planos (Converte vírgula para ponto)
     for (const planId of ['pro', 'vip', 'business']) {
         if(planPrices[planId] !== undefined) {
-            await supabase.from("subscription_plans")
-                .update({ price_monthly: Number(planPrices[planId]) })
-                .eq("id", planId);
+            // Substitui a vírgula pelo ponto para o banco de dados entender
+            const rawValue = String(planPrices[planId]).replace(',', '.');
+            const numericPrice = parseFloat(rawValue);
+
+            if (!isNaN(numericPrice)) {
+              await supabase.from("subscription_plans")
+                  .update({ price_monthly: numericPrice })
+                  .eq("id", planId);
+            }
         }
     }
 
@@ -296,23 +302,23 @@ const FinancialConfig = () => {
             <h2 className="font-semibold text-foreground text-sm">Preço das Assinaturas</h2>
           </div>
           <p className="text-[11px] text-muted-foreground mb-4">
-            Defina o valor mensal cobrado por cada plano. As alterações afetarão apenas as novas assinaturas.
+            Defina o valor mensal cobrado por cada plano. Você pode usar vírgula ou ponto (Ex: 99,90).
           </p>
 
           <div className="space-y-4">
             <div>
               <label className="text-xs font-bold text-primary mb-1.5 block">Plano Pro (R$)</label>
-              <input type="number" step="0.01" value={planPrices.pro || "0"} onChange={(e) => setPlanPrice("pro", e.target.value)} className={inputCls} />
+              <input type="text" placeholder="Ex: 39,90" value={planPrices.pro || ""} onChange={(e) => setPlanPrice("pro", e.target.value)} className={inputCls} />
             </div>
             
             <div>
               <label className="text-xs font-bold text-amber-500 mb-1.5 block">Plano VIP (R$)</label>
-              <input type="number" step="0.01" value={planPrices.vip || "0"} onChange={(e) => setPlanPrice("vip", e.target.value)} className={inputCls} />
+              <input type="text" placeholder="Ex: 69,90" value={planPrices.vip || ""} onChange={(e) => setPlanPrice("vip", e.target.value)} className={inputCls} />
             </div>
 
             <div>
               <label className="text-xs font-bold text-violet-500 mb-1.5 block">Plano Empresarial (R$)</label>
-              <input type="number" step="0.01" value={planPrices.business || "0"} onChange={(e) => setPlanPrice("business", e.target.value)} className={inputCls} />
+              <input type="text" placeholder="Ex: 149,90" value={planPrices.business || ""} onChange={(e) => setPlanPrice("business", e.target.value)} className={inputCls} />
             </div>
           </div>
         </div>

@@ -103,6 +103,7 @@ const Subscriptions = () => {
     );
   }
 
+  // Impede que o usuário compre planos se o perfil em si ainda não foi aprovado
   if (proStatus === "pending") {
     return (
       <AppLayout>
@@ -140,7 +141,6 @@ const Subscriptions = () => {
       return;
     }
 
-    // Fluxo unificado: Pro, VIP e Business abrem o mesmo modal de pagamento
     setSelectedPlanId(planId);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", address: "" });
     setPaymentOpen(true);
@@ -224,17 +224,23 @@ const Subscriptions = () => {
         throw new Error(res.data?.error || "Erro ao processar pagamento no Asaas");
       }
 
-      // CORREÇÃO: Força o status PENDING no banco para o Header ler corretamente
+      // LÓGICA INTELIGENTE: Pro = ACTIVE na hora. VIP/Business = PENDING.
+      const finalStatus = selectedPlanId === "pro" ? "ACTIVE" : "PENDING";
+      
       await supabase.from("subscriptions").upsert({
         user_id: session.user.id,
         plan_id: selectedPlanId,
-        status: "PENDING"
+        status: finalStatus
       });
       
-      toast({ title: "Assinatura pré-aprovada!", description: "Seu plano entrará em vigor após aprovação." });
+      if (finalStatus === "ACTIVE") {
+        toast({ title: "Plano Pro Ativado!", description: "Seu pagamento foi processado e o plano já está liberado." });
+      } else {
+        toast({ title: "Assinatura pré-aprovada!", description: "Seu plano entrará em vigor após aprovação do administrador." });
+      }
+      
       setPaymentOpen(false);
       
-      // Recarrega a página após 2 segundos para o selo amarelo de "Em análise" aparecer no topo
       setTimeout(() => {
         window.location.reload();
       }, 2000);
@@ -380,7 +386,7 @@ const Subscriptions = () => {
           A cobrança será processada mensalmente. Cancele a qualquer momento.
         </p>
 
-        {/* Modal Único de Pagamento (Pro, VIP e Business) */}
+        {/* Modal Único de Pagamento */}
         <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
@@ -397,8 +403,16 @@ const Subscriptions = () => {
                 </div>
                 
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-1">
-                  <p className="text-xs font-medium text-amber-700">💳 O cartão será salvo mas <strong>não será cobrado hoje</strong>.</p>
-                  <p className="text-xs text-amber-600 mt-0.5">A cobrança efetiva acontecerá após a aprovação do seu plano.</p>
+                  <p className="text-xs font-medium text-amber-700">
+                    {selectedPlan.id === "pro" 
+                      ? "💳 O cartão será salvo e a primeira cobrança será feita agora." 
+                      : "💳 O cartão será salvo mas não será cobrado hoje."}
+                  </p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    {selectedPlan.id === "pro"
+                      ? "Seu plano será ativado imediatamente após o pagamento."
+                      : "A cobrança efetiva acontecerá após a aprovação do seu plano."}
+                  </p>
                 </div>
 
                 <div className="space-y-3">

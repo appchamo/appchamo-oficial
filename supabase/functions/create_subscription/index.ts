@@ -143,11 +143,23 @@ serve(async (req) => {
     }
 
     // ===============================
-    // 2️⃣ Criar assinatura
+    // 2️⃣ Criar assinatura com Lógica Inteligente
     // ===============================
-    const futureDate = new Date();
-    futureDate.setDate(futureDate.getDate() + 30);
-    const nextDueDate = futureDate.toISOString().split("T")[0];
+    let nextDueDate: string;
+    let initialStatus: string;
+
+    if (planId === "pro") {
+      // PRO: Cobra hoje mesmo e já fica ativo na hora
+      nextDueDate = new Date().toISOString().split("T")[0];
+      initialStatus = "ACTIVE";
+    } else {
+      // VIP/BUSINESS: Agenda para 30 dias e fica aguardando aprovação
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 30);
+      nextDueDate = futureDate.toISOString().split("T")[0];
+      initialStatus = "PENDING";
+    }
+    
     console.log("CUSTOMER ID ENVIADO:", customerId);
     
     const subscriptionResponse = await fetch(
@@ -161,7 +173,7 @@ serve(async (req) => {
         body: JSON.stringify({
           customer: customerId,
           billingType: "CREDIT_CARD",
-          value: Number(value), // agora usa valor real
+          value: Number(value),
           cycle: "MONTHLY",
           nextDueDate: nextDueDate,
           description: "Plano Chamô",
@@ -203,7 +215,7 @@ serve(async (req) => {
         {
           user_id: userId,
           plan_id: planId,
-          status: "PENDING", // <-- A MÁGICA FOI FEITA AQUI! O status agora nasce PENDENTE.
+          status: initialStatus, // Aplica a nossa variável inteligente
           asaas_subscription_id: subscriptionData.id,
           asaas_customer_id: customerId,
           started_at: new Date().toISOString(),

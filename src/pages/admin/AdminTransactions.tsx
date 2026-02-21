@@ -175,7 +175,7 @@ const FinancialConfig = () => {
 
   useEffect(() => {
     const fetch = async () => {
-      // Busca taxas
+      // Busca taxas da plataforma
       const { data: platformData } = await supabase.from("platform_settings").select("*");
       if (platformData) {
         const map: Record<string, string> = {};
@@ -186,11 +186,12 @@ const FinancialConfig = () => {
         setSettings(map);
       }
 
-      // Busca preço dos planos formatados com vírgula para a tela
-      const { data: plansData } = await supabase.from("subscription_plans").select("id, price_monthly");
+      // ✅ Busca preço dos planos da tabela "plans"
+      const { data: plansData } = await supabase.from("plans").select("id, price_monthly");
       if (plansData) {
         const plansMap: Record<string, string> = {};
         plansData.forEach(p => {
+          // Troca ponto por vírgula para exibir de forma amigável no input
           plansMap[p.id] = p.price_monthly.toString().replace('.', ',');
         });
         setPlanPrices(plansMap);
@@ -209,7 +210,7 @@ const FinancialConfig = () => {
   const handleSave = async () => {
     setSaving(true);
     
-    // Salva Taxas
+    // 1. Salva Taxas Financeiras
     const feeKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed", "max_installments",
       "transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct",
       ...Array.from({ length: 11 }, (_, i) => `installment_fee_${i + 2}x`)];
@@ -220,17 +221,14 @@ const FinancialConfig = () => {
       }
     }
 
-    // Salva Preço dos Planos (Converte vírgula para ponto)
+    // 2. ✅ Salva Preço dos Planos (Converte vírgula para ponto e salva em "plans")
     for (const planId of ['pro', 'vip', 'business']) {
         if(planPrices[planId] !== undefined) {
-            // Substitui a vírgula pelo ponto para o banco de dados entender
             const rawValue = String(planPrices[planId]).replace(',', '.');
             const numericPrice = parseFloat(rawValue);
 
             if (!isNaN(numericPrice)) {
-              await supabase.from("subscription_plans")
-                  .update({ price_monthly: numericPrice })
-                  .eq("id", planId);
+              await supabase.from("plans").update({ price_monthly: numericPrice }).eq("id", planId);
             }
         }
     }

@@ -114,7 +114,7 @@ const nextDueDate = futureDate.toISOString().split("T")[0];
         body: JSON.stringify({
           customer: customerId,
           billingType: "CREDIT_CARD",
-          value: value,
+          value: 5.50,
           cycle: "MONTHLY",
           nextDueDate: nextDueDate, // Definindo a próxima data de vencimento para 30 dias a partir de hoje
           description: "Plano Chamô",

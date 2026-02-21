@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 serve(async (req) => {
   // 🔓 CORS
@@ -66,39 +67,63 @@ const {
       );
     }
 
-    // ===============================
-    // 1️⃣ Criar cliente no Asaas
-    // ===============================
-    const customerResponse = await fetch(
-      "https://api.asaas.com/v3/customers",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          access_token: ASAAS_API_KEY,
-        },
-        body: JSON.stringify({
-          name: holderName,
-          email: email,
-          cpfCnpj: cpfCnpj,
-          postalCode: postalCode,
-          addressNumber: addressNumber,
-        }),
-      }
-    );
+  
+  // ===============================
+// 1️⃣ Verificar se já existe customer
+// ===============================
 
-    const customerData = await customerResponse.json();
-    console.log("CUSTOMER RESPONSE:", customerData);
+const supabase = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+);
 
-    if (!customerResponse.ok) {
-      return new Response(JSON.stringify(customerData), {
-        status: customerResponse.status,
-        headers: { "Access-Control-Allow-Origin": "*" },
-      });
+// Buscar profile
+const { data: profile } = await supabase
+  .from("profiles")
+  .select("asaas_customer_id")
+  .eq("user_id", userId)
+  .single();
+
+let customerId = profile?.asaas_customer_id;
+
+// Se NÃO existir, cria
+if (!customerId) {
+
+  const customerResponse = await fetch(
+    "https://api.asaas.com/v3/customers",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        access_token: ASAAS_API_KEY,
+      },
+      body: JSON.stringify({
+        name: holderName,
+        email: email,
+        cpfCnpj: cpfCnpj,
+        postalCode: postalCode,
+        addressNumber: addressNumber,
+      }),
     }
+  );
 
-    const customerId = customerData.id;
+  const customerData = await customerResponse.json();
 
+  if (!customerResponse.ok) {
+    return new Response(JSON.stringify(customerData), {
+      status: customerResponse.status,
+      headers: { "Access-Control-Allow-Origin": "*" },
+    });
+  }
+
+  customerId = customerData.id;
+
+  // Salvar no profile
+  await supabase
+    .from("profiles")
+    .update({ asaas_customer_id: customerId })
+    .eq("user_id", userId);
+}
     // ===============================
     // 2️⃣ Criar assinatura
     // ===============================
@@ -139,9 +164,19 @@ const nextDueDate = futureDate.toISOString().split("T")[0];
     );
 
     const subscriptionData = await subscriptionResponse.json();
-    // 🔹 Salvar assinatura no Supabase
+
+if (!subscriptionResponse.ok) {
+  console.log("SUBSCRIPTION ERROR:", subscriptionData);
+  return new Response(JSON.stringify(subscriptionData), {
+    status: subscriptionResponse.status,
+    headers: { "Access-Control-Allow-Origin": "*" },
+  });
+}
+
+// 🔹 Só salva se realmente criou assinatura
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    // 🔹 Salvar assinatura no Supabase
 const saveResponse = await fetch(`${SUPABASE_URL}/rest/v1/subscriptions`, {
   method: "POST",
   headers: {

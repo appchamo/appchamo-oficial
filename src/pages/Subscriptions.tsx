@@ -72,6 +72,9 @@ const Subscriptions = () => {
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", address: "" });
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
+  
+  // Estado para armazenar os benefícios dinâmicos vindos do banco de dados
+  const [planFeaturesDb, setPlanFeaturesDb] = useState<Record<string, string[]>>({});
 
   // Estados detalhados para o Business com busca de CEP
   const [businessData, setBusinessData] = useState({ 
@@ -128,12 +131,25 @@ const Subscriptions = () => {
   useEffect(() => {
     if (!user) return;
     const load = async () => {
+      // 1. Busca o status do profissional
       const { data: pro } = await supabase
         .from("professionals")
         .select("profile_status")
         .eq("user_id", user.id)
         .maybeSingle();
       if (pro) setProStatus(pro.profile_status);
+
+      // 2. ✅ Busca os benefícios dinâmicos dos planos no banco de dados
+      const { data: plansData } = await supabase.from("plans").select("id, features");
+      if (plansData) {
+        const feats: Record<string, string[]> = {};
+        plansData.forEach(p => {
+          if (p.features && p.features.length > 0) {
+            feats[p.id] = p.features;
+          }
+        });
+        setPlanFeaturesDb(feats);
+      }
     };
     load();
   }, [user]);
@@ -383,6 +399,9 @@ const Subscriptions = () => {
               const Icon = details.icon;
               const isRecommended = (details as any).recommended;
 
+              // ✅ Usa os benefícios do banco se existirem, senão usa o padrão fixo
+              const displayFeatures = planFeaturesDb[p.id] || details.features;
+
               return (
                 <div
                   key={p.id}
@@ -412,7 +431,7 @@ const Subscriptions = () => {
                   </div>
 
                   <ul className="flex flex-col gap-1.5 mb-4">
-                    {details.features.map((f, i) => (
+                    {displayFeatures.map((f, i) => (
                       <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Check className={`w-3.5 h-3.5 ${isRecommended ? "text-amber-500" : "text-primary"} flex-shrink-0`} />
                         {f}

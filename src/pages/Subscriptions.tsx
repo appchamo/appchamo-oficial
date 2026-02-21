@@ -287,7 +287,8 @@ const Subscriptions = () => {
         business_cnpj: businessData.cnpj || null,
         business_address: fullAddress || null,
         business_proof_url: proofUrl || null
-      });
+      }, { onConflict: 'user_id' });
+      
 
       if (upsertError) throw new Error("Erro ao registrar dados empresariais no banco.");
 

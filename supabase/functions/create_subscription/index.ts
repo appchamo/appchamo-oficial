@@ -174,29 +174,23 @@ if (!subscriptionResponse.ok) {
   });
 }
 
-// 🔹 Só salva se realmente criou assinatura
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    // 🔹 Salvar assinatura no Supabase
-const saveResponse = await fetch(`${SUPABASE_URL}/rest/v1/subscriptions`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    apikey: SUPABASE_SERVICE_ROLE,
-    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE}`,
-    Prefer: "return=representation",
-  },
-  body: JSON.stringify({
-    user_id: userId,
-    plan_id: planId,
-    status: "pending",
-    asaas_subscription_id: subscriptionData.id,
-    asaas_customer_id: customerId,
-  }),
-});
+const { error: saveError } = await supabase
+  .from("subscriptions")
+  .upsert(
+    {
+      user_id: userId,
+      plan_id: planId,
+      status: subscriptionData.status,
+      asaas_subscription_id: subscriptionData.id,
+      asaas_customer_id: customerId,
+      started_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
 
-const saveData = await saveResponse.text();
-console.log("SAVE RESPONSE:", saveData);
+if (saveError) {
+  console.log("SAVE ERROR:", saveError);
+}
 
     console.log("SUBSCRIPTION RESPONSE:", subscriptionData);
 

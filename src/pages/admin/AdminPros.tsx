@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle } from "lucide-react";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -52,6 +52,38 @@ const availabilityBadge: Record<string, { label: string; cls: string }> = {
   quotes_only: { label: "Só orçamentos", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
   busy: { label: "Agenda fechada", cls: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
   unavailable: { label: "Indisponível", cls: "bg-destructive/10 text-destructive" },
+};
+
+// Componente auxiliar para buscar dados da assinatura (CNPJ e Endereço)
+const SubscriptionDoc = ({ userId }: { userId: string }) => {
+  const [subDoc, setSubDoc] = useState<{url: string, address: string} | null>(null);
+
+  useEffect(() => {
+    const fetchSub = async () => {
+      const { data } = await supabase
+        .from("subscriptions")
+        .select("business_proof_url, business_address")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (data) setSubDoc({ url: data.business_proof_url, address: data.business_address });
+    };
+    fetchSub();
+  }, [userId]);
+
+  if (!subDoc?.url) return <p className="text-[10px] text-muted-foreground italic">Carregando dados empresariais...</p>;
+
+  return (
+    <div className="space-y-2">
+      <a href={subDoc.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs font-bold text-violet-700 hover:underline">
+        <FileText className="w-4 h-4" /> Visualizar Cartão CNPJ
+      </a>
+      {subDoc.address && (
+        <p className="text-[10px] text-muted-foreground flex items-start gap-1">
+          <MapPin className="w-3 h-3 mt-0.5 text-violet-500" /> {subDoc.address}
+        </p>
+      )}
+    </div>
+  );
 };
 
 const AdminPros = () => {
@@ -188,7 +220,6 @@ const AdminPros = () => {
     fetchPros();
   };
 
-  // FLUXO DE ASSINATURA: APROVAR
   const handleApproveSubscription = async (pro: Professional) => {
     if (confirm(`Tem certeza que deseja APROVAR a assinatura de ${pro.full_name} e cobrar o cartão agora?`)) {
       setProcessingSub(pro.id);
@@ -201,7 +232,6 @@ const AdminPros = () => {
           throw new Error(res.data?.error || "Erro ao aprovar assinatura no Asaas");
         }
 
-        // Se o perfil estava pendente, aprova ele também automaticamente
         if (pro.profile_status === "pending") {
           await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", pro.id);
           await supabase.from("notifications").insert({
@@ -212,7 +242,6 @@ const AdminPros = () => {
             link: "/pro",
           });
         } else {
-          // CORREÇÃO: Notifica quem já era Free e fez upgrade
           await supabase.from("notifications").insert({
             user_id: pro.user_id,
             title: "Assinatura Aprovada! 👑",
@@ -232,14 +261,12 @@ const AdminPros = () => {
     }
   };
 
-  // FLUXO DE ASSINATURA: RECUSAR (Abre o modal)
   const openRejectSubscriptionModal = (pro: Professional) => {
     setRejectSubPro(pro);
     setRejectSubReason("");
     setRejectSubOpen(true);
   };
 
-  // FLUXO DE ASSINATURA: CONFIRMAR RECUSA
   const confirmRejectSubscription = async () => {
     if (!rejectSubPro) return;
     if (!rejectSubReason.trim()) {
@@ -257,7 +284,6 @@ const AdminPros = () => {
         throw new Error(res.data?.error || "Erro ao cancelar assinatura no Asaas");
       }
 
-      // Envia notificação detalhada pro profissional
       await supabase.from("notifications").insert({
         user_id: rejectSubPro.user_id,
         title: "Assinatura Recusada",
@@ -405,7 +431,6 @@ const AdminPros = () => {
                     }`}>
                       {planLabel[pro.plan_id] || pro.plan_id}
                     </span>
-                    {/* Indicador Pendente */}
                     {pro.plan_id !== "free" && pro.subscription_status !== "ACTIVE" && (
                       <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] rounded-full uppercase font-bold animate-pulse">Pendente</span>
                     )}
@@ -437,7 +462,6 @@ const AdminPros = () => {
                           </a>
                         </DropdownMenuItem>
                         
-                        {/* Botões de Assinatura - Só aparecem se o status não for ACTIVE */}
                         {pro.plan_id !== "free" && pro.subscription_status !== "ACTIVE" && (
                           <>
                             <DropdownMenuSeparator />
@@ -540,7 +564,6 @@ const AdminPros = () => {
                 </div>
               </div>
 
-              {/* Bloco de Gestão da Assinatura no Painel de Detalhes */}
               {detailPro.plan_id !== "free" && detailPro.subscription_status !== "ACTIVE" && (
                  <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 my-2">
                    <p className="text-xs font-semibold text-amber-800 dark:text-amber-400 mb-2 flex items-center gap-1.5">
@@ -569,21 +592,36 @@ const AdminPros = () => {
                 <ExternalLink className="w-3 h-3" /> Ver perfil público
               </a>
 
-              {docs.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-2">Documentos</p>
-                  {docs.map((d: any) => {
-                    const publicUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${d.file_url}`;
-                    return (
-                      <a key={d.id} href={publicUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline mb-1">
-                        <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
-                      </a>
-                    );
-                  })}
+              {/* Documentos de Identidade e Business */}
+              {(docs.length > 0 || detailPro.plan_id === 'business') && (
+                <div className="pt-2 border-t">
+                  <p className="text-xs font-bold text-muted-foreground uppercase mb-2">Documentos</p>
+                  
+                  {/* Documentos de Identidade (Cadastro inicial) */}
+                  <div className="space-y-1.5 mb-3">
+                    {docs.map((d: any) => {
+                      const publicUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${d.file_url}`;
+                      return (
+                        <a key={d.id} href={publicUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline">
+                          <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+                        </a>
+                      );
+                    })}
+                  </div>
+
+                  {/* Documentos do Plano Business (Cartão CNPJ) */}
+                  {detailPro.plan_id === 'business' && detailPro.subscription_status !== 'ACTIVE' && (
+                    <div className="bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 rounded-xl p-3">
+                      <p className="text-[10px] font-bold text-violet-600 uppercase mb-2 flex items-center gap-1">
+                        <Building2 className="w-3 h-3" /> Verificação Business
+                      </p>
+                      
+                      <SubscriptionDoc userId={detailPro.user_id} />
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Botões antigos de aprovação de perfil (mantidos para quem é plano Free) */}
               {detailPro.profile_status === "pending" && detailPro.plan_id === "free" && (
                 <div className="space-y-3 pt-2 border-t">
                   <div className="flex gap-2">
@@ -603,7 +641,6 @@ const AdminPros = () => {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL PARA RECUSAR ASSINATURA COM MOTIVO */}
       <Dialog open={rejectSubOpen} onOpenChange={setRejectSubOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -644,10 +681,8 @@ const AdminPros = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Bonus Calls Dialog */}
       <Dialog open={bonusOpen} onOpenChange={setBonusOpen}>
         <DialogContent className="max-w-sm">
-           {/* Conteúdo mantido igual */}
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Gift className="w-5 h-5 text-primary" /> Bonificar chamadas</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="flex gap-2">
@@ -700,7 +735,6 @@ const AdminPros = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Reviews Management Dialog */}
       <Dialog open={reviewsOpen} onOpenChange={setReviewsOpen}>
         <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>

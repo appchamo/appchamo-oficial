@@ -170,7 +170,7 @@ const MessageThread = () => {
       if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
     };
   }, []);
-  // Realtime: listen payment status change
+// Realtime: listen payment status change
 useEffect(() => {
   if (!pixData?.paymentId) return;
 
@@ -188,6 +188,7 @@ useEffect(() => {
         const updated = payload.new as any;
 
         if (updated.status === "completed") {
+
           setPixOpen(false);
           setPaymentConfirmed(true);
 
@@ -195,12 +196,19 @@ useEffect(() => {
             title: "Pagamento confirmado!",
           });
 
-          // enviar mensagem automática no chat
           await supabase.from("chat_messages").insert({
             request_id: threadId,
             sender_id: userId,
-            content: "✅ PAGAMENTO CONFIRMADO\nO pagamento foi aprovado com sucesso.",
+            content:
+              "✅ PAGAMENTO CONFIRMADO\nO pagamento foi aprovado com sucesso.",
           });
+
+          // 🔥 ABRE O MODAL DE AVALIAÇÃO
+          setTimeout(() => {
+            setRatingStars(0);
+            setRatingComment("");
+            setRatingOpen(true);
+          }, 350);
         }
       }
     )

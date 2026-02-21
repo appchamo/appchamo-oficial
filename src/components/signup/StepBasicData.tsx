@@ -256,19 +256,67 @@ const StepBasicData = ({ accountType, onNext, onBack }: Props) => {
           {birthDate && isUnderage(birthDate) && (
             <p className="text-xs text-destructive font-medium px-1">Você precisa ter 18 anos ou mais para se cadastrar.</p>
           )}
-{/* Documento obrigatório para todos */}
+{/* Documento */}
 <div>
   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-    CPF *
+    {accountType === "professional"
+      ? documentType === "cpf"
+        ? "CPF *"
+        : "CNPJ *"
+      : "CPF *"}
   </label>
+
+  {accountType === "professional" && (
+    <div className="flex gap-2 mb-2">
+      <button
+        type="button"
+        onClick={() => { setDocumentType("cpf"); setDocument(""); }}
+        className={`px-3 py-1 text-xs rounded-lg border ${
+          documentType === "cpf" ? "bg-primary text-white" : ""
+        }`}
+      >
+        CPF
+      </button>
+      <button
+        type="button"
+        onClick={() => { setDocumentType("cnpj"); setDocument(""); }}
+        className={`px-3 py-1 text-xs rounded-lg border ${
+          documentType === "cnpj" ? "bg-primary text-white" : ""
+        }`}
+      >
+        CNPJ
+      </button>
+    </div>
+  )}
+
   <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
     <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
     <input
       type="text"
       value={document}
-      onChange={(e) => setDocument(formatCpf(e.target.value))}
-      placeholder="000.000.000-00"
-      maxLength={14}
+      onChange={(e) =>
+        setDocument(
+          accountType === "professional"
+            ? documentType === "cpf"
+              ? formatCpf(e.target.value)
+              : formatCnpj(e.target.value)
+            : formatCpf(e.target.value)
+        )
+      }
+      placeholder={
+        accountType === "professional"
+          ? documentType === "cpf"
+            ? "000.000.000-00"
+            : "00.000.000/0000-00"
+          : "000.000.000-00"
+      }
+      maxLength={
+        accountType === "professional"
+          ? documentType === "cpf"
+            ? 14
+            : 18
+          : 14
+      }
       className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
     />
   </div>

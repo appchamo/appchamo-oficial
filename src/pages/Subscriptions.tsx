@@ -466,7 +466,7 @@ const Subscriptions = () => {
                       <Building2 className="w-3 h-3" /> Verificação Empresa
                     </p>
                     
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-3">
                       <div>
                         <label className="text-[10px] font-bold text-muted-foreground uppercase">CNPJ</label>
                         <input 

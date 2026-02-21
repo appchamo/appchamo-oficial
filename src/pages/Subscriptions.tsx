@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload } from "lucide-react";
+import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -73,9 +73,50 @@ const Subscriptions = () => {
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
 
-  // Novos campos para o Business
-  const [businessData, setBusinessData] = useState({ cnpj: "", companyAddress: "" });
+  // Estados detalhados para o Business com busca de CEP
+  const [businessData, setBusinessData] = useState({ 
+    cnpj: "", 
+    cep: "", 
+    street: "", 
+    number: "", 
+    neighborhood: "", 
+    city: "", 
+    state: "" 
+  });
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const [searchingCep, setSearchingCep] = useState(false);
+  const [showFullAddress, setShowFullAddress] = useState(false);
+
+  // Função que busca o endereço automaticamente via API
+  const handleCepChange = async (value: string) => {
+    const cep = value.replace(/\D/g, "");
+    setBusinessData(d => ({ ...d, cep: cep.replace(/^(\d{5})(\d{3})/, "$1-$2") }));
+
+    if (cep.length === 8) {
+      setSearchingCep(true);
+      try {
+        const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+        const data = await res.json();
+        if (data.erro) {
+          toast({ title: "CEP não encontrado", variant: "destructive" });
+          setShowFullAddress(false);
+        } else {
+          setBusinessData(d => ({
+            ...d,
+            street: data.logradouro,
+            neighborhood: data.bairro,
+            city: data.localidade,
+            state: data.uf
+          }));
+          setShowFullAddress(true);
+        }
+      } catch (error) {
+        toast({ title: "Erro ao buscar CEP", variant: "destructive" });
+      } finally {
+        setSearchingCep(false);
+      }
+    }
+  };
 
   // Downgrade & Cancel states
   const [downgradeOpen, setDowngradeOpen] = useState(false);
@@ -108,7 +149,6 @@ const Subscriptions = () => {
     );
   }
 
-  // Impede que o usuário compre planos se o perfil em si ainda não foi aprovado
   if (proStatus === "pending") {
     return (
       <AppLayout>
@@ -148,8 +188,9 @@ const Subscriptions = () => {
 
     setSelectedPlanId(planId);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", address: "" });
-    setBusinessData({ cnpj: "", companyAddress: "" });
+    setBusinessData({ cnpj: "", cep: "", street: "", number: "", neighborhood: "", city: "", state: "" });
     setProofFile(null);
+    setShowFullAddress(false);
     setPaymentOpen(true);
   };
 
@@ -193,10 +234,9 @@ const Subscriptions = () => {
       return;
     }
 
-    // Validação específica para Business
     if (selectedPlanId === "business") {
-      if (!businessData.cnpj || !businessData.companyAddress || !proofFile) {
-        toast({ title: "Para o plano Business, CNPJ, Endereço e Comprovante são obrigatórios.", variant: "destructive" });
+      if (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile) {
+        toast({ title: "CNPJ, CEP, Número e Comprovante são obrigatórios para Business.", variant: "destructive" });
         return;
       }
     }
@@ -210,8 +250,8 @@ const Subscriptions = () => {
     
     try {
       let proofUrl = "";
+      const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
 
-      // 1. Upload do arquivo para o plano Business
       if (selectedPlanId === "business" && proofFile && user) {
         const fileExt = proofFile.name.split('.').pop();
         const fileName = `${user.id}/${Date.now()}.${fileExt}`;
@@ -257,9 +297,8 @@ const Subscriptions = () => {
           postalCode: profileData?.address_zip || "",
           addressNumber: profileData?.address_number || "",
           phone: profileData?.phone || "",
-          // Novos dados enviados para a função
           cnpjBusiness: businessData.cnpj,
-          addressBusiness: businessData.companyAddress,
+          addressBusiness: fullAddress,
           proofUrl: proofUrl,
         },
       });
@@ -268,16 +307,14 @@ const Subscriptions = () => {
         throw new Error(res.data?.error || "Erro ao processar pagamento no Asaas");
       }
 
-      // LÓGICA INTELIGENTE: Pro = ACTIVE na hora. VIP/Business = PENDING.
       const finalStatus = selectedPlanId === "pro" ? "ACTIVE" : "PENDING";
       
       await supabase.from("subscriptions").upsert({
         user_id: session.user.id,
         plan_id: selectedPlanId,
         status: finalStatus,
-        // Salva os dados extras no banco de dados local também
         business_cnpj: businessData.cnpj || null,
-        business_address: businessData.companyAddress || null,
+        business_address: fullAddress || null,
         business_proof_url: proofUrl || null
       });
       
@@ -288,10 +325,7 @@ const Subscriptions = () => {
       }
       
       setPaymentOpen(false);
-      
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
+      setTimeout(() => { window.location.reload(); }, 2000);
 
     } catch (err: any) {
       toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
@@ -352,11 +386,7 @@ const Subscriptions = () => {
                 <div
                   key={p.id}
                   className={`relative bg-card border-2 rounded-2xl p-5 shadow-card transition-all ${
-                    isRecommended
-                      ? "border-amber-500 ring-2 ring-amber-500/20 scale-[1.02]"
-                      : isCurrent
-                      ? "border-primary ring-2 ring-primary/20"
-                      : "border-border"
+                    isRecommended ? "border-amber-500 ring-2 ring-amber-500/20 scale-[1.02]" : isCurrent ? "border-primary ring-2 ring-primary/20" : "border-border"
                   }`}
                 >
                   {isRecommended && (
@@ -376,9 +406,7 @@ const Subscriptions = () => {
                       </div>
                     </div>
                     {isCurrent && (
-                      <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold">
-                        Atual
-                      </span>
+                      <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold">Atual</span>
                     )}
                   </div>
 
@@ -393,16 +421,9 @@ const Subscriptions = () => {
 
                   {isCurrent ? (
                     <div className="space-y-2">
-                      <button disabled className="w-full py-2.5 rounded-xl border text-sm font-medium text-muted-foreground cursor-default">
-                        Plano atual
-                      </button>
+                      <button disabled className="w-full py-2.5 rounded-xl border text-sm font-medium text-muted-foreground cursor-default">Plano atual</button>
                       {p.id !== "free" && (
-                        <button
-                          onClick={() => setCancelOpen(true)}
-                          className="w-full text-[11px] text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          Cancelar assinatura
-                        </button>
+                        <button onClick={() => setCancelOpen(true)} className="w-full text-[11px] text-muted-foreground hover:text-destructive transition-colors">Cancelar assinatura</button>
                       )}
                     </div>
                   ) : (
@@ -410,18 +431,10 @@ const Subscriptions = () => {
                       onClick={() => handleSelectPlan(p.id)}
                       disabled={changing !== null}
                       className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
-                        isRecommended
-                          ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-600 hover:to-amber-700 shadow-lg"
-                          : p.price_monthly > (currentPlan?.price_monthly || 0)
-                          ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                          : "border text-foreground hover:bg-muted"
+                        isRecommended ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg" : p.price_monthly > (currentPlan?.price_monthly || 0) ? "bg-primary text-primary-foreground hover:bg-primary/90" : "border text-foreground hover:bg-muted"
                       }`}
                     >
-                      {changing === p.id
-                        ? "Processando..."
-                        : p.price_monthly > (currentPlan?.price_monthly || 0)
-                        ? "Fazer upgrade"
-                        : "Mudar plano"}
+                      {changing === p.id ? "Processando..." : p.price_monthly > (currentPlan?.price_monthly || 0) ? "Fazer upgrade" : "Mudar plano"}
                     </button>
                   )}
                 </div>
@@ -430,11 +443,8 @@ const Subscriptions = () => {
           </div>
         )}
 
-        <p className="text-xs text-muted-foreground text-center mt-6">
-          A cobrança será processada mensalmente. Cancele a qualquer momento.
-        </p>
+        <p className="text-xs text-muted-foreground text-center mt-6">A cobrança será processada mensalmente. Cancele a qualquer momento.</p>
 
-        {/* Modal Único de Pagamento */}
         <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
           <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -450,64 +460,83 @@ const Subscriptions = () => {
                   <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
                 </div>
                 
-                {/* CAMPOS OBRIGATÓRIOS DO PLANO BUSINESS */}
                 {selectedPlanId === "business" && (
                   <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4 space-y-3">
                     <p className="text-[10px] font-bold text-violet-600 uppercase flex items-center gap-1">
-                      <Building2 className="w-3 h-3" /> Verificação Empresarial
+                      <Building2 className="w-3 h-3" /> Verificação Empresa
                     </p>
                     
-                    <div>
-                      <label className="text-[10px] text-muted-foreground uppercase font-bold mb-1 block">CNPJ da Empresa</label>
-                      <input 
-                        value={businessData.cnpj} 
-                        onChange={(e) => setBusinessData(d => ({ ...d, cnpj: formatCNPJ(e.target.value) }))}
-                        placeholder="00.000.000/0000-00"
-                        className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-violet-500/30"
-                      />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase">CNPJ</label>
+                        <input 
+                          value={businessData.cnpj} 
+                          onChange={(e) => setBusinessData(d => ({ ...d, cnpj: formatCNPJ(e.target.value) }))}
+                          placeholder="00.000.../0001-00"
+                          className="w-full border-b bg-transparent py-1 text-sm outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                          CEP {searchingCep && <Clock className="w-2 h-2 animate-spin" />}
+                        </label>
+                        <input 
+                          value={businessData.cep} 
+                          onChange={(e) => handleCepChange(e.target.value)}
+                          placeholder="00000-000"
+                          maxLength={9}
+                          className="w-full border-b bg-transparent py-1 text-sm outline-none"
+                        />
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="text-[10px] text-muted-foreground uppercase font-bold mb-1 block">Endereço Comercial</label>
-                      <input 
-                        value={businessData.companyAddress} 
-                        onChange={(e) => setBusinessData(d => ({ ...d, companyAddress: e.target.value }))}
-                        placeholder="Rua, número, Bairro, Cidade"
-                        className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-violet-500/30"
-                      />
-                    </div>
+                    {showFullAddress && (
+                      <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                        <div className="grid grid-cols-4 gap-2">
+                          <div className="col-span-3">
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Rua</label>
+                            <input readOnly value={businessData.street} className="w-full border-b bg-transparent py-1 text-sm text-muted-foreground outline-none" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-emerald-600 uppercase">Nº *</label>
+                            <input 
+                              value={businessData.number} 
+                              onChange={(e) => setBusinessData(d => ({ ...d, number: e.target.value }))}
+                              placeholder="123"
+                              className="w-full border-b border-emerald-500/50 bg-transparent py-1 text-sm font-bold text-emerald-700 outline-none"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Bairro</label>
+                            <input readOnly value={businessData.neighborhood} className="w-full border-b bg-transparent py-1 text-sm text-muted-foreground outline-none" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Cidade/UF</label>
+                            <input readOnly value={`${businessData.city}/${businessData.state}`} className="w-full border-b bg-transparent py-1 text-sm text-muted-foreground outline-none" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-                    <div 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="border-2 border-dashed border-violet-500/30 rounded-xl p-4 text-center cursor-pointer hover:bg-violet-500/10 transition-all"
-                    >
-                      <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        hidden 
-                        accept=".pdf,.png,.jpg,.jpeg" 
-                        onChange={(e) => setProofFile(e.target.files?.[0] || null)}
-                      />
+                    <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-violet-300 rounded-xl p-3 text-center cursor-pointer hover:bg-violet-50 transition-colors">
+                      <input type="file" ref={fileInputRef} hidden accept=".pdf,.png,.jpg" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
                       {proofFile ? (
-                        <div className="flex flex-col items-center gap-1 text-emerald-600">
-                          <Check className="w-5 h-5" />
-                          <span className="text-[10px] font-bold truncate max-w-[150px]">{proofFile.name}</span>
-                        </div>
+                        <span className="text-xs text-emerald-600 font-bold flex items-center justify-center gap-1">
+                          <Check className="w-4 h-4" /> Comprovante OK!
+                        </span>
                       ) : (
-                        <div className="flex flex-col items-center gap-1">
-                          <Upload className="w-5 h-5 text-violet-500" />
-                          <span className="text-[10px] text-muted-foreground font-bold">ANEXAR COMPROVANTE CNPJ</span>
-                          <span className="text-[8px] text-muted-foreground/60">(PDF, PNG ou JPG)</span>
-                        </div>
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase flex items-center justify-center gap-1">
+                          <Upload className="w-3 h-3" /> Anexar Cartão CNPJ
+                        </span>
                       )}
                     </div>
                   </div>
                 )}
 
                 <div className="space-y-3">
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
-                    <CreditCard className="w-3 h-3" /> Dados do Cartão
-                  </p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CreditCard className="w-3 h-3" /> Dados do Cartão</p>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
                     <input value={cardForm.number} onChange={(e) => setCardForm(f => ({ ...f, number: formatCardNumber(e.target.value) }))} placeholder="0000 0000 0000 0000" maxLength={19} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
@@ -529,81 +558,37 @@ const Subscriptions = () => {
                 </div>
 
                 <button onClick={handlePaymentSubmit} disabled={processing} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-                  {processing ? (
-                    <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</>
-                  ) : (
-                    <><Lock className="w-4 h-4" /> Assinar Plano</>
-                  )}
+                  {processing ? <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</> : <><Lock className="w-4 h-4" /> Assinar Plano</>}
                 </button>
-
-                <p className="text-[10px] text-muted-foreground text-center flex items-center justify-center gap-1">
-                  <Lock className="w-3 h-3" /> Pagamento seguro e criptografado
-                </p>
+                <p className="text-[10px] text-muted-foreground text-center flex items-center justify-center gap-1"><Lock className="w-3 h-3" /> Pagamento seguro e criptografado</p>
               </div>
             )}
           </DialogContent>
         </Dialog>
 
-        {/* Modal de Confirmação de Downgrade */}
         <Dialog open={downgradeOpen} onOpenChange={setDowngradeOpen}>
           <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-500" />
-                Tem certeza?
-              </DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Tem certeza?</DialogTitle></DialogHeader>
             <div className="space-y-4">
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
-                <p className="text-sm text-foreground font-medium">Ao mudar para um plano inferior, você poderá perder benefícios como:</p>
-                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                  <li>• Recebimento de pagamentos pelo app</li>
-                  <li>• Selo de verificado</li>
-                  <li>• Destaque na plataforma</li>
-                  <li>• Suporte no app</li>
-                  <li>• Limite de dispositivos reduzido</li>
-                </ul>
+                <p className="text-sm text-foreground font-medium">Ao mudar para um plano inferior, você poderá perder benefícios.</p>
               </div>
-              {downgradePlanId && (
-                <p className="text-sm text-center text-muted-foreground">
-                  O valor da cobrança será ajustado para{" "}
-                  <strong className="text-foreground">
-                    {formatPrice(plans.find(p => p.id === downgradePlanId)?.price_monthly || 0)}
-                  </strong>
-                </p>
-              )}
               <div className="flex gap-2">
-                <button onClick={() => setDowngradeOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-                  Cancelar
-                </button>
-                <button onClick={handleDowngradeConfirm} disabled={downgrading} className="flex-1 py-2.5 rounded-xl bg-destructive text-destructive-foreground font-semibold text-sm hover:bg-destructive/90 transition-colors disabled:opacity-50">
-                  {downgrading ? "Processando..." : "Confirmar mudança"}
-                </button>
+                <button onClick={() => setDowngradeOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Cancelar</button>
+                <button onClick={handleDowngradeConfirm} disabled={downgrading} className="flex-1 py-2.5 rounded-xl bg-destructive text-destructive-foreground font-semibold text-sm hover:bg-destructive/90 transition-colors">Confirmar mudança</button>
               </div>
             </div>
           </DialogContent>
         </Dialog>
 
-        {/* Modal de Cancelamento de Assinatura */}
         <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
           <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-destructive" />
-                Cancelar assinatura
-              </DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-destructive" /> Cancelar assinatura</DialogTitle></DialogHeader>
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Ao cancelar sua assinatura, você voltará para o plano <strong>Grátis</strong> e perderá todos os benefícios do plano atual.
-              </p>
+              <p className="text-sm text-muted-foreground">Ao cancelar, você voltará para o plano <strong>Grátis</strong>.</p>
               <div className="flex gap-2">
-                <button onClick={() => setCancelOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-                  Manter plano
-                </button>
-                <button onClick={handleCancelSubscription} disabled={cancelling} className="flex-1 py-2.5 rounded-xl bg-destructive text-destructive-foreground font-semibold text-sm hover:bg-destructive/90 transition-colors disabled:opacity-50">
-                  {cancelling ? "Cancelando..." : "Cancelar assinatura"}
-                </button>
+                <button onClick={() => setCancelOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Manter plano</button>
+                <button onClick={handleCancelSubscription} disabled={cancelling} className="flex-1 py-2.5 rounded-xl bg-destructive text-white font-semibold text-sm">Confirmar Cancelamento</button>
               </div>
             </div>
           </DialogContent>

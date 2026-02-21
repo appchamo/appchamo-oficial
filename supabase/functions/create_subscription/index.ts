@@ -148,7 +148,8 @@ serve(async (req) => {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + 30);
     const nextDueDate = futureDate.toISOString().split("T")[0];
-console.log("CUSTOMER ID ENVIADO:", customerId);
+    console.log("CUSTOMER ID ENVIADO:", customerId);
+    
     const subscriptionResponse = await fetch(
       `${ASAAS_BASE_URL}/subscriptions`,
       {
@@ -202,7 +203,7 @@ console.log("CUSTOMER ID ENVIADO:", customerId);
         {
           user_id: userId,
           plan_id: planId,
-          status: subscriptionData.status,
+          status: "PENDING", // <-- A MÁGICA FOI FEITA AQUI! O status agora nasce PENDENTE.
           asaas_subscription_id: subscriptionData.id,
           asaas_customer_id: customerId,
           started_at: new Date().toISOString(),

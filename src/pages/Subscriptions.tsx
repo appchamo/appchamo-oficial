@@ -199,6 +199,9 @@ const Subscriptions = () => {
     setDowngrading(true);
     const ok = await changePlan(downgradePlanId);
     if (ok) {
+      if (downgradePlanId !== "business") {
+        await supabase.from("profiles").update({ user_type: "professional" }).eq("user_id", user?.id);
+      }
       toast({ title: "Plano alterado com sucesso!", description: "Seus benefícios foram ajustados." });
     } else {
       toast({ title: "Erro ao alterar plano.", variant: "destructive" });
@@ -212,6 +215,7 @@ const Subscriptions = () => {
     setCancelling(true);
     const ok = await changePlan("free");
     if (ok) {
+      await supabase.from("profiles").update({ user_type: "professional" }).eq("user_id", user.id);
       toast({ title: "Assinatura cancelada", description: "Você voltou para o plano Grátis." });
     } else {
       toast({ title: "Erro ao cancelar assinatura.", variant: "destructive" });
@@ -279,7 +283,6 @@ const Subscriptions = () => {
 
       const finalStatus = selectedPlanId === "pro" ? "ACTIVE" : "PENDING";
       
-      // ✅ GRAVAÇÃO NO BANCO ANTES DA EDGE FUNCTION (Evita NULL)
       const { error: upsertError } = await supabase.from("subscriptions").upsert({
         user_id: session.user.id,
         plan_id: selectedPlanId,

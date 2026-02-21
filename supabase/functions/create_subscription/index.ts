@@ -46,6 +46,7 @@ serve(async (req) => {
       addressNumber,
       userId,
       planId,
+      phone,
     } = body;
 
     // ===============================
@@ -176,6 +177,7 @@ console.log("CUSTOMER ID ENVIADO:", customerId);
             cpfCnpj: cpfCnpj,
             postalCode: postalCode,
             addressNumber: addressNumber,
+            phone: phone,
           },
         }),
       }

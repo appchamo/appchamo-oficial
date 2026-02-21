@@ -216,6 +216,7 @@ const Subscriptions = () => {
           cpfCnpj: profileData?.cnpj || profileData?.cpf || "",
           postalCode: profileData?.address_zip || "",
           addressNumber: profileData?.address_number || "",
+          phone: profileData?.phone || "",
         },
       });
 

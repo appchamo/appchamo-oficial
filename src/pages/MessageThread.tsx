@@ -474,9 +474,10 @@ const MessageThread = () => {
             </button>
           )}
 
-          {/* AVISO DE PAGAMENTO CONCLUÍDO CASO JÁ ESTEJA PAGO */}
+          {/* ✅ AVISO DE PAGAMENTO CONCLUÍDO (VERDE E ENCAIXADO) */}
           {alreadyPaid && !isMine && (
-            <div className="mt-1 w-full py-2 rounded-lg bg-primary/20 text-[10px] font-bold text-center uppercase tracking-wider">
+            <div className="mt-2 w-full py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[9px] font-bold text-emerald-600 text-center uppercase tracking-wider flex items-center justify-center gap-1.5">
+              <CheckCircle2 className="w-3 h-3" />
               Pagamento Concluído
             </div>
           )}
@@ -586,7 +587,7 @@ const MessageThread = () => {
         </div>
       )}
 
-      {/* DIALOGS (Billing, Payment, Rating, Reward, Pix) */}
+      {/* DIALOGS */}
       <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><DollarSign className="w-5 h-5 text-primary" /> Cobrar</DialogTitle></DialogHeader>
@@ -641,10 +642,14 @@ const MessageThread = () => {
       <Dialog open={pixOpen} onOpenChange={setPixOpen}>
         <DialogContent className="max-w-sm text-center">
           <DialogHeader><DialogTitle>Pagamento PIX</DialogTitle></DialogHeader>
-          <img src={`data:image/png;base64,${pixData?.qrCode}`} className="w-48 h-48 mx-auto" alt="QR Code" />
-          <textarea readOnly value={pixData?.copyPaste} className="w-full text-xs border p-2 rounded-lg bg-muted" rows={3} />
-          <button onClick={() => { navigator.clipboard.writeText(pixData?.copyPaste || ""); toast({title: "Copiado!"}); }} className="w-full py-2 bg-primary/10 text-primary font-bold rounded-lg mt-2">Copiar Código</button>
-          <div className="flex items-center justify-center gap-2 mt-4 text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" /> Aguardando pagamento...</div>
+          {pixData && (
+            <>
+              <img src={`data:image/png;base64,${pixData.qrCode}`} className="w-48 h-48 mx-auto" alt="QR Code" />
+              <textarea readOnly value={pixData.copyPaste} className="w-full text-xs border p-2 rounded-lg bg-muted" rows={3} />
+              <button onClick={() => { navigator.clipboard.writeText(pixData.copyPaste); toast({title: "Copiado!"}); }} className="w-full py-2 bg-primary/10 text-primary font-bold rounded-lg mt-2">Copiar Código</button>
+              <div className="flex items-center justify-center gap-2 mt-4 text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" /> Aguardando pagamento...</div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

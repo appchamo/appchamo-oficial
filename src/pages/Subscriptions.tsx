@@ -236,7 +236,7 @@ const Subscriptions = () => {
 
     if (selectedPlanId === "business") {
       if (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile) {
-        toast({ title: "CNPJ, CEP, Número e Comprovante são obrigatórios para Business.", variant: "destructive" });
+        toast({ title: "CNPJ, CEP, Número e Comprovante são obrigatórios.", variant: "destructive" });
         return;
       }
     }
@@ -249,10 +249,8 @@ const Subscriptions = () => {
     setProcessing(true);
     try {
       let proofUrl = "";
-      // 1. Gera o endereço completo formatado para ser salvo no banco
       const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
 
-      // 2. Upload do comprovante (Só para Plano Business)
       if (selectedPlanId === "business" && proofFile && user) {
         const fileExt = proofFile.name.split('.').pop();
         const fileName = `${user.id}/${Date.now()}.${fileExt}`;
@@ -264,7 +262,6 @@ const Subscriptions = () => {
         proofUrl = urlData.publicUrl;
       }
 
-      const expiryParts = cardForm.expiry.split("/");
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Não autenticado");
 
@@ -280,7 +277,21 @@ const Subscriptions = () => {
         return;
       }
 
-      // 3. Envia para a Edge Function (Pagamento Asaas)
+      const finalStatus = selectedPlanId === "pro" ? "ACTIVE" : "PENDING";
+      
+      // ✅ GRAVAÇÃO NO BANCO ANTES DA EDGE FUNCTION (Evita NULL)
+      const { error: upsertError } = await supabase.from("subscriptions").upsert({
+        user_id: session.user.id,
+        plan_id: selectedPlanId,
+        status: finalStatus,
+        business_cnpj: businessData.cnpj || null,
+        business_address: fullAddress || null,
+        business_proof_url: proofUrl || null
+      });
+
+      if (upsertError) throw new Error("Erro ao registrar dados empresariais no banco.");
+
+      const expiryParts = cardForm.expiry.split("/");
       const res = await supabase.functions.invoke("create_subscription", {
         body: {
           userId: session.user.id,
@@ -302,19 +313,7 @@ const Subscriptions = () => {
         },
       });
 
-      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no pagamento");
-
-      const finalStatus = selectedPlanId === "pro" ? "ACTIVE" : "PENDING";
-      
-      // 4. Salva no Banco de Dados (subscriptions) saindo do estado NULL
-      await supabase.from("subscriptions").upsert({
-        user_id: session.user.id,
-        plan_id: selectedPlanId,
-        status: finalStatus,
-        business_cnpj: businessData.cnpj || null,
-        business_address: fullAddress || null,
-        business_proof_url: proofUrl || null
-      });
+      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no processamento do pagamento.");
 
       if (finalStatus === "ACTIVE") {
         toast({ title: "Plano Pro Ativado!", description: "Seu pagamento foi processado e o plano já está liberado." });
@@ -326,7 +325,7 @@ const Subscriptions = () => {
       setTimeout(() => { window.location.reload(); }, 2000);
 
     } catch (err: any) {
-      toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
+      toast({ title: err.message || "Erro ao processar assinatura", variant: "destructive" });
     }
     setProcessing(false);
   };

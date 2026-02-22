@@ -86,6 +86,7 @@ const MessageThread = () => {
 
   // ✅ NOVO: Estados para o comprovante
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [dismissedReceipt, setDismissedReceipt] = useState(false); // ✅ Estado para esconder a caixinha
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1111,7 +1112,6 @@ const MessageThread = () => {
       </main>
 
       {/* Input bar / FLUXO DE COMPROVANTE */}
-      {/* ✅ Adicionado bloqueio da barra se status for cancelled */}
       {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" ?
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
           <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
@@ -1121,8 +1121,8 @@ const MessageThread = () => {
                "Serviço finalizado — chat encerrado"}
             </p>
 
-            {/* ✅ BLOCO DE COMPROVANTE (Não mostra se foi cancelado) */}
-            {!isProfessional && requestStatus !== "rejected" && requestStatus !== "cancelled" && (
+            {/* ✅ BLOCO DE COMPROVANTE (Não mostra se cancelado ou se clicou em 'Não enviar') */}
+            {!isProfessional && requestStatus !== "rejected" && requestStatus !== "cancelled" && !dismissedReceipt && (
               <div className="w-full max-w-xs mt-2 space-y-2 p-4 bg-background border rounded-2xl shadow-sm animate-in fade-in zoom-in duration-300">
                 <p className="text-xs font-bold text-center">Deseja enviar o comprovante?</p>
                 
@@ -1131,14 +1131,23 @@ const MessageThread = () => {
                     Comprovante enviado com sucesso
                   </div>
                 ) : (
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadingReceipt}
-                    className="w-full py-2.5 rounded-xl bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider hover:bg-primary/20 transition-all flex items-center justify-center gap-2"
-                  >
-                    {uploadingReceipt ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
-                    Selecionar Imagem ou PDF
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingReceipt}
+                      className="w-full py-2.5 rounded-xl bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider hover:bg-primary/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      {uploadingReceipt ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
+                      Selecionar Imagem ou PDF
+                    </button>
+                    {/* ✅ NOVO BOTÃO: Para esconder a caixinha de comprovante */}
+                    <button 
+                      onClick={() => setDismissedReceipt(true)}
+                      className="w-full py-2 rounded-xl text-muted-foreground text-[11px] font-medium hover:bg-muted transition-all"
+                    >
+                      Não enviar
+                    </button>
+                  </div>
                 )}
                 <input 
                   type="file" 

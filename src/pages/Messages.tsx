@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { MessageSquare, MoreVertical, Archive, Trash2, EyeOff, AlertTriangle, Inbox, Mic } from "lucide-react"; // ✅ Adicionado o ícone Mic
+import { MessageSquare, MoreVertical, Archive, EyeOff, AlertTriangle, Inbox, Mic } from "lucide-react"; 
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -156,13 +156,6 @@ const Messages = () => {
     load();
   };
 
-  const handleDelete = async (chatId: string) => {
-    if (!confirm("Excluir esta conversa para você?")) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("chat_read_status" as any).update({ is_deleted: true }).eq("user_id", user?.id).eq("request_id", chatId);
-    load();
-  };
-
   const handleMarkUnread = async (chatId: string, current: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("chat_read_status" as any).update({ manual_unread: !current }).eq("user_id", user?.id).eq("request_id", chatId);
@@ -249,7 +242,6 @@ const Messages = () => {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs truncate text-muted-foreground">
-                  {/* ✅ Suporte também mascarando áudio se houver */}
                   {renderLastMessage(supportLastMsg || "Fale com o suporte")}
                 </div>
                 {supportUnread > 0 && <span className="min-w-[20px] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5">{supportUnread}</span>}
@@ -284,7 +276,6 @@ const Messages = () => {
                   <div className="flex-1 min-w-0">
                     <p className={`text-sm truncate ${hasUnread ? "font-bold text-foreground" : "font-semibold text-foreground"}`}>{t.otherName}</p>
                     <div className={`text-xs truncate mt-0.5 flex items-center gap-1 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                      {/* ✅ Chamando a função para esconder o link do áudio */}
                       {renderLastMessage(t.lastMessage)}
                     </div>
                   </div>
@@ -311,10 +302,6 @@ const Messages = () => {
                         <span className="font-medium text-sm">{t.is_archived ? "Desarquivar" : "Arquivar conversa"}</span>
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => handleDelete(t.id)} className="gap-2 cursor-pointer py-2 text-red-600 focus:text-red-600 focus:bg-red-50">
-                        <Trash2 className="w-4 h-4" />
-                        <span className="font-medium text-sm">Excluir conversa</span>
-                      </DropdownMenuItem>
                       <DropdownMenuItem 
                         onClick={() => setReportingChatId(t.id)} 
                         className="gap-2 cursor-pointer py-2 text-amber-600 focus:text-amber-600 focus:bg-amber-50"

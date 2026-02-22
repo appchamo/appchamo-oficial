@@ -48,6 +48,7 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>("free"); // ✅ Armazena o plano escolhido
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -85,6 +86,7 @@ const Signup = () => {
 
   const handlePlanSelect = (planId: string) => {
     if (!profileData) return;
+    setSelectedPlanId(planId); // ✅ Guarda o plano para saber o destino final
     doSignup(profileData, planId);
   };
 
@@ -105,13 +107,13 @@ const Signup = () => {
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: basicData.email,
         password: basicData.password,
-       options: {
-  emailRedirectTo: window.location.origin,
-  data: { 
-    full_name: basicData.name,
-    user_type: accountType, // 👈 ESSENCIAL
-  },
-},
+        options: {
+          emailRedirectTo: window.location.origin,
+          data: { 
+            full_name: basicData.name,
+            user_type: accountType,
+          },
+        },
       });
 
       if (authError) {
@@ -163,7 +165,6 @@ const Signup = () => {
         return;
       }
 
-      // MOSTRA POPUP
       setCouponPopup(true);
     } catch (err: any) {
       toast({
@@ -176,14 +177,24 @@ const Signup = () => {
     setLoading(false);
   };
 
-  // 🔥 ALTERAÇÃO PRINCIPAL AQUI
+  // 🔥 ALTERAÇÃO AQUI: Lógica de redirecionamento inteligente
   const handleCouponClose = () => {
     setCouponPopup(false);
-
-    toast({ title: "Conta criada com sucesso!" });
-
-    // Redireciona direto para HOME
-    navigate("/home");
+    
+    // Se for Profissional e escolheu plano pago, vai para análise
+    if (accountType === "professional" && selectedPlanId !== "free") {
+      toast({ 
+        title: "Dados em análise!", 
+        description: "Seu perfil está sendo verificado. Avisaremos assim que for aprovado!" 
+      });
+      // Aqui você pode redirecionar para uma página de "Aguarde aprovação" 
+      // ou para a Home, mas com o perfil travado (depende de como está sua Home)
+      navigate("/home"); 
+    } else {
+      // Clientes ou Profissionais FREE vão direto
+      toast({ title: "Conta criada com sucesso!" });
+      navigate("/home");
+    }
   };
 
   if (loading) {

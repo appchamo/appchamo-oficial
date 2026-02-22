@@ -1,10 +1,11 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter } from "lucide-react";
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2 } from "lucide-react"; // Adicionado CheckCircle2
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch"; // Adicionado Switch
 import { fuzzyMatch } from "@/lib/fuzzyMatch";
 
 interface Pro {
@@ -125,7 +126,6 @@ const Search = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        {/* ✅ BARRA DE BUSCA (LUPA) IGUAL À HOME */}
         <div className="relative mb-6">
           <div className="relative group">
             <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -149,14 +149,13 @@ const Search = () => {
             {search ? `Resultados para "${search}"` : "Todos os Profissionais"}
           </h1>
           
-          {/* ✅ BOTÃO DE FILTROS */}
           <Sheet>
             <SheetTrigger asChild>
               <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-card hover:bg-muted transition-colors text-xs font-semibold">
                 <SlidersHorizontal className="w-3.5 h-3.5" /> Filtros
               </button>
             </SheetTrigger>
-            <SheetContent side="bottom" className="rounded-t-3xl h-[60vh]">
+            <SheetContent side="bottom" className="rounded-t-3xl h-[65vh] overflow-y-auto">
               <SheetHeader>
                 <SheetTitle>Filtrar Profissionais</SheetTitle>
               </SheetHeader>
@@ -176,8 +175,21 @@ const Search = () => {
                   <label className="text-sm font-bold mb-3 block">Avaliação mínima: {filterMinRating} estrelas</label>
                   <Slider value={[filterMinRating]} onValueChange={([v]) => setFilterMinRating(v)} max={5} step={1} />
                 </div>
+
+                {/* ✅ FILTRO: APENAS VERIFICADOS */}
+                <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-primary" />
+                    <span className="text-sm font-bold text-foreground">Apenas Verificados</span>
+                  </div>
+                  <Switch 
+                    checked={filterVerified} 
+                    onCheckedChange={setFilterVerified} 
+                  />
+                </div>
+
                 <button 
-                  onClick={() => { setFilterCategory(""); setFilterMinRating(0); }}
+                  onClick={() => { setFilterCategory(""); setFilterMinRating(0); setFilterVerified(false); }}
                   className="w-full py-3 text-sm font-semibold text-primary"
                 >
                   Limpar Filtros
@@ -195,7 +207,7 @@ const Search = () => {
           <div className="text-center py-16 bg-muted/30 rounded-2xl border-2 border-dashed">
             <SearchIcon className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
             <p className="text-sm font-medium text-muted-foreground">Nenhum profissional encontrado.</p>
-            <button onClick={() => {setSearch(""); setFilterCategory("");}} className="text-xs text-primary font-bold mt-2">Ver todos os profissionais</button>
+            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterVerified(false);}} className="text-xs text-primary font-bold mt-2">Ver todos os profissionais</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

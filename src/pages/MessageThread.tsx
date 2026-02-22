@@ -5,7 +5,8 @@ import BottomNav from "@/components/BottomNav";
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface Message {
   id: string;
@@ -48,7 +49,6 @@ const MessageThread = () => {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string;} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
-  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [cardStep, setCardStep] = useState(false);
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
   const [installments, setInstallments] = useState("1");
@@ -65,6 +65,7 @@ const MessageThread = () => {
   const [pixOpen, setPixOpen] = useState(false);
   const [pixPolling, setPixPolling] = useState(false);
   const [pixCopied, setPixCopied] = useState(false);
+  const pixIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Audio recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -103,9 +104,7 @@ const MessageThread = () => {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
             const { data: profile } = await supabase.from("profiles_public").select("full_name, avatar_url").eq("user_id", pro.user_id).single();
-            if (profile) {
-              setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
-            }
+            if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
           }
         } else {
           const { data: profile } = await supabase.from("profiles_public").select("full_name, avatar_url").eq("user_id", req.client_id).single();
@@ -201,19 +200,14 @@ const MessageThread = () => {
     }
   };
 
-  // ✅ FUNÇÃO DE ENVIO DE COBRANÇA CORRIGIDA
   const handleSendBilling = async () => {
-    if (!billingAmount || !userId || !threadId || !billingMethod) {
-      toast({ title: "Preencha todos os campos", variant: "destructive" });
-      return;
-    }
-    
-    setSending(true);
+    if (!billingAmount || !userId || !threadId || !billingMethod) return;
     const amount = parseFloat(billingAmount);
-    const installments = billingMethod === "pix" ? "1" : billingInstallments;
+    if (isNaN(amount) || amount <= 0) return;
     
-    // Monta o conteúdo estruturado que o sistema reconhece
-    const billingContent = `💰 COBRANÇA\nValor: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${billingMethod === 'pix' ? 'PIX' : 'Cartão de Crédito'}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${installments}]`;
+    const installments = billingMethod === "pix" ? "1" : billingInstallments;
+    const methodLabel = billingMethod === "pix" ? "PIX" : `Cartão ${installments}x`;
+    const billingContent = `💰 COBRANÇA\nValor: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${installments}]`;
 
     const { error } = await supabase.from("chat_messages").insert({
       request_id: threadId,
@@ -221,17 +215,14 @@ const MessageThread = () => {
       content: billingContent
     });
 
-    if (error) {
-      toast({ title: "Erro ao enviar cobrança", variant: "destructive" });
-    } else {
+    if (error) toast({ title: "Erro ao enviar", variant: "destructive" });
+    else {
       setBillingOpen(false);
       setBillingAmount("");
       setBillingDesc("");
       setBillingMethod(null);
-      setBillingStep("choose_type");
-      toast({ title: "Cobrança enviada com sucesso!" });
+      toast({ title: "Cobrança enviada!" });
     }
-    setSending(false);
   };
 
   const parseBilling = (content: string) => {
@@ -250,25 +241,92 @@ const MessageThread = () => {
         setPaymentMethod(billing.method); 
         setCardStep(billing.method === "card"); 
         if (billing.method === "card") setInstallments(billing.installments); 
+    } else {
+        setPaymentMethod(null);
+        setCardStep(false);
     }
     setPaymentOpen(true);
   };
 
+  // ✅ LÓGICA DE PAGAMENTO COMPLETA DO LOVABLE (CARTOON + PIX + CPF CHECK)
   const handleConfirmPayment = async () => {
-    if (!paymentData || !userId || !threadId || !paymentMethod) return;
+    if (!paymentMethod || !paymentData || !userId || !threadId) return;
+
+    if (paymentMethod === "card") {
+      if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) {
+        toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
+        return;
+      }
+    }
+
     setProcessingPayment(true);
     try {
-      const res = await supabase.functions.invoke("create_payment", {
-        body: { request_id: threadId, amount: parseFloat(paymentData.amount), method: paymentMethod, installments: paymentMethod === "card" ? installments : 1, cardData: paymentMethod === "card" ? cardForm : null }
-      });
-      if (res.error) throw new Error("Erro ao gerar pagamento");
-      if (paymentMethod === "pix") { setPixData({ qrCode: res.data.pix_qr_code, copyPaste: res.data.pix_copy_paste, paymentId: res.data.payment_id }); setPaymentOpen(false); setPixOpen(true); }
-      if (paymentMethod === "card") { 
-        await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: "✅ PAGAMENTO CONFIRMADO\nO pagamento via cartão foi aprovado." });
-        setPaymentOpen(false);
-        setRatingOpen(true);
-      }
-    } catch (err: any) { toast({ title: "Erro no pagamento", variant: "destructive" }); }
+        // Validação de Perfil (CPF/CNPJ)
+        const { data: profile } = await supabase.from("profiles").select("full_name, email, cpf, cnpj, phone, address_zip, address_number").eq("user_id", userId).single();
+
+        if (!profile?.cpf && !profile?.cnpj) {
+          toast({ title: "Cadastre seu CPF ou CNPJ no perfil antes de pagar.", variant: "destructive" });
+          setProcessingPayment(false);
+          setPaymentOpen(false);
+          navigate("/profile");
+          return;
+        }
+
+        const expiryParts = cardForm.expiry.split("/");
+        const res = await supabase.functions.invoke("create_payment", {
+          body: {
+            action: "create_service_payment",
+            request_id: threadId,
+            amount: parseFloat(paymentData.amount),
+            billing_type: paymentMethod === "pix" ? "PIX" : "CREDIT_CARD",
+            installment_count: parseInt(installments),
+            credit_card: paymentMethod === "card" ? {
+              holder_name: cardForm.name,
+              number: cardForm.number.replace(/\s/g, ""),
+              expiry_month: expiryParts[0],
+              expiry_year: `20${expiryParts[1]}`,
+              cvv: cardForm.cvv
+            } : null,
+            credit_card_holder_info: paymentMethod === "card" ? {
+              name: profile.full_name || cardForm.name,
+              email: profile.email || "",
+              cpf_cnpj: profile.cpf || profile.cnpj || "",
+              postal_code: profile.address_zip || cardForm.postalCode || "",
+              address_number: profile.address_number || cardForm.addressNumber || "",
+              phone: profile.phone || ""
+            } : null
+          }
+        });
+
+        if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no processamento");
+
+        if (paymentMethod === "pix") {
+            setPixData({ qrCode: res.data.pix_qr_code, copyPaste: res.data.pix_copy_paste, paymentId: res.data.payment_id });
+            setPaymentOpen(false);
+            setPixOpen(true);
+            setPixPolling(true);
+            
+            // Polling do PIX
+            if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
+            pixIntervalRef.current = setInterval(async () => {
+                const check = await supabase.functions.invoke("create_payment", { body: { action: "check_payment_status", payment_id: res.data.payment_id } });
+                if (check.data?.confirmed) {
+                    clearInterval(pixIntervalRef.current!);
+                    setPixOpen(false);
+                    await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: "✅ PAGAMENTO CONFIRMADO\nO pagamento via PIX foi aprovado." });
+                    setRatingOpen(true);
+                }
+            }, 5000);
+        } else {
+            // Cartão Aprovado
+            toast({ title: "Pagamento aprovado!" });
+            await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: "✅ PAGAMENTO CONFIRMADO\nO pagamento via cartão foi aprovado." });
+            setPaymentOpen(false);
+            setRatingOpen(true);
+        }
+    } catch (err: any) {
+      toast({ title: err.message || "Erro no pagamento", variant: "destructive" });
+    }
     setProcessingPayment(false);
   };
 
@@ -276,7 +334,7 @@ const MessageThread = () => {
     if (ratingStars === 0 || !userId || !threadId) return;
     const { error } = await supabase.rpc("submit_review", { _request_id: threadId, _rating: ratingStars, _comment: ratingComment || null });
     if (error) toast({ title: "Erro na avaliação", variant: "destructive" });
-    else { setRatingOpen(false); setHasRated(true); setRequestStatus("completed"); toast({ title: "Obrigado pela avaliação!" }); }
+    else { setRatingOpen(false); setHasRated(true); setRequestStatus("completed"); toast({ title: "Obrigado!" }); }
   };
 
   const renderMessageContent = (msg: Message) => {
@@ -286,22 +344,13 @@ const MessageThread = () => {
 
     if (audioData) return <AudioPlayer src={audioData[1]} duration={parseInt(audioData[2])} isMine={isMine} />;
 
-    if (msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA")) return (
-      <div className="text-center w-full my-2">
-        <div className="inline-block bg-muted/80 border rounded-xl px-4 py-2">
-          <p className="text-xs font-semibold text-foreground">{msg.content.split("\n")[0]}</p>
-        </div>
-      </div>
-    );
-
     if (msg.content.includes("💰 COBRANÇA") && billing) {
       const alreadyPaid = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO"));
       return (
         <div className="space-y-2 p-1">
-          <div className="flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /><span className="font-bold text-sm">Cobrança de Serviço</span></div>
+          <div className="flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /><span className="font-bold text-sm">Cobrança</span></div>
           <p className="text-xl font-black">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
-          <p className="text-[10px] opacity-70 italic">{billing.desc}</p>
-          {!isMine && !alreadyPaid && <button onClick={() => openPayment(msg)} className="mt-2 w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-sm">Pagar agora</button>}
+          {!isMine && !alreadyPaid && <button onClick={() => openPayment(msg)} className="mt-2 w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-bold shadow-sm">Pagar agora</button>}
           {alreadyPaid && <div className="mt-2 w-full py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-600 text-center flex items-center justify-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Pago</div>}
         </div>
       );
@@ -310,7 +359,6 @@ const MessageThread = () => {
     if (msg.content.includes("✅ PAGAMENTO CONFIRMADO")) return (
       <div className="flex flex-col gap-1">
         <p className="font-bold text-sm flex items-center gap-1.5 text-emerald-600"><CheckCircle2 className="w-4 h-4" /> Pagamento confirmado</p>
-        <p className="text-xs opacity-80">O serviço foi pago e liberado.</p>
       </div>
     );
 
@@ -327,7 +375,7 @@ const MessageThread = () => {
       );
     }
 
-    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>;
+    return <p className="whitespace-pre-wrap text-sm">{msg.content}</p>;
   };
 
   const otherInitials = otherParty.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
@@ -344,7 +392,7 @@ const MessageThread = () => {
           </div>
           {isProfessional && requestStatus === "accepted" && (
             <div className="flex gap-2">
-              <button onClick={async () => { await loadFeeSettings(); setBillingStep("choose_type"); setBillingOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-primary-foreground shadow-sm active:scale-95 transition-transform"><BadgeDollarSign className="w-3.5 h-3.5" /> Cobrar</button>
+              <button onClick={async () => { await loadFeeSettings(); setBillingStep("choose_type"); setBillingOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-primary-foreground shadow-sm"><BadgeDollarSign className="w-3.5 h-3.5" /> Cobrar</button>
               <button onClick={() => setClosingCall(true)} className="p-1.5 rounded-lg bg-destructive/10 text-destructive"><LogOut className="w-4 h-4" /></button>
             </div>
           )}
@@ -354,15 +402,13 @@ const MessageThread = () => {
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-3">
         {messages.map((msg) => {
           const isMine = msg.sender_id === userId;
-          const isSys = msg.content.startsWith("📋") || msg.content.includes("🔒");
           const rendered = renderMessageContent(msg);
-          if (!rendered) return null;
+          if (!rendered || msg.content.includes("AVALIAÇÃO:")) return null;
           return (
-            <div key={msg.id} className={`flex ${isSys ? "justify-center" : isMine ? "justify-end" : "justify-start"} gap-2`}>
-              {!isMine && !isSys && (otherParty.avatar_url ? <img src={otherParty.avatar_url} className="w-7 h-7 rounded-full object-cover mt-1" /> : <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary mt-1">{otherInitials}</div>)}
-              <div className={isSys ? "" : `max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-none" : "bg-card border rounded-bl-none shadow-sm"}`}>
+            <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
+              <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-none" : "bg-card border rounded-bl-none shadow-sm"}`}>
                 {rendered}
-                {!isSys && <p className={`text-[9px] mt-1 opacity-60 text-right`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>}
+                <p className={`text-[9px] mt-1 opacity-60 text-right`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
               </div>
             </div>
           );
@@ -371,155 +417,102 @@ const MessageThread = () => {
       </main>
 
       <div className="sticky bottom-20 bg-background border-t px-4 py-3 flex items-center gap-2">
-        {isRecording ? (
-          <div className="flex-1 flex items-center gap-2 bg-destructive/5 rounded-xl px-3 py-2 border border-destructive/10">
-            <div className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
-            <span className="text-sm font-bold text-destructive flex-1">{formatRecTime(recordingTime)}</span>
-            <button onClick={cancelRecording} className="text-xs font-bold text-muted-foreground mr-2">Cancelar</button>
-            <button onClick={stopAndSendRecording} className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center"><Send className="w-3.5 h-3.5" /></button>
-          </div>
-        ) : (
-          <>
             <input type="text" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="Mensagem..." className="flex-1 bg-muted/40 border-none rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary/20" />
-            {text.trim() ? <button onClick={handleSend} className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-md active:scale-90 transition-transform"><Send className="w-4 h-4" /></button> : <button onClick={startRecording} className="w-10 h-10 rounded-full bg-muted flex items-center justify-center active:scale-90 transition-transform"><Mic className="w-5 h-5 text-muted-foreground" /></button>}
-          </>
-        )}
+            {text.trim() ? <button onClick={handleSend} className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-md"><Send className="w-4 h-4" /></button> : <button onClick={startRecording} className="w-10 h-10 rounded-full bg-muted flex items-center justify-center"><Mic className="w-5 h-5 text-muted-foreground" /></button>}
       </div>
 
       <BottomNav />
 
-      {/* ✅ MODAL DE COBRANÇA RESTAURADO */}
+      {/* MODAL DE COBRANÇA */}
       <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
-        <DialogContent className="max-w-[90vw] sm:max-w-sm rounded-3xl p-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-xl font-black">
-              <DollarSign className="w-6 h-6 text-emerald-500" /> Cobrar Cliente
-            </DialogTitle>
-          </DialogHeader>
-
+        <DialogContent className="max-w-sm rounded-3xl p-6">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 font-black"><DollarSign className="w-6 h-6 text-emerald-500" /> Cobrar</DialogTitle></DialogHeader>
           {billingStep === "choose_type" && (
-            <div className="grid grid-cols-1 gap-3 py-4">
-               <button 
-                onClick={() => setBillingStep("app_form")} 
-                disabled={proPlanId === "free"}
-                className="flex items-center gap-4 p-4 rounded-2xl border-2 border-muted hover:border-primary transition-all text-left disabled:opacity-50"
-               >
+            <div className="grid gap-3 py-4">
+               <button onClick={() => setBillingStep("app_form")} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-muted hover:border-primary text-left">
                   <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary"><CreditCard className="w-6 h-6" /></div>
-                  <div>
-                    <p className="font-bold text-sm">Receber pelo App</p>
-                    <p className="text-xs text-muted-foreground text-emerald-600 font-medium">PIX ou Cartão de Crédito</p>
-                  </div>
+                  <div><p className="font-bold text-sm">Pelo App</p><p className="text-xs text-emerald-600 font-medium">PIX ou Cartão</p></div>
                </button>
-               
-               <button 
-                onClick={() => setBillingStep("presencial_confirm")}
-                className="flex items-center gap-4 p-4 rounded-2xl border-2 border-muted hover:border-primary transition-all text-left"
-               >
+               <button onClick={() => setBillingStep("presencial_confirm")} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-muted hover:border-primary text-left">
                   <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-muted-foreground"><Handshake className="w-6 h-6" /></div>
-                  <div>
-                    <p className="font-bold text-sm">Pagamento Externo</p>
-                    <p className="text-xs text-muted-foreground">Dinheiro ou Maquininha</p>
-                  </div>
+                  <div><p className="font-bold text-sm">Presencial</p><p className="text-xs text-muted-foreground">Dinheiro ou Maquina</p></div>
                </button>
             </div>
           )}
-
           {billingStep === "app_form" && (
-            <div className="space-y-5 py-2">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Valor do Serviço</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-muted-foreground text-sm">R$</span>
-                  <input 
-                    value={billingAmount} 
-                    onChange={(e) => setBillingAmount(e.target.value)} 
-                    type="number" 
-                    placeholder="0,00" 
-                    className="w-full bg-muted/30 border-2 border-muted rounded-2xl pl-10 pr-4 py-3.5 font-black text-lg outline-none focus:border-primary transition-all" 
-                  />
-                </div>
+            <div className="space-y-4">
+              <input value={billingAmount} onChange={(e) => setBillingAmount(e.target.value)} type="number" placeholder="Valor R$" className="w-full bg-muted/30 border-2 rounded-2xl px-4 py-3 font-black text-lg outline-none" />
+              <input value={billingDesc} onChange={(e) => setBillingDesc(e.target.value)} placeholder="O que está cobrando?" className="w-full bg-muted/30 border-2 rounded-2xl px-4 py-3 text-sm outline-none" />
+              <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => setBillingMethod("pix")} className={`py-3 rounded-xl border-2 font-bold text-xs ${billingMethod === "pix" ? "border-primary bg-primary/5 text-primary" : ""}`}>PIX</button>
+                    <button onClick={() => setBillingMethod("card")} className={`py-3 rounded-xl border-2 font-bold text-xs ${billingMethod === "card" ? "border-primary bg-primary/5 text-primary" : ""}`}>Cartão</button>
               </div>
-
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">O que está sendo cobrado?</label>
-                <input 
-                  value={billingDesc} 
-                  onChange={(e) => setBillingDesc(e.target.value)} 
-                  placeholder="Ex: Visita técnica, Peças..." 
-                  className="w-full bg-muted/30 border-2 border-muted rounded-2xl px-4 py-3 text-sm outline-none focus:border-primary transition-all" 
-                />
-              </div>
-
-              <div className="space-y-3">
-                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1 text-center block">Escolha como o cliente vai pagar</label>
-                 <div className="grid grid-cols-2 gap-2">
-                    <button 
-                        onClick={() => setBillingMethod("pix")}
-                        className={`py-3 rounded-xl border-2 font-bold text-xs flex items-center justify-center gap-2 transition-all ${billingMethod === "pix" ? "border-primary bg-primary/5 text-primary" : "border-muted text-muted-foreground"}`}
-                    >
-                        <QrCode className="w-4 h-4" /> PIX
-                    </button>
-                    <button 
-                        onClick={() => setBillingMethod("card")}
-                        className={`py-3 rounded-xl border-2 font-bold text-xs flex items-center justify-center gap-2 transition-all ${billingMethod === "card" ? "border-primary bg-primary/5 text-primary" : "border-muted text-muted-foreground"}`}
-                    >
-                        <CreditCard className="w-4 h-4" /> Cartão
-                    </button>
-                 </div>
-              </div>
-
-              {/* ✅ CÁLCULO DE TAXAS VISÍVEL */}
-              {billingAmount && billingMethod && (
-                <div className="p-4 bg-muted/30 rounded-2xl space-y-2 border border-dashed">
-                    <div className="flex justify-between text-[11px] font-medium">
-                        <span className="text-muted-foreground">Valor Bruto:</span>
-                        <span>R$ {parseFloat(billingAmount).toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-[11px] font-bold text-emerald-600">
-                        <span>Você recebe aprox:</span>
-                        <span>R$ {(parseFloat(billingAmount) * (billingMethod === 'pix' ? 0.95 : 0.90)).toFixed(2)}</span>
-                    </div>
-                </div>
-              )}
-
-              <button 
-                onClick={handleSendBilling} 
-                disabled={!billingAmount || !billingMethod || sending}
-                className="w-full py-4 rounded-2xl bg-primary text-primary-foreground font-black text-sm shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50"
-              >
-                {sending ? "Enviando..." : "ENVIAR COBRANÇA AGORA"}
-              </button>
-              
-              <button onClick={() => setBillingStep("choose_type")} className="w-full text-xs font-bold text-muted-foreground hover:text-foreground transition-colors">Voltar</button>
+              <button onClick={handleSendBilling} disabled={!billingAmount || !billingMethod} className="w-full py-4 rounded-2xl bg-primary text-white font-black text-sm shadow-lg">ENVIAR COBRANÇA</button>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Demais diálogos (Payment, Pix, Rating) mantidos conforme original mas com correções de UI */}
+      {/* ✅ MODAL DE PAGAMENTO (FUSÃO LOVABLE + VS CODE) */}
       <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
         <DialogContent className="max-w-sm rounded-3xl">
-          <DialogHeader><DialogTitle className="font-black">Pagar Serviço</DialogTitle></DialogHeader>
-          <div className="space-y-4 pt-2">
+          <DialogHeader><DialogTitle className="font-black">{cardStep ? "Dados do Cartão" : "Pagar Serviço"}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
             <div className="text-center p-6 bg-primary/5 rounded-2xl border border-primary/10">
                 <p className="text-3xl font-black text-primary">R$ {paymentData ? parseFloat(paymentData.amount).toFixed(2).replace(".", ",") : "0,00"}</p>
-                <p className="text-xs font-bold text-muted-foreground mt-1 uppercase tracking-tighter">{paymentData?.desc}</p>
+                <p className="text-xs font-bold text-muted-foreground mt-1 uppercase">{paymentData?.desc}</p>
             </div>
-            <button onClick={handleConfirmPayment} disabled={processingPayment} className="w-full py-4 rounded-2xl bg-primary text-white font-black text-sm shadow-xl active:scale-95 transition-all">
-                {processingPayment ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : `CONFIRMAR PAGAMENTO VIA ${paymentMethod?.toUpperCase()}`}
-            </button>
+
+            {!cardStep ? (
+                <div className="space-y-2">
+                    <button onClick={() => handleConfirmPayment()} className="w-full py-4 rounded-2xl bg-primary text-white font-black text-sm shadow-xl">
+                        {paymentMethod === 'pix' ? 'GERAR QR CODE PIX' : 'PROSSEGUIR COM CARTÃO'}
+                    </button>
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    <input value={cardForm.number} onChange={(e) => setCardForm(f => ({...f, number: e.target.value}))} placeholder="0000 0000 0000 0000" className="w-full bg-muted/30 border-2 rounded-xl px-4 py-2.5 text-sm" />
+                    <input value={cardForm.name} onChange={(e) => setCardForm(f => ({...f, name: e.target.value.toUpperCase()}))} placeholder="NOME NO CARTÃO" className="w-full bg-muted/30 border-2 rounded-xl px-4 py-2.5 text-sm uppercase" />
+                    <div className="grid grid-cols-2 gap-2">
+                        <input value={cardForm.expiry} onChange={(e) => setCardForm(f => ({...f, expiry: e.target.value}))} placeholder="MM/AA" className="w-full bg-muted/30 border-2 rounded-xl px-4 py-2.5 text-sm" />
+                        <input value={cardForm.cvv} onChange={(e) => setCardForm(f => ({...f, cvv: e.target.value}))} placeholder="CVV" className="w-full bg-muted/30 border-2 rounded-xl px-4 py-2.5 text-sm" />
+                    </div>
+                    <select value={installments} onChange={(e) => setInstallments(e.target.value)} className="w-full bg-muted/30 border-2 rounded-xl px-4 py-2.5 text-sm">
+                        <option value="1">1x de R$ {paymentData?.amount}</option>
+                        <option value="2">2x de R$ {(parseFloat(paymentData?.amount || '0') / 2).toFixed(2)}</option>
+                        <option value="3">3x de R$ {(parseFloat(paymentData?.amount || '0') / 3).toFixed(2)}</option>
+                    </select>
+                    <button onClick={handleConfirmPayment} disabled={processingPayment} className="w-full py-4 rounded-2xl bg-primary text-white font-black text-sm shadow-xl">
+                        {processingPayment ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "PAGAR AGORA"}
+                    </button>
+                </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={ratingOpen} onOpenChange={setRatingOpen}>
+      {/* MODAL PIX */}
+      <Dialog open={pixOpen} onOpenChange={setPixOpen}>
         <DialogContent className="max-w-sm rounded-3xl text-center">
+          <DialogHeader><DialogTitle>Pagar com PIX</DialogTitle></DialogHeader>
+          {pixData && (
+            <div className="space-y-4">
+              <img src={`data:image/png;base64,${pixData.qrCode}`} className="w-48 h-48 mx-auto border p-2 rounded-xl" />
+              <button onClick={() => { navigator.clipboard.writeText(pixData.copyPaste); toast({title: "Copiado!"}); }} className="w-full py-3 bg-primary/10 text-primary font-black rounded-xl">COPIAR CÓDIGO PIX</button>
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground animate-pulse"><Loader2 className="w-3 h-3 animate-spin" /> Aguardando pagamento...</div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL AVALIAÇÃO */}
+      <Dialog open={ratingOpen} onOpenChange={setRatingOpen}>
+        <DialogContent className="max-w-sm rounded-3xl text-center p-8">
           <DialogHeader><DialogTitle className="font-black text-xl">Como foi o serviço?</DialogTitle></DialogHeader>
           <div className="flex justify-center gap-2 my-6">
-            {[1,2,3,4,5].map(s => <Star key={s} onClick={() => setRatingStars(s)} className={`w-10 h-10 cursor-pointer transition-all ${s <= ratingStars ? "fill-amber-400 text-amber-400 scale-110" : "text-muted hover:scale-105"}`} />)}
+            {[1,2,3,4,5].map(s => <Star key={s} onClick={() => setRatingStars(s)} className={`w-10 h-10 cursor-pointer ${s <= ratingStars ? "fill-amber-400 text-amber-400 scale-110" : "text-muted"}`} />)}
           </div>
-          <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)} placeholder="Deixe um comentário sobre o profissional..." className="w-full bg-muted/30 border-2 border-muted rounded-2xl p-4 text-sm outline-none focus:border-primary min-h-[100px]" />
-          <button onClick={handleSubmitRating} disabled={ratingStars === 0} className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm mt-6 shadow-lg shadow-primary/20">ENVIAR AVALIAÇÃO</button>
+          <button onClick={handleSubmitRating} disabled={ratingStars === 0} className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm shadow-lg shadow-primary/20">ENVIAR AVALIAÇÃO</button>
         </DialogContent>
       </Dialog>
     </div>

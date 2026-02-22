@@ -54,6 +54,8 @@ const Search = () => {
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
+  // ✅ NOVO: Estado para a cidade
+  const [filterCity, setFilterCity] = useState<string>("");
 
   // ✅ AJUSTE: Permite calcular distância mesmo sem login (usando Patrocínio como base temporária)
   useEffect(() => {
@@ -68,7 +70,11 @@ const Search = () => {
       
       const { data } = await supabase.from("profiles").select("address_city, latitude, longitude").eq("user_id", user.id).single();
       
-      if (data?.address_city) setUserCity(data.address_city);
+      if (data?.address_city) {
+        setUserCity(data.address_city);
+        // ✅ Preenche automaticamente o filtro de cidade se estiver vazio
+        setFilterCity((prev) => prev || data.address_city);
+      }
       
       if (data?.latitude && data?.longitude) {
         setUserCoords({ lat: data.latitude, lng: data.longitude });
@@ -174,6 +180,15 @@ const Search = () => {
       const target = `${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`.toLowerCase();
       if (!fuzzyMatch(q, target)) return false;
     }
+    
+    // ✅ NOVO: Filtra pela cidade (case insensitive)
+    if (filterCity) {
+      const pCity = (p.city || "").toLowerCase();
+      const fCity = filterCity.toLowerCase();
+      // Remove acentos para uma busca mais robusta, se desejar. Por simplicidade, usando includes:
+      if (!pCity.includes(fCity)) return false;
+    }
+
     if (filterCategory && p.category_id !== filterCategory) return false;
     if (filterProfession && p.profession_id !== filterProfession) return false;
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
@@ -214,6 +229,20 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
+                {/* ✅ NOVO: Campo de Cidade */}
+                <div>
+                  <label className="text-sm font-bold flex items-center gap-2 mb-3">
+                    <MapPin className="w-4 h-4 text-primary" /> Cidade
+                  </label>
+                  <input
+                    type="text"
+                    value={filterCity}
+                    onChange={(e) => setFilterCity(e.target.value)}
+                    placeholder="Ex: Patrocínio"
+                    className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                  />
+                </div>
+
                 {/* BARRA DE DISTÂNCIA */}
                 {userCoords && (
                   <div>
@@ -272,7 +301,8 @@ const Search = () => {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-4">
-                  <button onClick={() => { setFilterCategory(""); setFilterProfession(""); setFilterMinRating(0); setFilterVerified(false); setFilterRadius(100); }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
+                  {/* ✅ Limpa também a cidade */}
+                  <button onClick={() => { setFilterCategory(""); setFilterProfession(""); setFilterMinRating(0); setFilterVerified(false); setFilterRadius(100); setFilterCity(""); }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
                   <button onClick={() => setIsSheetOpen(false)} className="py-3 text-sm font-bold text-white bg-primary rounded-xl">Aplicar</button>
                 </div>
               </div>

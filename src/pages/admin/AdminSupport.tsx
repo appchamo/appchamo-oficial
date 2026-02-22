@@ -1,11 +1,12 @@
 import AdminLayout from "@/components/AdminLayout";
-import { HelpCircle, Send, ArrowLeft, Clock, XCircle, FileText } from "lucide-react";
+import { HelpCircle, Send, ArrowLeft, Clock, XCircle, FileText, AlertTriangle, MessageSquare, CheckCircle2, Eye } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import AudioPlayer from "@/components/AudioPlayer";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+// Interfaces do Suporte
 interface TicketThread {
   id: string;
   user_id: string;
@@ -25,10 +26,31 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
-  image_urls?: string[] | null; // Adicionado para suportar fotos dinâmicas
+  image_urls?: string[] | null;
+}
+
+// ✅ Interfaces da Denúncia
+interface ChatReport {
+  id: string;
+  reporter_id: string;
+  chat_id: string;
+  reason: string;
+  status: string;
+  created_at: string;
+  reporter_name: string;
+  reporter_avatar: string | null;
+}
+
+interface ReportedChatMessage {
+  id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  sender_name?: string;
 }
 
 const AdminSupport = () => {
+  // Estados do Suporte
   const [tickets, setTickets] = useState<TicketThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<TicketThread | null>(null);
@@ -39,11 +61,21 @@ const AdminSupport = () => {
   const [closeOpen, setCloseOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // ✅ Estados das Denúncias
+  const [activeTab, setActiveTab] = useState<"support" | "reports">("support");
+  const [reports, setReports] = useState<ChatReport[]>([]);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [viewingReportChat, setViewingReportChat] = useState<string | null>(null);
+  const [reportedMessages, setReportedMessages] = useState<ReportedChatMessage[]>([]);
+  const [loadingReportedChat, setLoadingReportedChat] = useState(false);
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setAdminId(data.user?.id || null));
   }, []);
 
+  // Busca os Tickets de Suporte
   const fetchTickets = async () => {
+    setLoading(true);
     const { data: ticketRows } = await supabase
       .from("support_tickets")
       .select("id, user_id, protocol, subject, status, created_at")
@@ -91,7 +123,41 @@ const AdminSupport = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchTickets(); }, []);
+  // ✅ Busca as Denúncias
+  const fetchReports = async () => {
+    setLoadingReports(true);
+    const { data: reportRows } = await supabase
+      .from("chat_reports" as any)
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (!reportRows || reportRows.length === 0) {
+      setReports([]);
+      setLoadingReports(false);
+      return;
+    }
+
+    const userIds = [...new Set(reportRows.map((r: any) => r.reporter_id))];
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("user_id, full_name, avatar_url")
+      .in("user_id", userIds);
+    const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
+
+    const enrichedReports: ChatReport[] = reportRows.map((r: any) => ({
+      ...r,
+      reporter_name: profileMap.get(r.reporter_id)?.full_name || "Usuário",
+      reporter_avatar: profileMap.get(r.reporter_id)?.avatar_url || null,
+    }));
+
+    setReports(enrichedReports);
+    setLoadingReports(false);
+  };
+
+  useEffect(() => { 
+    if (activeTab === "support") fetchTickets(); 
+    else fetchReports();
+  }, [activeTab]);
 
   const openTicket = async (ticket: TicketThread) => {
     setSelected(ticket);
@@ -101,6 +167,40 @@ const AdminSupport = () => {
       .eq("ticket_id", ticket.id)
       .order("created_at");
     setMessages((data as Message[]) || []);
+  };
+
+  // ✅ Função para ler as mensagens do chat denunciado
+  const handleViewReportedChat = async (chatId: string) => {
+    setViewingReportChat(chatId);
+    setLoadingReportedChat(true);
+    
+    const { data: chatData } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("request_id", chatId)
+      .order("created_at", { ascending: true });
+
+    if (chatData && chatData.length > 0) {
+      const uids = [...new Set(chatData.map(m => m.sender_id))];
+      const { data: profs } = await supabase.from("profiles").select("user_id, full_name").in("user_id", uids);
+      const pMap = new Map((profs || []).map(p => [p.user_id, p.full_name]));
+      
+      const enrichedChat = chatData.map(m => ({
+        ...m,
+        sender_name: pMap.get(m.sender_id) || "Usuário"
+      }));
+      setReportedMessages(enrichedChat);
+    } else {
+      setReportedMessages([]);
+    }
+    setLoadingReportedChat(false);
+  };
+
+  // ✅ Função para marcar a denúncia como resolvida
+  const handleResolveReport = async (reportId: string) => {
+    await supabase.from("chat_reports" as any).update({ status: 'resolvido' }).eq("id", reportId);
+    toast({ title: "Denúncia resolvida com sucesso!" });
+    fetchReports(); // Recarrega a lista
   };
 
   useEffect(() => {
@@ -119,7 +219,7 @@ const AdminSupport = () => {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, reportedMessages]);
 
   const handleSend = async () => {
     if (!text.trim() || !selected || !adminId) return;
@@ -182,7 +282,6 @@ const AdminSupport = () => {
       );
     }
 
-    // ✅ NOVO: Renderiza imagens dinâmicas vindas da coluna image_urls
     if (msg.image_urls && msg.image_urls.length > 0) {
       return (
         <div className="space-y-2">
@@ -233,11 +332,14 @@ const AdminSupport = () => {
   };
 
   const threadIsClosed = selected ? (selected.status === "closed" || messages.some(m => m.content === "[CLOSED]")) : false;
+  const openTickets = tickets.filter(t => t.status !== "closed");
+  const pendingReports = reports.filter(r => r.status !== "resolvido");
 
+  // SE UM TICKET ESTIVER SELECIONADO, MOSTRA O CHAT DO SUPORTE
   if (selected) {
     const initials = selected.full_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
     return (
-      <AdminLayout title="Suporte">
+      <AdminLayout title="Atendimento">
         <div className="flex items-center gap-3 mb-4">
           <button onClick={() => { setSelected(null); fetchTickets(); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -327,64 +429,196 @@ const AdminSupport = () => {
     );
   }
 
-  const openTickets = tickets.filter(t => t.status !== "closed");
-
+  // TELA PRINCIPAL (ABAS DE SUPORTE E DENÚNCIAS)
   return (
-    <AdminLayout title="Suporte">
-      {loading ? (
-        <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
-      ) : tickets.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma conversa de suporte.</div>
-      ) : (
-        <div className="space-y-3">
-          {openTickets.length > 0 && (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4">
-              <p className="text-sm font-medium text-amber-700 flex items-center gap-2">
-                <Clock className="w-4 h-4" /> {openTickets.length} chamado(s) aberto(s)
-              </p>
+    <AdminLayout title="Central de Atendimento">
+      
+      {/* ✅ BARRA DE ABAS */}
+      <div className="flex bg-muted/30 p-1 rounded-xl mb-6 border">
+        <button
+          onClick={() => setActiveTab("support")}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+            activeTab === "support" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <HelpCircle className="w-4 h-4" />
+          Suporte {openTickets.length > 0 && <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{openTickets.length}</span>}
+        </button>
+        <button
+          onClick={() => setActiveTab("reports")}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+            activeTab === "reports" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4" />
+          Denúncias {pendingReports.length > 0 && <span className="bg-destructive text-white text-[10px] px-1.5 py-0.5 rounded-full">{pendingReports.length}</span>}
+        </button>
+      </div>
+
+      {/* CONTEÚDO DA ABA SUPORTE */}
+      {activeTab === "support" && (
+        <>
+          {loading ? (
+            <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
+          ) : tickets.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma conversa de suporte.</div>
+          ) : (
+            <div className="space-y-3">
+              {openTickets.length > 0 && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4">
+                  <p className="text-sm font-medium text-amber-700 flex items-center gap-2">
+                    <Clock className="w-4 h-4" /> {openTickets.length} chamado(s) aberto(s)
+                  </p>
+                </div>
+              )}
+              <div className="flex flex-col">
+                {tickets.map((t) => {
+                  const initials = t.full_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                  let preview = t.lastMessage;
+                  if (preview.includes("[AUDIO:")) preview = "🎤 Mensagem de voz";
+                  if (preview.includes("[IMAGE:")) preview = "📷 Imagem";
+                  if (preview.includes("[VIDEO:")) preview = "🎥 Vídeo";
+                  if (preview.includes("[FILE:")) preview = "📎 Arquivo";
+                  if (preview.includes("[CLOSED]")) preview = "✅ Chamado encerrado";
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => openTicket(t)}
+                      className={`flex items-center gap-3 px-3 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors text-left w-full ${t.status !== "closed" ? "bg-amber-500/5" : ""}`}
+                    >
+                      {t.avatar_url ? (
+                        <img src={t.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center text-sm font-bold text-amber-600">{initials}</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-semibold text-foreground truncate">{t.full_name}</p>
+                          <span className="text-[11px] text-muted-foreground">{new Date(t.lastTime).toLocaleDateString("pt-BR")}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground">{t.protocol || ""}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                            t.status === "closed" ? "bg-muted text-muted-foreground" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                          }`}>
+                            {t.status === "closed" ? "Encerrado" : "Aberto"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{preview}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
-          <div className="flex flex-col">
-            {tickets.map((t) => {
-              const initials = t.full_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-              let preview = t.lastMessage;
-              if (preview.includes("[AUDIO:")) preview = "🎤 Mensagem de voz";
-              if (preview.includes("[IMAGE:")) preview = "📷 Imagem";
-              if (preview.includes("[VIDEO:")) preview = "🎥 Vídeo";
-              if (preview.includes("[FILE:")) preview = "📎 Arquivo";
-              if (preview.includes("[CLOSED]")) preview = "✅ Chamado encerrado";
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => openTicket(t)}
-                  className={`flex items-center gap-3 px-3 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors text-left w-full ${t.status !== "closed" ? "bg-amber-500/5" : ""}`}
-                >
-                  {t.avatar_url ? (
-                    <img src={t.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center text-sm font-bold text-amber-600">{initials}</div>
-                  )}
-                  <div className="flex-1 min-w-0">
+        </>
+      )}
+
+      {/* ✅ CONTEÚDO DA ABA DENÚNCIAS */}
+      {activeTab === "reports" && (
+        <>
+          {loadingReports ? (
+            <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-destructive border-t-transparent rounded-full" /></div>
+          ) : reports.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
+              <CheckCircle2 className="w-10 h-10 text-green-500/50" />
+              <p className="text-sm font-medium">Nenhuma denúncia registrada.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {reports.map((r) => {
+                const initials = r.reporter_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                return (
+                  <div key={r.id} className={`flex flex-col gap-3 p-4 border rounded-xl ${r.status === 'resolvido' ? 'bg-muted/30 opacity-70' : 'bg-card'}`}>
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-foreground truncate">{t.full_name}</p>
-                      <span className="text-[11px] text-muted-foreground">{new Date(t.lastTime).toLocaleDateString("pt-BR")}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground">{t.protocol || ""}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                        t.status === "closed" ? "bg-muted text-muted-foreground" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                      }`}>
-                        {t.status === "closed" ? "Encerrado" : "Aberto"}
+                      <div className="flex items-center gap-3">
+                        {r.reporter_avatar ? (
+                          <img src={r.reporter_avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center text-xs font-bold text-destructive">{initials}</div>
+                        )}
+                        <div>
+                          <p className="text-sm font-bold text-foreground">{r.reporter_name}</p>
+                          <p className="text-[10px] text-muted-foreground">{new Date(r.created_at).toLocaleString("pt-BR")}</p>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] px-2 py-1 rounded-full font-bold ${r.status === 'resolvido' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {r.status === 'resolvido' ? 'Resolvido' : 'Pendente'}
                       </span>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">{preview}</p>
+                    
+                    <div className="bg-destructive/5 border border-destructive/10 p-3 rounded-lg">
+                      <p className="text-xs font-semibold text-destructive mb-1 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Motivo da denúncia:
+                      </p>
+                      <p className="text-sm text-foreground">{r.reason}</p>
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-2">
+                      <button 
+                        onClick={() => handleViewReportedChat(r.chat_id)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors"
+                      >
+                        <Eye className="w-4 h-4" /> Ler Conversa
+                      </button>
+                      
+                      {r.status !== 'resolvido' && (
+                        <button 
+                          onClick={() => handleResolveReport(r.id)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
+                        >
+                          <CheckCircle2 className="w-4 h-4" /> Marcar Resolvido
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
+
+      {/* ✅ MODAL DE VISUALIZAÇÃO DO CHAT DENUNCIADO */}
+      <Dialog open={!!viewingReportChat} onOpenChange={(open) => !open && setViewingReportChat(null)}>
+        <DialogContent className="sm:max-w-md h-[80vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b flex-shrink-0 bg-muted/30">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <MessageSquare className="w-4 h-4 text-muted-foreground" />
+              Auditoria de Conversa
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto p-4 bg-muted/10 space-y-4">
+            {loadingReportedChat ? (
+              <div className="flex justify-center py-10"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+            ) : reportedMessages.length === 0 ? (
+              <p className="text-center text-muted-foreground text-sm">Nenhuma mensagem encontrada neste chat.</p>
+            ) : (
+              reportedMessages.map((msg, idx) => {
+                // Alterna os lados baseado no remetente (simulando um chat)
+                const isFirstSender = reportedMessages[0].sender_id === msg.sender_id;
+                return (
+                  <div key={msg.id} className={`flex flex-col ${isFirstSender ? "items-start" : "items-end"}`}>
+                    <span className="text-[10px] text-muted-foreground mb-1 px-1 font-medium">{msg.sender_name}</span>
+                    <div className={`max-w-[85%] px-3 py-2 rounded-xl text-sm ${
+                      isFirstSender ? "bg-card border text-foreground rounded-tl-sm" : "bg-primary text-primary-foreground rounded-tr-sm"
+                    }`}>
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    </div>
+                    <span className="text-[9px] text-muted-foreground mt-1 px-1">
+                      {new Date(msg.created_at).toLocaleString("pt-BR", { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                )
+              })
+            )}
+            <div ref={bottomRef} />
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </AdminLayout>
   );
 };

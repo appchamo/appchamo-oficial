@@ -10,7 +10,7 @@ import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
-import SubscriptionDialog from "@/components/subscription/SubscriptionDialog"; // ✅ Caminho corrigido com 's' minúsculo
+import SubscriptionDialog from "@/components/subscription/SubscriptionDialog"; // ✅ Import correto
 
 type AccountType = "client" | "professional";
 type Step = "type" | "basic" | "documents" | "profile" | "plan";
@@ -49,8 +49,8 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
-  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false); 
+  const [selectedPlanId, setSelectedPlanId] = useState<string>("free"); // ✅ Armazena plano
+  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false); // ✅ Controle do Modal
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -90,6 +90,7 @@ const Signup = () => {
     if (!profileData) return;
     setSelectedPlanId(planId); 
     
+    // ✅ Se for pago, abre o modal de pagamento primeiro
     if (planId !== "free") {
       setIsSubscriptionOpen(true);
     } else {
@@ -97,6 +98,7 @@ const Signup = () => {
     }
   };
 
+  // ✅ Chamado após o pagamento no modal
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
     if (profileData) {
@@ -123,10 +125,7 @@ const Signup = () => {
         password: basicData.password,
         options: {
           emailRedirectTo: window.location.origin,
-          data: { 
-            full_name: basicData.name,
-            user_type: accountType,
-          },
+          data: { full_name: basicData.name },
         },
       });
 
@@ -179,12 +178,13 @@ const Signup = () => {
         return;
       }
 
+      // ✅ Define que acabou de cadastrar para a Home mostrar o cupom depois
       localStorage.setItem("just_signed_up", "true");
-      
+
       if (accountType === "professional" && planId !== "free") {
         toast({ 
-          title: "Cadastro em análise!", 
-          description: "Recebemos seus dados e pagamento. Avisaremos assim que for aprovado!" 
+          title: "Perfil em análise!", 
+          description: "Recebemos seus dados. Avisaremos assim que for aprovado!" 
         });
       } else {
         toast({ title: "Conta criada com sucesso!" });
@@ -252,6 +252,7 @@ const Signup = () => {
         />
       )}
 
+      {/* ✅ Modal de Pagamento integrado */}
       <SubscriptionDialog 
         isOpen={isSubscriptionOpen}
         onClose={() => setIsSubscriptionOpen(false)}
@@ -259,14 +260,19 @@ const Signup = () => {
         onSuccess={handleSubscriptionSuccess}
       />
 
+      {/* Modal mantido para compatibilidade, mas o fluxo agora é via Home */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
-          <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="text-center">🎉 Parabéns!</DialogTitle>
+          </DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />
             <p className="text-sm text-foreground font-medium">Você ganhou 1 cupom!</p>
           </div>
-          <button onClick={handleCouponClose} className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-semibold">Entendi!</button>
+          <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold">
+            Entendi!
+          </button>
         </DialogContent>
       </Dialog>
     </>

@@ -18,12 +18,19 @@ interface Pro {
   category_name: string;
   profession_name: string;
   category_id: string | null;
+  profession_id: string | null;
   user_type: string;
   city: string | null;
   state: string | null;
 }
 
 interface Category {
+  id: string;
+  name: string;
+}
+
+// ✅ Interface para as Profissões
+interface Profession {
   id: string;
   name: string;
 }
@@ -35,12 +42,12 @@ const Search = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [userCity, setUserCity] = useState<string | null>(null);
-  
-  // ✅ Controle de abertura do modal adicionado
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   // Filters
   const [filterCategory, setFilterCategory] = useState<string>("");
+  const [filterProfession, setFilterProfession] = useState<string>(""); // ✅ Estado para profissão
+  const [professions, setProfessions] = useState<Profession[]>([]); // ✅ Lista de profissões da categoria
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
 
@@ -53,6 +60,25 @@ const Search = () => {
     };
     loadUserCity();
   }, []);
+
+  // ✅ Carrega profissões quando a categoria muda
+  useEffect(() => {
+    const loadProfessions = async () => {
+      if (!filterCategory) {
+        setProfessions([]);
+        setFilterProfession("");
+        return;
+      }
+      const { data } = await supabase
+        .from("professions")
+        .select("id, name")
+        .eq("category_id", filterCategory)
+        .eq("active", true)
+        .order("name");
+      setProfessions(data || []);
+    };
+    loadProfessions();
+  }, [filterCategory]);
 
   const loadPros = async () => {
     setLoading(true);
@@ -94,6 +120,7 @@ const Search = () => {
       category_name: (p.categories as any)?.name || "—",
       profession_name: (p.professions as any)?.name || "",
       category_id: p.category_id,
+      profession_id: p.profession_id,
       user_type: "professional",
       city: locationMap.get(p.user_id)?.address_city || null,
       state: locationMap.get(p.user_id)?.address_state || null,
@@ -120,6 +147,7 @@ const Search = () => {
       if (!fuzzyMatch(q, target)) return false;
     }
     if (filterCategory && p.category_id !== filterCategory) return false;
+    if (filterProfession && p.profession_id !== filterProfession) return false; // ✅ Filtro de profissão
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
     if (filterVerified && !p.verified) return false;
     return true;
@@ -127,7 +155,7 @@ const Search = () => {
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5">
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24 text-foreground">
         <div className="relative mb-6">
           <div className="relative group">
             <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -147,9 +175,7 @@ const Search = () => {
         </div>
 
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-lg font-bold text-foreground">
-            {search ? `Resultados para "${search}"` : "Todos os Profissionais"}
-          </h1>
+          <h1 className="text-lg font-bold">Profissionais disponíveis</h1>
           
           <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
             <SheetTrigger asChild>
@@ -157,14 +183,13 @@ const Search = () => {
                 <SlidersHorizontal className="w-3.5 h-3.5" /> Filtros
               </button>
             </SheetTrigger>
-            <SheetContent side="bottom" className="rounded-t-3xl h-[65vh] overflow-y-auto">
+            <SheetContent side="bottom" className="rounded-t-3xl h-[85vh] overflow-y-auto">
               <SheetHeader>
                 <SheetTitle>Filtrar Profissionais</SheetTitle>
               </SheetHeader>
               <div className="py-6 space-y-6">
                 <div>
                   <label className="text-sm font-bold mb-3 block">Categoria</label>
-                  {/* ✅ autoFocus={false} adicionado para não abrir a lista sozinho */}
                   <select 
                     autoFocus={false}
                     value={filterCategory} 
@@ -175,6 +200,21 @@ const Search = () => {
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
+
+                {/* ✅ LISTA DE PROFISSÕES (SÓ APARECE SE ESCOLHER CATEGORIA) */}
+                {filterCategory && (
+                  <div className="animate-in fade-in slide-in-from-top-1">
+                    <label className="text-sm font-bold mb-3 block">Profissão específica</label>
+                    <select 
+                      value={filterProfession} 
+                      onChange={(e) => setFilterProfession(e.target.value)}
+                      className="w-full p-3 rounded-xl border bg-background text-sm"
+                    >
+                      <option value="">Qualquer profissão</option>
+                      {professions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="text-sm font-bold mb-3 block">Avaliação mínima</label>
@@ -194,11 +234,6 @@ const Search = () => {
                         />
                       </button>
                     ))}
-                    {filterMinRating > 0 && (
-                      <span className="ml-2 text-sm font-bold text-primary">
-                        {filterMinRating}+
-                      </span>
-                    )}
                   </div>
                 </div>
 
@@ -215,14 +250,14 @@ const Search = () => {
 
                 <div className="grid grid-cols-2 gap-4 pt-4">
                   <button 
-                    onClick={() => { setFilterCategory(""); setFilterMinRating(0); setFilterVerified(false); }}
+                    onClick={() => { setFilterCategory(""); setFilterProfession(""); setFilterMinRating(0); setFilterVerified(false); }}
                     className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl"
                   >
                     Limpar
                   </button>
                   <button 
                     onClick={() => setIsSheetOpen(false)}
-                    className="py-3 text-sm font-bold text-white bg-primary rounded-xl shadow-lg shadow-primary/20"
+                    className="py-3 text-sm font-bold text-white bg-primary rounded-xl"
                   >
                     Aplicar
                   </button>
@@ -240,43 +275,39 @@ const Search = () => {
           <div className="text-center py-16 bg-muted/30 rounded-2xl border-2 border-dashed">
             <SearchIcon className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
             <p className="text-sm font-medium text-muted-foreground">Nenhum profissional encontrado.</p>
-            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterVerified(false);}} className="text-xs text-primary font-bold mt-2">Ver todos os profissionais</button>
+            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterProfession(""); setFilterVerified(false);}} className="text-xs text-primary font-bold mt-2">Ver todos</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {filtered.map((pro) => {
-              const initials = pro.full_name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
-              return (
-                <Link
-                  key={pro.id}
-                  to={`/professional/${pro.id}`}
-                  className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 hover:shadow-md transition-all group"
-                >
-                  <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
-                    {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : initials}
+            {filtered.map((pro) => (
+              <Link
+                key={pro.id}
+                to={`/professional/${pro.id}`}
+                className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group"
+              >
+                <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
+                  {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : pro.full_name[0]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1">
+                    <p className="font-bold text-sm text-foreground truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
+                    {pro.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <p className="text-xs text-muted-foreground truncate font-medium">{pro.category_name} · {pro.profession_name}</p>
+                  <div className="flex items-center justify-between mt-1">
                     <div className="flex items-center gap-1">
-                      <p className="font-bold text-sm text-foreground truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
-                      {pro.verified && <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />}
+                      <Star className="w-3.5 h-3.5 fill-primary text-primary" />
+                      <span className="text-xs font-bold">{Number(pro.rating).toFixed(1)}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{pro.category_name} · {pro.profession_name}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-1">
-                        <Star className="w-3.5 h-3.5 fill-primary text-primary" />
-                        <span className="text-xs font-bold">{Number(pro.rating).toFixed(1)}</span>
-                        <span className="text-[10px] text-muted-foreground">({pro.total_services})</span>
-                      </div>
-                      {pro.city && (
-                        <p className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                          <MapPin className="w-3 h-3" /> {pro.city}
-                        </p>
-                      )}
-                    </div>
+                    {pro.city && (
+                      <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 font-medium">
+                        <MapPin className="w-3 h-3" /> {pro.city}
+                      </p>
+                    )}
                   </div>
-                </Link>
-              );
-            })}
+                </div>
+              </Link>
+            ))}
           </div>
         )}
       </main>

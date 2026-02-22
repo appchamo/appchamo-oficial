@@ -10,6 +10,7 @@ import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
+import SubscriptionModal from "@/components/SubscriptionModal"; // ✅ Adicionado
 
 type AccountType = "client" | "professional";
 type Step = "type" | "basic" | "documents" | "profile" | "plan";
@@ -48,7 +49,8 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>("free"); // ✅ Armazena o plano escolhido
+  const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false); // ✅ Adicionado
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -86,8 +88,22 @@ const Signup = () => {
 
   const handlePlanSelect = (planId: string) => {
     if (!profileData) return;
-    setSelectedPlanId(planId); // ✅ Guarda o plano para saber o destino final
-    doSignup(profileData, planId);
+    setSelectedPlanId(planId); 
+    
+    // ✅ Se for plano pago, abre o modal de pagamento primeiro
+    if (planId !== "free") {
+      setShowSubscriptionModal(true);
+    } else {
+      doSignup(profileData, planId);
+    }
+  };
+
+  // ✅ Função chamada após o sucesso no SubscriptionModal
+  const handleSubscriptionSuccess = () => {
+    setShowSubscriptionModal(false);
+    if (profileData) {
+      doSignup(profileData, selectedPlanId);
+    }
   };
 
   const doSignup = async (
@@ -165,7 +181,19 @@ const Signup = () => {
         return;
       }
 
-      setCouponPopup(true);
+      // ✅ Em vez de abrir o cupom aqui, avisamos que redirecionará
+      localStorage.setItem("show_welcome_coupon", "true"); // Sinalizador para a Home
+      
+      if (accountType === "professional" && planId !== "free") {
+        toast({ 
+          title: "Assinatura realizada!", 
+          description: "Seu perfil está em análise. Redirecionando..." 
+        });
+      } else {
+        toast({ title: "Conta criada com sucesso!" });
+      }
+
+      navigate("/home");
     } catch (err: any) {
       toast({
         title: "Erro ao criar conta.",
@@ -177,24 +205,10 @@ const Signup = () => {
     setLoading(false);
   };
 
-  // 🔥 ALTERAÇÃO AQUI: Lógica de redirecionamento inteligente
+  // Mantido caso precise de fallback, mas a navegação agora é direta no doSignup
   const handleCouponClose = () => {
     setCouponPopup(false);
-    
-    // Se for Profissional e escolheu plano pago, vai para análise
-    if (accountType === "professional" && selectedPlanId !== "free") {
-      toast({ 
-        title: "Dados em análise!", 
-        description: "Seu perfil está sendo verificado. Avisaremos assim que for aprovado!" 
-      });
-      // Aqui você pode redirecionar para uma página de "Aguarde aprovação" 
-      // ou para a Home, mas com o perfil travado (depende de como está sua Home)
-      navigate("/home"); 
-    } else {
-      // Clientes ou Profissionais FREE vão direto
-      toast({ title: "Conta criada com sucesso!" });
-      navigate("/home");
-    }
+    navigate("/home");
   };
 
   if (loading) {
@@ -242,33 +256,23 @@ const Signup = () => {
         />
       )}
 
+      {/* ✅ Modal de Assinatura integrado ao fluxo */}
+      <SubscriptionModal 
+        isOpen={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        planId={selectedPlanId}
+        onSuccess={handleSubscriptionSuccess}
+      />
+
+      {/* ✅ Mantido apenas para compatibilidade, o cupom real será na Home */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
-          <DialogHeader>
-            <DialogTitle className="text-center">🎉 Parabéns!</DialogTitle>
-          </DialogHeader>
-
+          <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
-            <div className="w-16 h-16 rounded-full bg-accent flex items-center justify-center">
-              <Ticket className="w-8 h-8 text-primary" />
-            </div>
-
-            <p className="text-sm text-foreground font-medium">
-              Você ganhou <strong className="text-primary">1 cupom</strong> para o sorteio mensal!
-            </p>
-
-            <p className="text-xs text-muted-foreground">
-              O cupom já foi adicionado à sua conta.
-              Continue usando o Chamô para ganhar mais cupons.
-            </p>
+            <Ticket className="w-16 h-16 text-primary" />
+            <p className="text-sm font-medium text-foreground">Você ganhou 1 cupom!</p>
           </div>
-
-          <button
-            onClick={handleCouponClose}
-            className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-          >
-            Entendi!
-          </button>
+          <button onClick={handleCouponClose} className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-semibold">Entendi!</button>
         </DialogContent>
       </Dialog>
     </>

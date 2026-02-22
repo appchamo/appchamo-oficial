@@ -757,7 +757,7 @@ const MessageThread = () => {
     return null;
   };
 
-  // ✅ NOVO: Função para upload de comprovante único
+  // ✅ NOVO: Função para upload de comprovante único (revisada para 1732 linhas)
   const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userId || !threadId) return;
@@ -779,7 +779,8 @@ const MessageThread = () => {
       const { error: msgError } = await supabase.from("chat_messages").insert({
         request_id: threadId,
         sender_id: userId,
-        content: `📄 COMPROVANTE ENVIADO\nArquivo: ${file.name}\n\n[FILE:${urlData.publicUrl}:${file.name}]`
+        content: `📄 COMPROVANTE ENVIADO\nArquivo: ${file.name}\n\n[FILE:${urlData.publicUrl}:${file.name}]`,
+        image_urls: [urlData.publicUrl]
       });
 
       if (msgError) throw msgError;
@@ -831,7 +832,7 @@ const MessageThread = () => {
     }
 
     if (isBilling && billing) {
-      // ✅ AJUSTE: Verifica se já existe mensagem de confirmação de pagamento para BLOQUEAR re-pagamento
+      // ✅ BLOQUEIO: Verifica se já existe mensagem de confirmação para impedir duplo pagamento
       const alreadyPaid = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial"));
 
       return (
@@ -846,7 +847,7 @@ const MessageThread = () => {
           {!isMine && (
             alreadyPaid ? (
               <div className="mt-2 w-full py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-600 text-center flex items-center justify-center gap-1.5 uppercase">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Pagamento efetuado com sucesso
+                <CheckCircle2 className="w-3 h-3" /> Pagamento efetuado com sucesso
               </div>
             ) : (
               <button
@@ -892,12 +893,26 @@ const MessageThread = () => {
       );
     }
 
-    // Render images inline from photo URLs
+    // ✅ Renderização de fotos dinâmicas (Mantendo o que funcionou antes)
+    if (msg.image_urls && msg.image_urls.length > 0) {
+      return (
+        <div className="space-y-2">
+          <div className={`grid ${msg.image_urls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-1.5`}>
+            {msg.image_urls.map((url, j) => (
+              <img key={j} src={url} alt="Mídia do chat" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
+            ))}
+          </div>
+          {msg.content && <p className="text-sm">{msg.content}</p>}
+        </div>
+      );
+    }
+
+    // Fallback para Regex de fotos (do lovable original)
     const imageUrlRegex = /(https?:\/\/[^\s]+?\.(png|jpg|jpeg|webp|gif))/gi;
     const parts = msg.content.split("\n");
     const hasImages = imageUrlRegex.test(msg.content);
 
-    if (hasImages) {
+    if (hasImages && (!msg.image_urls || msg.image_urls.length === 0)) {
       return (
         <div className="space-y-2">
           {parts.map((line, i) => {
@@ -1069,7 +1084,7 @@ const MessageThread = () => {
         <div ref={bottomRef} />
       </main>
 
-      {/* Input bar */}
+      {/* Input bar / FLUXO DE COMPROVANTE */}
       {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" ?
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
           <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
@@ -1077,9 +1092,9 @@ const MessageThread = () => {
               {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : "Serviço finalizado — chat encerrado"}
             </p>
 
-            {/* ✅ BLOCO DE COMPROVANTE (Apenas para o cliente) */}
+            {/* ✅ BLOCO DE COMPROVANTE (Apenas para o cliente ao fechar o chat) */}
             {!isProfessional && requestStatus !== "rejected" && (
-              <div className="w-full max-w-xs mt-2 space-y-2 p-4 bg-background border rounded-2xl shadow-sm">
+              <div className="w-full max-w-xs mt-2 space-y-2 p-4 bg-background border rounded-2xl shadow-sm animate-in fade-in zoom-in duration-300">
                 <p className="text-xs font-bold text-center">Deseja enviar o comprovante?</p>
                 
                 {messages.some(m => m.content.includes("📄 COMPROVANTE ENVIADO") && m.sender_id === userId) ? (

@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { MessageSquare, MoreVertical, Archive, Trash2, EyeOff, AlertTriangle, Inbox } from "lucide-react";
+import { MessageSquare, MoreVertical, Archive, Trash2, EyeOff, AlertTriangle, Inbox, Mic } from "lucide-react"; // ✅ Adicionado o ícone Mic
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,7 +33,6 @@ interface Thread {
   lastMessage: string | null;
   lastMessageTime: string | null;
   unreadCount: number;
-  // ✅ Novos campos de status
   is_archived: boolean;
   manual_unread: boolean;
 }
@@ -45,7 +44,7 @@ const Messages = () => {
   const [supportLastMsg, setSupportLastMsg] = useState<string | null>(null);
   const [supportLastTime, setSupportLastTime] = useState<string | null>(null);
   const [hasSupportMessages, setHasSupportMessages] = useState(false);
-  const [showArchived, setShowArchived] = useState(false); // ✅ Controle da visão de arquivados
+  const [showArchived, setShowArchived] = useState(false);
   const navigate = useNavigate();
 
   const [reportingChatId, setReportingChatId] = useState<string | null>(null);
@@ -57,7 +56,7 @@ const Messages = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
-    // Load support thread info (mantido)
+    // Load support thread info
     const { data: supportMsgs, count: totalSupport } = await supabase
       .from("support_messages")
       .select("*", { count: "exact" })
@@ -92,7 +91,6 @@ const Messages = () => {
     const unique = Array.from(new Map(allReqs.map(r => [r.id, r])).values());
     const threadIds = unique.map(r => r.id);
 
-    // ✅ Busca status estendidos (arquivado, deletado, não lido manual)
     const { data: readStatuses } = await supabase
       .from("chat_read_status" as any)
       .select("request_id, last_read_at, is_archived, is_deleted, manual_unread")
@@ -104,7 +102,7 @@ const Messages = () => {
     const enriched: Thread[] = await Promise.all(unique.map(async (req: any) => {
       const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
       
-      if (statusData.is_deleted) return null as any; // Se deletado, ignora
+      if (statusData.is_deleted) return null as any;
 
       const isClient = req.client_id === user.id;
       let otherName = "Usuário";
@@ -152,7 +150,6 @@ const Messages = () => {
 
   useEffect(() => { load(); }, []);
 
-  // ✅ FUNÇÕES REAIS DOS BOTÕES
   const handleArchive = async (chatId: string, current: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("chat_read_status" as any).update({ is_archived: !current }).eq("user_id", user?.id).eq("request_id", chatId);
@@ -200,9 +197,21 @@ const Messages = () => {
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   };
 
+  // ✅ Função Auxiliar para renderizar a última mensagem limpa
+  const renderLastMessage = (msg: string | null) => {
+    if (!msg) return "Nova conversa";
+    if (msg.startsWith("[AUDIO:")) {
+      return (
+        <span className="flex items-center gap-1 text-primary">
+          <Mic className="w-3.5 h-3.5" /> Mensagem de áudio
+        </span>
+      );
+    }
+    return msg;
+  };
+
   if (loading) return <AppLayout><main className="max-w-screen-lg mx-auto px-4 py-10 text-center text-muted-foreground">Carregando...</main></AppLayout>;
 
-  // ✅ Filtra threads baseado se estamos vendo a pasta de arquivados ou não
   const activeThreads = threads.filter(t => !t.is_archived);
   const archivedThreads = threads.filter(t => t.is_archived);
   const currentList = showArchived ? archivedThreads : activeThreads;
@@ -239,7 +248,10 @@ const Messages = () => {
                 {supportLastTime && <span className="text-[11px] text-muted-foreground">{timeLabel(supportLastTime)}</span>}
               </div>
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs truncate text-muted-foreground">{supportLastMsg || "Fale com o suporte"}</p>
+                <div className="text-xs truncate text-muted-foreground">
+                  {/* ✅ Suporte também mascarando áudio se houver */}
+                  {renderLastMessage(supportLastMsg || "Fale com o suporte")}
+                </div>
                 {supportUnread > 0 && <span className="min-w-[20px] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5">{supportUnread}</span>}
               </div>
             </div>
@@ -255,7 +267,6 @@ const Messages = () => {
               <div key={t.id} className={`flex items-center gap-3 px-2 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors rounded-lg ${hasUnread ? "bg-primary/5" : ""}`}>
                 <div 
                   onClick={() => {
-                    // ✅ Se abrir conversa marcada como não lida, remove a marcação
                     if (t.manual_unread) handleMarkUnread(t.id, true);
                     navigate(`/messages/${t.id}`);
                   }}
@@ -272,9 +283,10 @@ const Messages = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className={`text-sm truncate ${hasUnread ? "font-bold text-foreground" : "font-semibold text-foreground"}`}>{t.otherName}</p>
-                    <p className={`text-xs truncate mt-0.5 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                      {t.lastMessage || "Nova conversa"}
-                    </p>
+                    <div className={`text-xs truncate mt-0.5 flex items-center gap-1 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                      {/* ✅ Chamando a função para esconder o link do áudio */}
+                      {renderLastMessage(t.lastMessage)}
+                    </div>
                   </div>
                 </div>
 

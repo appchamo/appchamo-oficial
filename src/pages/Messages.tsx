@@ -242,6 +242,7 @@ const Messages = () => {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs truncate text-muted-foreground">
+                  {/* ✅ Suporte também mascarando áudio se houver */}
                   {renderLastMessage(supportLastMsg || "Fale com o suporte")}
                 </div>
                 {supportUnread > 0 && <span className="min-w-[20px] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5">{supportUnread}</span>}
@@ -254,6 +255,8 @@ const Messages = () => {
           {currentList.map((t) => {
             const initials = t.otherName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
             const hasUnread = t.unreadCount > 0 || t.manual_unread;
+            // ✅ Identifica se o chat já foi finalizado (esconde botão de arquivar se estiver ativo)
+            const isChatFinished = t.status === "completed" || t.status === "closed" || t.status === "cancelled" || t.status === "rejected";
 
             return (
               <div key={t.id} className={`flex items-center gap-3 px-2 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors rounded-lg ${hasUnread ? "bg-primary/5" : ""}`}>
@@ -276,6 +279,7 @@ const Messages = () => {
                   <div className="flex-1 min-w-0">
                     <p className={`text-sm truncate ${hasUnread ? "font-bold text-foreground" : "font-semibold text-foreground"}`}>{t.otherName}</p>
                     <div className={`text-xs truncate mt-0.5 flex items-center gap-1 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                      {/* ✅ Chamando a função para esconder o link do áudio */}
                       {renderLastMessage(t.lastMessage)}
                     </div>
                   </div>
@@ -297,10 +301,15 @@ const Messages = () => {
                         <EyeOff className="w-4 h-4 text-muted-foreground" />
                         <span className="font-medium text-sm">{t.manual_unread ? "Marcar como lida" : "Marcar como não lida"}</span>
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2">
-                        <Archive className="w-4 h-4 text-muted-foreground" />
-                        <span className="font-medium text-sm">{t.is_archived ? "Desarquivar" : "Arquivar conversa"}</span>
-                      </DropdownMenuItem>
+                      
+                      {/* ✅ BLOQUEIO AQUI: Só mostra o arquivar se o chat estiver finalizado/cancelado */}
+                      {isChatFinished && (
+                        <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2">
+                          <Archive className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-medium text-sm">{t.is_archived ? "Desarquivar" : "Arquivar conversa"}</span>
+                        </DropdownMenuItem>
+                      )}
+                      
                       <DropdownMenuSeparator />
                       <DropdownMenuItem 
                         onClick={() => setReportingChatId(t.id)} 

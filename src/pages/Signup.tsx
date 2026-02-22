@@ -10,7 +10,7 @@ import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
-import SubscriptionModal from "@/components/SubscriptionModal"; // ✅ Adicionado
+import SubscriptionDialog from "@/components/SubscriptionDialog"; // ✅ Adicionado import correto
 
 type AccountType = "client" | "professional";
 type Step = "type" | "basic" | "documents" | "profile" | "plan";
@@ -50,7 +50,7 @@ const Signup = () => {
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
-  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false); // ✅ Adicionado
+  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false); // ✅ Controle do Modal
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -86,21 +86,21 @@ const Signup = () => {
     }
   };
 
+  // ✅ Modificado para abrir o Modal antes de criar a conta se for plano pago
   const handlePlanSelect = (planId: string) => {
     if (!profileData) return;
     setSelectedPlanId(planId); 
     
-    // ✅ Se for plano pago, abre o modal de pagamento primeiro
     if (planId !== "free") {
-      setShowSubscriptionModal(true);
+      setIsSubscriptionOpen(true);
     } else {
       doSignup(profileData, planId);
     }
   };
 
-  // ✅ Função chamada após o sucesso no SubscriptionModal
+  // ✅ Função chamada quando o pagamento é preenchido/confirmado no modal
   const handleSubscriptionSuccess = () => {
-    setShowSubscriptionModal(false);
+    setIsSubscriptionOpen(false);
     if (profileData) {
       doSignup(profileData, selectedPlanId);
     }
@@ -181,13 +181,13 @@ const Signup = () => {
         return;
       }
 
-      // ✅ Em vez de abrir o cupom aqui, avisamos que redirecionará
-      localStorage.setItem("show_welcome_coupon", "true"); // Sinalizador para a Home
+      // ✅ Em vez de abrir o popup aqui, salvamos no localStorage para a Home abrir depois
+      localStorage.setItem("just_signed_up", "true");
       
       if (accountType === "professional" && planId !== "free") {
         toast({ 
-          title: "Assinatura realizada!", 
-          description: "Seu perfil está em análise. Redirecionando..." 
+          title: "Cadastro em análise!", 
+          description: "Recebemos seus dados e pagamento. Avisaremos assim que for aprovado!" 
         });
       } else {
         toast({ title: "Conta criada com sucesso!" });
@@ -205,7 +205,6 @@ const Signup = () => {
     setLoading(false);
   };
 
-  // Mantido caso precise de fallback, mas a navegação agora é direta no doSignup
   const handleCouponClose = () => {
     setCouponPopup(false);
     navigate("/home");
@@ -256,21 +255,21 @@ const Signup = () => {
         />
       )}
 
-      {/* ✅ Modal de Assinatura integrado ao fluxo */}
-      <SubscriptionModal 
-        isOpen={showSubscriptionModal}
-        onClose={() => setShowSubscriptionModal(false)}
+      {/* ✅ Modal de Assinatura integrado ao fluxo de cadastro */}
+      <SubscriptionDialog 
+        isOpen={isSubscriptionOpen}
+        onClose={() => setIsSubscriptionOpen(false)}
         planId={selectedPlanId}
         onSuccess={handleSubscriptionSuccess}
       />
 
-      {/* ✅ Mantido apenas para compatibilidade, o cupom real será na Home */}
+      {/* ✅ O Modal de cupom agora só será chamado via Home, mas mantemos a estrutura por segurança */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />
-            <p className="text-sm font-medium text-foreground">Você ganhou 1 cupom!</p>
+            <p className="text-sm text-foreground font-medium">Você ganhou 1 cupom!</p>
           </div>
           <button onClick={handleCouponClose} className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-semibold">Entendi!</button>
         </DialogContent>

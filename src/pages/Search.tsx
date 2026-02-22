@@ -55,10 +55,16 @@ const Search = () => {
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
 
+  // ✅ AJUSTE: Permite calcular distância mesmo sem login (usando Patrocínio como base temporária)
   useEffect(() => {
     const loadUserLocation = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      
+      if (!user) {
+        // Se NÃO estiver logado, assume o centro de Patrocínio para não quebrar a tela de testes
+        setUserCoords({ lat: -18.9431, lng: -46.9922 });
+        return;
+      }
       
       const { data } = await supabase.from("profiles").select("address_city, latitude, longitude").eq("user_id", user.id).single();
       
@@ -67,6 +73,7 @@ const Search = () => {
       if (data?.latitude && data?.longitude) {
         setUserCoords({ lat: data.latitude, lng: data.longitude });
       } else {
+        // Fallback caso o perfil do usuário logado não tenha coordenadas
         setUserCoords({ lat: -18.9431, lng: -46.9922 });
       }
     };
@@ -172,7 +179,7 @@ const Search = () => {
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
     if (filterVerified && !p.verified) return false;
     
-    // ✅ AJUSTE NOVO: FILTRA PELA DISTÂNCIA EM TEMPO REAL
+    // Filtra pela distância
     if (p.distance !== undefined && p.distance > filterRadius) return false;
     
     return true;
@@ -207,22 +214,25 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <label className="text-sm font-bold flex items-center gap-2">
-                      <Navigation className="w-4 h-4 text-primary" /> Distância máxima
-                    </label>
-                    <span className="text-xs font-bold text-primary">{filterRadius} km</span>
+                {/* BARRA DE DISTÂNCIA */}
+                {userCoords && (
+                  <div>
+                    <div className="flex justify-between items-center mb-3">
+                      <label className="text-sm font-bold flex items-center gap-2">
+                        <Navigation className="w-4 h-4 text-primary" /> Distância máxima
+                      </label>
+                      <span className="text-xs font-bold text-primary">{filterRadius} km</span>
+                    </div>
+                    <Slider 
+                      value={[filterRadius]} 
+                      onValueChange={([v]) => setFilterRadius(v)} 
+                      max={150} 
+                      step={5} 
+                      className="py-4"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Mostrando profissionais em até {filterRadius}km de você.</p>
                   </div>
-                  <Slider 
-                    value={[filterRadius]} 
-                    onValueChange={([v]) => setFilterRadius(v)} 
-                    max={150} 
-                    step={5} 
-                    className="py-4"
-                  />
-                  <p className="text-[10px] text-muted-foreground">Mostrando profissionais em até {filterRadius}km de você.</p>
-                </div>
+                )}
 
                 <div>
                   <label className="text-sm font-bold mb-3 block">Categoria</label>
@@ -292,7 +302,8 @@ const Search = () => {
                       <Star className="w-3.5 h-3.5 fill-primary text-primary" />
                       <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
                     </div>
-                    {pro.distance !== undefined && (
+                    {/* SÓ MOSTRA A DISTÂNCIA SE TIVER A COORDENADA DO USUÁRIO VÁLIDA */}
+                    {userCoords && pro.distance !== undefined && (
                       <p className="text-[10px] text-primary font-bold bg-primary/5 px-2 py-0.5 rounded-full">
                         {pro.distance < 1 ? 'Menos de 1km' : `${Math.round(pro.distance)} km`}
                       </p>

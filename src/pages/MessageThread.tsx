@@ -7,11 +7,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+// 1. ATUALIZAMOS A INTERFACE PARA ACEITAR O ARRAY DE IMAGENS
 interface Message {
   id: string;
   sender_id: string;
   content: string;
   created_at: string;
+  image_urls?: string[] | null; // Adicionado aqui
 }
 
 interface OtherParty {
@@ -449,7 +451,6 @@ const MessageThread = () => {
     );
 
     if (isBilling && billing) {
-      // 🔍 VERIFICA SE O PAGAMENTO JÁ FOI FEITO NESTE CHAT
       const alreadyPaid = messages.some(m => 
         m.content.includes("✅ PAGAMENTO CONFIRMADO") || 
         m.content.includes("🤝 Pagamento presencial")
@@ -464,7 +465,6 @@ const MessageThread = () => {
           <p className="text-lg font-bold">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
           <p className="text-xs opacity-80">{billing.desc}</p>
           
-          {/* SÓ MOSTRA O BOTÃO SE NÃO FOR O PROFISSIONAL E SE NÃO ESTIVER PAGO */}
           {!isMine && !alreadyPaid && (
             <button
               onClick={() => openPayment(msg)}
@@ -474,7 +474,6 @@ const MessageThread = () => {
             </button>
           )}
 
-          {/* ✅ AVISO DE PAGAMENTO CONCLUÍDO (VERDE E ENCAIXADO) */}
           {alreadyPaid && !isMine && (
             <div className="mt-2 w-full py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[9px] font-bold text-emerald-600 text-center uppercase tracking-wider flex items-center justify-center gap-1.5">
               <CheckCircle2 className="w-3 h-3" />
@@ -492,20 +491,25 @@ const MessageThread = () => {
       </div>
     );
 
-    const imageUrlRegex = /(https?:\/\/[^\s]+?\.(png|jpg|jpeg|webp|gif))/gi;
-    if (imageUrlRegex.test(msg.content)) {
-      const urls = msg.content.match(imageUrlRegex);
-      return (
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-1.5">
-            {urls?.map((url, j) => <img key={j} src={url} alt="" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />)}
+    // ✅ FIX: RENDERIZAÇÃO DAS IMAGENS DINÂMICAS DO CAMPO image_urls
+    return (
+      <div className="space-y-2">
+        {msg.image_urls && msg.image_urls.length > 0 && (
+          <div className="grid grid-cols-2 gap-1.5 mb-2">
+            {msg.image_urls.map((url, j) => (
+              <img 
+                key={j} 
+                src={url} 
+                alt="" 
+                className="w-full aspect-square rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity border border-white/10 shadow-sm" 
+                onClick={() => window.open(url, '_blank')} 
+              />
+            ))}
           </div>
-          <p>{msg.content.split("\n").filter(l => !l.startsWith("Fotos:")).join("\n")}</p>
-        </div>
-      );
-    }
-
-    return <p className="whitespace-pre-wrap">{msg.content}</p>;
+        )}
+        <p className="whitespace-pre-wrap">{msg.content}</p>
+      </div>
+    );
   };
 
   const otherInitials = otherParty.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
@@ -558,6 +562,7 @@ const MessageThread = () => {
         <div ref={bottomRef} />
       </main>
 
+      {/* FOOTER & DIALOGS (MANTIDOS IGUAIS) */}
       {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" ? (
         <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3 text-center space-y-2">
           <p className="text-sm text-muted-foreground">{requestStatus === "rejected" ? "Chamada recusada" : "Serviço finalizado"}</p>
@@ -587,7 +592,7 @@ const MessageThread = () => {
         </div>
       )}
 
-      {/* DIALOGS */}
+      {/* DIALOGS MANTIDOS IGUAIS... */}
       <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><DollarSign className="w-5 h-5 text-primary" /> Cobrar</DialogTitle></DialogHeader>

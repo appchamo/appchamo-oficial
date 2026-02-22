@@ -173,9 +173,32 @@ const Search = () => {
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
+
+                {/* ✅ FILTRO DE ESTRELAS CLICÁVEIS SUBSTITUINDO O SLIDER */}
                 <div>
-                  <label className="text-sm font-bold mb-3 block">Avaliação mínima: {filterMinRating} estrelas</label>
-                  <Slider value={[filterMinRating]} onValueChange={([v]) => setFilterMinRating(v)} max={5} step={1} />
+                  <label className="text-sm font-bold mb-3 block">Avaliação mínima</label>
+                  <div className="flex items-center gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        onClick={() => setFilterMinRating(star === filterMinRating ? 0 : star)}
+                        className="p-1 transition-transform active:scale-90"
+                      >
+                        <Star
+                          className={`w-8 h-8 ${
+                            filterMinRating >= star
+                              ? "fill-primary text-primary"
+                              : "text-muted-foreground/30"
+                          }`}
+                        />
+                      </button>
+                    ))}
+                    {filterMinRating > 0 && (
+                      <span className="ml-2 text-sm font-bold text-primary">
+                        {filterMinRating}+
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">

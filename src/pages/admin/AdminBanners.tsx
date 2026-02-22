@@ -142,10 +142,10 @@ const AdminBanners = () => {
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
 
-            {/* ✅ SEÇÃO DESKTOP */}
+            {/* ✅ SEÇÃO DESKTOP (1080x460) */}
             <div className="p-3 border-2 border-dashed rounded-2xl bg-muted/20">
               <label className="text-xs font-bold text-foreground mb-3 flex items-center gap-2 uppercase tracking-tighter">
-                <Monitor className="w-4 h-4 text-primary" /> Imagem Desktop (Larga)
+                <Monitor className="w-4 h-4 text-primary" /> IMAGEM DESKTOP (1080x460)
               </label>
               {form.image_url ? (
                 <div className="relative rounded-xl overflow-hidden border mb-2">
@@ -157,22 +157,22 @@ const AdminBanners = () => {
               ) : (
                 <ImageCropUpload
                   onUpload={(url) => setForm(f => ({ ...f, image_url: url }))}
-                  aspect={16/5}
+                  aspect={1080/460}
                   shape="rect"
                   bucketPath="branding"
-                  label="Upload Desktop"
+                  label="Upload Desktop (1080x460)"
                 />
               )}
             </div>
 
-            {/* ✅ SEÇÃO MOBILE */}
+            {/* ✅ SEÇÃO MOBILE (1080x360) */}
             <div className="p-3 border-2 border-dashed rounded-2xl bg-muted/20">
               <label className="text-xs font-bold text-foreground mb-3 flex items-center gap-2 uppercase tracking-tighter">
-                <Smartphone className="w-4 h-4 text-primary" /> Imagem Mobile (Vertical/Quadrada)
+                <Smartphone className="w-4 h-4 text-primary" /> IMAGEM MOBILE (1080x360)
               </label>
               {form.image_url_mobile ? (
-                <div className="relative rounded-xl overflow-hidden border mb-2 w-32 mx-auto">
-                  <img src={form.image_url_mobile} alt="Banner Mobile" className="w-full h-32 object-cover" />
+                <div className="relative rounded-xl overflow-hidden border mb-2">
+                  <img src={form.image_url_mobile} alt="Banner Mobile" className="w-full h-24 object-cover" />
                   <button onClick={() => setForm(f => ({ ...f, image_url_mobile: "" }))} className="absolute top-1 right-1 p-1 rounded-full bg-destructive text-destructive-foreground">
                     <X className="w-3 h-3" />
                   </button>
@@ -180,10 +180,10 @@ const AdminBanners = () => {
               ) : (
                 <ImageCropUpload
                   onUpload={(url) => setForm(f => ({ ...f, image_url_mobile: url }))}
-                  aspect={4/5}
+                  aspect={1080/360}
                   shape="rect"
                   bucketPath="branding"
-                  label="Upload Mobile"
+                  label="Upload Mobile (1080x360)"
                 />
               )}
             </div>

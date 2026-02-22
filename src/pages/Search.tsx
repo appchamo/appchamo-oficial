@@ -164,7 +164,9 @@ const Search = () => {
               <div className="py-6 space-y-6">
                 <div>
                   <label className="text-sm font-bold mb-3 block">Categoria</label>
+                  {/* ✅ autoFocus={false} adicionado para não abrir a lista sozinho */}
                   <select 
+                    autoFocus={false}
                     value={filterCategory} 
                     onChange={(e) => setFilterCategory(e.target.value)}
                     className="w-full p-3 rounded-xl border bg-background text-sm"
@@ -174,7 +176,6 @@ const Search = () => {
                   </select>
                 </div>
 
-                {/* ✅ FILTRO DE ESTRELAS CLICÁVEIS SUBSTITUINDO O SLIDER */}
                 <div>
                   <label className="text-sm font-bold mb-3 block">Avaliação mínima</label>
                   <div className="flex items-center gap-2">
@@ -219,7 +220,6 @@ const Search = () => {
                   >
                     Limpar
                   </button>
-                  {/* ✅ BOTÃO APLICAR ADICIONADO: FECHA O MODAL */}
                   <button 
                     onClick={() => setIsSheetOpen(false)}
                     className="py-3 text-sm font-bold text-white bg-primary rounded-xl shadow-lg shadow-primary/20"

@@ -65,7 +65,7 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate("/login"); return; }
 
-      // Check if the TARGET professional has reached their free plan call limit
+      // Check professional call limit
       const { data: proRecord } = await supabase.from("professionals").select("user_id").eq("id", professionalId).maybeSingle();
       if (proRecord) {
         const { data: proSub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", proRecord.user_id).maybeSingle();
@@ -79,28 +79,28 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
         }
       }
 
-      // Upload photos
+      // 1. Upload photos to Storage
       const photoUrls: string[] = [];
       for (const p of photos) {
-        const fileName = `service-requests/${Date.now()}-${Math.random().toString(36).slice(2)}.webp`;
-        const { error } = await supabase.storage.from("uploads").upload(fileName, p.file, { contentType: p.file.type });
-        if (!error) {
+        const fileExt = p.file.name.split('.').pop();
+        const fileName = `chat/${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from("uploads")
+          .upload(fileName, p.file);
+
+        if (!uploadError) {
           const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
           photoUrls.push(urlData.publicUrl);
         }
       }
 
-      // Build description
+      // 2. Build description for the Request record
       let fullDesc = withDetails && description.trim()
         ? description.trim()
         : `Solicitação de serviço para ${professionalName}`;
 
-      if (withDetails && date) {
-        fullDesc += `\n\nData desejada: ${date}`;
-      }
-      if (photoUrls.length > 0) {
-        fullDesc += `\n\nFotos: ${photoUrls.join(", ")}`;
-      }
+      if (withDetails && date) fullDesc += `\n\nData desejada: ${date}`;
 
       const { data: req, error: reqError } = await supabase.from("service_requests").insert({
         client_id: user.id,
@@ -113,7 +113,7 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
       const requestId = (req as any).id;
       const protocol = (req as any).protocol;
 
-      // Send protocol as system message
+      // 3. Send protocol as system message
       if (protocol) {
         await supabase.from("chat_messages").insert({
           request_id: requestId,
@@ -122,18 +122,20 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
         });
       }
 
-      // Auto-send first message in chat
+      // 4. ✅ FIX: Auto-send first message WITH IMAGES
       let autoMsg = withDetails && description.trim()
         ? `Olá, gostaria de contratar o seu serviço!\n\n${description.trim()}${date ? `\nData desejada: ${date}` : ""}`
         : "Olá, gostaria de contratar o seu serviço!";
 
+      // Enviamos a mensagem incluindo o array de URLs das fotos
       await supabase.from("chat_messages").insert({
         request_id: requestId,
         sender_id: user.id,
         content: autoMsg,
+        image_urls: photoUrls.length > 0 ? photoUrls : null // Adicionamos as fotos aqui
       });
 
-      // Notify the professional
+      // 5. Notify the professional
       if (proRecord) {
         await supabase.from("notifications").insert({
           user_id: proRecord.user_id,

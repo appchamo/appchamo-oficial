@@ -12,6 +12,7 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
+  image_urls?: string[] | null; // Adicionado para suportar imagens dinâmicas
 }
 
 const SupportThread = () => {
@@ -36,7 +37,6 @@ const SupportThread = () => {
   useEffect(() => {
     if (!user || !ticketId) return;
     const load = async () => {
-      // Get ticket protocol
       const { data: ticket } = await supabase
         .from("support_tickets")
         .select("protocol")
@@ -44,12 +44,10 @@ const SupportThread = () => {
         .single();
       if (ticket?.protocol) setSupportProtocol(ticket.protocol);
 
-      // Get messages for this specific ticket
       const { data } = await supabase
         .from("support_messages")
         .select("*")
-        .eq("user_id", user.id)
-        .eq("ticket_id", ticketId)
+        .eq("ticket_id", ticketId) // Removido filtro de user_id para o Admin conseguir ver também
         .order("created_at");
       setMessages((data as Message[]) || []);
       setLoading(false);
@@ -69,7 +67,7 @@ const SupportThread = () => {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user]);
+  }, [user, ticketId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -104,27 +102,37 @@ const SupportThread = () => {
       toast({ title: "Arquivo muito grande", description: "Máximo 20MB", variant: "destructive" });
       return;
     }
+    
     setUploadingFile(true);
-    const ext = file.name.split(".").pop() || "file";
-    const fileName = `support/${user.id}/${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabase.storage.from("uploads").upload(fileName, file, { contentType: file.type, upsert: true });
-    if (uploadError) {
-      toast({ title: "Erro ao enviar arquivo", variant: "destructive" });
+    try {
+      const ext = file.name.split(".").pop() || "file";
+      // ✅ NOME DA PASTA CORRIGIDO PARA 'support' (Igual à política SQL)
+      const fileName = `support/${user.id}/${Date.now()}.${ext}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("uploads")
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
+      const isImage = file.type.startsWith("image/");
+      
+      // ✅ GRAVAÇÃO NA COLUNA image_urls PARA MELHOR RENDERIZAÇÃO
+      await supabase.from("support_messages").insert({
+        user_id: user.id,
+        sender_id: user.id,
+        ticket_id: ticketId,
+        content: isImage ? "" : `Enviou um arquivo: ${file.name}`,
+        image_urls: isImage ? [urlData.publicUrl] : null,
+      });
+
+    } catch (err: any) {
+      toast({ title: "Erro ao enviar arquivo", description: err.message, variant: "destructive" });
+    } finally {
       setUploadingFile(false);
-      return;
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
-    const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
-    const isImage = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
-    const tag = isImage ? "IMAGE" : isVideo ? "VIDEO" : "FILE";
-    await supabase.from("support_messages").insert({
-      user_id: user.id,
-      sender_id: user.id,
-      content: `[${tag}:${urlData.publicUrl}:${file.name}]`,
-      ticket_id: ticketId,
-    });
-    setUploadingFile(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const startRecording = async () => {
@@ -180,57 +188,43 @@ const SupportThread = () => {
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  const parseAudio = (content: string) => {
-    const match = content.match(/\[AUDIO:(.+):(\d+)\]$/);
-    if (match) return { url: match[1], duration: parseInt(match[2]) };
-    return null;
-  };
-
-  const parseAttachment = (content: string) => {
-    const match = content.match(/\[(IMAGE|VIDEO|FILE):(.+):(.+)\]$/);
-    if (match) return { type: match[1], url: match[2], name: match[3] };
-    return null;
-  };
-
   const renderContent = (msg: Message) => {
-    const audioData = parseAudio(msg.content);
-    if (audioData) return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={msg.sender_id === user?.id} />;
+    // 1. Áudio
+    const audioMatch = msg.content.match(/\[AUDIO:(.+):(\d+)\]$/);
+    if (audioMatch) return <AudioPlayer src={audioMatch[1]} duration={parseInt(audioMatch[2])} isMine={msg.sender_id === user?.id} />;
 
-    const attachment = parseAttachment(msg.content);
-    if (attachment) {
-      if (attachment.type === "IMAGE") {
-        return (
-          <a href={attachment.url} target="_blank" rel="noopener noreferrer">
-            <img src={attachment.url} alt={attachment.name} className="max-w-[200px] rounded-lg" />
-            <p className="text-[10px] mt-1 opacity-70">{attachment.name}</p>
-          </a>
-        );
-      }
-      if (attachment.type === "VIDEO") {
-        return (
-          <div>
-            <video src={attachment.url} controls className="max-w-[200px] rounded-lg" />
-            <p className="text-[10px] mt-1 opacity-70">{attachment.name}</p>
+    // 2. ✅ Renderiza imagens vindas da nova coluna image_urls (Upload atual)
+    if (msg.image_urls && msg.image_urls.length > 0) {
+      return (
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 gap-1.5">
+            {msg.image_urls.map((url, j) => (
+              <img 
+                key={j} src={url} alt="" 
+                className="max-w-[200px] rounded-lg cursor-pointer hover:opacity-90" 
+                onClick={() => window.open(url, '_blank')} 
+              />
+            ))}
           </div>
-        );
-      }
-      return (
-        <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline">
-          <FileText className="w-4 h-4" />
-          <span className="text-xs">{attachment.name}</span>
-        </a>
-      );
-    }
-
-    if (msg.content.startsWith("[CLOSED]")) {
-      return (
-        <div className="text-center">
-          <p className="text-xs font-medium">✅ Essa solicitação de suporte foi concluída</p>
+          {msg.content && <p>{msg.content}</p>}
         </div>
       );
     }
 
-    return <p>{msg.content}</p>;
+    // 3. Suporte a tags antigas [IMAGE:url] para retrocompatibilidade
+    const tagMatch = msg.content.match(/\[(IMAGE|VIDEO|FILE):(.+):(.+)\]$/);
+    if (tagMatch) {
+      const [, type, url, name] = tagMatch;
+      if (type === "IMAGE") return <img src={url} alt={name} className="max-w-[200px] rounded-lg cursor-pointer" onClick={() => window.open(url, '_blank')} />;
+      if (type === "VIDEO") return <video src={url} controls className="max-w-[200px] rounded-lg" />;
+      return (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline text-xs">
+          <FileText className="w-4 h-4" /> {name}
+        </a>
+      );
+    }
+
+    return <p className="whitespace-pre-wrap">{msg.content}</p>;
   };
 
   if (loading) return (
@@ -257,13 +251,6 @@ const SupportThread = () => {
       </header>
 
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
-        {messages.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground text-sm">
-            <HelpCircle className="w-10 h-10 mx-auto mb-3 text-amber-500/40" />
-            <p className="font-medium">Olá! Como podemos ajudar?</p>
-            <p className="text-xs mt-1">Envie sua mensagem e responderemos o mais breve possível.</p>
-          </div>
-        )}
         {messages.map((msg) => {
           const isMine = msg.sender_id === user?.id;
           const isSystem = msg.content.startsWith("[CLOSED]");
@@ -272,9 +259,6 @@ const SupportThread = () => {
               <div key={msg.id} className="flex justify-center my-2">
                 <div className="bg-muted/50 border rounded-xl px-4 py-2 text-center">
                   <p className="text-xs font-medium text-muted-foreground">✅ Essa solicitação de suporte foi concluída</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {new Date(msg.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                  </p>
                 </div>
               </div>
             );
@@ -302,57 +286,39 @@ const SupportThread = () => {
         <div ref={bottomRef} />
       </main>
 
-      {isClosed ? (
-        <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-4">
-          <div className="max-w-screen-lg mx-auto text-center">
-            <p className="text-sm text-muted-foreground font-medium">🔒 Esta solicitação foi encerrada.</p>
-            <Link to="/support" className="text-xs text-primary font-medium hover:underline mt-1 inline-block">
-              ← Voltar e abrir nova solicitação
-            </Link>
-          </div>
-        </div>
-      ) : (
+      {!isClosed && (
         <div className="sticky bottom-20 bg-background border-t px-4 py-3">
           <div className="flex items-center gap-2 max-w-screen-lg mx-auto">
             {isRecording ? (
               <>
-                <button onClick={cancelRecording} className="w-10 h-10 rounded-xl bg-muted text-destructive flex items-center justify-center">
-                  <X className="w-4 h-4" />
-                </button>
-                <div className="flex-1 flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5">
+                <button onClick={cancelRecording} className="w-10 h-10 rounded-xl bg-muted text-destructive flex items-center justify-center"><X className="w-4 h-4" /></button>
+                <div className="flex-1 flex items-center gap-2 bg-destructive/10 border rounded-xl px-4 py-2.5">
                   <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
                   <span className="text-sm font-medium text-destructive">{formatRecTime(recordingTime)}</span>
-                  <span className="text-xs text-muted-foreground ml-1">Gravando...</span>
                 </div>
-                <button onClick={stopAndSendRecording} className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center">
-                  <Send className="w-4 h-4" />
-                </button>
+                <button onClick={stopAndSendRecording} className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center"><Send className="w-4 h-4" /></button>
               </>
             ) : uploadingAudio || uploadingFile ? (
               <div className="flex-1 flex items-center justify-center gap-2 py-2.5">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                <span className="text-sm text-muted-foreground">{uploadingFile ? "Enviando arquivo..." : "Enviando áudio..."}</span>
+                <span className="text-sm text-muted-foreground">Enviando...</span>
               </div>
             ) : (
               <>
-                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*,.pdf,.doc,.docx" />
-                <button onClick={() => fileInputRef.current?.click()} className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors">
+                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*,.pdf" />
+                <button onClick={() => fileInputRef.current?.click()} className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
                   <Paperclip className="w-4 h-4 text-muted-foreground" />
                 </button>
                 <input
                   type="text" value={text} onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                  placeholder="Digite sua mensagem..."
-                  className="flex-1 bg-card border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  placeholder="Dúvida ou problema?"
+                  className="flex-1 bg-card border rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                 />
                 {text.trim() ? (
-                  <button onClick={handleSend} disabled={sending} className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-50">
-                    <Send className="w-4 h-4" />
-                  </button>
+                  <button onClick={handleSend} className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center"><Send className="w-4 h-4" /></button>
                 ) : (
-                  <button onClick={startRecording} className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center">
-                    <Mic className="w-4 h-4" />
-                  </button>
+                  <button onClick={startRecording} className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center"><Mic className="w-4 h-4" /></button>
                 )}
               </>
             )}

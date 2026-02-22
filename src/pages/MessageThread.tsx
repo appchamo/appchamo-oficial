@@ -1,24 +1,18 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { 
-  ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, 
-  Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, 
-  Crown, BadgeDollarSign, CreditCard, QrCode, Image as ImageIcon,
-  ShieldCheck, Clock, Info
-} from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface Message {
   id: string;
   sender_id: string;
   content: string;
   created_at: string;
-  image_urls?: string[] | null;
+  image_urls?: string[] | null; // ✅ Mantido do VS Code
 }
 
 interface OtherParty {
@@ -37,7 +31,7 @@ const MessageThread = () => {
   const [isProfessional, setIsProfessional] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // --- ESTADOS DO PROFISSIONAL (Billing) ---
+  // Billing state
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingStep, setBillingStep] = useState<"choose_type" | "app_form" | "presencial_confirm">("choose_type");
   const [billingAmount, setBillingAmount] = useState("");
@@ -50,34 +44,39 @@ const MessageThread = () => {
   const [hasRated, setHasRated] = useState(false);
   const [proPlanId, setProPlanId] = useState<string | null>(null);
 
-  // --- ESTADOS DO CLIENTE (Payment) ---
+  // Payment state (client side)
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentData, setPaymentData] = useState<{amount: string; desc: string; msgId: string;} | null>(null);
+  const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string;} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [cardStep, setCardStep] = useState(false);
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
   const [installments, setInstallments] = useState("1");
   const [processingPayment, setProcessingPayment] = useState(false);
-  const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
-  const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
-  const [couponDiscount, setCouponDiscount] = useState<{type: string; value: number;} | null>(null);
 
-  // --- ESTADOS DE AVALIAÇÃO E RECOMPENSA ---
+  // Rating state
   const [ratingOpen, setRatingOpen] = useState(false);
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [requestStatus, setRequestStatus] = useState<string>("pending");
-  const [rewardCoupon, setRewardCoupon] = useState<{type: string; value: number;} | null>(null);
+
+  // Coupon state
+  const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
+  const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
+  const [couponDiscount, setCouponDiscount] = useState<{type: string;value: number;} | null>(null);
+
+  // Reward coupon state
+  const [rewardCoupon, setRewardCoupon] = useState<{type: string;value: number;} | null>(null);
   const [rewardOpen, setRewardOpen] = useState(false);
 
-  // --- ESTADOS DO PIX ---
-  const [pixData, setPixData] = useState<{qrCode: string; copyPaste: string; paymentId: string;} | null>(null);
+  // PIX state
+  const [pixData, setPixData] = useState<{qrCode: string;copyPaste: string;paymentId: string;} | null>(null);
   const [pixOpen, setPixOpen] = useState(false);
   const [pixPolling, setPixPolling] = useState(false);
   const [pixCopied, setPixCopied] = useState(false);
   const pixIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // --- ESTADOS DE ÁUDIO ---
+  // Audio recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -85,68 +84,69 @@ const MessageThread = () => {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // --- CARREGAMENTO INICIAL ---
   useEffect(() => {
     const load = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      setUserId(user.id);
+      if (user) setUserId(user.id);
 
       const { data: req } = await supabase.from("service_requests").select("*").eq("id", threadId!).maybeSingle();
-      if (req) {
+      if (req && user) {
         setRequestStatus(req.status);
         setRequestProtocol((req as any).protocol || null);
         const isClient = req.client_id === user.id;
 
-        // Check if user is the professional
-        const { data: pro } = await supabase.from("professionals").select("user_id, id").eq("id", req.professional_id).maybeSingle();
-        if (pro && pro.user_id === user.id) {
-          setIsProfessional(true);
-          const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
-          setProPlanId(sub?.plan_id || "free");
-        }
-
-        // Ratings check for client
         if (isClient && (req.status === "completed" || req.status === "closed")) {
           const { count } = await supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId!).eq("client_id", user.id);
           if ((count || 0) > 0) setHasRated(true);
         }
 
-        // Load names/avatars
+        if (!isClient) {
+          const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
+          if (pro && pro.user_id === user.id) {
+            setIsProfessional(true);
+            const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
+            setProPlanId(sub?.plan_id || "free");
+          }
+        }
+
         if (isClient) {
+          const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
-            const { data: profile } = await supabase.from("profiles_public").select("full_name, avatar_url").eq("user_id", pro.user_id).single();
+            const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
             if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
           }
         } else {
-          const { data: profile } = await supabase.from("profiles_public").select("full_name, avatar_url").eq("user_id", req.client_id).single();
+          const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
           if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
         }
       }
 
-      const { data: chatData } = await supabase.from("chat_messages").select("*").eq("request_id", threadId!).order("created_at");
-      setMessages(chatData as Message[] || []);
+      const { data } = await supabase.from("chat_messages").select("*").eq("request_id", threadId!).order("created_at");
+      setMessages(data as Message[] || []);
     };
     if (threadId) load();
   }, [threadId]);
 
-  // --- REALTIME SYNC ---
   useEffect(() => {
     if (!threadId) return;
-    const channel = supabase.channel(`chat-${threadId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
-      (payload) => setMessages((prev) => [...prev, payload.new as Message]))
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests", filter: `id=eq.${threadId}` },
-      (payload) => {
-        const updated = payload.new as any;
-        setRequestStatus(updated.status);
-        if (updated.protocol) setRequestProtocol(updated.protocol);
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const channel = supabase.channel(`chat-${threadId}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
+    (payload) => {
+      setMessages((prev) => [...prev, payload.new as Message]);
+    }).subscribe();
+    return () => {supabase.removeChannel(channel);};
   }, [threadId]);
 
-  // --- AUTO-SCROLL AND READ MARKER ---
+  useEffect(() => {
+    if (!threadId) return;
+    const channel = supabase.channel(`req-status-${threadId}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests", filter: `id=eq.${threadId}` },
+    (payload) => {
+      const updated = payload.new as any;
+      setRequestStatus(updated.status);
+      if (updated.protocol) setRequestProtocol(updated.protocol);
+    }).subscribe();
+    return () => {supabase.removeChannel(channel);};
+  }, [threadId]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     if (threadId && userId) {
@@ -157,7 +157,6 @@ const MessageThread = () => {
     }
   }, [messages, threadId, userId]);
 
-  // --- MESSAGE ACTIONS ---
   const handleSend = async () => {
     if (!text.trim() || !userId || !threadId) return;
     setSending(true);
@@ -166,12 +165,11 @@ const MessageThread = () => {
       sender_id: userId,
       content: text.trim()
     });
-    if (error) toast({ title: "Erro ao enviar", variant: "destructive" });
+    if (error) toast({ title: "Erro ao enviar mensagem", variant: "destructive" });
     else setText("");
     setSending(false);
   };
 
-  // --- AUDIO LOGIC ---
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -184,11 +182,16 @@ const MessageThread = () => {
       setIsRecording(true);
       setRecordingTime(0);
       recordingTimerRef.current = setInterval(() => setRecordingTime((t) => t + 1), 1000);
-    } catch { toast({ title: "Acesso ao microfone negado", variant: "destructive" }); }
+    } catch {
+      toast({ title: "Não foi possível acessar o microfone", description: "Verifique as permissões do navegador.", variant: "destructive" });
+    }
   };
 
   const cancelRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") mediaRecorderRef.current.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.onstop = () => { mediaRecorderRef.current?.stream?.getTracks().forEach((t) => t.stop()); };
+      mediaRecorderRef.current.stop();
+    }
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setIsRecording(false);
     setRecordingTime(0);
@@ -201,30 +204,34 @@ const MessageThread = () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     const recorder = mediaRecorderRef.current;
     await new Promise<void>((resolve) => {
-      recorder.onstop = () => resolve();
+      const prevOnStop = recorder.onstop;
+      recorder.onstop = (e) => { if (typeof prevOnStop === 'function') prevOnStop.call(recorder, e); resolve(); };
       recorder.stop();
     });
     setIsRecording(false);
-    const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+    const ext = MediaRecorder.isTypeSupported('audio/webm') ? 'webm' : 'm4a';
+    const mimeType = ext === 'webm' ? 'audio/webm' : 'audio/mp4';
+    const blob = new Blob(audioChunksRef.current, { type: mimeType });
     if (blob.size < 1000) { setUploadingAudio(false); setRecordingTime(0); return; }
-    const fileName = `audio/${userId}/${Date.now()}.webm`;
-    const { error: uploadError } = await supabase.storage.from("uploads").upload(fileName, blob);
-    if (!uploadError) {
-      const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
-      await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: `[AUDIO:${urlData.publicUrl}:${recordingTime}]` });
-    }
+    const fileName = `audio/${userId}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await supabase.storage.from("uploads").upload(fileName, blob, { contentType: mimeType, upsert: true });
+    if (uploadError) { toast({ title: "Erro ao enviar áudio", variant: "destructive" }); setUploadingAudio(false); setRecordingTime(0); return; }
+    const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
+    await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: `[AUDIO:${urlData.publicUrl}:${recordingTime}]` });
     setUploadingAudio(false);
     setRecordingTime(0);
   };
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  // --- BILLING LOGIC (PROFESSIONAL) ---
   const loadFeeSettings = async () => {
     const { data } = await supabase.from("platform_settings").select("key, value");
     if (data) {
       const map: Record<string, string> = {};
-      data.forEach(s => map[s.key] = String(s.value));
+      for (const s of data) {
+        const val = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
+        map[s.key] = val;
+      }
       setFeeSettings(map);
     }
   };
@@ -237,12 +244,20 @@ const MessageThread = () => {
       const pct = parseFloat(feeSettings.pix_fee_pct || "0");
       const fixed = parseFloat(feeSettings.pix_fee_fixed || "0");
       const fee = amount * pct / 100 + fixed;
-      return { fee, label: `Taxa PIX: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2)}` : ""} = R$ ${fee.toFixed(2)}` };
+      return { fee, label: `Taxa PIX: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
     }
     if (billingMethod === "card") {
-      const pct = parseFloat(feeSettings.card_fee_pct || "0");
-      const fee = amount * pct / 100;
-      return { fee, label: `Taxa Cartão: ${pct}% = R$ ${fee.toFixed(2)}` };
+      const inst = parseInt(billingInstallments);
+      if (inst === 1) {
+        const pct = parseFloat(feeSettings.card_fee_pct || "0");
+        const fixed = parseFloat(feeSettings.card_fee_fixed || "0");
+        const fee = amount * pct / 100 + fixed;
+        return { fee, label: `Taxa cartão à vista: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
+      } else {
+        const pct = parseFloat(feeSettings[`installment_fee_${inst}x`] || "0");
+        const fee = amount * pct / 100;
+        return { fee, label: `Taxa ${inst}x: ${pct}% = R$ ${fee.toFixed(2).replace(".", ",")}` };
+      }
     }
     return null;
   };
@@ -253,8 +268,12 @@ const MessageThread = () => {
     const maxInst = parseInt(feeSettings.max_installments || "12");
     const options = [];
     for (let i = 1; i <= maxInst; i++) {
+      const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
+      const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
+      const fee = amount * feePct / 100 + feeFixed;
       const val = (amount / i).toFixed(2).replace(".", ",");
-      options.push({ value: String(i), label: `${i}x de R$ ${val}` });
+      const feeLabel = fee > 0 ? ` (taxa: ${feePct}%)` : "";
+      options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} à vista${feeLabel}` : `${i}x de R$ ${val}${feeLabel}` });
     }
     return options;
   };
@@ -262,22 +281,16 @@ const MessageThread = () => {
   const handleSendBilling = async () => {
     if (!billingAmount || !userId || !threadId || !billingMethod) return;
     const amount = parseFloat(billingAmount);
+    if (isNaN(amount) || amount <= 0) {toast({ title: "Valor inválido", variant: "destructive" });return;}
     const methodLabel = billingMethod === "pix" ? "PIX" : `Cartão ${billingInstallments}x`;
     const feeInfo = getBillingFeeLabel();
     const feeText = feeInfo ? `\nTaxa: ${feeInfo.label}` : "";
     const billingContent = `💰 COBRANÇA\nValor: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}${feeText}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}]`;
-
     const { error } = await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: billingContent });
-    if (!error) {
-      setBillingOpen(false);
-      setBillingAmount("");
-      setBillingDesc("");
-      setBillingMethod(null);
-      toast({ title: "Cobrança enviada com sucesso!" });
-    }
+    if (error) toast({ title: "Erro ao enviar cobrança", variant: "destructive" });
+    else { setBillingOpen(false); setBillingAmount(""); setBillingDesc(""); setBillingMethod(null); setBillingInstallments("1"); toast({ title: "Cobrança enviada!" }); }
   };
 
-  // --- PAYMENT LOGIC (CLIENT) ---
   const parseBilling = (content: string) => {
     const matchNew = content.match(/\[COBRAR:([0-9.]+):(.+?):(\w+):(\d+)\]/);
     if (matchNew) return { amount: matchNew[1], desc: matchNew[2], method: matchNew[3] as "pix" | "card", installments: matchNew[4] };
@@ -290,18 +303,28 @@ const MessageThread = () => {
     const billing = parseBilling(msg.content);
     if (!billing) return;
     setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id });
-    if (billing.method) {
-      setPaymentMethod(billing.method);
-      setCardStep(billing.method === "card");
-      if (billing.method === "card") setInstallments(billing.installments);
-    }
+    if (billing.method) { setPaymentMethod(billing.method); setCardStep(billing.method === "card"); if (billing.method === "card") setInstallments(billing.installments); }
+    else { setPaymentMethod(null); setCardStep(false); setInstallments("1"); }
+    setPaymentConfirmed(false);
+    setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
+    setSelectedCouponId(null);
+    setCouponDiscount(null);
     setPaymentOpen(true);
-    // Load coupons
     if (userId) {
-      const { data } = await supabase.from("coupons").select("*").eq("user_id", userId).eq("coupon_type", "discount").eq("used", false);
-      setAvailableCoupons(data || []);
+      const { data } = await supabase.from("coupons").select("*").eq("user_id", userId).eq("coupon_type", "discount").eq("used", false).order("created_at", { ascending: false });
+      const valid = (data || []).filter((c: any) => !c.expires_at || new Date(c.expires_at) > new Date());
+      setAvailableCoupons(valid);
     }
   };
+
+  const applyCoupon = (couponId: string) => {
+    const coupon = availableCoupons.find((c) => c.id === couponId);
+    if (!coupon) return;
+    setSelectedCouponId(couponId);
+    setCouponDiscount({ type: coupon.discount_percent > 0 ? "percentage" : "fixed", value: coupon.discount_percent });
+  };
+
+  const removeCoupon = () => { setSelectedCouponId(null); setCouponDiscount(null); };
 
   const getDiscountedAmount = () => {
     if (!paymentData || !couponDiscount) return paymentData ? parseFloat(paymentData.amount) : 0;
@@ -309,28 +332,38 @@ const MessageThread = () => {
     return couponDiscount.type === "percentage" ? Math.max(0, amount * (1 - couponDiscount.value / 100)) : Math.max(0, amount - couponDiscount.value);
   };
 
-  const formatCardNumber = (v: string) => v.replace(/\D/g, "").slice(0, 16).replace(/(\d{4})(?=\d)/g, "$1 ");
-  const formatExpiry = (v: string) => v.replace(/\D/g, "").slice(0, 4).replace(/(\d{2})(?=\d)/, "$1/");
+  const formatCardNumber = (value: string) => { const digits = value.replace(/\D/g, "").slice(0, 16); return digits.replace(/(\d{4})(?=\d)/g, "$1 "); };
+  const formatExpiry = (value: string) => { const digits = value.replace(/\D/g, "").slice(0, 4); if (digits.length > 2) return `${digits.slice(0, 2)}/${digits.slice(2)}`; return digits; };
+
+  const handleSelectMethod = (method: "pix" | "card") => { setPaymentMethod(method); if (method === "card") setCardStep(true); };
+
+  const getInstallmentOptions = () => {
+    if (!paymentData) return [];
+    const amount = getDiscountedAmount();
+    const options = [];
+    const maxInstallments = amount >= 100 ? 12 : amount >= 50 ? 6 : amount >= 20 ? 3 : 1;
+    for (let i = 1; i <= maxInstallments; i++) {
+      const val = (amount / i).toFixed(2).replace(".", ",");
+      options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista)` : `${i}x de R$ ${val}` });
+    }
+    return options;
+  };
 
   const handleConfirmPayment = async () => {
     if (!paymentMethod || !paymentData || !userId || !threadId) return;
-    if (paymentMethod === "card" && (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv)) {
-      toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
-      return;
+    if (paymentMethod === "card") {
+      if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) { toast({ title: "Preencha todos os dados do cartão", variant: "destructive" }); return; }
+      if (cardForm.number.replace(/\s/g, "").length < 16) { toast({ title: "Número do cartão inválido", variant: "destructive" }); return; }
+      const { data: profileCheck } = await supabase.from("profiles").select("address_zip, address_number").eq("user_id", userId).single();
+      const hasAddress = (profileCheck?.address_zip || cardForm.postalCode) && (profileCheck?.address_number || cardForm.addressNumber);
+      if (!hasAddress) { toast({ title: "Preencha o CEP e número do endereço", variant: "destructive" }); return; }
     }
-
     setProcessingPayment(true);
     try {
       const { data: profile } = await supabase.from("profiles").select("*").eq("user_id", userId).single();
-      if (!profile?.cpf && !profile?.cnpj) {
-        toast({ title: "Cadastre seu CPF/CNPJ no perfil primeiro." });
-        setPaymentOpen(false);
-        navigate("/profile");
-        return;
-      }
-
-      const expiryParts = cardForm.expiry.split("/");
+      if (!profile?.cpf && !profile?.cnpj) { toast({ title: "Cadastre seu CPF ou CNPJ no perfil antes de realizar pagamentos.", variant: "destructive" }); setProcessingPayment(false); setPaymentOpen(false); navigate("/profile"); return; }
       const finalAmount = getDiscountedAmount();
+      const expiryParts = cardForm.expiry.split("/");
       
       const res = await supabase.functions.invoke("create_payment", {
         body: {
@@ -339,63 +372,41 @@ const MessageThread = () => {
           amount: finalAmount,
           billing_type: paymentMethod === "pix" ? "PIX" : "CREDIT_CARD",
           installment_count: parseInt(installments),
-          credit_card: paymentMethod === "card" ? {
-            holder_name: cardForm.name,
-            number: cardForm.number.replace(/\s/g, ""),
-            expiry_month: expiryParts[0],
-            expiry_year: `20${expiryParts[1]}`,
-            cvv: cardForm.cvv
-          } : null,
-          credit_card_holder_info: {
-            name: profile.full_name || cardForm.name,
-            email: profile.email || "",
-            cpf_cnpj: profile.cpf || profile.cnpj || "",
-            postal_code: profile.address_zip || cardForm.postalCode || "",
-            address_number: profile.address_number || cardForm.addressNumber || "",
-            phone: profile.phone || ""
-          }
+          credit_card: paymentMethod === "card" ? { holder_name: cardForm.name, number: cardForm.number.replace(/\s/g, ""), expiry_month: expiryParts[0], expiry_year: `20${expiryParts[1]}`, cvv: cardForm.cvv } : null,
+          credit_card_holder_info: { name: profile?.full_name || cardForm.name, email: profile?.email || "", cpf_cnpj: profile?.cpf || profile?.cnpj || "", postal_code: profile?.address_zip || cardForm.postalCode || "", address_number: profile?.address_number || cardForm.addressNumber || "", phone: profile?.phone || "" }
         }
       });
 
-      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no pagamento");
+      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no processamento");
 
       if (paymentMethod === "pix") {
         setPixData({ qrCode: res.data.pix_qr_code, copyPaste: res.data.pix_copy_paste, paymentId: res.data.payment_id });
-        setPaymentOpen(false);
-        setPixOpen(true);
-        setPixPolling(true);
+        setProcessingPayment(false); setPaymentOpen(false); setPixOpen(true); setPixCopied(false); setPixPolling(true);
         if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
         pixIntervalRef.current = setInterval(async () => {
           const check = await supabase.functions.invoke("create_payment", { body: { action: "check_payment_status", payment_id: res.data.payment_id } });
           if (check.data?.confirmed) {
-            clearInterval(pixIntervalRef.current!);
-            setPixOpen(false);
-            const discountNote = couponDiscount ? `\nDesconto aplicado.` : "";
-            await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2)}${discountNote}\nMétodo: PIX` });
+            clearInterval(pixIntervalRef.current!); setPixPolling(false); setPixOpen(false);
+            await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2).replace(".", ",")}\nMétodo: PIX` });
             if (selectedCouponId) await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
-            setRatingOpen(true);
+            setRatingStars(0); setRatingOpen(true);
           }
         }, 5000);
       } else {
-        const discountNote = couponDiscount ? `\nDesconto aplicado.` : "";
-        await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2)}${discountNote}\nMétodo: Cartão de Crédito` });
+        await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2).replace(".", ",")}\nMétodo: Cartão de Crédito` });
         if (selectedCouponId) await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
-        setPaymentOpen(false);
-        setRatingOpen(true);
+        setProcessingPayment(false); setPaymentConfirmed(true); setPaymentOpen(false); toast({ title: "Pagamento confirmado!" });
+        setTimeout(() => { setRatingStars(0); setRatingOpen(true); }, 350);
       }
-    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
-    finally { setProcessingPayment(false); }
+    } catch (err: any) { setProcessingPayment(false); toast({ title: err.message || "Erro no processamento", variant: "destructive" }); }
   };
 
   const handleSubmitRating = async () => {
     if (ratingStars === 0 || !userId || !threadId) return;
     const { error } = await supabase.rpc("submit_review", { _request_id: threadId, _rating: ratingStars, _comment: ratingComment || null });
-    if (!error) {
-      setRatingOpen(false);
-      setHasRated(true);
-      setRequestStatus("completed");
-      toast({ title: "Avaliação enviada!" });
-      // Award coupon logic
+    if (error) toast({ title: "Erro na avaliação", variant: "destructive" });
+    else {
+      setRequestStatus("completed"); setRatingOpen(false); setHasRated(true); toast({ title: "Obrigado pela avaliação!" });
       const isDiscount = Math.random() > 0.5;
       if (isDiscount) {
         await supabase.from("coupons").insert({ user_id: userId, coupon_type: "discount", source: "payment", discount_percent: 10 } as any);
@@ -408,118 +419,76 @@ const MessageThread = () => {
     }
   };
 
-  // --- RENDER LOGIC ---
   const renderMessageContent = (msg: Message) => {
     const billing = parseBilling(msg.content);
     const isMine = msg.sender_id === userId;
-    const audioMatch = msg.content.match(/\[AUDIO:(.+):(\d+)\]$/);
+    const audioData = msg.content.match(/\[AUDIO:(.+):(\d+)\]$/);
+    if (audioData) return <AudioPlayer src={audioData[1]} duration={parseInt(audioData[2])} isMine={isMine} />;
 
-    if (audioMatch) return <AudioPlayer src={audioMatch[1]} duration={parseInt(audioMatch[2])} isMine={isMine} />;
-
-    if (msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA")) {
-      return (
-        <div className="bg-muted/80 border rounded-2xl px-5 py-3 text-center shadow-sm w-full">
-          <p className="text-xs font-bold text-foreground mb-1">{msg.content.split("\n")[0].replace("📋 ", "")}</p>
-          <p className="text-[10px] text-muted-foreground">Sistema Chamô • Referência de Atendimento</p>
-        </div>
-      );
-    }
+    if (msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA")) return (
+      <div className="text-center w-full my-2"><div className="inline-block bg-muted/80 border rounded-xl px-4 py-2"><p className="text-xs font-semibold text-foreground">{msg.content.split("\n")[0]}</p></div></div>
+    );
 
     if (msg.content.includes("💰 COBRANÇA") && billing) {
-      const alreadyPaid = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial"));
+      const alreadyPaid = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO"));
       return (
-        <div className="space-y-3 p-2 min-w-[200px]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2"><DollarSign className="w-5 h-5 text-emerald-500" /><span className="font-black text-sm uppercase tracking-tighter">Cobrança</span></div>
-            <ShieldCheck className="w-4 h-4 text-primary opacity-50" />
-          </div>
-          <div>
-            <p className="text-2xl font-black text-foreground">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
-            <p className="text-[11px] font-bold text-muted-foreground uppercase">{billing.desc}</p>
-          </div>
-          {!isMine && !alreadyPaid && (
-            <button onClick={() => openPayment(msg)} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-black text-xs shadow-lg shadow-primary/20 active:scale-95 transition-all">PAGAR AGORA</button>
-          )}
-          {alreadyPaid && (
-            <div className="w-full py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 flex items-center justify-center gap-2 text-[10px] font-black uppercase"><CheckCircle2 className="w-4 h-4" /> Pagamento Confirmado</div>
-          )}
+        <div className="space-y-2 p-1">
+          <div className="flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /><span className="font-bold text-sm text-foreground">Cobrança</span></div>
+          <p className="text-xl font-black text-foreground">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
+          <p className="text-[10px] opacity-70 italic text-muted-foreground">{billing.desc}</p>
+          {!isMine && !alreadyPaid && <button onClick={() => openPayment(msg)} className="mt-2 w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-sm">Pagar agora</button>}
+          {alreadyPaid && <div className="mt-2 w-full py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-600 text-center flex items-center justify-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Pago</div>}
         </div>
       );
     }
 
-    if (msg.content.includes("✅ PAGAMENTO CONFIRMADO")) {
-      return (
-        <div className="flex flex-col gap-1 p-1">
-          <p className="font-black text-sm text-emerald-600 flex items-center gap-1.5 uppercase tracking-tighter"><CheckCircle2 className="w-5 h-5" /> Serviço Pago</p>
-          <p className="text-[11px] text-muted-foreground font-medium">O valor já foi processado e liberado para o profissional.</p>
-        </div>
-      );
-    }
+    if (msg.content.includes("✅ PAGAMENTO CONFIRMADO")) return <p className="font-bold text-sm text-emerald-600 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Pagamento confirmado</p>;
 
+    // ✅ FIX: Renderiza imagens dinâmicas (image_urls) OU regex do Lovable
     if (msg.image_urls && msg.image_urls.length > 0) {
       return (
-        <div className="flex flex-col gap-2 max-w-[260px]">
-          <div className={`grid ${msg.image_urls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-1.5`}>
-            {msg.image_urls.map((url, j) => (
-              <div key={j} className="aspect-square rounded-xl overflow-hidden border border-white/10 shadow-sm bg-muted/20">
-                <img src={url} className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform" onClick={() => window.open(url, '_blank')} />
-              </div>
-            ))}
+        <div className="flex flex-col gap-2 max-w-[240px]">
+          <div className={`grid ${msg.image_urls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-1`}>
+            {msg.image_urls.map((url, j) => <img key={j} src={url} className="rounded-lg w-full object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />)}
           </div>
-          {msg.content && <p className="text-sm leading-relaxed">{msg.content}</p>}
+          {msg.content && <p className="text-sm">{msg.content}</p>}
         </div>
       );
     }
 
-    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>;
+    return <p className="whitespace-pre-wrap text-sm">{msg.content}</p>;
   };
 
-  const otherInitials = otherParty.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const otherInitials = otherParty.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
       <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b">
-        <div className="flex items-center gap-3 px-4 py-3 max-w-screen-lg mx-auto">
-          <Link to="/messages" className="p-2 rounded-xl hover:bg-muted transition-all active:scale-90"><ArrowLeft className="w-5 h-5" /></Link>
-          <div className="relative">
-            {otherParty.avatar_url ? (
-              <img src={otherParty.avatar_url} className="w-10 h-10 rounded-full object-cover border-2 border-background shadow-sm" />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-black text-primary border-2 border-background shadow-sm">{otherInitials}</div>
-            )}
-            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-card rounded-full" />
-          </div>
+        <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
+          <Link to="/messages" className="p-1.5 rounded-lg hover:bg-muted"><ArrowLeft className="w-5 h-5 text-foreground" /></Link>
+          {otherParty.avatar_url ? <img src={otherParty.avatar_url} alt="" className="w-9 h-9 rounded-full object-cover" /> : <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">{otherInitials}</div>}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-black text-foreground truncate tracking-tight">{otherParty.name}</p>
-            <div className="flex items-center gap-1.5">
-              <Clock className="w-3 h-3 text-muted-foreground" />
-              <p className="text-[10px] text-muted-foreground font-bold uppercase">online agora</p>
-            </div>
+            <p className="text-sm font-semibold truncate text-foreground">{otherParty.name}</p>
+            <p className="text-[10px] text-green-500 font-medium">online</p>
           </div>
-          
           {isProfessional && requestStatus === "accepted" && (
             <div className="flex gap-2">
-              <button onClick={async () => { await loadFeeSettings(); setBillingStep("choose_type"); setBillingOpen(true); }} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-primary text-primary-foreground shadow-lg shadow-primary/20 active:scale-95 transition-all"><BadgeDollarSign className="w-4 h-4" /> COBRAR</button>
-              <button onClick={() => setClosingCall(true)} className="p-2.5 rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 active:scale-95 transition-all"><LogOut className="w-4 h-4" /></button>
+              <button onClick={async () => { await loadFeeSettings(); setBillingStep("choose_type"); setBillingOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-primary-foreground shadow-sm"><BadgeDollarSign className="w-3.5 h-3.5" /> Cobrar</button>
+              <button onClick={() => setClosingCall(true)} className="p-1.5 rounded-lg bg-destructive/10 text-destructive"><LogOut className="w-4 h-4" /></button>
             </div>
           )}
         </div>
       </header>
 
-      <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-5 flex flex-col gap-4">
-        {/* Professional Action Box */}
+      <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-3">
         {isProfessional && requestStatus === "pending" && (
-          <div className="bg-card border-2 border-primary/20 rounded-3xl p-6 text-center space-y-5 shadow-xl animate-in fade-in zoom-in duration-300">
-            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto"><Handshake className="w-8 h-8 text-primary" /></div>
-            <div>
-              <p className="font-black text-base tracking-tight">Nova Chamada de Serviço!</p>
-              <p className="text-xs text-muted-foreground mt-1">O cliente está aguardando seu retorno para iniciar.</p>
+            <div className="bg-card border-2 border-primary/20 rounded-2xl p-5 text-center space-y-4 shadow-sm">
+                <p className="font-bold text-sm text-foreground">Nova solicitação recebida!</p>
+                <div className="flex gap-3">
+                    <button onClick={async () => { await supabase.from("service_requests").update({ status: "rejected" } as any).eq("id", threadId!); setRequestStatus("rejected"); }} className="flex-1 py-3 rounded-xl border-2 font-bold text-xs text-destructive">RECUSAR</button>
+                    <button onClick={async () => { await supabase.from("service_requests").update({ status: "accepted" } as any).eq("id", threadId!); setRequestStatus("accepted"); }} className="flex-1 py-3 rounded-xl bg-primary text-white font-bold text-xs">ACEITAR</button>
+                </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={async () => { await supabase.from("service_requests").update({ status: "rejected" } as any).eq("id", threadId!); setRequestStatus("rejected"); }} className="py-3.5 rounded-2xl border-2 border-muted font-black text-[10px] uppercase tracking-widest text-muted-foreground hover:bg-muted transition-all">RECUSAR</button>
-              <button onClick={async () => { await supabase.from("service_requests").update({ status: "accepted" } as any).eq("id", threadId!); setRequestStatus("accepted"); }} className="py-3.5 rounded-2xl bg-primary text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-primary/30 active:scale-95 transition-all">ACEITAR AGORA</button>
-            </div>
-          </div>
         )}
 
         {messages.map((msg) => {
@@ -527,15 +496,11 @@ const MessageThread = () => {
           const isSys = msg.content.startsWith("📋") || msg.content.includes("🔒");
           const rendered = renderMessageContent(msg);
           if (!rendered || msg.content.includes("AVALIAÇÃO:")) return null;
-
           return (
             <div key={msg.id} className={`flex ${isSys ? "justify-center" : isMine ? "justify-end" : "justify-start"} gap-2`}>
-              {!isMine && !isSys && (
-                otherParty.avatar_url ? <img src={otherParty.avatar_url} className="w-8 h-8 rounded-full object-cover mt-1 shadow-sm" /> : <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-black text-primary mt-1 border shadow-sm">{otherInitials}</div>
-              )}
-              <div className={isSys ? "w-full my-4 px-8" : `max-w-[85%] px-4 py-3 rounded-2xl text-sm shadow-sm ${isMine ? "bg-primary text-primary-foreground rounded-tr-none" : "bg-card border rounded-tl-none text-foreground"}`}>
+              <div className={isSys ? "w-full flex justify-center my-2" : `max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-none" : "bg-card border rounded-bl-none shadow-sm text-foreground"}`}>
                 {rendered}
-                {!isSys && <p className={`text-[9px] mt-1.5 font-bold uppercase opacity-50 ${isMine ? "text-right" : ""}`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>}
+                {!isSys && <p className={`text-[9px] mt-1 opacity-60 text-right`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>}
               </div>
             </div>
           );
@@ -543,236 +508,79 @@ const MessageThread = () => {
         <div ref={bottomRef} />
       </main>
 
-      {/* Input Bar */}
-      <div className="sticky bottom-20 bg-background/80 backdrop-blur-md border-t px-4 py-4">
-        <div className="max-w-screen-lg mx-auto flex items-center gap-3">
-          {isRecording ? (
-            <div className="flex-1 flex items-center gap-3 bg-destructive/5 rounded-2xl px-4 py-3 border-2 border-destructive/10 animate-in slide-in-from-bottom-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-destructive animate-pulse" />
-              <span className="text-sm font-black text-destructive flex-1">{formatRecTime(recordingTime)}</span>
-              <button onClick={cancelRecording} className="text-[10px] font-black uppercase text-muted-foreground hover:text-destructive transition-colors">Cancelar</button>
-              <button onClick={stopAndSendRecording} className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-lg active:scale-90 transition-all"><Send className="w-4 h-4" /></button>
-            </div>
-          ) : (
-            <>
-              <div className="flex-1 relative group">
-                <input 
-                  type="text" value={text} 
-                  onChange={(e) => setText(e.target.value)} 
-                  onKeyDown={(e) => e.key === "Enter" && handleSend()} 
-                  placeholder="Mande uma mensagem..." 
-                  className="w-full bg-muted/40 border-2 border-transparent rounded-2xl pl-5 pr-12 py-3.5 text-sm outline-none focus:bg-card focus:border-primary/20 transition-all shadow-inner" 
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground opacity-30 group-focus-within:opacity-100"><MessageSquare className="w-5 h-5" /></div>
-              </div>
-              {text.trim() ? (
-                <button onClick={handleSend} disabled={sending} className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20 active:scale-90 transition-all"><Send className="w-5 h-5" /></button>
-              ) : (
-                <button onClick={startRecording} className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center hover:bg-primary/10 hover:text-primary transition-all active:scale-90"><Mic className="w-5 h-5" /></button>
-              )}
-            </>
-          )}
-        </div>
+      <div className="sticky bottom-20 bg-background border-t px-4 py-3 flex items-center gap-2">
+            <input type="text" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="Mensagem..." className="flex-1 bg-muted/40 border-none rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary/20 text-foreground" />
+            {text.trim() ? <button onClick={handleSend} className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-md"><Send className="w-4 h-4" /></button> : <button onClick={startRecording} className="w-10 h-10 rounded-full bg-muted flex items-center justify-center"><Mic className="w-5 h-5 text-muted-foreground" /></button>}
       </div>
 
       <BottomNav />
 
-      {/* --- MODAIS DE NEGÓCIO (LAYOUT PREMIUM) --- */}
-
-      {/* 1. Modal de Cobrança do Profissional */}
+      {/* MODAL COBRANÇA */}
       <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
-        <DialogContent className="max-w-sm rounded-[32px] p-8 border-none shadow-2xl">
-          <DialogHeader><DialogTitle className="text-2xl font-black tracking-tight text-center">Cobrar Atendimento</DialogTitle></DialogHeader>
-          
+        <DialogContent className="max-w-sm rounded-3xl p-6">
+          <DialogHeader><DialogTitle className="font-black text-foreground">Cobrar Cliente</DialogTitle></DialogHeader>
           {billingStep === "choose_type" && (
-            <div className="grid gap-4 py-6">
-               <button onClick={() => setBillingStep("app_form")} disabled={proPlanId === "free"} className="group flex items-center gap-5 p-5 rounded-3xl border-2 border-muted hover:border-primary hover:bg-primary/5 transition-all text-left disabled:opacity-40">
-                  <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform"><CreditCard className="w-7 h-7" /></div>
-                  <div className="flex-1">
-                    <p className="font-black text-sm tracking-tight">Receber pelo App</p>
-                    <p className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider mt-0.5">PIX ou Cartão</p>
-                  </div>
+            <div className="grid gap-3 py-4">
+               <button onClick={() => setBillingStep("app_form")} disabled={proPlanId === "free"} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-muted hover:border-primary text-left disabled:opacity-50">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary"><CreditCard className="w-6 h-6" /></div>
+                  <div><p className="font-bold text-sm text-foreground">Pelo App</p><p className="text-xs text-emerald-600">PIX ou Cartão</p></div>
                </button>
-               
-               <button onClick={() => setBillingStep("presencial_confirm")} className="group flex items-center gap-5 p-5 rounded-3xl border-2 border-muted hover:border-primary hover:bg-primary/5 transition-all text-left">
-                  <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center text-muted-foreground group-hover:scale-110 transition-transform"><Handshake className="w-7 h-7" /></div>
-                  <div className="flex-1">
-                    <p className="font-black text-sm tracking-tight">Pagamento Externo</p>
-                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mt-0.5">Direto com o cliente</p>
-                  </div>
+               <button onClick={() => setBillingStep("presencial_confirm")} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-muted hover:border-primary text-left text-foreground">
+                  <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center"><Handshake className="w-6 h-6 text-muted-foreground" /></div>
+                  <div><p className="font-bold text-sm">Presencial</p><p className="text-xs">Dinheiro/Máquina</p></div>
                </button>
             </div>
           )}
-
           {billingStep === "app_form" && (
-            <div className="space-y-6 py-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-2">Valor Total</label>
-                <div className="relative">
-                  <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-primary text-lg">R$</span>
-                  <input value={billingAmount} onChange={e => setBillingAmount(e.target.value)} type="number" placeholder="0,00" className="w-full bg-muted/30 border-2 border-transparent focus:border-primary rounded-[20px] pl-12 pr-6 py-4 font-black text-xl outline-none transition-all shadow-inner" />
-                </div>
+            <div className="space-y-4">
+              <input value={billingAmount} onChange={e => setBillingAmount(e.target.value)} type="number" placeholder="Valor R$" className="w-full bg-muted/30 border-2 rounded-2xl px-4 py-3 font-black text-lg outline-none text-foreground" />
+              <input value={billingDesc} onChange={e => setBillingDesc(e.target.value)} placeholder="Descrição" className="w-full bg-muted/30 border-2 rounded-2xl px-4 py-3 text-sm outline-none text-foreground" />
+              <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => setBillingMethod("pix")} className={`py-3 rounded-xl border-2 font-bold text-xs ${billingMethod === "pix" ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"}`}>PIX</button>
+                    <button onClick={() => setBillingMethod("card")} className={`py-3 rounded-xl border-2 font-bold text-xs ${billingMethod === "card" ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"}`}>CARTÃO</button>
               </div>
-
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-2">Referência</label>
-                <input value={billingDesc} onChange={e => setBillingDesc(e.target.value)} placeholder="O que você fez?" className="w-full bg-muted/30 border-2 border-transparent focus:border-primary rounded-[20px] px-6 py-4 text-sm font-bold outline-none transition-all shadow-inner" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => {setBillingMethod("pix"); setBillingInstallments("1");}} className={`py-4 rounded-2xl border-2 font-black text-xs flex items-center justify-center gap-2 transition-all ${billingMethod === 'pix' ? 'border-primary bg-primary/5 text-primary' : 'border-muted opacity-50'}`}><QrCode className="w-4 h-4" /> PIX</button>
-                <button onClick={() => setBillingMethod("card")} className={`py-4 rounded-2xl border-2 font-black text-xs flex items-center justify-center gap-2 transition-all ${billingMethod === 'card' ? 'border-primary bg-primary/5 text-primary' : 'border-muted opacity-50'}`}><CreditCard className="w-4 h-4" /> CARTÃO</button>
-              </div>
-
-              {billingMethod === "card" && (
-                 <select value={billingInstallments} onChange={e => setBillingInstallments(e.target.value)} className="w-full bg-muted/30 border-2 border-transparent rounded-[20px] px-6 py-4 text-sm font-bold outline-none">
-                    {getBillingInstallmentOptions().map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                 </select>
-              )}
-
-              <Button onClick={handleSendBilling} disabled={!billingAmount || !billingMethod} className="w-full h-14 rounded-2xl bg-primary text-white font-black text-sm shadow-xl shadow-primary/20 hover:scale-[1.02] transition-transform">ENVIAR COBRANÇA AGORA</Button>
+              <button onClick={handleSendBilling} disabled={!billingAmount || !billingMethod} className="w-full py-4 rounded-2xl bg-primary text-white font-black">ENVIAR COBRANÇA</button>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* 2. Modal de Pagamento do Cliente */}
+      {/* MODAL PAGAMENTO */}
       <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
         <DialogContent className="max-w-sm rounded-[32px] p-8">
-          <DialogHeader><DialogTitle className="text-2xl font-black text-center">{cardStep ? "Dados do Cartão" : "Confirmar Pagamento"}</DialogTitle></DialogHeader>
-          
+          <DialogHeader><DialogTitle className="font-black text-foreground text-center">{cardStep ? "Dados do Cartão" : "Confirmar Pagamento"}</DialogTitle></DialogHeader>
           <div className="space-y-6 pt-4">
             <div className="text-center p-8 bg-primary/5 rounded-[32px] border-2 border-dashed border-primary/20">
                 <p className="text-4xl font-black text-primary">R$ {getDiscountedAmount().toFixed(2).replace(".", ",")}</p>
-                <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mt-2">{paymentData?.desc}</p>
+                <p className="text-[10px] font-black text-muted-foreground uppercase mt-2">{paymentData?.desc}</p>
             </div>
-
             {!cardStep ? (
-              <div className="space-y-4">
-                {availableCoupons.length > 0 && !selectedCouponId && (
-                   <button onClick={() => applyCoupon(availableCoupons[0].id)} className="w-full p-4 rounded-2xl border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-between group">
-                      <div className="flex items-center gap-3"><Ticket className="w-5 h-5 text-primary" /><span className="text-xs font-black text-primary uppercase">Aplicar Cupom Disponível</span></div>
-                      <Check className="w-4 h-4 text-primary opacity-0 group-hover:opacity-100 transition-opacity" />
-                   </button>
-                )}
-                <Button onClick={handleConfirmPayment} disabled={processingPayment} className="w-full h-14 rounded-2xl bg-primary text-white font-black shadow-xl">
-                  {processingPayment ? <Loader2 className="animate-spin w-5 h-5" /> : `PAGAR VIA ${paymentMethod?.toUpperCase()}`}
-                </Button>
-              </div>
+                <button onClick={() => paymentMethod === 'pix' ? handleConfirmPayment() : setCardStep(true)} className="w-full py-4 rounded-2xl bg-primary text-white font-black">
+                    {paymentMethod === 'pix' ? 'GERAR PIX' : 'PROSSEGUIR'}
+                </button>
             ) : (
-              <div className="space-y-3">
-                <input value={cardForm.number} onChange={e => setCardForm(f => ({...f, number: formatCardNumber(e.target.value)}))} placeholder="0000 0000 0000 0000" className="w-full bg-muted/30 border-2 border-transparent rounded-2xl px-6 py-4 text-sm font-bold shadow-inner" />
-                <input value={cardForm.name} onChange={e => setCardForm(f => ({...f, name: e.target.value.toUpperCase()}))} placeholder="NOME COMO NO CARTÃO" className="w-full bg-muted/30 border-2 border-transparent rounded-2xl px-6 py-4 text-sm font-bold uppercase shadow-inner" />
-                <div className="grid grid-cols-2 gap-3">
-                  <input value={cardForm.expiry} onChange={e => setCardForm(f => ({...f, expiry: formatExpiry(e.target.value)}))} placeholder="MM/AA" className="w-full bg-muted/30 border-2 border-transparent rounded-2xl px-6 py-4 text-sm font-bold shadow-inner" />
-                  <input value={cardForm.cvv} onChange={e => setCardForm(f => ({...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4)}))} type="password" placeholder="CVV" className="w-full bg-muted/30 border-2 border-transparent rounded-2xl px-6 py-4 text-sm font-bold shadow-inner" />
+                <div className="space-y-3">
+                    <input value={cardForm.number} onChange={e => setCardForm(f => ({...f, number: formatCardNumber(e.target.value)}))} placeholder="Número do Cartão" className="w-full bg-muted/30 border-2 rounded-2xl px-6 py-4 text-sm font-bold text-foreground" />
+                    <input value={cardForm.name} onChange={e => setCardForm(f => ({...f, name: e.target.value.toUpperCase()}))} placeholder="NOME NO CARTÃO" className="w-full bg-muted/30 border-2 rounded-2xl px-6 py-4 text-sm font-bold uppercase text-foreground" />
+                    <div className="grid grid-cols-2 gap-3">
+                        <input value={cardForm.expiry} onChange={e => setCardForm(f => ({...f, expiry: formatExpiry(e.target.value)}))} placeholder="MM/AA" className="w-full bg-muted/30 border-2 rounded-2xl px-6 py-4 text-sm font-bold text-foreground" />
+                        <input value={cardForm.cvv} onChange={e => setCardForm(f => ({...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4)}))} type="password" placeholder="CVV" className="w-full bg-muted/30 border-2 rounded-2xl px-6 py-4 text-sm font-bold text-foreground" />
+                    </div>
+                    <select value={installments} onChange={e => setInstallments(e.target.value)} className="w-full bg-muted/30 border-2 rounded-2xl px-6 py-4 text-sm font-bold text-foreground">
+                        {getInstallmentOptions().map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                    <button onClick={handleConfirmPayment} disabled={processingPayment} className="w-full h-14 rounded-2xl bg-primary text-white font-black">{processingPayment ? <Loader2 className="animate-spin mx-auto" /> : "PAGAR AGORA"}</button>
                 </div>
-                <Button onClick={handleConfirmPayment} disabled={processingPayment} className="w-full h-14 rounded-2xl bg-primary text-white font-black shadow-xl mt-4">PAGAR AGORA</Button>
-              </div>
             )}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* 3. Modal do PIX QR Code */}
-      <Dialog open={pixOpen} onOpenChange={setPixOpen}>
-        <DialogContent className="max-w-sm rounded-[32px] p-8 text-center">
-          <DialogHeader><DialogTitle className="text-xl font-black">Pagamento PIX</DialogTitle></DialogHeader>
-          {pixData && (
-            <div className="space-y-6 pt-4">
-              <div className="bg-white p-6 rounded-3xl border-4 border-muted/20 inline-block mx-auto shadow-inner">
-                <img src={`data:image/png;base64,${pixData.qrCode}`} className="w-48 h-48 mx-auto" alt="QR Code" />
-              </div>
-              <button onClick={() => { navigator.clipboard.writeText(pixData.copyPaste); setPixCopied(true); toast({title: "Copiado!"}); setTimeout(() => setPixCopied(false), 3000); }} className="w-full py-4 rounded-2xl bg-primary/10 text-primary font-black text-xs flex items-center justify-center gap-3">
-                {pixCopied ? <CheckCircle2 className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                COPIAR CÓDIGO PIX
-              </button>
-              <div className="flex items-center justify-center gap-3 py-2 text-xs font-bold text-muted-foreground animate-pulse tracking-tight">
-                <Loader2 className="w-4 h-4 animate-spin" /> AGUARDANDO CONFIRMAÇÃO DO BANCO...
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* 4. Modal de Avaliação Final */}
-      <Dialog open={ratingOpen} onOpenChange={setRatingOpen}>
-        <DialogContent className="max-w-sm rounded-[40px] p-10 text-center">
-          <DialogHeader><DialogTitle className="text-2xl font-black tracking-tight">Tudo pronto!</DialogTitle></DialogHeader>
-          <div className="py-6 space-y-8">
-            <div className="space-y-2">
-              <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Avalie o Atendimento</p>
-              <div className="flex justify-center gap-2">
-                {[1,2,3,4,5].map(s => (
-                  <button key={s} onClick={() => setRatingStars(s)} className="transition-transform active:scale-90">
-                    <Star className={`w-10 h-10 ${s <= ratingStars ? "fill-amber-400 text-amber-400 scale-110" : "text-muted/30"}`} />
-                  </button>
-                ))}
-              </div>
-            </div>
-            <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)} placeholder="Deixe um comentário rápido sobre o serviço..." className="w-full bg-muted/30 border-2 border-transparent focus:border-primary rounded-3xl p-5 text-sm font-bold shadow-inner min-h-[120px] outline-none transition-all" />
-            <Button onClick={handleSubmitRating} disabled={ratingStars === 0} className="w-full h-14 rounded-2xl bg-primary text-white font-black text-sm shadow-xl shadow-primary/20">FINALIZAR E AVALIAR</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* 5. Modal de Recompensa (Ganha Cupom) */}
-      <Dialog open={rewardOpen} onOpenChange={setRewardOpen}>
-        <DialogContent className="max-w-sm rounded-[40px] p-10 text-center border-none shadow-[0_0_50px_rgba(var(--primary),0.3)]">
-          <div className="space-y-8 py-4">
-            <div className="w-24 h-24 rounded-[32px] bg-gradient-to-br from-primary to-amber-500 flex items-center justify-center mx-auto shadow-2xl animate-bounce">
-               {rewardCoupon?.type === "discount" ? <Ticket className="w-12 h-12 text-white" /> : <Star className="w-12 h-12 text-white fill-white" />}
-            </div>
-            <div>
-              <h3 className="text-3xl font-black tracking-tighter">PARABÉNS! 🎉</h3>
-              <p className="text-sm font-bold text-muted-foreground mt-2 uppercase tracking-widest">Você ganhou um presente!</p>
-            </div>
-            
-            <div className="bg-primary/5 border-2 border-dashed border-primary/30 rounded-3xl p-6">
-              {rewardCoupon?.type === "discount" ? (
-                <>
-                  <p className="text-4xl font-black text-primary">{rewardCoupon.value}% OFF</p>
-                  <p className="text-[10px] font-black text-primary/60 uppercase tracking-widest mt-1">Desconto no próximo serviço</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-xl font-black text-primary tracking-tight">CUPOM DE SORTEIO</p>
-                  <p className="text-[10px] font-black text-primary/60 uppercase tracking-widest mt-1">Você está concorrendo ao prêmio!</p>
-                </>
-              )}
-            </div>
-            
-            <Button onClick={() => setRewardOpen(false)} className="w-full h-14 rounded-2xl bg-foreground text-background font-black shadow-2xl">ENTENDIDO!</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* 6. Modal de Confirmação de Encerramento */}
-      <Dialog open={closingCall} onOpenChange={setClosingCall}>
-        <DialogContent className="max-w-xs rounded-3xl p-8 text-center">
-          <DialogHeader><DialogTitle className="font-black">Encerrar Chamada?</DialogTitle></DialogHeader>
-          <div className="space-y-6 pt-4">
-             <div className="w-16 h-16 bg-destructive/10 text-destructive rounded-full flex items-center justify-center mx-auto"><LogOut className="w-8 h-8" /></div>
-             <p className="text-xs font-bold text-muted-foreground uppercase leading-relaxed tracking-tight">Isso finalizará o chat para ambos. Tem certeza?</p>
-             <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setClosingCall(false)} className="py-3 rounded-xl border-2 font-black text-[10px] uppercase">Não</button>
-                <button 
-                  onClick={async () => {
-                    const { error } = await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId!);
-                    if (!error) {
-                        await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: "🔒 CHAMADA ENCERRADA pelo profissional." });
-                        setRequestStatus("completed");
-                        setClosingCall(false);
-                        toast({ title: "Chamada finalizada" });
-                    }
-                  }} 
-                  className="py-3 rounded-xl bg-destructive text-white font-black text-[10px] uppercase shadow-lg shadow-destructive/20"
-                >Sim, Encerrar</button>
-             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
+      {/* MODAIS PIX, RATING E REWARD (CÓDIGO LOVABLE PURO) */}
+      <Dialog open={pixOpen} onOpenChange={setPixOpen}><DialogContent className="max-w-sm rounded-[32px] p-8 text-center">{pixData && (<div className="space-y-6"><img src={`data:image/png;base64,${pixData.qrCode}`} className="w-48 h-48 mx-auto" /><button onClick={() => {navigator.clipboard.writeText(pixData.copyPaste); toast({title:"Copiado!"});}} className="w-full py-4 rounded-2xl bg-primary/10 text-primary font-black">COPIAR PIX</button></div>)}</DialogContent></Dialog>
+      <Dialog open={ratingOpen} onOpenChange={setRatingOpen}><DialogContent className="max-w-sm rounded-[40px] p-10 text-center"><div className="flex justify-center gap-2 my-6">{[1,2,3,4,5].map(s => <Star key={s} onClick={()=>setRatingStars(s)} className={`w-10 h-10 cursor-pointer ${s <= ratingStars ? "fill-amber-400 text-amber-400" : "text-muted/30"}`} />)}</div><Button onClick={handleSubmitRating} disabled={ratingStars===0} className="w-full h-14 rounded-2xl bg-primary text-white font-black">AVALIAR</Button></DialogContent></Dialog>
+      <Dialog open={rewardOpen} onOpenChange={setRewardOpen}><DialogContent className="max-w-sm rounded-[40px] p-10 text-center border-none shadow-2xl"><div className="space-y-8"><div className="w-24 h-24 rounded-3xl bg-primary/10 flex items-center justify-center mx-auto"><Ticket className="w-12 h-12 text-primary" /></div><h3 className="text-3xl font-black">GANHOU! 🎉</h3><p className="text-sm font-bold text-primary">{rewardCoupon?.type === "discount" ? `${rewardCoupon.value}% OFF` : "Cupom de Sorteio"}</p><Button onClick={()=>setRewardOpen(false)} className="w-full h-14 rounded-2xl bg-foreground text-background font-black">ENTENDIDO!</Button></div></DialogContent></Dialog>
+      <Dialog open={closingCall} onOpenChange={setClosingCall}><DialogContent className="max-w-xs rounded-3xl p-8 text-center"><DialogHeader><DialogTitle className="font-black">Encerrar?</DialogTitle></DialogHeader><div className="grid grid-cols-2 gap-3 mt-4"><button onClick={()=>setClosingCall(false)} className="py-3 border-2 rounded-xl">Não</button><button onClick={async ()=>{await supabase.from("service_requests").update({status:"completed"} as any).eq("id",threadId!); setRequestStatus("completed"); setClosingCall(false);}} className="py-3 bg-destructive text-white rounded-xl">Sim</button></div></DialogContent></Dialog>
     </div>
   );
 };

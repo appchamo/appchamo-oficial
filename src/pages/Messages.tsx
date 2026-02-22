@@ -1,8 +1,24 @@
 import AppLayout from "@/components/AppLayout";
-import { MessageSquare } from "lucide-react";
-import { Link } from "react-router-dom";
+import { MessageSquare, MoreVertical, Archive, Trash2, EyeOff, AlertTriangle } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface Thread {
   id: string;
@@ -25,6 +41,12 @@ const Messages = () => {
   const [supportLastMsg, setSupportLastMsg] = useState<string | null>(null);
   const [supportLastTime, setSupportLastTime] = useState<string | null>(null);
   const [hasSupportMessages, setHasSupportMessages] = useState(false);
+  const navigate = useNavigate();
+
+  // Estados para o Modal de Denúncia
+  const [reportingChatId, setReportingChatId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState("");
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -171,13 +193,50 @@ const Messages = () => {
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   };
 
+  // ✅ Função para enviar a denúncia
+  const handleReportSubmit = async () => {
+    if (!reportingChatId || !reportReason.trim()) return;
+    
+    setIsSubmittingReport(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Usuário não autenticado");
+
+      const { error } = await supabase
+        .from('chat_reports' as any)
+        .insert({
+          reporter_id: user.id,
+          chat_id: reportingChatId,
+          reason: reportReason.trim()
+        });
+
+      if (error) throw error;
+      
+      // Limpa os estados e fecha o modal (pode adicionar um toast de sucesso aqui se tiver)
+      setReportingChatId(null);
+      setReportReason("");
+      alert("Denúncia enviada com sucesso! Nossa equipe analisará em breve.");
+    } catch (error) {
+      console.error("Erro ao enviar denúncia:", error);
+      alert("Erro ao enviar denúncia. Tente novamente.");
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
+
+  // Funções placeholder para as outras ações do menu
+  const handleAction = (action: string, chatId: string) => {
+    console.log(`Ação ${action} no chat ${chatId}`);
+    // Futuro: Implementar arquivar, excluir, marcar como não lida
+  };
+
   if (loading) return <AppLayout><main className="max-w-screen-lg mx-auto px-4 py-10 text-center text-muted-foreground">Carregando...</main></AppLayout>;
 
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         <h1 className="text-xl font-bold text-foreground mb-4">Mensagens</h1>
-        {/* Support thread - always shown at top */}
+        
         <Link to="/support"
           className={`flex items-center gap-3 px-2 py-3 border-b hover:bg-amber-500/5 transition-colors rounded-lg ${supportUnread > 0 ? "bg-amber-500/10" : ""}`}>
           <div className="relative flex-shrink-0">
@@ -229,38 +288,114 @@ const Messages = () => {
               const hasUnread = t.unreadCount > 0;
 
               return (
-                <Link key={t.id} to={`/messages/${t.id}`}
-                  className={`flex items-center gap-3 px-2 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors rounded-lg ${hasUnread ? "bg-primary/5" : ""}`}>
-                  <div className="relative flex-shrink-0">
-                    {t.otherAvatar ? (
-                      <img src={t.otherAvatar} alt={t.otherName} className="w-14 h-14 rounded-full object-cover border-2 border-background shadow-sm" />
-                    ) : (
-                      <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-sm font-bold text-primary border-2 border-background shadow-sm">
-                        {initials}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <p className={`text-sm truncate ${hasUnread ? "font-bold text-foreground" : "font-semibold text-foreground"}`}>{t.otherName}</p>
-                      <span className={`text-[11px] flex-shrink-0 ml-2 ${hasUnread ? "text-primary font-semibold" : "text-muted-foreground"}`}>
-                        {timeLabel(t.lastMessageTime)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <p className={`text-xs truncate mt-0.5 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>{preview}</p>
-                      {hasUnread && (
-                        <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center px-1.5">
-                          {t.unreadCount > 99 ? "99+" : t.unreadCount}
-                        </span>
+                <div key={t.id} className={`flex items-center gap-3 px-2 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors rounded-lg ${hasUnread ? "bg-primary/5" : ""}`}>
+                  {/* Área clicável que leva para o chat */}
+                  <div 
+                    onClick={() => navigate(`/messages/${t.id}`)}
+                    className="flex flex-1 items-center gap-3 cursor-pointer min-w-0"
+                  >
+                    <div className="relative flex-shrink-0">
+                      {t.otherAvatar ? (
+                        <img src={t.otherAvatar} alt={t.otherName} className="w-14 h-14 rounded-full object-cover border-2 border-background shadow-sm" />
+                      ) : (
+                        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-sm font-bold text-primary border-2 border-background shadow-sm">
+                          {initials}
+                        </div>
                       )}
                     </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className={`text-sm truncate ${hasUnread ? "font-bold text-foreground" : "font-semibold text-foreground"}`}>{t.otherName}</p>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className={`text-xs truncate mt-0.5 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>{preview}</p>
+                        {hasUnread && (
+                          <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center px-1.5">
+                            {t.unreadCount > 99 ? "99+" : t.unreadCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </Link>
+
+                  {/* Menu de 3 pontinhos e Horário */}
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <span className={`text-[11px] ${hasUnread ? "text-primary font-semibold" : "text-muted-foreground"}`}>
+                      {timeLabel(t.lastMessageTime)}
+                    </span>
+                    
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="p-1 hover:bg-muted rounded-full transition-colors text-muted-foreground">
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48 rounded-xl shadow-lg border-muted">
+                        <DropdownMenuItem onClick={() => handleAction('unread', t.id)} className="gap-2 cursor-pointer py-2">
+                          <EyeOff className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-medium text-sm">Marcar como não lida</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAction('archive', t.id)} className="gap-2 cursor-pointer py-2">
+                          <Archive className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-medium text-sm">Arquivar conversa</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => handleAction('delete', t.id)} className="gap-2 cursor-pointer py-2 text-red-600 focus:text-red-600 focus:bg-red-50">
+                          <Trash2 className="w-4 h-4" />
+                          <span className="font-medium text-sm">Excluir conversa</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => setReportingChatId(t.id)} 
+                          className="gap-2 cursor-pointer py-2 text-amber-600 focus:text-amber-600 focus:bg-amber-50"
+                        >
+                          <AlertTriangle className="w-4 h-4" />
+                          <span className="font-medium text-sm">Denunciar conversa</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
               );
             })}
           </div>
         )}
+
+        {/* ✅ Modal de Denúncia */}
+        <Dialog open={!!reportingChatId} onOpenChange={(open) => !open && setReportingChatId(null)}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-600">
+                <AlertTriangle className="w-5 h-5" />
+                Denunciar Conversa
+              </DialogTitle>
+              <DialogDescription>
+                Descreva o motivo da denúncia. Nossa equipe de suporte analisará a conversa para tomar as medidas necessárias.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <textarea
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                placeholder="Ex: Profissional agindo com falta de respeito, cobrando por fora do app, etc..."
+                className="w-full min-h-[120px] p-3 rounded-xl border border-muted bg-background text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 resize-none"
+              />
+            </div>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button type="button" variant="outline" onClick={() => setReportingChatId(null)} className="w-full sm:w-auto rounded-xl">
+                Cancelar
+              </Button>
+              <Button 
+                type="button" 
+                onClick={handleReportSubmit} 
+                disabled={!reportReason.trim() || isSubmittingReport}
+                className="w-full sm:w-auto rounded-xl bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {isSubmittingReport ? "Enviando..." : "Enviar Denúncia"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </main>
     </AppLayout>
   );

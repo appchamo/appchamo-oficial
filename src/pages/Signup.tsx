@@ -10,7 +10,7 @@ import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
-import SubscriptionDialog from "@/components/subscription/SubscriptionDialog"; // ✅ Import correto
+import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
 
 type AccountType = "client" | "professional";
 type Step = "type" | "basic" | "documents" | "profile" | "plan";
@@ -49,8 +49,8 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>("free"); // ✅ Armazena plano
-  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false); // ✅ Controle do Modal
+  const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
+  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -59,11 +59,8 @@ const Signup = () => {
 
   const handleBasicNext = (data: BasicData) => {
     setBasicData(data);
-    if (accountType === "professional") {
-      setStep("documents");
-    } else {
-      setStep("profile");
-    }
+    if (accountType === "professional") setStep("documents");
+    else setStep("profile");
   };
 
   const handleDocumentsNext = (files: File[]) => {
@@ -71,55 +68,33 @@ const Signup = () => {
     setStep("profile");
   };
 
-  const handleProfileNext = (data: {
-    avatarUrl: string;
-    categoryId?: string;
-    professionId?: string;
-    bio?: string;
-    services?: string;
-  }) => {
+  const handleProfileNext = (data: any) => {
     setProfileData(data);
-    if (accountType === "professional") {
-      setStep("plan");
-    } else {
-      doSignup(data, "free");
-    }
+    if (accountType === "professional") setStep("plan");
+    else doSignup(data, "free");
   };
 
-  const handlePlanSelect = (planId: string) => {
+  // ✅ Inicia o cadastro primeiro para garantir o login
+  const handlePlanSelect = async (planId: string) => {
     if (!profileData) return;
-    setSelectedPlanId(planId); 
+    setSelectedPlanId(planId);
     
-    // ✅ Se for pago, abre o modal de pagamento primeiro
-    if (planId !== "free") {
-      setIsSubscriptionOpen(true);
-    } else {
-      doSignup(profileData, planId);
-    }
+    // Dispara o cadastro. Se for pago, o doSignup abrirá o modal após o sucesso.
+    doSignup(profileData, planId);
   };
 
-  // ✅ Chamado após o pagamento no modal
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
-    if (profileData) {
-      doSignup(profileData, selectedPlanId);
-    }
+    localStorage.setItem("just_signed_up", "true");
+    navigate("/home");
   };
 
-  const doSignup = async (
-    pData: {
-      avatarUrl: string;
-      categoryId?: string;
-      professionId?: string;
-      bio?: string;
-      services?: string;
-    },
-    planId: string
-  ) => {
+  const doSignup = async (pData: any, planId: string) => {
     if (!basicData) return;
     setLoading(true);
 
     try {
+      // 1. Cria a conta no Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: basicData.email,
         password: basicData.password,
@@ -142,8 +117,7 @@ const Signup = () => {
       }
 
       const userId = authData.user.id;
-
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 1000));
 
       const docFilesPayload = await Promise.all(
         docFiles.map(async (file) => ({
@@ -153,6 +127,7 @@ const Signup = () => {
         }))
       );
 
+      // 2. Completa o perfil via Edge Function
       const { data: result, error: fnError } = await supabase.functions.invoke(
         "complete-signup",
         {
@@ -168,38 +143,25 @@ const Signup = () => {
       );
 
       if (fnError || result?.error) {
-        console.error("complete-signup error:", fnError || result?.error);
-        toast({
-          title: "Erro ao completar cadastro.",
-          description: fnError?.message || result?.error,
-          variant: "destructive",
-        });
+        toast({ title: "Erro ao completar cadastro.", variant: "destructive" });
         setLoading(false);
         return;
       }
 
-      // ✅ Define que acabou de cadastrar para a Home mostrar o cupom depois
-      localStorage.setItem("just_signed_up", "true");
-
+      // 3. ✅ Se for plano pago, abre o modal agora (usuário já está logado)
       if (accountType === "professional" && planId !== "free") {
-        toast({ 
-          title: "Perfil em análise!", 
-          description: "Recebemos seus dados. Avisaremos assim que for aprovado!" 
-        });
+        setLoading(false);
+        setIsSubscriptionOpen(true);
       } else {
+        // Se for free, finaliza normal
+        localStorage.setItem("just_signed_up", "true");
         toast({ title: "Conta criada com sucesso!" });
+        navigate("/home");
       }
-
-      navigate("/home");
     } catch (err: any) {
-      toast({
-        title: "Erro ao criar conta.",
-        description: translateError(err.message),
-        variant: "destructive",
-      });
+      toast({ title: "Erro ao criar conta.", description: translateError(err.message), variant: "destructive" });
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const handleCouponClose = () => {
@@ -222,37 +184,11 @@ const Signup = () => {
   return (
     <>
       {step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
-      {step === "basic" && (
-        <StepBasicData
-          accountType={accountType}
-          onNext={handleBasicNext}
-          onBack={() => setStep("type")}
-        />
-      )}
-      {step === "documents" && (
-        <StepDocuments
-          documentType={basicData?.documentType || "cpf"}
-          onNext={handleDocumentsNext}
-          onBack={() => setStep("basic")}
-        />
-      )}
-      {step === "profile" && (
-        <StepProfile
-          accountType={accountType}
-          onNext={handleProfileNext}
-          onBack={() =>
-            setStep(accountType === "professional" ? "documents" : "basic")
-          }
-        />
-      )}
-      {step === "plan" && (
-        <StepPlanSelect
-          onSelect={handlePlanSelect}
-          onBack={() => setStep("profile")}
-        />
-      )}
+      {step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep("type")} />}
+      {step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
+      {step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
+      {step === "plan" && <StepPlanSelect onSelect={handlePlanSelect} onBack={() => setStep("profile")} />}
 
-      {/* ✅ Modal de Pagamento integrado */}
       <SubscriptionDialog 
         isOpen={isSubscriptionOpen}
         onClose={() => setIsSubscriptionOpen(false)}
@@ -260,19 +196,14 @@ const Signup = () => {
         onSuccess={handleSubscriptionSuccess}
       />
 
-      {/* Modal mantido para compatibilidade, mas o fluxo agora é via Home */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
-          <DialogHeader>
-            <DialogTitle className="text-center">🎉 Parabéns!</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />
-            <p className="text-sm text-foreground font-medium">Você ganhou 1 cupom!</p>
+            <p className="text-sm font-medium text-foreground">Você ganhou 1 cupom!</p>
           </div>
-          <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold">
-            Entendi!
-          </button>
+          <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold">Entendi!</button>
         </DialogContent>
       </Dialog>
     </>

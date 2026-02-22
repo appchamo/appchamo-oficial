@@ -31,10 +31,10 @@ const Search = () => {
   const [professions, setProfessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filtros
+  // Filtros (Iniciam vazios para mostrar tudo)
   const [filterCategory, setFilterCategory] = useState("");
   const [filterProfession, setFilterProfession] = useState("");
-  const [filterCity, setFilterCity] = useState("");
+  const [filterCity, setFilterCity] = useState(""); // ✅ Agora começa vazio
   const [filterRadius, setFilterRadius] = useState(50);
   const [filterMinRating, setFilterMinRating] = useState(0);
   const [filterVerifiedOnly, setFilterVerifiedOnly] = useState(false);
@@ -42,21 +42,16 @@ const Search = () => {
 
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase.from("profiles").select("address_city").eq("user_id", user.id).maybeSingle();
-        // ✅ Inicializa a cidade, mas deixa o usuário ver tudo se quiser
-        if (profile?.address_city) setFilterCity(profile.address_city);
-      }
-      
+      // Carrega categorias
       const { data: cats } = await supabase.from("categories").select("*").eq("active", true).order("name");
       setCategories(cats || []);
+      
+      // Carrega profissionais sem filtrar por cidade de quem está logado
       loadPros();
     };
     init();
   }, []);
 
-  // Recarrega profissões ao mudar categoria
   useEffect(() => {
     if (filterCategory) {
       supabase.from("professions").select("*").eq("category_id", filterCategory).eq("active", true).then(({ data }) => setProfessions(data || []));
@@ -101,35 +96,28 @@ const Search = () => {
     setLoading(false);
   };
 
-  // ✅ FUNÇÃO DE COMPARAÇÃO DE TEXTO ROBUSTA (Ignora acentos e espaços)
   const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
   const filtered = pros.filter(p => {
+    // 1. Busca por nome ou categoria
     if (search && !normalize(p.full_name + p.category_name).includes(normalize(search))) return false;
+    
+    // 2. Filtro de Categoria e Profissão
     if (filterCategory && p.category_id !== filterCategory) return false;
     if (filterProfession && p.profession_id !== filterProfession) return false;
     
-    // ✅ CORREÇÃO DO FILTRO DE CIDADE
-    if (filterCity) {
+    // 3. Filtro de Cidade (SÓ FILTRA SE VOCÊ DIGITAR ALGO)
+    if (filterCity.trim() !== "") {
       if (!p.city || !normalize(p.city).includes(normalize(filterCity))) return false;
     }
 
+    // 4. Outros
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
     if (filterVerifiedOnly && !p.verified) return false;
     if (filterCompaniesOnly && p.plan_id !== "business") return false;
+    
     return true;
   });
-
-  // ✅ FUNÇÃO PARA RESETAR TUDO
-  const resetFilters = () => {
-    setFilterCity("");
-    setSearch("");
-    setFilterCategory("");
-    setFilterProfession("");
-    setFilterMinRating(0);
-    setFilterVerifiedOnly(false);
-    setFilterCompaniesOnly(false);
-  };
 
   return (
     <AppLayout>
@@ -159,10 +147,10 @@ const Search = () => {
                   <label className="text-sm font-bold flex items-center gap-2"><MapPin className="w-4 h-4 text-primary" /> Localização</label>
                   <input 
                     value={filterCity} onChange={(e) => setFilterCity(e.target.value)}
-                    placeholder="Cidade" className="w-full p-3 rounded-xl border bg-background text-sm" 
+                    placeholder="Filtrar por cidade..." className="w-full p-3 rounded-xl border bg-background text-sm" 
                   />
                   <div className="flex justify-between text-xs font-medium text-muted-foreground">
-                    <span>Raio de alcance</span>
+                    <span>Distância máxima</span>
                     <span>{filterRadius}km</span>
                   </div>
                   <Slider value={[filterRadius]} onValueChange={([v]) => setFilterRadius(v)} min={1} max={150} step={1} />
@@ -201,7 +189,12 @@ const Search = () => {
                   </div>
                 </div>
 
-                <button onClick={resetFilters} className="w-full py-3 text-sm font-bold text-primary">Limpar Filtros</button>
+                <button 
+                   onClick={() => { setFilterCity(""); setSearch(""); setFilterCategory(""); setFilterMinRating(0); setFilterVerifiedOnly(false); setFilterCompaniesOnly(false); }} 
+                   className="w-full py-3 text-sm font-bold text-primary"
+                >
+                  Limpar tudo
+                </button>
               </div>
             </SheetContent>
           </Sheet>
@@ -212,21 +205,20 @@ const Search = () => {
             {[1,2,3,4].map(i => <div key={i} className="h-24 bg-muted animate-pulse rounded-2xl" />)}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-            <SearchIcon className="w-12 h-12 text-muted-foreground/30" />
-            <p className="font-bold">Nenhum resultado encontrado</p>
-            <button onClick={resetFilters} className="text-xs font-bold text-primary underline">Ver todos os profissionais</button>
+          <div className="text-center py-20">
+            <p className="font-bold">Nenhum profissional encontrado</p>
+            <button onClick={() => setFilterCity("")} className="text-xs text-primary underline mt-2">Remover filtro de localização</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {filtered.map((pro) => (
-              <Link key={pro.id} to={`/professional/${pro.id}`} className="flex items-center gap-4 bg-card border rounded-2xl p-4 hover:shadow-sm transition-all">
-                <div className="w-14 h-14 rounded-full bg-muted overflow-hidden border-2 border-background shadow-sm">
+              <Link key={pro.id} to={`/professional/${pro.id}`} className="flex items-center gap-4 bg-card border rounded-2xl p-4 hover:shadow-sm transition-all group">
+                <div className="w-14 h-14 rounded-full bg-muted overflow-hidden border-2 border-background shadow-sm flex-shrink-0">
                   {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-bold">{pro.full_name[0]}</div>}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    <p className="font-bold text-sm truncate">{pro.full_name}</p>
+                    <p className="font-bold text-sm truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
                     {pro.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
                     {pro.plan_id === 'business' && <Building2 className="w-3.5 h-3.5 text-orange-500" />}
                   </div>

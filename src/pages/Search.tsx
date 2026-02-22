@@ -36,7 +36,7 @@ const Search = () => {
   const [loading, setLoading] = useState(true);
   const [userCity, setUserCity] = useState<string | null>(null);
   
-  // ✅ Controle de abertura do modal
+  // ✅ Controle de abertura do modal adicionado
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   // Filters
@@ -196,7 +196,7 @@ const Search = () => {
                   >
                     Limpar
                   </button>
-                  {/* ✅ BOTÃO APLICAR: FECHA O MODAL */}
+                  {/* ✅ BOTÃO APLICAR ADICIONADO: FECHA O MODAL */}
                   <button 
                     onClick={() => setIsSheetOpen(false)}
                     className="py-3 text-sm font-bold text-white bg-primary rounded-xl shadow-lg shadow-primary/20"

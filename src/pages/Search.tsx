@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2 } from "lucide-react";
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2, Navigation } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,6 +22,10 @@ interface Pro {
   user_type: string;
   city: string | null;
   state: string | null;
+  // ✅ Novos campos para localização
+  latitude: number | null;
+  longitude: number | null;
+  distance?: number;
 }
 
 interface Category {
@@ -29,7 +33,6 @@ interface Category {
   name: string;
 }
 
-// ✅ Interface para as Profissões
 interface Profession {
   id: string;
   name: string;
@@ -44,24 +47,38 @@ const Search = () => {
   const [userCity, setUserCity] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
+  // ✅ Estados para Geolocalização
+  const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [filterRadius, setFilterRadius] = useState<number>(100); // Padrão 100km
+
   // Filters
   const [filterCategory, setFilterCategory] = useState<string>("");
-  const [filterProfession, setFilterProfession] = useState<string>(""); // ✅ Estado para profissão
-  const [professions, setProfessions] = useState<Profession[]>([]); // ✅ Lista de profissões da categoria
+  const [filterProfession, setFilterProfession] = useState<string>("");
+  const [professions, setProfessions] = useState<Profession[]>([]);
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
 
+  // ✅ 1. Pega a localização do usuário (Você em Patrocínio)
   useEffect(() => {
-    const loadUserCity = async () => {
+    const loadUserLocation = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from("profiles").select("address_city").eq("user_id", user.id).single();
+      
+      const { data } = await supabase.from("profiles").select("address_city, latitude, longitude").eq("user_id", user.id).single();
+      
       if (data?.address_city) setUserCity(data.address_city);
+      
+      // Se você já tiver lat/lng no seu perfil de Patrocínio, usamos elas
+      if (data?.latitude && data?.longitude) {
+        setUserCoords({ lat: data.latitude, lng: data.longitude });
+      } else {
+        // Fallback para coordenadas centrais de Patrocínio caso o seu perfil esteja sem
+        setUserCoords({ lat: -18.9431, lng: -46.9922 });
+      }
     };
-    loadUserCity();
+    loadUserLocation();
   }, []);
 
-  // ✅ Carrega profissões quando a categoria muda
   useEffect(() => {
     const loadProfessions = async () => {
       if (!filterCategory) {
@@ -69,12 +86,7 @@ const Search = () => {
         setFilterProfession("");
         return;
       }
-      const { data } = await supabase
-        .from("professions")
-        .select("id, name")
-        .eq("category_id", filterCategory)
-        .eq("active", true)
-        .order("name");
+      const { data } = await supabase.from("professions").select("id, name").eq("category_id", filterCategory).eq("active", true).order("name");
       setProfessions(data || []);
     };
     loadProfessions();
@@ -104,41 +116,58 @@ const Search = () => {
     const userIds = prosRes.data.map((p) => p.user_id);
     const [profilesRes, fullProfilesRes] = await Promise.all([
       supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
-      supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, address_city, address_state, latitude, longitude").in("user_id", userIds),
     ]);
 
     const profileMap = new Map(((profilesRes.data || []) as any[]).map((p) => [p.user_id, p]));
     const locationMap = new Map(((fullProfilesRes.data || []) as any[]).map((p) => [p.user_id, p]));
 
-    const mappedPros = prosRes.data.map((p) => ({
-      id: p.id,
-      rating: p.rating,
-      total_services: p.total_services,
-      verified: p.verified,
-      full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
-      avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
-      category_name: (p.categories as any)?.name || "—",
-      profession_name: (p.professions as any)?.name || "",
-      category_id: p.category_id,
-      profession_id: p.profession_id,
-      user_type: "professional",
-      city: locationMap.get(p.user_id)?.address_city || null,
-      state: locationMap.get(p.user_id)?.address_state || null,
-    }));
+    const mappedPros = prosRes.data.map((p) => {
+      const loc = locationMap.get(p.user_id);
+      let distance = undefined;
 
-    if (userCity) {
-      mappedPros.sort((a, b) => {
-        if (a.city === userCity && b.city !== userCity) return -1;
-        if (a.city !== userCity && b.city === userCity) return 1;
-        return b.rating - a.rating;
-      });
+      // ✅ 2. Cálculo de distância em tempo real (Haversine)
+      if (userCoords && loc?.latitude && loc?.longitude) {
+        const R = 6371; // Raio da Terra em KM
+        const dLat = (loc.latitude - userCoords.lat) * Math.PI / 180;
+        const dLon = (loc.longitude - userCoords.lng) * Math.PI / 180;
+        const a = 
+          Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(loc.latitude * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        distance = R * c;
+      }
+
+      return {
+        id: p.id,
+        rating: p.rating,
+        total_services: p.total_services,
+        verified: p.verified,
+        full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+        avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
+        category_name: (p.categories as any)?.name || "—",
+        profession_name: (p.professions as any)?.name || "",
+        category_id: p.category_id,
+        profession_id: p.profession_id,
+        user_type: "professional",
+        city: loc?.address_city || null,
+        state: loc?.address_state || null,
+        latitude: loc?.latitude || null,
+        longitude: loc?.longitude || null,
+        distance: distance
+      };
+    });
+
+    // Ordenar por distância (mais próximos primeiro)
+    if (userCoords) {
+      mappedPros.sort((a, b) => (a.distance || 999) - (b.distance || 999));
     }
 
     setPros(mappedPros);
     setLoading(false);
   };
 
-  useEffect(() => { loadPros(); }, [userCity]);
+  useEffect(() => { loadPros(); }, [userCoords]);
 
   const filtered = pros.filter((p) => {
     const q = search.trim().toLowerCase();
@@ -147,9 +176,13 @@ const Search = () => {
       if (!fuzzyMatch(q, target)) return false;
     }
     if (filterCategory && p.category_id !== filterCategory) return false;
-    if (filterProfession && p.profession_id !== filterProfession) return false; // ✅ Filtro de profissão
+    if (filterProfession && p.profession_id !== filterProfession) return false;
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
     if (filterVerified && !p.verified) return false;
+    
+    // ✅ 3. Filtro de Raio KM
+    if (userCoords && p.distance !== undefined && p.distance > filterRadius) return false;
+    
     return true;
   });
 
@@ -166,16 +199,11 @@ const Search = () => {
               placeholder="Buscar profissional ou serviço..."
               className="w-full pl-12 pr-12 py-4 bg-card border-2 border-muted rounded-2xl text-sm outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 transition-all shadow-sm"
             />
-            {search && (
-              <button onClick={() => setSearch("")} className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded-full transition-colors">
-                <X className="w-4 h-4 text-muted-foreground" />
-              </button>
-            )}
           </div>
         </div>
 
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-lg font-bold">Profissionais disponíveis</h1>
+          <h1 className="text-lg font-bold text-foreground">Explorar</h1>
           
           <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
             <SheetTrigger asChild>
@@ -184,32 +212,39 @@ const Search = () => {
               </button>
             </SheetTrigger>
             <SheetContent side="bottom" className="rounded-t-3xl h-[85vh] overflow-y-auto">
-              <SheetHeader>
-                <SheetTitle>Filtrar Profissionais</SheetTitle>
-              </SheetHeader>
+              <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
+                
+                {/* ✅ BARRA DE DISTÂNCIA (KM) */}
+                <div>
+                  <div className="flex justify-between items-center mb-3">
+                    <label className="text-sm font-bold flex items-center gap-2">
+                      <Navigation className="w-4 h-4 text-primary" /> Distância máxima
+                    </label>
+                    <span className="text-xs font-bold text-primary">{filterRadius} km</span>
+                  </div>
+                  <Slider 
+                    value={[filterRadius]} 
+                    onValueChange={([v]) => setFilterRadius(v)} 
+                    max={150} 
+                    step={5} 
+                    className="py-4"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Mostrando profissionais em até {filterRadius}km de você.</p>
+                </div>
+
                 <div>
                   <label className="text-sm font-bold mb-3 block">Categoria</label>
-                  <select 
-                    autoFocus={false}
-                    value={filterCategory} 
-                    onChange={(e) => setFilterCategory(e.target.value)}
-                    className="w-full p-3 rounded-xl border bg-background text-sm"
-                  >
-                    <option value="">Todas as categorias</option>
+                  <select autoFocus={false} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="w-full p-3 rounded-xl border bg-background text-sm">
+                    <option value="">Todas</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
 
-                {/* ✅ LISTA DE PROFISSÕES (SÓ APARECE SE ESCOLHER CATEGORIA) */}
                 {filterCategory && (
                   <div className="animate-in fade-in slide-in-from-top-1">
-                    <label className="text-sm font-bold mb-3 block">Profissão específica</label>
-                    <select 
-                      value={filterProfession} 
-                      onChange={(e) => setFilterProfession(e.target.value)}
-                      className="w-full p-3 rounded-xl border bg-background text-sm"
-                    >
+                    <label className="text-sm font-bold mb-3 block">Profissão</label>
+                    <select value={filterProfession} onChange={(e) => setFilterProfession(e.target.value)} className="w-full p-3 rounded-xl border bg-background text-sm">
                       <option value="">Qualquer profissão</option>
                       {professions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
@@ -220,18 +255,8 @@ const Search = () => {
                   <label className="text-sm font-bold mb-3 block">Avaliação mínima</label>
                   <div className="flex items-center gap-2">
                     {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        onClick={() => setFilterMinRating(star === filterMinRating ? 0 : star)}
-                        className="p-1 transition-transform active:scale-90"
-                      >
-                        <Star
-                          className={`w-8 h-8 ${
-                            filterMinRating >= star
-                              ? "fill-primary text-primary"
-                              : "text-muted-foreground/30"
-                          }`}
-                        />
+                      <button key={star} onClick={() => setFilterMinRating(star === filterMinRating ? 0 : star)} className="p-1 transition-transform active:scale-90">
+                        <Star className={`w-8 h-8 ${filterMinRating >= star ? "fill-primary text-primary" : "text-muted-foreground/30"}`} />
                       </button>
                     ))}
                   </div>
@@ -242,66 +267,45 @@ const Search = () => {
                     <CheckCircle2 className="w-5 h-5 text-primary" />
                     <span className="text-sm font-bold text-foreground">Apenas Verificados</span>
                   </div>
-                  <Switch 
-                    checked={filterVerified} 
-                    onCheckedChange={setFilterVerified} 
-                  />
+                  <Switch checked={filterVerified} onCheckedChange={setFilterVerified} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-4">
-                  <button 
-                    onClick={() => { setFilterCategory(""); setFilterProfession(""); setFilterMinRating(0); setFilterVerified(false); }}
-                    className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl"
-                  >
-                    Limpar
-                  </button>
-                  <button 
-                    onClick={() => setIsSheetOpen(false)}
-                    className="py-3 text-sm font-bold text-white bg-primary rounded-xl"
-                  >
-                    Aplicar
-                  </button>
+                  <button onClick={() => { setFilterCategory(""); setFilterProfession(""); setFilterMinRating(0); setFilterVerified(false); setFilterRadius(100); }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
+                  <button onClick={() => setIsSheetOpen(false)} className="py-3 text-sm font-bold text-white bg-primary rounded-xl">Aplicar</button>
                 </div>
               </div>
             </SheetContent>
           </Sheet>
         </div>
 
+        {/* LISTAGEM COM KM NO CARD */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {[1,2,3,4].map(i => <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />)}
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16 bg-muted/30 rounded-2xl border-2 border-dashed">
-            <SearchIcon className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
-            <p className="text-sm font-medium text-muted-foreground">Nenhum profissional encontrado.</p>
-            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterProfession(""); setFilterVerified(false);}} className="text-xs text-primary font-bold mt-2">Ver todos</button>
-          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {filtered.map((pro) => (
-              <Link
-                key={pro.id}
-                to={`/professional/${pro.id}`}
-                className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group"
-              >
+              <Link key={pro.id} to={`/professional/${pro.id}`} className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group">
                 <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
                   {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : pro.full_name[0]}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1">
-                    <p className="font-bold text-sm text-foreground truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
+                  <div className="flex items-center gap-1 text-foreground">
+                    <p className="font-bold text-sm truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
                     {pro.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
                   </div>
                   <p className="text-xs text-muted-foreground truncate font-medium">{pro.category_name} · {pro.profession_name}</p>
                   <div className="flex items-center justify-between mt-1">
                     <div className="flex items-center gap-1">
                       <Star className="w-3.5 h-3.5 fill-primary text-primary" />
-                      <span className="text-xs font-bold">{Number(pro.rating).toFixed(1)}</span>
+                      <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
                     </div>
-                    {pro.city && (
-                      <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 font-medium">
-                        <MapPin className="w-3 h-3" /> {pro.city}
+                    {/* ✅ EXIBE A DISTÂNCIA REAL NO CARD */}
+                    {pro.distance !== undefined && (
+                      <p className="text-[10px] text-primary font-bold bg-primary/5 px-2 py-0.5 rounded-full">
+                        {pro.distance < 1 ? 'Menos de 1km' : `${Math.round(pro.distance)} km`}
                       </p>
                     )}
                   </div>

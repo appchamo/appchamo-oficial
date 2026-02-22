@@ -1,11 +1,11 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2 } from "lucide-react"; // Adicionado CheckCircle2
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch"; // Adicionado Switch
+import { Switch } from "@/components/ui/switch";
 import { fuzzyMatch } from "@/lib/fuzzyMatch";
 
 interface Pro {
@@ -35,6 +35,9 @@ const Search = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [userCity, setUserCity] = useState<string | null>(null);
+  
+  // ✅ Controle de abertura do modal
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   // Filters
   const [filterCategory, setFilterCategory] = useState<string>("");
@@ -96,7 +99,6 @@ const Search = () => {
       state: locationMap.get(p.user_id)?.address_state || null,
     }));
 
-    // Ordenar: Primeiro os da mesma cidade do usuário, depois por nota
     if (userCity) {
       mappedPros.sort((a, b) => {
         if (a.city === userCity && b.city !== userCity) return -1;
@@ -149,7 +151,7 @@ const Search = () => {
             {search ? `Resultados para "${search}"` : "Todos os Profissionais"}
           </h1>
           
-          <Sheet>
+          <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
             <SheetTrigger asChild>
               <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-card hover:bg-muted transition-colors text-xs font-semibold">
                 <SlidersHorizontal className="w-3.5 h-3.5" /> Filtros
@@ -176,7 +178,6 @@ const Search = () => {
                   <Slider value={[filterMinRating]} onValueChange={([v]) => setFilterMinRating(v)} max={5} step={1} />
                 </div>
 
-                {/* ✅ FILTRO: APENAS VERIFICADOS */}
                 <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="w-5 h-5 text-primary" />
@@ -188,12 +189,21 @@ const Search = () => {
                   />
                 </div>
 
-                <button 
-                  onClick={() => { setFilterCategory(""); setFilterMinRating(0); setFilterVerified(false); }}
-                  className="w-full py-3 text-sm font-semibold text-primary"
-                >
-                  Limpar Filtros
-                </button>
+                <div className="grid grid-cols-2 gap-4 pt-4">
+                  <button 
+                    onClick={() => { setFilterCategory(""); setFilterMinRating(0); setFilterVerified(false); }}
+                    className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl"
+                  >
+                    Limpar
+                  </button>
+                  {/* ✅ BOTÃO APLICAR: FECHA O MODAL */}
+                  <button 
+                    onClick={() => setIsSheetOpen(false)}
+                    className="py-3 text-sm font-bold text-white bg-primary rounded-xl shadow-lg shadow-primary/20"
+                  >
+                    Aplicar
+                  </button>
+                </div>
               </div>
             </SheetContent>
           </Sheet>
@@ -201,7 +211,7 @@ const Search = () => {
 
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-             {[1,2,3,4].map(i => <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />)}
+              {[1,2,3,4].map(i => <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />)}
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 bg-muted/30 rounded-2xl border-2 border-dashed">

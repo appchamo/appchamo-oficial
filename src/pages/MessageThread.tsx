@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useState, useRef } from "react";
@@ -12,6 +12,7 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
+  image_urls?: string[] | null;
 }
 
 interface OtherParty {
@@ -82,6 +83,10 @@ const MessageThread = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ✅ NOVO: Estados para o comprovante
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -339,7 +344,7 @@ const MessageThread = () => {
       const fee = amount * feePct / 100 + feeFixed;
       const val = (amount / i).toFixed(2).replace(".", ",");
       const feeLabel = fee > 0 ? ` (taxa: ${feePct}%)` : "";
-      options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} à vista${feeLabel}` : `${i}x de R$ ${val}${feeLabel}` });
+      options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista)${feeLabel}` : `${i}x de R$ ${val}${feeLabel}` });
     }
     return options;
   };
@@ -752,6 +757,41 @@ const MessageThread = () => {
     return null;
   };
 
+  // ✅ NOVO: Função para upload de comprovante único
+  const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userId || !threadId) return;
+
+    setUploadingReceipt(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const fileName = `receipts/${threadId}/${Date.now()}.${ext}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("uploads")
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
+
+      // Envia como mensagem no chat
+      const { error: msgError } = await supabase.from("chat_messages").insert({
+        request_id: threadId,
+        sender_id: userId,
+        content: `📄 COMPROVANTE ENVIADO\nArquivo: ${file.name}\n\n[FILE:${urlData.publicUrl}:${file.name}]`
+      });
+
+      if (msgError) throw msgError;
+      
+      toast({ title: "Comprovante enviado com sucesso!" });
+    } catch (error) {
+      toast({ title: "Erro ao enviar comprovante", variant: "destructive" });
+    } finally {
+      setUploadingReceipt(false);
+    }
+  };
+
   const renderMessageContent = (msg: Message) => {
     const billing = parseBilling(msg.content);
     const isMine = msg.sender_id === userId;
@@ -760,6 +800,7 @@ const MessageThread = () => {
     const isRating = msg.content.includes("⭐ AVALIAÇÃO");
     const isProtocol = msg.content.startsWith("📋 PROTOCOLO:");
     const isSystemClose = msg.content.includes("🔒 CHAMADA ENCERRADA");
+    const isReceipt = msg.content.includes("📄 COMPROVANTE ENVIADO");
     const audioData = parseAudio(msg.content);
 
     if (audioData) {
@@ -790,6 +831,9 @@ const MessageThread = () => {
     }
 
     if (isBilling && billing) {
+      // ✅ AJUSTE: Verifica se já existe mensagem de confirmação de pagamento para BLOQUEAR re-pagamento
+      const alreadyPaid = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial"));
+
       return (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -798,16 +842,21 @@ const MessageThread = () => {
           </div>
           <p className="text-lg font-bold">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
           <p className="text-xs opacity-80">{billing.desc}</p>
-          {!isMine &&
-          <button
-            onClick={() => openPayment(msg)}
-            className="mt-1 w-full py-2 rounded-lg bg-background/20 backdrop-blur-sm text-xs font-semibold hover:bg-background/30 transition-colors border border-current/20">
-
-              Pagar agora
-            </button>
-          }
+          
+          {!isMine && (
+            alreadyPaid ? (
+              <div className="mt-2 w-full py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-600 text-center flex items-center justify-center gap-1.5 uppercase">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Pagamento efetuado com sucesso
+              </div>
+            ) : (
+              <button
+                onClick={() => openPayment(msg)}
+                className="mt-1 w-full py-2 rounded-lg bg-background/20 backdrop-blur-sm text-xs font-semibold hover:bg-background/30 transition-colors border border-current/20">
+                Pagar agora
+              </button>
+            )
+          )}
         </div>);
-
     }
 
     if (isPaymentConfirm) {
@@ -824,6 +873,23 @@ const MessageThread = () => {
     // Hide rating messages completely
     if (isRating) {
       return null;
+    }
+
+    // ✅ Render comprovante (arquivo)
+    if (isReceipt) {
+      const fileMatch = msg.content.match(/\[FILE:(.+):(.+)\]$/);
+      return (
+        <div className="space-y-2">
+          <p className="font-semibold flex items-center gap-1.5 text-emerald-600">
+            <CheckCircle2 className="w-4 h-4" /> Comprovante enviado
+          </p>
+          {fileMatch && (
+            <a href={fileMatch[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] underline opacity-70">
+              Visualizar arquivo: {fileMatch[2]}
+            </a>
+          )}
+        </div>
+      );
     }
 
     // Render images inline from photo URLs
@@ -1010,6 +1076,36 @@ const MessageThread = () => {
             <p className="text-sm text-muted-foreground">
               {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : "Serviço finalizado — chat encerrado"}
             </p>
+
+            {/* ✅ BLOCO DE COMPROVANTE (Apenas para o cliente) */}
+            {!isProfessional && requestStatus !== "rejected" && (
+              <div className="w-full max-w-xs mt-2 space-y-2 p-4 bg-background border rounded-2xl shadow-sm">
+                <p className="text-xs font-bold text-center">Deseja enviar o comprovante?</p>
+                
+                {messages.some(m => m.content.includes("📄 COMPROVANTE ENVIADO") && m.sender_id === userId) ? (
+                  <div className="py-2 text-[10px] font-black text-emerald-600 text-center uppercase tracking-widest bg-emerald-50 rounded-lg border border-emerald-100">
+                    Comprovante enviado com sucesso
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingReceipt}
+                    className="w-full py-2.5 rounded-xl bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider hover:bg-primary/20 transition-all flex items-center justify-center gap-2"
+                  >
+                    {uploadingReceipt ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
+                    Selecionar Imagem ou PDF
+                  </button>
+                )}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  accept="image/*,application/pdf"
+                  onChange={handleUploadReceipt}
+                />
+              </div>
+            )}
+
             {/* Show rating button for client only after payment (not on rejected calls) */}
             {!isProfessional && !hasRated && requestStatus !== "rejected" && messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial")) &&
           <button

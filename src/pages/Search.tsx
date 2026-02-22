@@ -44,6 +44,7 @@ const Search = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [userCity, setUserCity] = useState<string | null>(null);
+  const [userState, setUserState] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
@@ -55,27 +56,46 @@ const Search = () => {
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
   
-  // ✅ Estados do Autocomplete de Cidade
+  // ✅ Estados do IBGE (Estado e Cidade)
+  const [filterState, setFilterState] = useState<string>("");
+  const [statesList, setStatesList] = useState<{ sigla: string; nome: string }[]>([]);
   const [filterCity, setFilterCity] = useState<string>("");
   const [allCities, setAllCities] = useState<string[]>([]);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCityDropdown, setShowCityDropdown] = useState(false);
 
-  // ✅ Busca as cidades do IBGE ao carregar a tela
+  // ✅ 1. Busca os Estados (UF) do IBGE ao carregar a tela
+  useEffect(() => {
+    const fetchStates = async () => {
+      try {
+        const res = await fetch('https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome');
+        const data = await res.json();
+        setStatesList(data.map((s: any) => ({ sigla: s.sigla, nome: s.nome })));
+      } catch (error) {
+        console.error("Erro ao buscar estados do IBGE:", error);
+      }
+    };
+    fetchStates();
+  }, []);
+
+  // ✅ 2. Busca as Cidades SEMPRE que o Estado (filterState) mudar
   useEffect(() => {
     const fetchCities = async () => {
+      if (!filterState) {
+        setAllCities([]);
+        return;
+      }
       try {
-        const res = await fetch('https://servicodados.ibge.gov.br/api/v1/localidades/municipios');
+        const res = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${filterState}/municipios`);
         const data = await res.json();
         const cityNames = data.map((c: any) => c.nome);
-        // Remove duplicatas por segurança e salva no estado
         setAllCities(Array.from(new Set(cityNames)));
       } catch (error) {
         console.error("Erro ao buscar cidades do IBGE:", error);
       }
     };
     fetchCities();
-  }, []);
+  }, [filterState]);
 
   useEffect(() => {
     const loadUserLocation = async () => {
@@ -86,11 +106,16 @@ const Search = () => {
         return;
       }
       
-      const { data } = await supabase.from("profiles").select("address_city, latitude, longitude").eq("user_id", user.id).single();
+      const { data } = await supabase.from("profiles").select("address_city, address_state, latitude, longitude").eq("user_id", user.id).single();
       
+      if (data?.address_state) {
+        setUserState(data.address_state);
+        setFilterState((prev) => prev || data.address_state); // Preenche o estado
+      }
+
       if (data?.address_city) {
         setUserCity(data.address_city);
-        setFilterCity((prev) => prev || data.address_city);
+        setFilterCity((prev) => prev || data.address_city); // Preenche a cidade
       }
       
       if (data?.latitude && data?.longitude) {
@@ -196,7 +221,14 @@ const Search = () => {
       if (!fuzzyMatch(q, target)) return false;
     }
     
-    // Filtra pela cidade (removendo acentos para melhorar a busca)
+    // ✅ NOVO: Filtra pelo Estado
+    if (filterState) {
+      const pState = (p.state || "").toLowerCase();
+      const fState = filterState.toLowerCase();
+      if (pState !== fState) return false;
+    }
+
+    // Filtra pela cidade
     if (filterCity) {
       const pCity = (p.city || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const fCity = filterCity.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -213,17 +245,15 @@ const Search = () => {
     return true;
   });
 
-  // ✅ Função que lida com a digitação e mostra as sugestões do IBGE
   const handleCityInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setFilterCity(val);
 
     if (val.length >= 2) {
-      // Filtra as cidades ignorando acentos
       const normalizedInput = val.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const matches = allCities.filter(c => 
         c.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalizedInput)
-      ).slice(0, 5); // Mostra no máximo 5 sugestões
+      ).slice(0, 5);
       
       setCitySuggestions(matches);
       setShowCityDropdown(true);
@@ -232,7 +262,6 @@ const Search = () => {
     }
   };
 
-  // ✅ Função quando o usuário clica em uma sugestão
   const handleCitySelect = (cityName: string) => {
     setFilterCity(cityName);
     setShowCityDropdown(false);
@@ -267,7 +296,28 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
-                {/* ✅ NOVO: Campo de Cidade com Autocomplete do IBGE */}
+                {/* ✅ NOVO: Campo de Estado (UF) */}
+                <div>
+                  <label className="text-sm font-bold flex items-center gap-2 mb-3">
+                    <MapPin className="w-4 h-4 text-primary" /> Estado
+                  </label>
+                  <select
+                    value={filterState}
+                    onChange={(e) => {
+                      setFilterState(e.target.value);
+                      setFilterCity(""); // Limpa a cidade ao trocar de estado
+                      setCitySuggestions([]);
+                    }}
+                    className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                  >
+                    <option value="">Selecione o Estado</option>
+                    {statesList.map(s => (
+                      <option key={s.sigla} value={s.sigla}>{s.nome} ({s.sigla})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* ✅ ATUALIZADO: Campo de Cidade (Só funciona se um estado estiver selecionado) */}
                 <div className="relative">
                   <label className="text-sm font-bold flex items-center gap-2 mb-3">
                     <MapPin className="w-4 h-4 text-primary" /> Cidade
@@ -277,16 +327,16 @@ const Search = () => {
                     value={filterCity}
                     onChange={handleCityInputChange}
                     onFocus={() => { if (citySuggestions.length > 0) setShowCityDropdown(true) }}
-                    placeholder="Ex: Patrocínio"
-                    className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                    placeholder={filterState ? "Ex: Patrocínio" : "Selecione um estado primeiro"}
+                    disabled={!filterState} // Bloqueia se não tiver estado
+                    className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none disabled:opacity-50 disabled:bg-muted"
                   />
-                  {/* Caixa flutuante de sugestões */}
                   {showCityDropdown && citySuggestions.length > 0 && (
                     <ul className="absolute z-50 w-full bg-card border rounded-xl mt-1 shadow-lg max-h-48 overflow-y-auto">
                       {citySuggestions.map((city, idx) => (
                         <li
                           key={idx}
-                          onMouseDown={() => handleCitySelect(city)} // onMouseDown é mais rápido que onClick, evita conflito com onBlur
+                          onMouseDown={() => handleCitySelect(city)}
                           className="px-4 py-3 text-sm font-medium hover:bg-muted cursor-pointer transition-colors border-b last:border-0"
                         >
                           {city}
@@ -360,6 +410,7 @@ const Search = () => {
                     setFilterMinRating(0); 
                     setFilterVerified(false); 
                     setFilterRadius(100); 
+                    setFilterState(userState || ""); // Volta para o estado do usuário
                     setFilterCity(userCity || ""); // Volta para a cidade do usuário
                   }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
                   <button onClick={() => setIsSheetOpen(false)} className="py-3 text-sm font-bold text-white bg-primary rounded-xl">Aplicar</button>

@@ -679,8 +679,6 @@ const MessageThread = () => {
   };
 
 
-
-
   const handleSubmitRating = async () => {
     if (ratingStars === 0) {toast({ title: "Selecione uma nota", variant: "destructive" });return;}
     if (!userId || !threadId) return;
@@ -800,7 +798,7 @@ const MessageThread = () => {
     const isPaymentConfirm = msg.content.includes("✅ PAGAMENTO CONFIRMADO");
     const isRating = msg.content.includes("⭐ AVALIAÇÃO");
     const isProtocol = msg.content.startsWith("📋 PROTOCOLO:");
-    const isSystemClose = msg.content.includes("🔒 CHAMADA ENCERRADA");
+    const isSystemClose = msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada");
     const isReceipt = msg.content.includes("📄 COMPROVANTE ENVIADO");
     const audioData = parseAudio(msg.content);
 
@@ -992,6 +990,29 @@ const MessageThread = () => {
 
       {/* Messages */}
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
+        
+        {/* ✅ NOVO: Cancelamento do lado do CLIENTE quando pendente */}
+        {!isProfessional && requestStatus === "pending" &&
+        <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 shadow-sm">
+            <p className="text-sm font-semibold text-foreground text-center">Aguardando resposta</p>
+            <p className="text-xs text-muted-foreground text-center">O profissional ainda não aceitou. Se desejar desistir, você pode cancelar a solicitação.</p>
+            <button
+              onClick={async () => {
+                await supabase.from("service_requests").update({ status: "cancelled" } as any).eq("id", threadId!);
+                setRequestStatus("cancelled");
+                await supabase.from("chat_messages").insert({
+                  request_id: threadId!,
+                  sender_id: userId!,
+                  content: "🚫 Solicitação cancelada pelo cliente. Chat encerrado."
+                });
+                toast({ title: "Solicitação cancelada com sucesso" });
+              }}
+              className="w-full py-2.5 rounded-xl border-2 border-destructive text-destructive font-semibold text-sm hover:bg-destructive/10 transition-colors">
+                Cancelar Solicitação
+            </button>
+        </div>
+        }
+
         {/* Accept/Reject buttons for professional when pending */}
         {isProfessional && requestStatus === "pending" &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2">
@@ -1001,7 +1022,7 @@ const MessageThread = () => {
               <button
               onClick={async () => {
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId!);
-        setRequestStatus("rejected");
+                setRequestStatus("rejected");
                 await supabase.from("chat_messages").insert({
                   request_id: threadId!,
                   sender_id: userId!,
@@ -1031,11 +1052,16 @@ const MessageThread = () => {
             </div>
           </div>
         }
-        {requestStatus === "rejected" &&
+
+        {/* ✅ Atualizado para mostrar feedback se for recusada ou cancelada */}
+        {(requestStatus === "rejected" || requestStatus === "cancelled") &&
         <div className="bg-destructive/10 border border-destructive/20 rounded-2xl p-4 text-center mb-2">
-            <p className="text-sm font-semibold text-destructive">Chamada recusada</p>
+            <p className="text-sm font-semibold text-destructive">
+              {requestStatus === "rejected" ? "Chamada recusada" : "Solicitação cancelada"}
+            </p>
           </div>
         }
+        
         {messages.length === 0 &&
         <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma mensagem. Inicie a conversa!</div>
         }
@@ -1048,7 +1074,7 @@ const MessageThread = () => {
           if (rendered === null) return null;
 
           // Protocol and system messages - render centered without bubble
-          const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA");
+          const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada");
           if (isSystemMsg) {
             return (
               <div key={msg.id} className="flex justify-center">
@@ -1085,15 +1111,18 @@ const MessageThread = () => {
       </main>
 
       {/* Input bar / FLUXO DE COMPROVANTE */}
-      {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" ?
+      {/* ✅ Adicionado bloqueio da barra se status for cancelled */}
+      {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" ?
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
           <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
             <p className="text-sm text-muted-foreground">
-              {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : "Serviço finalizado — chat encerrado"}
+              {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : 
+               requestStatus === "cancelled" ? "Solicitação cancelada — chat encerrado" : 
+               "Serviço finalizado — chat encerrado"}
             </p>
 
-            {/* ✅ BLOCO DE COMPROVANTE (Apenas para o cliente ao fechar o chat) */}
-            {!isProfessional && requestStatus !== "rejected" && (
+            {/* ✅ BLOCO DE COMPROVANTE (Não mostra se foi cancelado) */}
+            {!isProfessional && requestStatus !== "rejected" && requestStatus !== "cancelled" && (
               <div className="w-full max-w-xs mt-2 space-y-2 p-4 bg-background border rounded-2xl shadow-sm animate-in fade-in zoom-in duration-300">
                 <p className="text-xs font-bold text-center">Deseja enviar o comprovante?</p>
                 
@@ -1121,8 +1150,8 @@ const MessageThread = () => {
               </div>
             )}
 
-            {/* Show rating button for client only after payment (not on rejected calls) */}
-            {!isProfessional && !hasRated && requestStatus !== "rejected" && messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial")) &&
+            {/* Show rating button for client only after payment (not on rejected/cancelled calls) */}
+            {!isProfessional && !hasRated && requestStatus !== "rejected" && requestStatus !== "cancelled" && messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial")) &&
           <button
             onClick={() => {setRatingStars(0);setRatingComment("");setRatingOpen(true);}}
             className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center gap-1.5">
@@ -1354,7 +1383,7 @@ const MessageThread = () => {
               }
                   {getBillingFeeLabel() &&
               <p className="text-xs text-muted-foreground">
-                      💰 {getBillingFeeLabel()!.label}
+                    💰 {getBillingFeeLabel()!.label}
                     </p>
               }
                 </div>

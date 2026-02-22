@@ -12,7 +12,7 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
-  image_urls?: string[] | null; // Adicionado para suportar imagens dinâmicas
+  image_urls?: string[] | null;
 }
 
 const SupportThread = () => {
@@ -23,6 +23,7 @@ const SupportThread = () => {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false); // ✅ Novo estado
   const [supportProtocol, setSupportProtocol] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,7 +48,7 @@ const SupportThread = () => {
       const { data } = await supabase
         .from("support_messages")
         .select("*")
-        .eq("ticket_id", ticketId) // Removido filtro de user_id para o Admin conseguir ver também
+        .eq("ticket_id", ticketId)
         .order("created_at");
       setMessages((data as Message[]) || []);
       setLoading(false);
@@ -95,42 +96,80 @@ const SupportThread = () => {
     setSending(false);
   };
 
+  // ✅ FUNÇÃO DE COMPRESSÃO ADICIONADA PARA O SUPORTE
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-    if (file.size > 20 * 1024 * 1024) {
+    const originalFile = e.target.files?.[0];
+    if (!originalFile || !user) return;
+
+    if (originalFile.size > 20 * 1024 * 1024) {
       toast({ title: "Arquivo muito grande", description: "Máximo 20MB", variant: "destructive" });
       return;
     }
-    
+
+    const isImage = originalFile.type.startsWith("image/");
     setUploadingFile(true);
+
     try {
-      const ext = file.name.split(".").pop() || "file";
-      // ✅ NOME DA PASTA CORRIGIDO PARA 'support' (Igual à política SQL)
+      let fileToUpload: File | Blob = originalFile;
+
+      // Se for imagem, comprime antes de subir
+      if (isImage) {
+        setIsCompressing(true);
+        fileToUpload = await new Promise<File>((resolve) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(originalFile);
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              let width = img.width;
+              let height = img.height;
+              const MAX_WIDTH = 1200;
+              if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+              }
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext("2d");
+              ctx?.drawImage(img, 0, 0, width, height);
+              canvas.toBlob((blob) => {
+                if (blob) {
+                  const compressed = new File([blob], originalFile.name.replace(/\.[^/.]+$/, ".webp"), { type: "image/webp" });
+                  resolve(compressed);
+                }
+              }, "image/webp", 0.7);
+            };
+          };
+        });
+        setIsCompressing(false);
+      }
+
+      const ext = isImage ? "webp" : originalFile.name.split(".").pop() || "file";
       const fileName = `support/${user.id}/${Date.now()}.${ext}`;
       
       const { error: uploadError } = await supabase.storage
         .from("uploads")
-        .upload(fileName, file);
+        .upload(fileName, fileToUpload);
 
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
-      const isImage = file.type.startsWith("image/");
       
-      // ✅ GRAVAÇÃO NA COLUNA image_urls PARA MELHOR RENDERIZAÇÃO
       await supabase.from("support_messages").insert({
         user_id: user.id,
         sender_id: user.id,
         ticket_id: ticketId,
-        content: isImage ? "" : `Enviou um arquivo: ${file.name}`,
+        content: isImage ? "" : `Enviou um arquivo: ${originalFile.name}`,
         image_urls: isImage ? [urlData.publicUrl] : null,
       });
 
     } catch (err: any) {
-      toast({ title: "Erro ao enviar arquivo", description: err.message, variant: "destructive" });
+      toast({ title: "Erro ao enviar", description: err.message, variant: "destructive" });
     } finally {
       setUploadingFile(false);
+      setIsCompressing(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -189,11 +228,9 @@ const SupportThread = () => {
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   const renderContent = (msg: Message) => {
-    // 1. Áudio
     const audioMatch = msg.content.match(/\[AUDIO:(.+):(\d+)\]$/);
     if (audioMatch) return <AudioPlayer src={audioMatch[1]} duration={parseInt(audioMatch[2])} isMine={msg.sender_id === user?.id} />;
 
-    // 2. ✅ Renderiza imagens vindas da nova coluna image_urls (Upload atual)
     if (msg.image_urls && msg.image_urls.length > 0) {
       return (
         <div className="space-y-2">
@@ -206,12 +243,11 @@ const SupportThread = () => {
               />
             ))}
           </div>
-          {msg.content && <p>{msg.content}</p>}
+          {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
         </div>
       );
     }
 
-    // 3. Suporte a tags antigas [IMAGE:url] para retrocompatibilidade
     const tagMatch = msg.content.match(/\[(IMAGE|VIDEO|FILE):(.+):(.+)\]$/);
     if (tagMatch) {
       const [, type, url, name] = tagMatch;
@@ -227,25 +263,17 @@ const SupportThread = () => {
     return <p className="whitespace-pre-wrap">{msg.content}</p>;
   };
 
-  if (loading) return (
-    <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
-    </div>
-  );
+  if (loading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="animate-spin w-6 h-6 text-primary" /></div>;
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
       <header className="sticky top-0 z-30 bg-amber-500/90 backdrop-blur-md border-b border-amber-600/30">
-        <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
-          <Link to="/support" className="p-1.5 rounded-lg hover:bg-amber-600/20 transition-colors">
-            <ArrowLeft className="w-5 h-5 text-white" />
-          </Link>
-          <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
-            <HelpCircle className="w-5 h-5 text-white" />
-          </div>
+        <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto text-white">
+          <Link to="/support" className="p-1.5 rounded-lg hover:bg-amber-600/20"><ArrowLeft className="w-5 h-5" /></Link>
+          <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center"><HelpCircle className="w-5 h-5" /></div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">Suporte Chamô</p>
-            <p className="text-[10px] text-white/70">{supportProtocol ? `Protocolo: ${supportProtocol}` : "Atendimento"}</p>
+            <p className="text-sm font-semibold truncate">Suporte Chamô</p>
+            <p className="text-[10px] opacity-70">{supportProtocol ? `Protocolo: ${supportProtocol}` : "Atendimento"}</p>
           </div>
         </div>
       </header>
@@ -253,32 +281,17 @@ const SupportThread = () => {
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
         {messages.map((msg) => {
           const isMine = msg.sender_id === user?.id;
-          const isSystem = msg.content.startsWith("[CLOSED]");
-          if (isSystem) {
-            return (
-              <div key={msg.id} className="flex justify-center my-2">
-                <div className="bg-muted/50 border rounded-xl px-4 py-2 text-center">
-                  <p className="text-xs font-medium text-muted-foreground">✅ Essa solicitação de suporte foi concluída</p>
-                </div>
-              </div>
-            );
-          }
+          if (msg.content === "[CLOSED]") return (
+            <div key={msg.id} className="flex justify-center my-2">
+              <div className="bg-muted/50 border rounded-xl px-4 py-2 text-xs font-medium text-muted-foreground">✅ Chamado encerrado</div>
+            </div>
+          );
           return (
             <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
-              {!isMine && (
-                <div className="w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center mt-1 flex-shrink-0">
-                  <HelpCircle className="w-4 h-4 text-amber-600" />
-                </div>
-              )}
-              <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
-                isMine
-                  ? "bg-primary text-primary-foreground rounded-br-md"
-                  : "bg-amber-500/10 border border-amber-500/20 rounded-bl-md text-foreground"
-              }`}>
+              {!isMine && <div className="w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center mt-1 flex-shrink-0"><HelpCircle className="w-4 h-4 text-amber-600" /></div>}
+              <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-amber-500/10 border border-amber-500/20 rounded-bl-md text-foreground"}`}>
                 {renderContent(msg)}
-                <p className={`text-[10px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
-                  {new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                </p>
+                <p className={`text-[9px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
               </div>
             </div>
           );
@@ -301,22 +314,17 @@ const SupportThread = () => {
             ) : uploadingAudio || uploadingFile ? (
               <div className="flex-1 flex items-center justify-center gap-2 py-2.5">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                <span className="text-sm text-muted-foreground">Enviando...</span>
+                <span className="text-sm text-muted-foreground">{isCompressing ? "Comprimindo imagem..." : "Enviando..."}</span>
               </div>
             ) : (
               <>
                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*,.pdf" />
-                <button onClick={() => fileInputRef.current?.click()} className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
+                <button onClick={() => fileInputRef.current?.click()} className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors">
                   <Paperclip className="w-4 h-4 text-muted-foreground" />
                 </button>
-                <input
-                  type="text" value={text} onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                  placeholder="Dúvida ou problema?"
-                  className="flex-1 bg-card border rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                />
+                <input type="text" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="Dúvida ou problema?" className="flex-1 bg-card border rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30" />
                 {text.trim() ? (
-                  <button onClick={handleSend} className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center"><Send className="w-4 h-4" /></button>
+                  <button onClick={handleSend} disabled={sending} className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center disabled:opacity-50"><Send className="w-4 h-4" /></button>
                 ) : (
                   <button onClick={startRecording} className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center"><Mic className="w-4 h-4" /></button>
                 )}

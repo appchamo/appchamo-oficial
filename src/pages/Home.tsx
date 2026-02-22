@@ -9,12 +9,13 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { Link, useNavigate } from "react-router-dom";
-import { Zap, Search, Star, BadgeCheck, X, Briefcase } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { Zap, Ticket } from "lucide-react"; // Adicionado Ticket
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
 import HomeJobsBanner from "@/components/home/HomeJobsBanner";
 import HomeWelcome from "@/components/home/HomeWelcome";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; // Adicionado Dialog
 
 const Home = () => {
   const { profile } = useAuth();
@@ -23,11 +24,22 @@ const Home = () => {
   const navigate = useNavigate();
   const userName = profile?.full_name?.split(" ")[0] || "Usuário";
   const [jobCount, setJobCount] = useState(0);
+  const [showCoupon, setShowCoupon] = useState(false); // ✅ Estado para o cupom
 
   useEffect(() => {
     supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => {
       setJobCount(count || 0);
     });
+
+    // ✅ Lógica do Cupom com Delay de 3 segundos
+    const justSignedUp = localStorage.getItem("just_signed_up");
+    if (justSignedUp === "true") {
+      const timer = setTimeout(() => {
+        setShowCoupon(true);
+        localStorage.removeItem("just_signed_up"); // Limpa para não repetir
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
   }, []);
 
   const sectionComponents: Record<string, React.ReactNode> = {
@@ -41,7 +53,6 @@ const Home = () => {
     tutorials: <TutorialsSection key="tutorials" />
   };
 
-  // Banner positions mapped after sections
   const bannerAfter: Record<string, string> = {
     welcome: "top",
     sponsors: "below_sponsors",
@@ -77,15 +88,34 @@ const Home = () => {
 
         <footer className="text-center py-6 border-t mt-4">
           <p className="text-xs text-muted-foreground">
-            O Chamô atua exclusivamente como intermediário. Não há vínculo empregatício entre a plataforma e os profissionais.
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
             © 2026 Chamô. Todos os direitos reservados.
           </p>
         </footer>
       </main>
-    </AppLayout>);
 
+      {/* ✅ Modal de Cupom com Delay */}
+      <Dialog open={showCoupon} onOpenChange={setShowCoupon}>
+        <DialogContent className="max-w-xs text-center">
+          <DialogHeader>
+            <DialogTitle className="text-center">🎉 Parabéns!</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-3 py-4">
+            <div className="w-16 h-16 rounded-full bg-accent flex items-center justify-center">
+              <Ticket className="w-8 h-8 text-primary" />
+            </div>
+            <p className="text-sm text-foreground font-medium">
+              Você ganhou <strong className="text-primary">1 cupom</strong> para o sorteio!
+            </p>
+          </div>
+          <button
+            onClick={() => setShowCoupon(false)}
+            className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-semibold"
+          >
+            Entendi!
+          </button>
+        </DialogContent>
+      </Dialog>
+    </AppLayout>);
 };
 
 export default Home;

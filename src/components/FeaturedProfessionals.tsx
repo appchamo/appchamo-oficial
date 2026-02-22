@@ -12,6 +12,7 @@ interface Pro {
   category_name: string;
   full_name: string;
   avatar_url: string | null;
+  plan_type?: string; // ✅ Adicionado para corrigir o erro de tipagem
 }
 
 /**
@@ -39,10 +40,11 @@ const FeaturedProfessionals = () => {
   const loadPros = useCallback(async () => {
     const { data: pros } = await supabase
       .from("professionals")
-      .select("id, rating, total_services, verified, user_id, category_id, categories(name)")
+      .select("id, rating, total_services, verified, user_id, category_id, plan_type, categories(name)") // ✅ plan_type incluído
       .eq("active", true)
       .eq("profile_status", "approved")
       .neq("availability_status", "unavailable")
+      .neq("plan_type", "free") // 🔥 Filtra para NÃO mostrar FREE nos destaques
       .order("rating", { ascending: false })
       .limit(10);
 
@@ -74,6 +76,7 @@ const FeaturedProfessionals = () => {
         category_name: (p.categories as any)?.name || "—",
         full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
         avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
+        plan_type: p.plan_type // ✅ Incluído no mapeamento
       }))
     );
   }, []);

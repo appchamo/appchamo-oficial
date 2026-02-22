@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2 } from "lucide-react";
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2, Building2 } from "lucide-react"; // Adicionado Building2
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -21,6 +21,7 @@ interface Pro {
   user_type: string;
   city: string | null;
   state: string | null;
+  plan_id?: string | null; // Adicionado para o filtro de empresa
 }
 
 interface Category {
@@ -35,14 +36,13 @@ const Search = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [userCity, setUserCity] = useState<string | null>(null);
-  
-  // ✅ Controle de abertura do modal
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   // Filters
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
+  const [filterCompanies, setFilterCompanies] = useState(false); // ✅ Estado: Apenas Empresas
 
   useEffect(() => {
     const loadUserCity = async () => {
@@ -59,7 +59,11 @@ const Search = () => {
     const [prosRes, catsRes] = await Promise.all([
       supabase
         .from("professionals")
-        .select("id, rating, total_services, verified, user_id, availability_status, category_id, profession_id, categories(name), professions:profession_id(name)")
+        .select(`
+          id, rating, total_services, verified, user_id, availability_status, category_id, profession_id, 
+          categories(name), professions:profession_id(name),
+          subscriptions:user_id (plan_id)
+        `) // ✅ Adicionado subscriptions no select
         .eq("active", true)
         .eq("profile_status", "approved")
         .neq("availability_status", "unavailable")
@@ -97,6 +101,7 @@ const Search = () => {
       user_type: "professional",
       city: locationMap.get(p.user_id)?.address_city || null,
       state: locationMap.get(p.user_id)?.address_state || null,
+      plan_id: (p.subscriptions as any)?.[0]?.plan_id || 'free', // ✅ Mapeia o plano
     }));
 
     if (userCity) {
@@ -122,12 +127,13 @@ const Search = () => {
     if (filterCategory && p.category_id !== filterCategory) return false;
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
     if (filterVerified && !p.verified) return false;
+    if (filterCompanies && p.plan_id !== 'business') return false; // ✅ Lógica: Apenas empresas (plano business)
     return true;
   });
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5">
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24">
         <div className="relative mb-6">
           <div className="relative group">
             <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -157,49 +163,57 @@ const Search = () => {
                 <SlidersHorizontal className="w-3.5 h-3.5" /> Filtros
               </button>
             </SheetTrigger>
-            <SheetContent side="bottom" className="rounded-t-3xl h-[65vh] overflow-y-auto">
+            <SheetContent side="bottom" className="rounded-t-3xl h-[75vh] overflow-y-auto">
               <SheetHeader>
                 <SheetTitle>Filtrar Profissionais</SheetTitle>
               </SheetHeader>
               <div className="py-6 space-y-6">
                 <div>
-                  <label className="text-sm font-bold mb-3 block">Categoria</label>
+                  <label className="text-sm font-bold mb-3 block text-foreground">Categoria</label>
                   <select 
                     value={filterCategory} 
                     onChange={(e) => setFilterCategory(e.target.value)}
-                    className="w-full p-3 rounded-xl border bg-background text-sm"
+                    className="w-full p-3 rounded-xl border bg-background text-sm text-foreground"
                   >
                     <option value="">Todas as categorias</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm font-bold mb-3 block">Avaliação mínima: {filterMinRating} estrelas</label>
+                  <label className="text-sm font-bold mb-3 block text-foreground">Avaliação mínima: {filterMinRating} estrelas</label>
                   <Slider value={[filterMinRating]} onValueChange={([v]) => setFilterMinRating(v)} max={5} step={1} />
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-primary" />
-                    <span className="text-sm font-bold text-foreground">Apenas Verificados</span>
+                <div className="space-y-4">
+                  {/* FILTRO: APENAS VERIFICADOS */}
+                  <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-primary" />
+                      <span className="text-sm font-bold text-foreground">Apenas Verificados</span>
+                    </div>
+                    <Switch checked={filterVerified} onCheckedChange={setFilterVerified} />
                   </div>
-                  <Switch 
-                    checked={filterVerified} 
-                    onCheckedChange={setFilterVerified} 
-                  />
+
+                  {/* ✅ FILTRO: SOMENTE EMPRESAS */}
+                  <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">
+                    <div className="flex items-center gap-3">
+                      <Building2 className="w-5 h-5 text-primary" />
+                      <span className="text-sm font-bold text-foreground">Somente Empresas</span>
+                    </div>
+                    <Switch checked={filterCompanies} onCheckedChange={setFilterCompanies} />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-4">
                   <button 
-                    onClick={() => { setFilterCategory(""); setFilterMinRating(0); setFilterVerified(false); }}
+                    onClick={() => { setFilterCategory(""); setFilterMinRating(0); setFilterVerified(false); setFilterCompanies(false); }}
                     className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl"
                   >
                     Limpar
                   </button>
-                  {/* ✅ BOTÃO APLICAR: FECHA O MODAL */}
                   <button 
                     onClick={() => setIsSheetOpen(false)}
-                    className="py-3 text-sm font-bold text-white bg-primary rounded-xl shadow-lg shadow-primary/20"
+                    className="py-3 text-sm font-bold text-white bg-primary rounded-xl"
                   >
                     Aplicar
                   </button>
@@ -209,6 +223,7 @@ const Search = () => {
           </Sheet>
         </div>
 
+        {/* LISTAGEM */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {[1,2,3,4].map(i => <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />)}
@@ -217,7 +232,7 @@ const Search = () => {
           <div className="text-center py-16 bg-muted/30 rounded-2xl border-2 border-dashed">
             <SearchIcon className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
             <p className="text-sm font-medium text-muted-foreground">Nenhum profissional encontrado.</p>
-            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterVerified(false);}} className="text-xs text-primary font-bold mt-2">Ver todos os profissionais</button>
+            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterVerified(false); setFilterCompanies(false);}} className="text-xs text-primary font-bold mt-2">Ver todos os profissionais</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -227,7 +242,7 @@ const Search = () => {
                 <Link
                   key={pro.id}
                   to={`/professional/${pro.id}`}
-                  className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 hover:shadow-md transition-all group"
+                  className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group"
                 >
                   <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
                     {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : initials}
@@ -236,6 +251,7 @@ const Search = () => {
                     <div className="flex items-center gap-1">
                       <p className="font-bold text-sm text-foreground truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
                       {pro.verified && <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />}
+                      {pro.plan_id === 'business' && <Building2 className="w-3.5 h-3.5 text-orange-500" />}
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{pro.category_name} · {pro.profession_name}</p>
                     <div className="flex items-center justify-between mt-1">

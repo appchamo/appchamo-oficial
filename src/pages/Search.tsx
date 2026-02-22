@@ -54,16 +54,34 @@ const Search = () => {
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
-  // ✅ NOVO: Estado para a cidade
+  
+  // ✅ Estados do Autocomplete de Cidade
   const [filterCity, setFilterCity] = useState<string>("");
+  const [allCities, setAllCities] = useState<string[]>([]);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
 
-  // ✅ AJUSTE: Permite calcular distância mesmo sem login (usando Patrocínio como base temporária)
+  // ✅ Busca as cidades do IBGE ao carregar a tela
+  useEffect(() => {
+    const fetchCities = async () => {
+      try {
+        const res = await fetch('https://servicodados.ibge.gov.br/api/v1/localidades/municipios');
+        const data = await res.json();
+        const cityNames = data.map((c: any) => c.nome);
+        // Remove duplicatas por segurança e salva no estado
+        setAllCities(Array.from(new Set(cityNames)));
+      } catch (error) {
+        console.error("Erro ao buscar cidades do IBGE:", error);
+      }
+    };
+    fetchCities();
+  }, []);
+
   useEffect(() => {
     const loadUserLocation = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
-        // Se NÃO estiver logado, assume o centro de Patrocínio para não quebrar a tela de testes
         setUserCoords({ lat: -18.9431, lng: -46.9922 });
         return;
       }
@@ -72,14 +90,12 @@ const Search = () => {
       
       if (data?.address_city) {
         setUserCity(data.address_city);
-        // ✅ Preenche automaticamente o filtro de cidade se estiver vazio
         setFilterCity((prev) => prev || data.address_city);
       }
       
       if (data?.latitude && data?.longitude) {
         setUserCoords({ lat: data.latitude, lng: data.longitude });
       } else {
-        // Fallback caso o perfil do usuário logado não tenha coordenadas
         setUserCoords({ lat: -18.9431, lng: -46.9922 });
       }
     };
@@ -106,7 +122,6 @@ const Search = () => {
         .from("professionals")
         .select("id, rating, total_services, verified, user_id, availability_status, category_id, profession_id, categories(name), professions:profession_id(name)")
         .eq("active", true)
-        .eq("profile_status", "approved")
         .neq("availability_status", "unavailable")
         .order("rating", { ascending: false }),
       supabase.from("categories").select("id, name").eq("active", true).order("name"),
@@ -181,11 +196,10 @@ const Search = () => {
       if (!fuzzyMatch(q, target)) return false;
     }
     
-    // ✅ NOVO: Filtra pela cidade (case insensitive)
+    // Filtra pela cidade (removendo acentos para melhorar a busca)
     if (filterCity) {
-      const pCity = (p.city || "").toLowerCase();
-      const fCity = filterCity.toLowerCase();
-      // Remove acentos para uma busca mais robusta, se desejar. Por simplicidade, usando includes:
+      const pCity = (p.city || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const fCity = filterCity.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       if (!pCity.includes(fCity)) return false;
     }
 
@@ -194,11 +208,35 @@ const Search = () => {
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
     if (filterVerified && !p.verified) return false;
     
-    // Filtra pela distância
     if (p.distance !== undefined && p.distance > filterRadius) return false;
     
     return true;
   });
+
+  // ✅ Função que lida com a digitação e mostra as sugestões do IBGE
+  const handleCityInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setFilterCity(val);
+
+    if (val.length >= 2) {
+      // Filtra as cidades ignorando acentos
+      const normalizedInput = val.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const matches = allCities.filter(c => 
+        c.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalizedInput)
+      ).slice(0, 5); // Mostra no máximo 5 sugestões
+      
+      setCitySuggestions(matches);
+      setShowCityDropdown(true);
+    } else {
+      setShowCityDropdown(false);
+    }
+  };
+
+  // ✅ Função quando o usuário clica em uma sugestão
+  const handleCitySelect = (cityName: string) => {
+    setFilterCity(cityName);
+    setShowCityDropdown(false);
+  };
 
   return (
     <AppLayout>
@@ -229,18 +267,33 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
-                {/* ✅ NOVO: Campo de Cidade */}
-                <div>
+                {/* ✅ NOVO: Campo de Cidade com Autocomplete do IBGE */}
+                <div className="relative">
                   <label className="text-sm font-bold flex items-center gap-2 mb-3">
                     <MapPin className="w-4 h-4 text-primary" /> Cidade
                   </label>
                   <input
                     type="text"
                     value={filterCity}
-                    onChange={(e) => setFilterCity(e.target.value)}
+                    onChange={handleCityInputChange}
+                    onFocus={() => { if (citySuggestions.length > 0) setShowCityDropdown(true) }}
                     placeholder="Ex: Patrocínio"
                     className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                   />
+                  {/* Caixa flutuante de sugestões */}
+                  {showCityDropdown && citySuggestions.length > 0 && (
+                    <ul className="absolute z-50 w-full bg-card border rounded-xl mt-1 shadow-lg max-h-48 overflow-y-auto">
+                      {citySuggestions.map((city, idx) => (
+                        <li
+                          key={idx}
+                          onMouseDown={() => handleCitySelect(city)} // onMouseDown é mais rápido que onClick, evita conflito com onBlur
+                          className="px-4 py-3 text-sm font-medium hover:bg-muted cursor-pointer transition-colors border-b last:border-0"
+                        >
+                          {city}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 {/* BARRA DE DISTÂNCIA */}
@@ -301,8 +354,14 @@ const Search = () => {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-4">
-                  {/* ✅ Limpa também a cidade */}
-                  <button onClick={() => { setFilterCategory(""); setFilterProfession(""); setFilterMinRating(0); setFilterVerified(false); setFilterRadius(100); setFilterCity(""); }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
+                  <button onClick={() => { 
+                    setFilterCategory(""); 
+                    setFilterProfession(""); 
+                    setFilterMinRating(0); 
+                    setFilterVerified(false); 
+                    setFilterRadius(100); 
+                    setFilterCity(userCity || ""); // Volta para a cidade do usuário
+                  }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
                   <button onClick={() => setIsSheetOpen(false)} className="py-3 text-sm font-bold text-white bg-primary rounded-xl">Aplicar</button>
                 </div>
               </div>
@@ -332,7 +391,6 @@ const Search = () => {
                       <Star className="w-3.5 h-3.5 fill-primary text-primary" />
                       <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
                     </div>
-                    {/* SÓ MOSTRA A DISTÂNCIA SE TIVER A COORDENADA DO USUÁRIO VÁLIDA */}
                     {userCoords && pro.distance !== undefined && (
                       <p className="text-[10px] text-primary font-bold bg-primary/5 px-2 py-0.5 rounded-full">
                         {pro.distance < 1 ? 'Menos de 1km' : `${Math.round(pro.distance)} km`}

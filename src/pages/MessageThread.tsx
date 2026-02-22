@@ -367,14 +367,14 @@ const MessageThread = () => {
       </div>
     );
 
-    // ✅ FIX: RENDERIZAÇÃO DAS IMAGENS DINÂMICAS COM GRID ORGANIZADO
+    // ✅ FIX: TAMANHO REDUZIDO DAS IMAGENS NO NAVEGADOR (Desktop e Mobile)
     if (msg.image_urls && msg.image_urls.length > 0) {
       const gridCols = msg.image_urls.length === 1 ? "grid-cols-1" : "grid-cols-2";
       return (
-        <div className="flex flex-col gap-2 max-w-full">
+        <div className="flex flex-col gap-2 w-full max-w-[240px] md:max-w-[320px]">
           <div className={`grid ${gridCols} gap-1.5 w-full`}>
             {msg.image_urls.map((url, j) => (
-              <div key={j} className="relative aspect-square w-full overflow-hidden rounded-lg border border-white/10 shadow-sm bg-muted">
+              <div key={j} className="relative aspect-square w-full overflow-hidden rounded-lg border border-white/10 shadow-sm bg-muted/50">
                 <img 
                   src={url} 
                   alt="" 
@@ -384,7 +384,7 @@ const MessageThread = () => {
               </div>
             ))}
           </div>
-          {msg.content && <p className="whitespace-pre-wrap text-sm">{msg.content}</p>}
+          {msg.content && <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>}
         </div>
       );
     }
@@ -432,7 +432,7 @@ const MessageThread = () => {
           return (
             <div key={msg.id} className={`flex ${isSys ? "justify-center" : isMine ? "justify-end" : "justify-start"} gap-2`}>
               {!isMine && !isSys && (otherParty.avatar_url ? <img src={otherParty.avatar_url} className="w-7 h-7 rounded-full object-cover mt-1" /> : <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary mt-1">{otherInitials}</div>)}
-              <div className={isSys ? "" : `max-w-[85%] md:max-w-[70%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-card border rounded-bl-md"}`}>
+              <div className={isSys ? "" : `max-w-[90%] md:max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-card border rounded-bl-md"}`}>
                 {rendered}
                 {!isSys && <p className={`text-[9px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>}
               </div>
@@ -473,7 +473,7 @@ const MessageThread = () => {
 
       <BottomNav />
 
-      {/* DIALOGS */}
+      {/* DIALOGS (MANTIDOS IGUAIS) */}
       <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><DollarSign className="w-5 h-5 text-primary" /> Cobrar</DialogTitle></DialogHeader>

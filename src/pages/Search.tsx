@@ -22,7 +22,6 @@ interface Pro {
   user_type: string;
   city: string | null;
   state: string | null;
-  // ✅ Novos campos para localização
   latitude: number | null;
   longitude: number | null;
   distance?: number;
@@ -47,18 +46,15 @@ const Search = () => {
   const [userCity, setUserCity] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
-  // ✅ Estados para Geolocalização
   const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
-  const [filterRadius, setFilterRadius] = useState<number>(100); // Padrão 100km
+  const [filterRadius, setFilterRadius] = useState<number>(100);
 
-  // Filters
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterProfession, setFilterProfession] = useState<string>("");
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
 
-  // ✅ 1. Pega a localização do usuário (Você em Patrocínio)
   useEffect(() => {
     const loadUserLocation = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -68,11 +64,9 @@ const Search = () => {
       
       if (data?.address_city) setUserCity(data.address_city);
       
-      // Se você já tiver lat/lng no seu perfil de Patrocínio, usamos elas
       if (data?.latitude && data?.longitude) {
         setUserCoords({ lat: data.latitude, lng: data.longitude });
       } else {
-        // Fallback para coordenadas centrais de Patrocínio caso o seu perfil esteja sem
         setUserCoords({ lat: -18.9431, lng: -46.9922 });
       }
     };
@@ -126,9 +120,8 @@ const Search = () => {
       const loc = locationMap.get(p.user_id);
       let distance = undefined;
 
-      // ✅ 2. Cálculo de distância em tempo real (Haversine)
       if (userCoords && loc?.latitude && loc?.longitude) {
-        const R = 6371; // Raio da Terra em KM
+        const R = 6371; 
         const dLat = (loc.latitude - userCoords.lat) * Math.PI / 180;
         const dLon = (loc.longitude - userCoords.lng) * Math.PI / 180;
         const a = 
@@ -158,7 +151,6 @@ const Search = () => {
       };
     });
 
-    // Ordenar por distância (mais próximos primeiro)
     if (userCoords) {
       mappedPros.sort((a, b) => (a.distance || 999) - (b.distance || 999));
     }
@@ -180,8 +172,8 @@ const Search = () => {
     if (filterMinRating > 0 && p.rating < filterMinRating) return false;
     if (filterVerified && !p.verified) return false;
     
-    // ✅ 3. Filtro de Raio KM
-    if (userCoords && p.distance !== undefined && p.distance > filterRadius) return false;
+    // ✅ AJUSTE NOVO: FILTRA PELA DISTÂNCIA EM TEMPO REAL
+    if (p.distance !== undefined && p.distance > filterRadius) return false;
     
     return true;
   });
@@ -215,7 +207,6 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
-                {/* ✅ BARRA DE DISTÂNCIA (KM) */}
                 <div>
                   <div className="flex justify-between items-center mb-3">
                     <label className="text-sm font-bold flex items-center gap-2">
@@ -279,7 +270,6 @@ const Search = () => {
           </Sheet>
         </div>
 
-        {/* LISTAGEM COM KM NO CARD */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {[1,2,3,4].map(i => <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />)}
@@ -302,7 +292,6 @@ const Search = () => {
                       <Star className="w-3.5 h-3.5 fill-primary text-primary" />
                       <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
                     </div>
-                    {/* ✅ EXIBE A DISTÂNCIA REAL NO CARD */}
                     {pro.distance !== undefined && (
                       <p className="text-[10px] text-primary font-bold bg-primary/5 px-2 py-0.5 rounded-full">
                         {pro.distance < 1 ? 'Menos de 1km' : `${Math.round(pro.distance)} km`}

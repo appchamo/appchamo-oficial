@@ -25,6 +25,7 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
+  image_urls?: string[] | null; // Adicionado para suportar fotos dinâmicas
 }
 
 const AdminSupport = () => {
@@ -64,10 +65,9 @@ const AdminSupport = () => {
     const result: TicketThread[] = [];
     for (const t of ticketRows) {
       const p = profileMap.get(t.user_id);
-      // Get last message for this ticket
       const { data: lastMsg } = await supabase
         .from("support_messages")
-        .select("content, created_at")
+        .select("content, created_at, image_urls")
         .eq("ticket_id", t.id)
         .order("created_at", { ascending: false })
         .limit(1);
@@ -82,7 +82,7 @@ const AdminSupport = () => {
         full_name: p?.full_name || "Usuário",
         avatar_url: p?.avatar_url || null,
         unreadCount: 0,
-        lastMessage: lastMsg?.[0]?.content || t.subject || "",
+        lastMessage: lastMsg?.[0]?.content || (lastMsg?.[0]?.image_urls ? "📷 Imagem" : t.subject || ""),
         lastTime: lastMsg?.[0]?.created_at || t.created_at,
       });
     }
@@ -181,6 +181,27 @@ const AdminSupport = () => {
         </div>
       );
     }
+
+    // ✅ NOVO: Renderiza imagens dinâmicas vindas da coluna image_urls
+    if (msg.image_urls && msg.image_urls.length > 0) {
+      return (
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 gap-1.5">
+            {msg.image_urls.map((url, i) => (
+              <img 
+                key={i} 
+                src={url} 
+                alt="" 
+                className="max-w-[220px] rounded-lg border border-white/10 cursor-pointer hover:opacity-90 transition-opacity" 
+                onClick={() => window.open(url, '_blank')} 
+              />
+            ))}
+          </div>
+          {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
+        </div>
+      );
+    }
+
     const audioData = parseAudio(msg.content);
     if (audioData) return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={isAdmin} />;
     const attachment = parseAttachment(msg.content);
@@ -208,7 +229,7 @@ const AdminSupport = () => {
         </a>
       );
     }
-    return <p>{msg.content}</p>;
+    return <p className="whitespace-pre-wrap">{msg.content}</p>;
   };
 
   const threadIsClosed = selected ? (selected.status === "closed" || messages.some(m => m.content === "[CLOSED]")) : false;
@@ -240,7 +261,7 @@ const AdminSupport = () => {
         <div className="bg-card border rounded-xl p-4 max-h-[60vh] overflow-y-auto flex flex-col gap-2">
           {messages.length === 0 && <p className="text-center text-muted-foreground text-sm py-8">Nenhuma mensagem ainda.</p>}
           {messages.map((msg) => {
-            const isAdmin = msg.sender_id !== selected.user_id;
+            const isAdmin = msg.sender_id === adminId;
             const isSystem = msg.content.startsWith("[CLOSED]");
             if (isSystem) {
               return (
@@ -307,7 +328,6 @@ const AdminSupport = () => {
   }
 
   const openTickets = tickets.filter(t => t.status !== "closed");
-  const closedTickets = tickets.filter(t => t.status === "closed");
 
   return (
     <AdminLayout title="Suporte">

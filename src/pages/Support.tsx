@@ -1,239 +1,125 @@
-import AdminLayout from "@/components/AdminLayout";
-import { HelpCircle, Search, MessageSquare, Clock, CheckCircle2, ArrowLeft, Send, X, Paperclip, Loader2, FileText, Mic } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "@/hooks/use-toast";
-import AudioPlayer from "@/components/AudioPlayer";
+import { useAuth } from "@/hooks/useAuth";
+import { ArrowLeft, HelpCircle, Plus } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import BottomNav from "@/components/BottomNav";
 
 interface Ticket {
   id: string;
-  user_id: string;
   protocol: string | null;
   subject: string;
   status: string;
   created_at: string;
-  user_name?: string;
 }
 
-interface Message {
-  id: string;
-  sender_id: string;
-  content: string;
-  created_at: string;
-  image_urls?: string[] | null;
-}
-
-const AdminSupport = () => {
+const Support = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [reply, setReply] = useState("");
-  const [sending, setSending] = useState(false);
-  const [uploadingFile, setUploadingFile] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    const loadTickets = async () => {
-      const { data: ticketsData } = await supabase.from("support_tickets").select("*").order("created_at", { ascending: false });
-      if (!ticketsData) return;
-      const userIds = ticketsData.map(t => t.user_id);
-      const { data: profiles } = await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds);
-      const nameMap = new Map((profiles || []).map(p => [p.user_id, p.full_name]));
-      setTickets(ticketsData.map(t => ({ ...t, user_name: nameMap.get(t.user_id) || "Usuário" })));
+    if (!user) return;
+    const load = async () => {
+      const { data } = await supabase
+        .from("support_tickets")
+        .select("id, protocol, subject, status, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      setTickets((data as Ticket[]) || []);
       setLoading(false);
     };
-    loadTickets();
-  }, []);
+    load();
+  }, [user]);
 
-  useEffect(() => {
-    if (!selectedTicket) return;
-    const loadMessages = async () => {
-      const { data } = await supabase.from("support_messages").select("*").eq("ticket_id", selectedTicket.id).order("created_at");
-      setMessages(data as Message[] || []);
-    };
-    loadMessages();
-
-    const channel = supabase.channel(`admin-support-${selectedTicket.id}`).on("postgres_changes", {
-      event: "INSERT", schema: "public", table: "support_messages", filter: `ticket_id=eq.${selectedTicket.id}`
-    }, (payload) => {
-      setMessages(prev => [...prev, payload.new as Message]);
-    }).subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedTicket]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSendReply = async () => {
-    if (!reply.trim() || !selectedTicket) return;
-    setSending(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from("support_messages").insert({
-      ticket_id: selectedTicket.id,
-      user_id: selectedTicket.user_id,
-      sender_id: user?.id,
-      content: reply.trim()
-    });
-    if (error) toast({ title: "Erro ao enviar", variant: "destructive" });
-    else setReply("");
-    setSending(false);
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedTicket) return;
-    setUploadingFile(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    const ext = file.name.split(".").pop();
-    const fileName = `support/admin/${Date.now()}.${ext}`;
-    
-    const { error: uploadError } = await supabase.storage.from("uploads").upload(fileName, file);
-    if (uploadError) { toast({ title: "Erro ao subir arquivo", variant: "destructive" }); setUploadingFile(false); return; }
-
-    const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
-    const isImage = file.type.startsWith("image/");
-
-    await supabase.from("support_messages").insert({
-      ticket_id: selectedTicket.id,
-      user_id: selectedTicket.user_id,
-      sender_id: user?.id,
-      content: isImage ? "" : `Anexo: ${file.name}`,
-      image_urls: isImage ? [urlData.publicUrl] : null
-    });
-    setUploadingFile(false);
-  };
-
-  const handleCloseTicket = async () => {
-    if (!selectedTicket) return;
-    const { error } = await supabase.from("support_tickets").update({ status: "closed" }).eq("id", selectedTicket.id);
-    if (error) toast({ title: "Erro ao encerrar", variant: "destructive" });
-    else {
-      const { data: { user } } = await supabase.auth.getUser();
-      await supabase.from("support_messages").insert({ ticket_id: selectedTicket.id, user_id: selectedTicket.user_id, sender_id: user?.id, content: "[CLOSED]" });
-      setSelectedTicket({ ...selectedTicket, status: "closed" });
-      toast({ title: "Ticket encerrado" });
+  const handleNewTicket = async () => {
+    if (!user) return;
+    setCreating(true);
+    const { data: newTicket, error } = await supabase
+      .from("support_tickets")
+      .insert({ user_id: user.id, subject: "Nova solicitação", message: "Abertura de suporte" })
+      .select("id")
+      .single();
+    if (error || !newTicket) {
+      setCreating(false);
+      return;
     }
+    navigate(`/support/${newTicket.id}`);
   };
 
-  const renderContent = (msg: Message) => {
-    const isMine = msg.sender_id !== selectedTicket?.user_id;
-    
-    // 1. Renderiza Imagens (Nova coluna image_urls)
-    if (msg.image_urls && msg.image_urls.length > 0) {
-      return (
-        <div className="space-y-2">
-          <div className="grid grid-cols-1 gap-1">
-            {msg.image_urls.map((url, i) => (
-              <img key={i} src={url} alt="" className="max-w-[200px] rounded-lg border cursor-pointer hover:opacity-90" onClick={() => window.open(url, '_blank')} />
-            ))}
-          </div>
-          {msg.content && <p className="text-sm">{msg.content}</p>}
-        </div>
-      );
-    }
-
-    // 2. Renderiza Áudio
-    const audioMatch = msg.content.match(/\[AUDIO:(.+):(\d+)\]$/);
-    if (audioMatch) return <AudioPlayer src={audioMatch[1]} duration={parseInt(audioMatch[2])} isMine={isMine} />;
-
-    // 3. Suporte a tags antigas [IMAGE:url]
-    const tagMatch = msg.content.match(/\[(IMAGE|VIDEO|FILE):(.+):(.+)\]$/);
-    if (tagMatch) {
-      const [, type, url, name] = tagMatch;
-      if (type === "IMAGE") return <img src={url} alt={name} className="max-w-[200px] rounded-lg cursor-pointer" onClick={() => window.open(url, '_blank')} />;
-      return <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 underline text-xs"><FileText className="w-3 h-3"/> {name}</a>;
-    }
-
-    if (msg.content === "[CLOSED]") return <p className="text-[10px] font-bold uppercase text-muted-foreground italic">🔒 Atendimento encerrado</p>;
-    
-    return <p className="text-sm whitespace-pre-wrap">{msg.content}</p>;
-  };
-
-  const filtered = tickets.filter(t => t.protocol?.includes(search) || t.user_name?.toLowerCase().includes(search.toLowerCase()));
+  if (loading) return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
+    </div>
+  );
 
   return (
-    <AdminLayout title="Suporte">
-      <div className="flex h-[calc(100vh-140px)] gap-4">
-        {/* Lista de Tickets */}
-        <div className={`w-full md:w-80 flex flex-col gap-3 ${selectedTicket ? "hidden md:flex" : "flex"}`}>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Protocolo ou nome..." className="w-full pl-9 pr-3 py-2 bg-card border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/30" />
+    <div className="min-h-screen bg-background flex flex-col pb-20">
+      <header className="sticky top-0 z-30 bg-amber-500/90 backdrop-blur-md border-b border-amber-600/30">
+        <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
+          <Link to="/home" className="p-1.5 rounded-lg hover:bg-amber-600/20 transition-colors">
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </Link>
+          <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
+            <HelpCircle className="w-5 h-5 text-white" />
           </div>
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-            {filtered.map(t => (
-              <button key={t.id} onClick={() => setSelectedTicket(t)} className={`w-full text-left p-3 rounded-xl border transition-all ${selectedTicket?.id === t.id ? "border-primary bg-primary/5 shadow-sm" : "bg-card hover:border-primary/20"}`}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-mono text-muted-foreground">{t.protocol}</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${t.status === "closed" ? "bg-muted text-muted-foreground" : "bg-green-100 text-green-700"}`}>{t.status === "closed" ? "Fim" : "Aberto"}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white truncate">Suporte Chamô</p>
+            <p className="text-[10px] text-white/70">Suas solicitações</p>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4">
+        <button
+          onClick={handleNewTicket}
+          disabled={creating}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 mb-4"
+        >
+          <Plus className="w-4 h-4" />
+          {creating ? "Criando..." : "Nova solicitação de suporte"}
+        </button>
+
+        {tickets.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground text-sm">
+            <HelpCircle className="w-10 h-10 mx-auto mb-3 text-amber-500/40" />
+            <p className="font-medium">Nenhuma solicitação ainda</p>
+            <p className="text-xs mt-1">Clique acima para abrir sua primeira solicitação.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {tickets.map((t) => (
+              <Link
+                key={t.id}
+                to={`/support/${t.id}`}
+                className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 hover:shadow-card transition-all"
+              >
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                  <HelpCircle className="w-5 h-5 text-amber-600" />
                 </div>
-                <p className="text-sm font-bold text-foreground truncate">{t.user_name}</p>
-                <p className="text-[10px] text-muted-foreground mt-1">{new Date(t.created_at).toLocaleDateString("pt-BR")}</p>
-              </button>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-sm text-foreground truncate">{t.protocol || "Suporte"}</p>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                      t.status === "closed" ? "bg-muted text-muted-foreground" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                    }`}>
+                      {t.status === "closed" ? "Encerrado" : "Aberto"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(t.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              </Link>
             ))}
           </div>
-        </div>
-
-        {/* Chat de Suporte */}
-        <div className={`flex-1 bg-card border rounded-2xl flex flex-col overflow-hidden ${!selectedTicket ? "hidden md:flex items-center justify-center text-muted-foreground" : "flex"}`}>
-          {selectedTicket ? (
-            <>
-              <div className="p-4 border-b flex items-center justify-between bg-muted/30">
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setSelectedTicket(null)} className="md:hidden p-1"><ArrowLeft className="w-5 h-5"/></button>
-                  <div>
-                    <p className="font-bold text-sm">{selectedTicket.user_name}</p>
-                    <p className="text-[10px] text-muted-foreground">Protocolo: {selectedTicket.protocol}</p>
-                  </div>
-                </div>
-                {selectedTicket.status !== "closed" && (
-                  <button onClick={handleCloseTicket} className="text-[11px] font-bold text-destructive px-3 py-1.5 rounded-lg hover:bg-destructive/10 transition-colors border border-destructive/20">Encerrar</button>
-                )}
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-background/50">
-                {messages.map(m => {
-                  const isMine = m.sender_id !== selectedTicket.user_id;
-                  return (
-                    <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[80%] p-3 rounded-2xl ${isMine ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-card border rounded-bl-sm"}`}>
-                        {renderContent(m)}
-                        <p className={`text-[9px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{new Date(m.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={bottomRef} />
-              </div>
-
-              {selectedTicket.status !== "closed" && (
-                <div className="p-4 border-t bg-card">
-                  <div className="flex items-center gap-2">
-                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,.pdf" />
-                    <button onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-xl bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"><Paperclip className="w-5 h-5"/></button>
-                    <input value={reply} onChange={e => setReply(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSendReply()} placeholder="Responder usuário..." className="flex-1 bg-muted/50 border-none rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30" />
-                    <button onClick={handleSendReply} disabled={sending || uploadingFile} className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
-                      {sending || uploadingFile ? <Loader2 className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5"/>}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="text-center space-y-2">
-              <MessageSquare className="w-12 h-12 mx-auto opacity-10" />
-              <p className="text-sm">Selecione uma conversa para visualizar</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </AdminLayout>
+        )}
+      </main>
+      <BottomNav />
+    </div>
   );
 };
 
-export default AdminSupport;
+export default Support;

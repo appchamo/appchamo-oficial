@@ -10,7 +10,7 @@ import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
-import SubscriptionDialog from "@/components/SubscriptionDialog"; // ✅ Adicionado import correto
+import SubscriptionDialog from "@/components/subscription/SubscriptionDialog"; // ✅ Caminho corrigido com 's' minúsculo
 
 type AccountType = "client" | "professional";
 type Step = "type" | "basic" | "documents" | "profile" | "plan";
@@ -50,7 +50,7 @@ const Signup = () => {
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
-  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false); // ✅ Controle do Modal
+  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false); 
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -86,7 +86,6 @@ const Signup = () => {
     }
   };
 
-  // ✅ Modificado para abrir o Modal antes de criar a conta se for plano pago
   const handlePlanSelect = (planId: string) => {
     if (!profileData) return;
     setSelectedPlanId(planId); 
@@ -98,7 +97,6 @@ const Signup = () => {
     }
   };
 
-  // ✅ Função chamada quando o pagamento é preenchido/confirmado no modal
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
     if (profileData) {
@@ -181,7 +179,6 @@ const Signup = () => {
         return;
       }
 
-      // ✅ Em vez de abrir o popup aqui, salvamos no localStorage para a Home abrir depois
       localStorage.setItem("just_signed_up", "true");
       
       if (accountType === "professional" && planId !== "free") {
@@ -255,7 +252,6 @@ const Signup = () => {
         />
       )}
 
-      {/* ✅ Modal de Assinatura integrado ao fluxo de cadastro */}
       <SubscriptionDialog 
         isOpen={isSubscriptionOpen}
         onClose={() => setIsSubscriptionOpen(false)}
@@ -263,7 +259,6 @@ const Signup = () => {
         onSuccess={handleSubscriptionSuccess}
       />
 
-      {/* ✅ O Modal de cupom agora só será chamado via Home, mas mantemos a estrutura por segurança */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>

@@ -6,7 +6,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { fuzzyMatch } from "@/lib/fuzzyMatch";
 
 interface Pro {
   id: string;
@@ -215,13 +214,20 @@ const Search = () => {
   useEffect(() => { loadPros(); }, [userCoords]);
 
   const filtered = pros.filter((p) => {
-    const q = search.trim().toLowerCase();
+    // ✅ NOVO: Limpa acentos e letras maiúsculas da busca (Ex: "João" vira "joao")
+    const q = search.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     if (q) {
-      const target = `${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`.toLowerCase();
-      if (!fuzzyMatch(q, target)) return false;
+      // ✅ Limpa acentos e junta todas as infos do profissional para comparar
+      const target = `${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      
+      // ✅ Exige que a busca esteja contida exatamente na string alvo
+      if (!target.includes(q)) return false;
     }
     
-    // ✅ NOVO: Filtra pelo Estado
+    // Filtra pelo Estado
     if (filterState) {
       const pState = (p.state || "").toLowerCase();
       const fState = filterState.toLowerCase();
@@ -296,7 +302,7 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
-                {/* ✅ NOVO: Campo de Estado (UF) */}
+                {/* Campo de Estado (UF) */}
                 <div>
                   <label className="text-sm font-bold flex items-center gap-2 mb-3">
                     <MapPin className="w-4 h-4 text-primary" /> Estado
@@ -317,7 +323,7 @@ const Search = () => {
                   </select>
                 </div>
 
-                {/* ✅ ATUALIZADO: Campo de Cidade (Só funciona se um estado estiver selecionado) */}
+                {/* Campo de Cidade (Só funciona se um estado estiver selecionado) */}
                 <div className="relative">
                   <label className="text-sm font-bold flex items-center gap-2 mb-3">
                     <MapPin className="w-4 h-4 text-primary" /> Cidade

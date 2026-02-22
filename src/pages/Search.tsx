@@ -4,7 +4,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { fuzzyMatch } from "@/lib/fuzzyMatch";
 
@@ -57,7 +56,6 @@ const Search = () => {
   const loadPros = async () => {
     setLoading(true);
     try {
-      // 1. Busca Profissionais e Categorias
       const [prosRes, catsRes] = await Promise.all([
         supabase
           .from("professionals")
@@ -76,8 +74,6 @@ const Search = () => {
       }
 
       const userIds = prosRes.data.map((p) => p.user_id);
-
-      // 2. Busca Perfis e Assinaturas separadamente para evitar erro de JOIN
       const [profilesRes, subsRes] = await Promise.all([
         supabase.from("profiles").select("user_id, full_name, avatar_url, address_city, address_state").in("user_id", userIds),
         supabase.from("subscriptions").select("user_id, plan_id").in("user_id", userIds)
@@ -105,7 +101,6 @@ const Search = () => {
         };
       });
 
-      // Ordenar por cidade do usuário
       if (userCity) {
         mappedPros.sort((a, b) => {
           if (a.city === userCity && b.city !== userCity) return -1;
@@ -139,7 +134,7 @@ const Search = () => {
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24">
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24 text-foreground">
         {/* BARRA DE PESQUISA */}
         <div className="relative mb-6">
           <div className="relative group">
@@ -157,9 +152,8 @@ const Search = () => {
           </div>
         </div>
 
-        {/* HEADER E BOTAO FILTRO */}
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-lg font-bold text-foreground">
+          <h1 className="text-lg font-bold">
             {search ? `Resultados para "${search}"` : "Todos os Profissionais"}
           </h1>
           
@@ -180,9 +174,20 @@ const Search = () => {
                   </select>
                 </div>
 
+                {/* ✅ ESTRELAS CLICÁVEIS SUBSTITUINDO O SLIDER */}
                 <div>
-                  <label className="text-sm font-bold mb-3 block text-foreground">Avaliação mínima: {filterMinRating} estrelas</label>
-                  <Slider value={[filterMinRating]} onValueChange={([v]) => setFilterMinRating(v)} max={5} step={1} />
+                  <label className="text-sm font-bold mb-3 block text-foreground">Avaliação mínima</label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button 
+                        key={star} 
+                        onClick={() => setFilterMinRating(star === filterMinRating ? 0 : star)}
+                        className={`p-2 rounded-xl border transition-all ${filterMinRating >= star ? "bg-primary/10 border-primary" : "bg-card border-muted"}`}
+                      >
+                        <Star className={`w-6 h-6 ${filterMinRating >= star ? "fill-primary text-primary" : "text-muted-foreground/30"}`} />
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -221,7 +226,7 @@ const Search = () => {
           <div className="text-center py-16 bg-muted/30 rounded-2xl border-2 border-dashed">
             <SearchIcon className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
             <p className="text-sm font-medium text-muted-foreground">Nenhum profissional encontrado.</p>
-            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterVerified(false); setFilterCompanies(false);}} className="text-xs text-primary font-bold mt-2 underline">Ver todos</button>
+            <button onClick={() => {setSearch(""); setFilterCategory(""); setFilterVerified(false); setFilterCompanies(false); setFilterMinRating(0);}} className="text-xs text-primary font-bold mt-2 underline">Ver todos</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

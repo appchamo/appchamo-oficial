@@ -39,6 +39,7 @@ const MessageThread = () => {
   const [billingMethod, setBillingMethod] = useState<"pix" | "card" | null>(null);
   const [billingInstallments, setBillingInstallments] = useState("1");
   const [feeSettings, setFeeSettings] = useState<Record<string, string>>({});
+  const [passFeeToClient, setPassFeeToClient] = useState(false); 
   const [closingCall, setClosingCall] = useState(false);
   const [requestProtocol, setRequestProtocol] = useState<string | null>(null);
   const [hasRated, setHasRated] = useState(false);
@@ -53,6 +54,7 @@ const MessageThread = () => {
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
   const [installments, setInstallments] = useState("1");
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [clientPassFee, setClientPassFee] = useState(false); 
 
   // Rating state
   const [ratingOpen, setRatingOpen] = useState(false);
@@ -84,41 +86,42 @@ const MessageThread = () => {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ✅ NOVO: Estados para o comprovante
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
-  const [dismissedReceipt, setDismissedReceipt] = useState(false); // ✅ Estado para esconder a caixinha
+  const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ✅ NOVO: Verifica se o usuário já escondeu a caixa de comprovante nesta conversa antes
+  useEffect(() => {
+    if (threadId && localStorage.getItem(`receipt_dismissed_${threadId}`) === "true") {
+      setDismissedReceipt(true);
+    }
+  }, [threadId]);
 
   useEffect(() => {
     const load = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setUserId(user.id);
 
-      // Get request details
       const { data: req } = await supabase.from("service_requests").select("*").eq("id", threadId!).maybeSingle();
       if (req && user) {
         setRequestStatus(req.status);
         setRequestProtocol((req as any).protocol || null);
         const isClient = req.client_id === user.id;
 
-        // Check if client already rated
         if (isClient && (req.status === "completed" || req.status === "closed")) {
           const { count } = await supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId!).eq("client_id", user.id);
           if ((count || 0) > 0) setHasRated(true);
         }
 
-        // Check if user is the professional
         if (!isClient) {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro && pro.user_id === user.id) {
             setIsProfessional(true);
-            // Check professional's plan
             const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
             setProPlanId(sub?.plan_id || "free");
           }
         }
 
-        // Load other party info
         if (isClient) {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
@@ -141,7 +144,6 @@ const MessageThread = () => {
     if (threadId) load();
   }, [threadId]);
 
-  // Realtime: chat messages
   useEffect(() => {
     if (!threadId) return;
     const channel = supabase.
@@ -154,7 +156,6 @@ const MessageThread = () => {
     return () => {supabase.removeChannel(channel);};
   }, [threadId]);
 
-  // Realtime: service_request status changes (close/reject syncs instantly)
   useEffect(() => {
     if (!threadId) return;
     const channel = supabase.
@@ -169,7 +170,6 @@ const MessageThread = () => {
     return () => {supabase.removeChannel(channel);};
   }, [threadId]);
 
-  // Cleanup PIX polling on unmount
   useEffect(() => {
     return () => {
       if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
@@ -178,7 +178,6 @@ const MessageThread = () => {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    // Mark thread as read
     if (threadId && userId) {
       supabase.from("chat_read_status" as any).upsert(
         { request_id: threadId, user_id: userId, last_read_at: new Date().toISOString() },
@@ -200,7 +199,6 @@ const MessageThread = () => {
     setSending(false);
   };
 
-  // Audio recording
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -295,7 +293,6 @@ const MessageThread = () => {
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  // Load fee settings when billing opens
   const loadFeeSettings = async () => {
     const { data } = await supabase.from("platform_settings").select("key, value");
     if (data) {
@@ -312,11 +309,16 @@ const MessageThread = () => {
     if (!billingMethod || !billingAmount) return null;
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return null;
+
+    if (passFeeToClient) {
+      return { fee: 0, label: `✅ Você receberá R$ ${amount.toFixed(2).replace(".", ",")}. As taxas do parcelamento serão cobradas do cliente.` };
+    }
+
     if (billingMethod === "pix") {
       const pct = parseFloat(feeSettings.pix_fee_pct || "0");
       const fixed = parseFloat(feeSettings.pix_fee_fixed || "0");
       const fee = amount * pct / 100 + fixed;
-      return { fee, label: `Taxa PIX: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
+      return { fee, label: `Sua taxa PIX: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
     }
     if (billingMethod === "card") {
       const inst = parseInt(billingInstallments);
@@ -324,11 +326,11 @@ const MessageThread = () => {
         const pct = parseFloat(feeSettings.card_fee_pct || "0");
         const fixed = parseFloat(feeSettings.card_fee_fixed || "0");
         const fee = amount * pct / 100 + fixed;
-        return { fee, label: `Taxa cartão à vista: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
+        return { fee, label: `Sua taxa cartão à vista: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
       } else {
         const pct = parseFloat(feeSettings[`installment_fee_${inst}x`] || "0");
         const fee = amount * pct / 100;
-        return { fee, label: `Taxa ${inst}x: ${pct}% = R$ ${fee.toFixed(2).replace(".", ",")}` };
+        return { fee, label: `Sua taxa em ${inst}x: ${pct}% = R$ ${fee.toFixed(2).replace(".", ",")}` };
       }
     }
     return null;
@@ -342,24 +344,30 @@ const MessageThread = () => {
     for (let i = 1; i <= maxInst; i++) {
       const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
       const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
-      const fee = amount * feePct / 100 + feeFixed;
-      const val = (amount / i).toFixed(2).replace(".", ",");
-      const feeLabel = fee > 0 ? ` (taxa: ${feePct}%)` : "";
-      options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista)${feeLabel}` : `${i}x de R$ ${val}${feeLabel}` });
+      const fee = (amount * feePct / 100) + feeFixed;
+
+      if (passFeeToClient) {
+        const totalWithFee = amount + fee;
+        const val = (totalWithFee / i).toFixed(2).replace(".", ",");
+        options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista) - C/ Juros` : `${i}x de R$ ${val} - C/ Juros` });
+      } else {
+        const val = (amount / i).toFixed(2).replace(".", ",");
+        const feeLabel = fee > 0 ? ` (- R$ ${fee.toFixed(2).replace(".", ",")} de taxa)` : "";
+        options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista)${feeLabel}` : `${i}x de R$ ${val}${feeLabel}` });
+      }
     }
     return options;
   };
 
-  // Professional sends billing
   const handleSendBilling = async () => {
     if (!billingAmount || !userId || !threadId || !billingMethod) return;
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) {toast({ title: "Valor inválido", variant: "destructive" });return;}
 
     const methodLabel = billingMethod === "pix" ? "PIX" : `Cartão ${billingInstallments}x`;
-    const feeInfo = getBillingFeeLabel();
-    const feeText = feeInfo ? `\nTaxa: ${feeInfo.label}` : "";
-    const billingContent = `💰 COBRANÇA\nValor: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}${feeText}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}]`;
+    const feeText = passFeeToClient ? "\nTaxa: Por conta do cliente" : "";
+    
+    const billingContent = `💰 COBRANÇA\nValor base: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}${feeText}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}:${passFeeToClient ? "true" : "false"}]`;
 
     const { error } = await supabase.from("chat_messages").insert({
       request_id: threadId,
@@ -373,27 +381,32 @@ const MessageThread = () => {
       setBillingDesc("");
       setBillingMethod(null);
       setBillingInstallments("1");
+      setPassFeeToClient(false);
       toast({ title: "Cobrança enviada!" });
     }
   };
 
-  // Parse billing messages (supports old and new format)
   const parseBilling = (content: string) => {
-    // New format: [COBRAR:amount:desc:method:installments]
-    const matchNew = content.match(/\[COBRAR:([0-9.]+):(.+?):(\w+):(\d+)\]/);
-    if (matchNew) return { amount: matchNew[1], desc: matchNew[2], method: matchNew[3] as "pix" | "card", installments: matchNew[4] };
-    // Old format: [COBRAR:amount:desc]
-    const match = content.match(/\[COBRAR:([0-9.]+):(.+?)\]/);
-    if (match) return { amount: match[1], desc: match[2], method: null, installments: "1" };
+    const matchV3 = content.match(/\[COBRAR:([0-9.]+):(.*):(\w+):(\d+):(true|false)\]/);
+    if (matchV3) return { amount: matchV3[1], desc: matchV3[2], method: matchV3[3] as "pix" | "card", installments: matchV3[4], passFee: matchV3[5] === "true" };
+
+    const matchNew = content.match(/\[COBRAR:([0-9.]+):(.*):(\w+):(\d+)\]/);
+    if (matchNew) return { amount: matchNew[1], desc: matchNew[2], method: matchNew[3] as "pix" | "card", installments: matchNew[4], passFee: false };
+
+    const match = content.match(/\[COBRAR:([0-9.]+):(.*)\]/);
+    if (match) return { amount: match[1], desc: match[2], method: null, installments: "1", passFee: false };
+    
     return null;
   };
 
-  // Client opens payment
   const openPayment = async (msg: Message) => {
+    await loadFeeSettings(); 
     const billing = parseBilling(msg.content);
     if (!billing) return;
     setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id });
-    // Pre-select method from billing
+    
+    setClientPassFee(billing.passFee); 
+
     if (billing.method) {
       setPaymentMethod(billing.method);
       if (billing.method === "card") {
@@ -413,7 +426,6 @@ const MessageThread = () => {
     setCouponDiscount(null);
     setPaymentOpen(true);
 
-    // Load available discount coupons
     if (userId) {
       const { data } = await supabase.
       from("coupons").
@@ -448,6 +460,24 @@ const MessageThread = () => {
     return Math.max(0, amount - couponDiscount.value);
   };
 
+  const getFinalAmountWithFee = (installmentsCount: number = 1, method: "pix" | "card" | null = paymentMethod) => {
+    const baseAmount = getDiscountedAmount();
+    if (!clientPassFee) return baseAmount; 
+
+    let fee = 0;
+    if (method === "card") {
+       const i = installmentsCount;
+       const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
+       const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
+       fee = (baseAmount * feePct / 100) + feeFixed;
+    } else if (method === "pix") {
+       const feePct = parseFloat(feeSettings.pix_fee_pct || "0");
+       const feeFixed = parseFloat(feeSettings.pix_fee_fixed || "0");
+       fee = (baseAmount * feePct / 100) + feeFixed;
+    }
+    return baseAmount + fee;
+  };
+
   const formatCardNumber = (value: string) => {
     const digits = value.replace(/\D/g, "").slice(0, 16);
     return digits.replace(/(\d{4})(?=\d)/g, "$1 ");
@@ -468,11 +498,19 @@ const MessageThread = () => {
 
   const getInstallmentOptions = () => {
     if (!paymentData) return [];
-    const amount = getDiscountedAmount();
+    const baseAmount = getDiscountedAmount();
     const options = [];
-    const maxInstallments = amount >= 100 ? 12 : amount >= 50 ? 6 : amount >= 20 ? 3 : 1;
+    const maxInstallments = baseAmount >= 100 ? 12 : baseAmount >= 50 ? 6 : baseAmount >= 20 ? 3 : 1;
+
     for (let i = 1; i <= maxInstallments; i++) {
-      const val = (amount / i).toFixed(2).replace(".", ",");
+      let fee = 0;
+      if (clientPassFee) {
+         const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
+         const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
+         fee = (baseAmount * feePct / 100) + feeFixed;
+      }
+      const totalWithFee = baseAmount + fee;
+      const val = (totalWithFee / i).toFixed(2).replace(".", ",");
       options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista)` : `${i}x de R$ ${val}` });
     }
     return options;
@@ -490,7 +528,6 @@ const MessageThread = () => {
         toast({ title: "Número do cartão inválido", variant: "destructive" });
         return;
       }
-      // Check address — profile or form
       const { data: profileCheck } = await supabase.
       from("profiles").
       select("address_zip, address_number").
@@ -525,7 +562,7 @@ const MessageThread = () => {
           return;
         }
 
-        const finalAmount = getDiscountedAmount();
+        const finalAmount = getFinalAmountWithFee(parseInt(installments), "card");
         const res = await supabase.functions.invoke("create_payment", {
           body: {
             action: "create_service_payment",
@@ -554,7 +591,6 @@ const MessageThread = () => {
           throw new Error(res.data?.error || "Erro ao processar pagamento");
         }
       } else if (paymentMethod === "pix") {
-        // PIX payment
         const { data: profile } = await supabase.
         from("profiles").
         select("cpf, cnpj").
@@ -572,7 +608,7 @@ const MessageThread = () => {
           return;
         }
 
-        const finalAmount = getDiscountedAmount();
+        const finalAmount = getFinalAmountWithFee(1, "pix");
         const res = await supabase.functions.invoke("create_payment", {
           body: {
             action: "create_service_payment",
@@ -586,7 +622,6 @@ const MessageThread = () => {
           throw new Error(res.data?.error || "Erro ao gerar PIX");
         }
 
-        // Show PIX QR code dialog
         setPixData({
           qrCode: res.data.pix_qr_code,
           copyPaste: res.data.pix_copy_paste,
@@ -597,7 +632,6 @@ const MessageThread = () => {
         setPixOpen(true);
         setPixCopied(false);
 
-        // Start polling for payment confirmation
         setPixPolling(true);
         if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
         pixIntervalRef.current = setInterval(async () => {
@@ -609,11 +643,10 @@ const MessageThread = () => {
               if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
               setPixPolling(false);
 
-              // Send confirmation message
               const discountNote = couponDiscount ?
               `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
               "";
-              const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX`;
+              const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX`;
 
               await supabase.from("chat_messages").insert({
                 request_id: threadId,
@@ -636,20 +669,20 @@ const MessageThread = () => {
           } catch (err) {
             console.error("PIX polling error:", err);
           }
-        }, 5000); // Poll every 5 seconds
+        }, 5000); 
 
-        return; // Don't continue to card confirmation flow
+        return; 
       } else {
         setProcessingPayment(false);
         return;
       }
 
-      const finalAmount = getDiscountedAmount();
+      const finalAmount = getFinalAmountWithFee(parseInt(installments), "card");
       const methodLabel = `Cartão de crédito (${installments}x)`;
       const discountNote = couponDiscount ?
       `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
       "";
-      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: ${methodLabel}`;
+      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: ${methodLabel}`;
 
       await supabase.from("chat_messages").insert({
         request_id: threadId,
@@ -657,7 +690,6 @@ const MessageThread = () => {
         content: confirmContent
       });
 
-      // Mark coupon as used
       if (selectedCouponId) {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
@@ -667,7 +699,6 @@ const MessageThread = () => {
       setPaymentOpen(false);
       toast({ title: "Pagamento confirmado!" });
 
-      // Open rating after dialog animation completes
       setTimeout(() => {
         setRatingStars(0);
         setRatingComment("");
@@ -679,12 +710,10 @@ const MessageThread = () => {
     }
   };
 
-
   const handleSubmitRating = async () => {
     if (ratingStars === 0) {toast({ title: "Selecione uma nota", variant: "destructive" });return;}
     if (!userId || !threadId) return;
 
-    // Update professional stats and mark request completed via secure RPC
     const { error } = await supabase.rpc("submit_review", {
       _request_id: threadId,
       _rating: ratingStars,
@@ -702,18 +731,19 @@ const MessageThread = () => {
     setHasRated(true);
     toast({ title: "Avaliação enviada! Obrigado!" });
 
-    // Award random coupon after rating
-    await awardPostPaymentCoupon();
+    // ✅ NOVO: Verifica se o pagamento foi via APP antes de liberar cupom
+    const hasAppPayment = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO"));
+    if (hasAppPayment) {
+      await awardPostPaymentCoupon();
+    }
   };
 
   const awardPostPaymentCoupon = async () => {
     if (!userId) return;
     try {
-      // Randomly choose raffle or discount
       const isDiscount = Math.random() > 0.5;
 
       if (isDiscount) {
-        // Fetch admin discount settings
         const { data: settingsData } = await supabase.
         from("platform_settings").
         select("key, value").
@@ -734,7 +764,6 @@ const MessageThread = () => {
 
         setRewardCoupon({ type: "discount", value: percent });
       } else {
-        // Raffle coupon
         await supabase.from("coupons").insert({
           user_id: userId,
           coupon_type: "raffle",
@@ -756,7 +785,6 @@ const MessageThread = () => {
     return null;
   };
 
-  // ✅ NOVO: Função para upload de comprovante único (revisada para 1732 linhas)
   const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userId || !threadId) return;
@@ -774,7 +802,6 @@ const MessageThread = () => {
 
       const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
 
-      // Envia como mensagem no chat
       const { error: msgError } = await supabase.from("chat_messages").insert({
         request_id: threadId,
         sender_id: userId,
@@ -807,7 +834,6 @@ const MessageThread = () => {
       return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={isMine} />;
     }
 
-    // Protocol message - render as system card
     if (isProtocol) {
       return (
         <div className="text-center w-full">
@@ -816,10 +842,8 @@ const MessageThread = () => {
             <p className="text-[10px] text-muted-foreground mt-0.5">Guarde este número para referência</p>
           </div>
         </div>);
-
     }
 
-    // System close message
     if (isSystemClose) {
       return (
         <div className="text-center w-full">
@@ -827,11 +851,9 @@ const MessageThread = () => {
             <p className="text-xs font-semibold text-foreground">{msg.content}</p>
           </div>
         </div>);
-
     }
 
     if (isBilling && billing) {
-      // ✅ BLOQUEIO: Verifica se já existe mensagem de confirmação para impedir duplo pagamento
       const alreadyPaid = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial"));
 
       return (
@@ -841,12 +863,15 @@ const MessageThread = () => {
             <span className="font-semibold">Cobrança</span>
           </div>
           <p className="text-lg font-bold">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
+          
+          {billing.passFee && !isMine && <p className="text-[10px] font-medium text-destructive mt-0 mb-1">+ Taxas no momento do pagamento</p>}
+          
           <p className="text-xs opacity-80">{billing.desc}</p>
           
           {!isMine && (
             alreadyPaid ? (
               <div className="mt-2 w-full py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-600 text-center flex items-center justify-center gap-1.5 uppercase">
-                <CheckCircle2 className="w-3 h-3" /> Pagamento efetuado com sucesso
+                <CheckCircle2 className="w-3 h-3" /> Pagamento efetuado
               </div>
             ) : (
               <button
@@ -867,15 +892,10 @@ const MessageThread = () => {
           <p key={i} className="text-xs opacity-80">{line}</p>
           )}
         </div>);
-
     }
 
-    // Hide rating messages completely
-    if (isRating) {
-      return null;
-    }
+    if (isRating) return null;
 
-    // ✅ Render comprovante (arquivo)
     if (isReceipt) {
       const fileMatch = msg.content.match(/\[FILE:(.+):(.+)\]$/);
       return (
@@ -892,7 +912,6 @@ const MessageThread = () => {
       );
     }
 
-    // ✅ Renderização de fotos dinâmicas (Mantendo o que funcionou antes)
     if (msg.image_urls && msg.image_urls.length > 0) {
       return (
         <div className="space-y-2">
@@ -906,7 +925,6 @@ const MessageThread = () => {
       );
     }
 
-    // Fallback para Regex de fotos (do lovable original)
     const imageUrlRegex = /(https?:\/\/[^\s]+?\.(png|jpg|jpeg|webp|gif))/gi;
     const parts = msg.content.split("\n");
     const hasImages = imageUrlRegex.test(msg.content);
@@ -929,7 +947,6 @@ const MessageThread = () => {
             return line.trim() ? <p key={i}>{line}</p> : null;
           })}
         </div>);
-
     }
 
     return <p className="whitespace-pre-wrap">{msg.content}</p>;
@@ -939,7 +956,6 @@ const MessageThread = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
-      {/* Header with avatar */}
       <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b">
         <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
           <Link to="/messages" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
@@ -956,13 +972,11 @@ const MessageThread = () => {
             <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
             <p className="text-[10px] text-muted-foreground">online</p>
           </div>
-          {/* Billing button for professionals */}
           {isProfessional && requestStatus === "accepted" &&
           <>
               <button
               onClick={async () => {await loadFeeSettings();setBillingOpen(true);}}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-primary text-primary-foreground">
-
                 <BadgeDollarSign className="w-3.5 h-3.5" /> Cobrar
               </button>
               <button
@@ -981,7 +995,6 @@ const MessageThread = () => {
               }}
               disabled={closingCall}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors">
-
                 <LogOut className="w-3.5 h-3.5" /> Encerrar
               </button>
             </>
@@ -989,10 +1002,7 @@ const MessageThread = () => {
         </div>
       </header>
 
-      {/* Messages */}
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
-        
-        {/* ✅ NOVO: Cancelamento do lado do CLIENTE quando pendente */}
         {!isProfessional && requestStatus === "pending" &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 shadow-sm">
             <p className="text-sm font-semibold text-foreground text-center">Aguardando resposta</p>
@@ -1014,7 +1024,6 @@ const MessageThread = () => {
         </div>
         }
 
-        {/* Accept/Reject buttons for professional when pending */}
         {isProfessional && requestStatus === "pending" &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2">
             <p className="text-sm font-semibold text-foreground text-center">Nova solicitação de serviço</p>
@@ -1032,7 +1041,6 @@ const MessageThread = () => {
                 toast({ title: "Chamada recusada e chat encerrado" });
               }}
               className="flex-1 py-2.5 rounded-xl border-2 border-destructive text-destructive font-semibold text-sm hover:bg-destructive/10 transition-colors">
-
                 Recusar
               </button>
               <button
@@ -1047,14 +1055,12 @@ const MessageThread = () => {
                 toast({ title: "Chamada aceita!" });
               }}
               className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-
                 Aceitar
               </button>
             </div>
           </div>
         }
 
-        {/* ✅ Atualizado para mostrar feedback se for recusada ou cancelada */}
         {(requestStatus === "rejected" || requestStatus === "cancelled") &&
         <div className="bg-destructive/10 border border-destructive/20 rounded-2xl p-4 text-center mb-2">
             <p className="text-sm font-semibold text-destructive">
@@ -1068,20 +1074,17 @@ const MessageThread = () => {
         }
         {messages.map((msg) => {
           const isMine = msg.sender_id === userId;
-          // Skip rating messages entirely
           const isRatingMsg = msg.content.includes("AVALIAÇÃO:") || msg.content.includes("avaliou seu atendimento com");
           if (isRatingMsg) return null;
           const rendered = renderMessageContent(msg);
           if (rendered === null) return null;
 
-          // Protocol and system messages - render centered without bubble
           const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada");
           if (isSystemMsg) {
             return (
               <div key={msg.id} className="flex justify-center">
                 {rendered}
               </div>);
-
           }
 
           return (
@@ -1111,7 +1114,6 @@ const MessageThread = () => {
         <div ref={bottomRef} />
       </main>
 
-      {/* Input bar / FLUXO DE COMPROVANTE */}
       {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" ?
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
           <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
@@ -1121,7 +1123,6 @@ const MessageThread = () => {
                "Serviço finalizado — chat encerrado"}
             </p>
 
-            {/* ✅ BLOCO DE COMPROVANTE (Não mostra se cancelado ou se clicou em 'Não enviar') */}
             {!isProfessional && requestStatus !== "rejected" && requestStatus !== "cancelled" && !dismissedReceipt && (
               <div className="w-full max-w-xs mt-2 space-y-2 p-4 bg-background border rounded-2xl shadow-sm animate-in fade-in zoom-in duration-300">
                 <p className="text-xs font-bold text-center">Deseja enviar o comprovante?</p>
@@ -1140,9 +1141,11 @@ const MessageThread = () => {
                       {uploadingReceipt ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
                       Selecionar Imagem ou PDF
                     </button>
-                    {/* ✅ NOVO BOTÃO: Para esconder a caixinha de comprovante */}
                     <button 
-                      onClick={() => setDismissedReceipt(true)}
+                      onClick={() => {
+                        setDismissedReceipt(true);
+                        if (threadId) localStorage.setItem(`receipt_dismissed_${threadId}`, "true"); // ✅ Salva no navegador do usuário
+                      }}
                       className="w-full py-2 rounded-xl text-muted-foreground text-[11px] font-medium hover:bg-muted transition-all"
                     >
                       Não enviar
@@ -1159,12 +1162,10 @@ const MessageThread = () => {
               </div>
             )}
 
-            {/* Show rating button for client only after payment (not on rejected/cancelled calls) */}
             {!isProfessional && !hasRated && requestStatus !== "rejected" && requestStatus !== "cancelled" && messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial")) &&
           <button
             onClick={() => {setRatingStars(0);setRatingComment("");setRatingOpen(true);}}
             className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center gap-1.5">
-
                 <Star className="w-4 h-4" /> Avaliar profissional
               </button>
           }
@@ -1227,7 +1228,7 @@ const MessageThread = () => {
       <Dialog open={billingOpen} onOpenChange={(open) => {
         setBillingOpen(open);
         if (open) {loadFeeSettings();setBillingStep("choose_type");}
-        if (!open) {setBillingStep("choose_type");setBillingMethod(null);setBillingAmount("");setBillingDesc("");}
+        if (!open) {setBillingStep("choose_type");setBillingMethod(null);setBillingAmount("");setBillingDesc("");setPassFeeToClient(false);}
       }}>
         <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -1241,7 +1242,6 @@ const MessageThread = () => {
             <button
               onClick={() => setBillingStep("app_form")}
               className="w-full py-4 rounded-xl border-2 hover:border-primary/50 transition-all flex items-center gap-3 px-4 group">
-
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                     <DollarSign className="w-5 h-5 text-primary" />
                   </div>
@@ -1273,7 +1273,6 @@ const MessageThread = () => {
               <button
               onClick={() => setBillingStep("presencial_confirm")}
               className="w-full py-4 rounded-xl border-2 hover:border-primary/50 transition-all flex items-center gap-3 px-4 group">
-
                 <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
                   <Handshake className="w-5 h-5 text-muted-foreground" />
                 </div>
@@ -1296,13 +1295,11 @@ const MessageThread = () => {
               onClick={async () => {
                 if (!userId || !threadId) return;
                 setClosingCall(true);
-                // Send presencial message
                 await supabase.from("chat_messages").insert({
                   request_id: threadId,
                   sender_id: userId,
                   content: "🤝 Pagamento presencial — combinado diretamente com o cliente."
                 });
-                // Close the call
                 await supabase.from("chat_messages").insert({
                   request_id: threadId,
                   sender_id: userId,
@@ -1316,14 +1313,12 @@ const MessageThread = () => {
               }}
               disabled={closingCall}
               className="w-full py-3 rounded-xl bg-destructive text-destructive-foreground font-semibold text-sm hover:bg-destructive/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
-
                 <LogOut className="w-4 h-4" />
                 {closingCall ? "Encerrando..." : "Encerrar chamada"}
               </button>
               <button
               onClick={() => setBillingStep("choose_type")}
               className="w-full py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-
                 Voltar
               </button>
             </div>
@@ -1332,12 +1327,11 @@ const MessageThread = () => {
           {billingStep === "app_form" &&
           <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Valor (R$) *</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Valor Base (R$) *</label>
                 <input
                 value={billingAmount} onChange={(e) => setBillingAmount(e.target.value)}
                 type="number" step="0.01" placeholder="0,00"
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Descrição</label>
@@ -1345,16 +1339,32 @@ const MessageThread = () => {
                 value={billingDesc} onChange={(e) => setBillingDesc(e.target.value)}
                 placeholder="Ex: Instalação elétrica"
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-
               </div>
 
-              {/* Payment method selection */}
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Forma de pagamento *</p>
+              {/* ✅ NOVO: Toggle Com Juros / Sem Juros */}
+              <div className="space-y-2 mt-2 pt-2 border-t">
+                <p className="text-xs font-medium text-muted-foreground">Quem pagará a taxa do sistema?</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setPassFeeToClient(false)}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all ${!passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                  >
+                    Sem Juros<br/><span className="text-[9px] font-normal">Eu assumo a taxa</span>
+                  </button>
+                  <button
+                    onClick={() => setPassFeeToClient(true)}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all ${passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                  >
+                    Com Juros<br/><span className="text-[9px] font-normal">Cliente paga a taxa</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2 mt-2 border-t pt-2">
+                <p className="text-xs font-medium text-muted-foreground">Forma de pagamento sugerida *</p>
                 <button
                 onClick={() => {setBillingMethod("pix");setBillingInstallments("1");}}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${billingMethod === "pix" ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}>
-
                   <span className="text-lg">📱</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">PIX</p>
@@ -1364,26 +1374,24 @@ const MessageThread = () => {
                 <button
                 onClick={() => setBillingMethod("card")}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${billingMethod === "card" ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}>
-
                   <span className="text-lg">💳</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">Cartão de crédito</p>
-                    <p className="text-[10px] text-muted-foreground">Parcelamento disponível</p>
+                    <p className="text-[10px] text-muted-foreground">O cliente poderá escolher as parcelas</p>
                   </div>
                 </button>
               </div>
 
-              {/* Fee display */}
+              {/* Fee display dinâmico */}
               {billingMethod && billingAmount && parseFloat(billingAmount) > 0 &&
             <div className="bg-muted/50 border rounded-xl p-3">
                   {billingMethod === "card" &&
               <div className="mb-2">
-                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Parcelas</label>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Simulação de Parcelas</label>
                       <select
                   value={billingInstallments}
                   onChange={(e) => setBillingInstallments(e.target.value)}
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-
                         {getBillingInstallmentOptions().map((opt) =>
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                   )}
@@ -1391,8 +1399,8 @@ const MessageThread = () => {
                     </div>
               }
                   {getBillingFeeLabel() &&
-              <p className="text-xs text-muted-foreground">
-                    💰 {getBillingFeeLabel()!.label}
+              <p className={`text-xs ${passFeeToClient ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
+                    {passFeeToClient ? '' : '💰 '} {getBillingFeeLabel()!.label}
                     </p>
               }
                 </div>
@@ -1402,7 +1410,6 @@ const MessageThread = () => {
                 <button
                 onClick={() => {setBillingStep("choose_type");setBillingMethod(null);}}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-
                   Voltar
                 </button>
                 <button onClick={handleSendBilling} disabled={!billingMethod}
@@ -1423,19 +1430,27 @@ const MessageThread = () => {
           </DialogHeader>
           {paymentData && !cardStep &&
           <div className="space-y-4">
-              <div className="text-center p-4 bg-muted/50 rounded-xl">
+              <div className="text-center p-4 bg-muted/50 rounded-xl relative">
+                {/* Mostra aviso se tiver juros embutidos */}
+                
                 {couponDiscount ?
               <>
                     <p className="text-sm line-through text-muted-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
-                    <p className="text-2xl font-bold text-primary">R$ {getDiscountedAmount().toFixed(2).replace(".", ",")}</p>
+                    <p className="text-3xl font-bold text-primary">R$ {getFinalAmountWithFee(paymentMethod === "card" ? parseInt(installments) : 1, paymentMethod).toFixed(2).replace(".", ",")}</p>
                     <p className="text-[10px] text-primary font-medium mt-0.5">
                       Desconto de {couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`} aplicado
                     </p>
                   </> :
-
-              <p className="text-2xl font-bold text-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
+              <p className="text-3xl font-bold text-foreground">R$ {getFinalAmountWithFee(paymentMethod === "card" ? parseInt(installments) : 1, paymentMethod).toFixed(2).replace(".", ",")}</p>
               }
-                <p className="text-xs text-muted-foreground mt-1">{paymentData.desc}</p>
+              
+              {clientPassFee && paymentMethod && (
+                  <div className="mt-2 text-[10px] bg-amber-500/10 text-amber-600 font-semibold py-1 px-2 rounded-md inline-block">
+                    Atenção: O valor acima inclui a taxa de parcelamento/transação.
+                  </div>
+                )}
+                
+                <p className="text-xs text-muted-foreground mt-2">{paymentData.desc}</p>
               </div>
 
               {/* Coupon Section */}
@@ -1470,12 +1485,10 @@ const MessageThread = () => {
                       </button>
                 )}
                   </div> :
-
               <p className="text-xs text-muted-foreground py-2">Nenhum cupom disponível</p>
               }
               </div>
 
-              {/* Payment method - show only what the professional selected, or both if old format */}
               {paymentMethod ?
             <div className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground">Método de pagamento:</p>
@@ -1493,7 +1506,6 @@ const MessageThread = () => {
                   <button
                 onClick={() => handleSelectMethod("pix")}
                 className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-border hover:border-primary/30 transition-colors">
-
                     <span className="text-lg">📱</span>
                     <div className="text-left">
                       <p className="text-sm font-semibold text-foreground">PIX</p>
@@ -1503,7 +1515,6 @@ const MessageThread = () => {
                   <button
                 onClick={() => handleSelectMethod("card")}
                 className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-border hover:border-primary/30 transition-colors">
-
                     <span className="text-lg">💳</span>
                     <div className="text-left">
                       <p className="text-sm font-semibold text-foreground">Cartão de crédito</p>
@@ -1518,7 +1529,6 @@ const MessageThread = () => {
               onClick={handleConfirmPayment}
               disabled={processingPayment}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-
                   {processingPayment ? "Processando..." : "Confirmar pagamento via PIX"}
                 </button>
             }
@@ -1527,7 +1537,6 @@ const MessageThread = () => {
             <button
               onClick={() => setCardStep(true)}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-
                   Prosseguir com cartão
                 </button>
             }
@@ -1541,13 +1550,11 @@ const MessageThread = () => {
                 {couponDiscount ?
               <>
                     <p className="text-sm line-through text-muted-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
-                    <p className="text-xl font-bold text-primary">R$ {getDiscountedAmount().toFixed(2).replace(".", ",")}</p>
+                    <p className="text-xl font-bold text-primary">R$ {getFinalAmountWithFee(parseInt(installments), "card").toFixed(2).replace(".", ",")}</p>
                   </> :
-
-              <p className="text-xl font-bold text-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
+              <p className="text-xl font-bold text-foreground">R$ {getFinalAmountWithFee(parseInt(installments), "card").toFixed(2).replace(".", ",")}</p>
               }
               </div>
-
 
               <div className="space-y-3">
                 <div>
@@ -1558,7 +1565,6 @@ const MessageThread = () => {
                   placeholder="0000 0000 0000 0000"
                   maxLength={19}
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Nome no cartão</label>
@@ -1567,7 +1573,6 @@ const MessageThread = () => {
                   onChange={(e) => setCardForm((f) => ({ ...f, name: e.target.value.toUpperCase() }))}
                   placeholder="NOME COMPLETO"
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
-
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1578,7 +1583,6 @@ const MessageThread = () => {
                     placeholder="MM/AA"
                     maxLength={5}
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
@@ -1589,7 +1593,6 @@ const MessageThread = () => {
                     maxLength={4}
                     type="password"
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
                   </div>
                 </div>
                 <div>
@@ -1598,7 +1601,6 @@ const MessageThread = () => {
                   value={installments}
                   onChange={(e) => setInstallments(e.target.value)}
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-
                     {getInstallmentOptions().map((opt) =>
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                   )}
@@ -1631,14 +1633,12 @@ const MessageThread = () => {
                 <button
                 onClick={() => {setCardStep(false);setPaymentMethod(null);}}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
-
                   Voltar
                 </button>
                 <button
                 onClick={handleConfirmPayment}
                 disabled={processingPayment}
                 className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-
                   {processingPayment ? "Processando..." : "Pagar"}
                 </button>
               </div>
@@ -1737,7 +1737,6 @@ const MessageThread = () => {
                   src={`data:image/png;base64,${pixData.qrCode}`}
                   alt="PIX QR Code"
                   className="w-48 h-48 mx-auto" />
-
                 </div>
               </div>
 

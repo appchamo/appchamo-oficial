@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, Package, X, Check } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, X, Check, ShoppingBag, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface Product {
   id: string;
@@ -21,11 +23,17 @@ interface ProductCatalogProps {
 }
 
 const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
+  const navigate = useNavigate();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", description: "", price: "", image_url: "", external_url: "" });
+
+  // Purchase Modal State
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [creatingRequest, setCreatingRequest] = useState(false);
 
   const fetchProducts = async () => {
     const { data } = await supabase
@@ -97,6 +105,81 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
     await supabase.from("product_catalog").delete().eq("id", id);
     toast({ title: "Produto removido" });
     fetchProducts();
+  };
+
+  // ✅ FUNÇÃO MÁGICA: Abre o modal de compra
+  const handleBuyClick = (p: Product) => {
+    if (p.external_url) {
+      window.open(p.external_url, '_blank');
+      return;
+    }
+    setSelectedProduct(p);
+    setPurchaseModalOpen(true);
+  };
+
+  // ✅ FUNÇÃO MÁGICA 2: Cria a solicitação e manda a foto do produto pro Chat
+  const handleConfirmPurchase = async () => {
+    if (!selectedProduct) return;
+    setCreatingRequest(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({ title: "Faça login para continuar", variant: "destructive" });
+        navigate("/login");
+        return;
+      }
+
+      // 1. Tenta achar uma solicitação em aberto com esse profissional
+      let reqId: string | null = null;
+      const { data: existingReq } = await supabase
+        .from("service_requests")
+        .select("id")
+        .eq("client_id", user.id)
+        .eq("professional_id", professionalId)
+        .in("status", ["pending", "accepted"])
+        .maybeSingle();
+
+      if (existingReq) {
+        reqId = existingReq.id;
+      } else {
+        // 2. Se não tem, cria uma nova solicitação
+        const { data: newReq, error: reqError } = await supabase
+          .from("service_requests")
+          .insert({
+            client_id: user.id,
+            professional_id: professionalId,
+            description: `Interesse no produto: ${selectedProduct.name}`,
+            status: "pending"
+          })
+          .select("id")
+          .single();
+
+        if (reqError) throw reqError;
+        reqId = newReq.id;
+      }
+
+      if (!reqId) throw new Error("Não foi possível iniciar o chat.");
+
+      // 3. Injeta a mensagem invisível do PRODUTO no Chat
+      const priceFormatted = selectedProduct.price > 0 ? `R$ ${Number(selectedProduct.price).toFixed(2).replace(".", ",")}` : "Sob consulta";
+      const productPayload = `🛍️ INTERESSE EM PRODUTO\n[PRODUCT:${selectedProduct.id}:${selectedProduct.name}:${priceFormatted}:${selectedProduct.image_url || 'null'}]`;
+
+      await supabase.from("chat_messages").insert({
+        request_id: reqId,
+        sender_id: user.id,
+        content: productPayload
+      });
+
+      toast({ title: "Solicitação enviada com sucesso!" });
+      setPurchaseModalOpen(false);
+      navigate(`/messages/${reqId}`); // Redireciona o cliente pro chat!
+
+    } catch (err: any) {
+      toast({ title: "Erro ao iniciar compra", description: err.message, variant: "destructive" });
+    } finally {
+      setCreatingRequest(false);
+    }
   };
 
   const visibleProducts = isOwner ? products : products.filter(p => p.active);
@@ -177,42 +260,87 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
       ) : (
         <div className="grid grid-cols-2 gap-3">
             {visibleProducts.map(p => {
-              const inner = (
-                <div className="border rounded-xl overflow-hidden bg-background group">
-                  {p.image_url ? (
-                    <img src={p.image_url} alt={p.name} className="w-full h-28 object-cover" />
-                  ) : (
-                    <div className="w-full h-28 bg-muted flex items-center justify-center">
-                      <Package className="w-8 h-8 text-muted-foreground/40" />
-                    </div>
-                  )}
-                  <div className="p-2.5">
-                    <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
-                    {p.description && <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{p.description}</p>}
-                    <p className="text-sm font-bold text-primary mt-1">
-                      {p.price > 0 ? `R$ ${Number(p.price).toFixed(2).replace(".", ",")}` : "Sob consulta"}
-                    </p>
-                    {isOwner && (
-                      <div className="flex gap-1.5 mt-2">
-                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleEdit(p); }} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[11px] font-medium hover:bg-muted transition-colors">
-                          <Pencil className="w-3 h-3" /> Editar
-                        </button>
-                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDelete(p.id); }} className="flex items-center justify-center p-1.5 rounded-lg border text-destructive hover:bg-destructive/10 transition-colors">
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+              return (
+                <div key={p.id} className="border rounded-xl overflow-hidden bg-background flex flex-col h-full">
+                  <div className="relative pt-[100%] bg-muted">
+                    {p.image_url ? (
+                      <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Package className="w-8 h-8 text-muted-foreground/40" />
                       </div>
                     )}
                   </div>
+                  
+                  <div className="p-2.5 flex flex-col flex-1">
+                    <p className="text-sm font-medium text-foreground line-clamp-2 leading-tight min-h-[40px]">{p.name}</p>
+                    <p className="text-sm font-bold text-primary mt-auto pt-2">
+                      {p.price > 0 ? `R$ ${Number(p.price).toFixed(2).replace(".", ",")}` : "Sob consulta"}
+                    </p>
+                    
+                    {/* Botão de Ação do Produto */}
+                    <div className="mt-3 pt-3 border-t">
+                      {isOwner ? (
+                        <div className="flex gap-1.5">
+                          <button onClick={() => handleEdit(p)} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[11px] font-medium hover:bg-muted transition-colors">
+                            <Pencil className="w-3 h-3" /> Editar
+                          </button>
+                          <button onClick={() => handleDelete(p.id)} className="flex items-center justify-center p-1.5 rounded-lg border text-destructive hover:bg-destructive/10 transition-colors">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => handleBuyClick(p)} className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-[11px] font-bold uppercase tracking-wider hover:bg-primary/90 transition-colors">
+                          <ShoppingBag className="w-3.5 h-3.5" /> 
+                          {p.external_url ? "Acessar Link" : "Comprar"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              );
-              return p.external_url && !isOwner ? (
-                <a key={p.id} href={p.external_url} target="_blank" rel="noopener noreferrer">{inner}</a>
-              ) : (
-                <div key={p.id}>{inner}</div>
               );
             })}
         </div>
       )}
+
+      {/* ✅ MODAL DE COMPRA */}
+      <Dialog open={purchaseModalOpen} onOpenChange={setPurchaseModalOpen}>
+        <DialogContent className="max-w-xs text-center rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-primary flex items-center justify-center gap-2"><ShoppingBag className="w-5 h-5" /> Confirmar Interesse</DialogTitle>
+          </DialogHeader>
+          {selectedProduct && (
+            <div className="space-y-4 pt-2">
+              <div className="flex gap-3 text-left p-3 bg-muted/50 rounded-xl border">
+                {selectedProduct.image_url ? (
+                  <img src={selectedProduct.image_url} alt="Produto" className="w-14 h-14 rounded-lg object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-14 h-14 rounded-lg bg-background border flex items-center justify-center flex-shrink-0">
+                    <Package className="w-6 h-6 text-muted-foreground/50" />
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm font-bold text-foreground line-clamp-2 leading-tight">{selectedProduct.name}</p>
+                  <p className="text-xs font-semibold text-primary mt-1">
+                    {selectedProduct.price > 0 ? `R$ ${Number(selectedProduct.price).toFixed(2).replace(".", ",")}` : "Sob consulta"}
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Você será direcionado ao chat com a empresa para combinar os detalhes do pedido e da entrega.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setPurchaseModalOpen(false)} className="flex-1 py-2.5 rounded-xl border font-medium text-sm hover:bg-muted transition-colors">
+                  Cancelar
+                </button>
+                <button onClick={handleConfirmPurchase} disabled={creatingRequest} className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50">
+                  {creatingRequest ? <Loader2 className="w-4 h-4 animate-spin" /> : "Iniciar Chat"}
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

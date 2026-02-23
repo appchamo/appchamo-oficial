@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useState, useRef } from "react";
@@ -87,7 +87,6 @@ const MessageThread = () => {
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ TRAVA DO TECLADO: Verifica se o chat tem mensagem de encerramento
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
 
@@ -541,7 +540,6 @@ const MessageThread = () => {
     return options;
   };
 
-  // ✅ MOTOR DE DISTRIBUIÇÃO APENAS REGISTRA, MAS NÃO ABRE O MODAL NA HORA
   const awardPostPaymentCoupon = async (paymentAmount: number) => {
     if (!userId) return;
     try {
@@ -750,7 +748,6 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
-              // ✅ ENCERRA O CHAT IMEDIATAMENTE (PIX)
               await supabase.from("chat_messages").insert({
                 request_id: threadId,
                 sender_id: userId,
@@ -768,7 +765,6 @@ const MessageThread = () => {
               toast({ title: "Pagamento PIX confirmado!" });
               setPixOpen(false);
               
-              // ABRE A AVALIAÇÃO OBRIGATÓRIA
               setRatingOpen(true);
             }
           } catch (err) {
@@ -799,7 +795,6 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
-      // ✅ ENCERRA O CHAT IMEDIATAMENTE (CARTÃO)
       await supabase.from("chat_messages").insert({
         request_id: threadId,
         sender_id: userId,
@@ -819,7 +814,6 @@ const MessageThread = () => {
       setPaymentOpen(false);
       toast({ title: "Pagamento confirmado!" });
 
-      // ABRE A AVALIAÇÃO OBRIGATÓRIA
       setRatingOpen(true);
 
     } catch (err: any) {
@@ -828,7 +822,6 @@ const MessageThread = () => {
     }
   };
 
-  // ✅ FUNÇÃO QUE FECHA A AVALIAÇÃO E LIBERA O CUPOM (SE HOUVER)
   const closeRatingAndShowReward = () => {
     setRatingOpen(false);
     if (rewardCoupon) {
@@ -858,13 +851,19 @@ const MessageThread = () => {
     setHasRated(true);
     toast({ title: "Avaliação enviada! Obrigado!" });
     
-    // Passa a vez para o cupom
     closeRatingAndShowReward();
   };
 
   const parseAudio = (content: string) => {
     const match = content.match(/\[AUDIO:(.+):(\d+)\]$/);
     if (match) return { url: match[1], duration: parseInt(match[2]) };
+    return null;
+  };
+
+  // ✅ NOVO: Parse do Produto Mágico
+  const parseProduct = (content: string) => {
+    const match = content.match(/\[PRODUCT:(.+):(.+):(.+):(.+)\]/);
+    if (match) return { id: match[1], name: match[2], price: match[3], image: match[4] === 'null' ? null : match[4] };
     return null;
   };
 
@@ -904,6 +903,7 @@ const MessageThread = () => {
 
   const renderMessageContent = (msg: Message) => {
     const billing = parseBilling(msg.content);
+    const product = parseProduct(msg.content);
     const isMine = msg.sender_id === userId;
     const isBilling = msg.content.includes("💰 COBRANÇA");
     const isPaymentConfirm = msg.content.includes("✅ PAGAMENTO CONFIRMADO");
@@ -911,10 +911,31 @@ const MessageThread = () => {
     const isProtocol = msg.content.startsWith("📋 PROTOCOLO:");
     const isSystemClose = msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada");
     const isReceipt = msg.content.includes("📄 COMPROVANTE ENVIADO");
+    const isProductReq = msg.content.includes("🛍️ INTERESSE EM PRODUTO");
     const audioData = parseAudio(msg.content);
 
     if (audioData) {
       return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={isMine} />;
+    }
+
+    // ✅ RENDERIZA O CARD DO PRODUTO NO CHAT
+    if (isProductReq && product) {
+      return (
+        <div className="space-y-2 max-w-[200px]">
+          <p className="font-semibold flex items-center gap-1.5 text-xs"><Package className="w-3.5 h-3.5" /> Interesse em Produto</p>
+          <div className="bg-background rounded-xl overflow-hidden border border-border">
+            {product.image ? (
+               <img src={product.image} alt={product.name} className="w-full h-24 object-cover" />
+            ) : (
+               <div className="w-full h-24 bg-muted flex items-center justify-center"><Package className="w-6 h-6 text-muted-foreground/50" /></div>
+            )}
+            <div className="p-2 bg-muted/30">
+              <p className="text-xs font-bold text-foreground line-clamp-1">{product.name}</p>
+              <p className="text-[10px] font-semibold text-primary mt-0.5">{product.price}</p>
+            </div>
+          </div>
+        </div>
+      );
     }
 
     if (isProtocol) {
@@ -1206,7 +1227,6 @@ const MessageThread = () => {
         <div ref={bottomRef} />
       </main>
 
-      {/* ✅ TRAVA DO TECLADO AQUI */}
       {isChatFinished ?
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
           <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
@@ -1255,16 +1275,17 @@ const MessageThread = () => {
               </div>
             )}
 
-            {!isProfessional && !hasRated && requestStatus !== "rejected" && requestStatus !== "cancelled" && messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial")) &&
-          <button
-            onClick={() => {setRatingStars(0);setRatingComment("");setRatingOpen(true);}}
-            className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center gap-1.5">
+            {/* SE O CHAT FECHOU (Por pagamento ou manual) E NÃO TEM AVALIAÇÃO, MOSTRA O BOTÃO */}
+            {!isProfessional && !hasRated && requestStatus !== "rejected" && requestStatus !== "cancelled" &&
+              <button
+                onClick={() => {setRatingStars(0);setRatingComment("");setRatingOpen(true);}}
+                className="px-4 py-2 mt-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center gap-1.5 animate-in fade-in zoom-in">
                 <Star className="w-4 h-4" /> Avaliar profissional
               </button>
-          }
+            }
             {!isProfessional && hasRated &&
-          <p className="text-xs text-muted-foreground">✅ Avaliação enviada</p>
-          }
+              <p className="text-xs text-muted-foreground">✅ Avaliação enviada</p>
+            }
           </div>
         </div> :
 
@@ -1317,7 +1338,6 @@ const MessageThread = () => {
       }
       <BottomNav />
 
-      {/* Billing Dialog (Profissional) */}
       <Dialog open={billingOpen} onOpenChange={(open) => {
         setBillingOpen(open);
         if (open) {loadFeeSettings();setBillingStep("choose_type");}
@@ -1755,7 +1775,7 @@ const MessageThread = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ NOVA LÓGICA DE MODAIS: Avaliação aparece primeiro! */}
+      {/* ✅ AVALIAÇÃO AGORA É PRIORITÁRIA */}
       <Dialog open={ratingOpen} onOpenChange={(open) => {
         if (!open) {
           closeRatingAndShowReward();
@@ -1787,17 +1807,16 @@ const MessageThread = () => {
               onClick={handleSubmitRating}
               disabled={ratingStars === 0}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-
               Enviar avaliação
             </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Reward Coupon Dialog (Só abre depois da avaliação, se houver cupom) */}
+      {/* Reward Coupon Dialog */}
       <Dialog open={rewardOpen} onOpenChange={(open) => {
         setRewardOpen(open);
-        if (!open) setRewardCoupon(null); // Limpa para não abrir duas vezes
+        if (!open) setRewardCoupon(null);
       }}>
         <DialogContent className="max-w-sm">
           <div className="text-center space-y-4 py-4">
@@ -1829,7 +1848,6 @@ const MessageThread = () => {
                 setRewardCoupon(null);
               }}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-
               Entendido!
             </button>
           </div>

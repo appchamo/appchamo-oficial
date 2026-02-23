@@ -11,7 +11,7 @@ interface SubscriptionDialogProps {
   onSuccess: () => void;
 }
 
-// ✅ Funções de Máscara (Formatação automática)
+// Funções de Máscara
 const formatCardNumber = (val: string) => {
   return val.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 ").slice(0, 19);
 };
@@ -42,7 +42,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
   const [formData, setFormData] = useState({
     holderName: "",
     number: "",
-    expiry: "", // Usando um campo único MM/AA
+    expiry: "", 
     ccv: "",
     cpfCnpj: "",
     postalCode: "",
@@ -50,7 +50,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
   });
 
   const handleSubscribe = async () => {
-    // Validação básica antes de enviar
+    // 1. Validações Locais
     if (!formData.holderName || !formData.number || !formData.expiry || !formData.ccv || !formData.cpfCnpj || !formData.postalCode || !formData.addressNumber) {
       toast({ title: "Atenção", description: "Preencha todos os campos do pagamento.", variant: "destructive" });
       return;
@@ -61,7 +61,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
       return;
     }
 
-    if (formData.expiry.length < 5) {
+    if (formData.expiry.length !== 5 || !formData.expiry.includes("/")) {
       toast({ title: "Validade inválida", description: "Preencha no formato MM/AA.", variant: "destructive" });
       return;
     }
@@ -74,28 +74,33 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
       const planValues = { pro: "49.90", vip: "140.00", business: "250.00" };
       const value = planValues[planId as keyof typeof planValues];
 
-      // Separa o MM/AA em Mês e Ano (adicionando "20" na frente do ano para a API)
-      const [expMonth, expYearShort] = formData.expiry.split("/");
-      const expYear = `20${expYearShort}`;
+      // ✅ BLINDAGEM: Garante que a data sempre vai ser extraída corretamente
+      const parts = formData.expiry.split("/");
+      const expMonth = parts[0];
+      const expYear = `20${parts[1]}`;
+
+      // ✅ Limpeza de todos os dados antes de enviar pro Asaas
+      const payload = {
+        holderName: formData.holderName.trim(),
+        number: formData.number.replace(/\s/g, ""), 
+        expiryMonth: expMonth,
+        expiryYear: expYear,
+        ccv: formData.ccv,
+        cpfCnpj: formData.cpfCnpj.replace(/\D/g, ""), 
+        postalCode: formData.postalCode.replace(/\D/g, ""),
+        addressNumber: formData.addressNumber.trim(),
+        userId: user.id,
+        email: user.email,
+        planId: planId,
+        value: value,
+      };
 
       const { data, error } = await supabase.functions.invoke("create-subscription", {
-        body: {
-          holderName: formData.holderName,
-          number: formData.number.replace(/\s/g, ""), // Tira os espaços para a API
-          expiryMonth: expMonth,
-          expiryYear: expYear,
-          ccv: formData.ccv,
-          cpfCnpj: formData.cpfCnpj.replace(/\D/g, ""), // Tira os pontos/traços
-          postalCode: formData.postalCode.replace(/\D/g, ""),
-          addressNumber: formData.addressNumber,
-          userId: user.id,
-          email: user.email,
-          planId: planId,
-          value: value,
-        }
+        body: payload
       });
 
       if (error) throw error;
+      if (data?.error) throw new Error(data.error); // Pega erro interno do Asaas se houver
 
       toast({ title: "Assinatura realizada!", description: "Seu plano foi processado com sucesso." });
       onSuccess();

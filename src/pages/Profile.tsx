@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -7,6 +7,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const availabilityOptions = [
+  { value: "available", label: "Disponível", icon: Circle, color: "text-green-500" },
+  { value: "quotes_only", label: "Somente orçamentos", icon: FileQuestion, color: "text-amber-500" },
+  { value: "busy", label: "Agenda fechada", icon: Clock, color: "text-orange-500" },
+  { value: "unavailable", label: "Indisponível", icon: CalendarOff, color: "text-destructive" },
+];
 
 const Profile = () => {
   const navigate = useNavigate();
@@ -41,6 +49,7 @@ const Profile = () => {
           setProData({
             ...data,
             category_name: (data.categories as any)?.name || "Sem categoria",
+            availability_status: data.availability_status || "available"
           });
           setBio(data.bio || "");
         }
@@ -67,6 +76,15 @@ const Profile = () => {
     await refreshProfile();
     toast({ title: "Perfil salvo!" });
     setEditing(false);
+  };
+
+  // NOVO: Função para alterar status de disponibilidade direto nesta tela
+  const handleStatusChange = async (status: string) => {
+    if (!proData || !user) return;
+    const { error } = await supabase.from("professionals").update({ availability_status: status }).eq("id", proData.id);
+    if (error) { toast({ title: "Erro ao atualizar status", variant: "destructive" }); return; }
+    setProData({ ...proData, availability_status: status });
+    toast({ title: "Status atualizado!" });
   };
 
   const handleLogout = async () => {
@@ -148,6 +166,28 @@ const Profile = () => {
               <span className="text-muted-foreground">{proData.total_services} serviços</span>
               <span className="text-muted-foreground">{proData.total_reviews} avaliações</span>
               <span className="text-xs text-muted-foreground ml-auto">{proData.category_name}</span>
+            </div>
+          )}
+
+          {/* ✅ NOVO: Edição de Status Rápida (Sempre visível para o Pro) */}
+          {proData && !editing && (
+            <div className="mt-4 pt-3 border-t">
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status de disponibilidade atual</label>
+              <Select value={proData.availability_status} onValueChange={handleStatusChange}>
+                <SelectTrigger className="rounded-xl w-full bg-background border">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {availabilityOptions.map(o => (
+                    <SelectItem key={o.value} value={o.value}>
+                      <span className="flex items-center gap-2">
+                        <o.icon className={`w-3 h-3 ${o.color} fill-current`} />
+                        {o.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 

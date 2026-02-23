@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -49,6 +49,10 @@ const ProfessionalProfile = () => {
   const [loading, setLoading] = useState(true);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [callDialogOpen, setCallDialogOpen] = useState(false);
+
+  // NOVO: Estado para edição do nome
+  const [editingName, setEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -132,6 +136,16 @@ const ProfessionalProfile = () => {
     toast({ title: "Status atualizado!" });
   };
 
+  // NOVO: Função para salvar o nome
+  const handleNameSave = async () => {
+    if (!pro || !editNameValue.trim()) return;
+    const { error } = await supabase.from("profiles").update({ full_name: editNameValue.trim() }).eq("user_id", pro.user_id);
+    if (error) { toast({ title: "Erro ao atualizar nome", variant: "destructive" }); return; }
+    setPro(prev => prev ? { ...prev, full_name: editNameValue.trim() } : prev);
+    setEditingName(false);
+    toast({ title: "Nome atualizado!" });
+  };
+
   const handleCall = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { navigate("/login"); return; }
@@ -169,16 +183,45 @@ const ProfessionalProfile = () => {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold text-foreground">{name}</h1>
-                {pro.verified && (
-                  <div className="relative">
-                    <div className="absolute -inset-1 bg-primary/20 rounded-full animate-pulse" />
-                    <BadgeCheck className="w-6 h-6 text-primary relative" />
+              <div className="flex items-center gap-2 mb-0.5">
+                {/* ✅ NOVO: Lógica de edição de nome inline */}
+                {editingName ? (
+                  <div className="flex items-center gap-2 w-full">
+                    <input
+                      value={editNameValue}
+                      onChange={(e) => setEditNameValue(e.target.value)}
+                      className="flex-1 border rounded-lg px-2 py-1 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                      autoFocus
+                    />
+                    <button onClick={handleNameSave} className="p-1.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setEditingName(false)} className="p-1.5 bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
+                ) : (
+                  <>
+                    <h1 className="text-lg font-bold text-foreground truncate">{name}</h1>
+                    {pro.verified && (
+                      <div className="relative flex-shrink-0">
+                        <div className="absolute -inset-1 bg-primary/20 rounded-full animate-pulse" />
+                        <BadgeCheck className="w-5 h-5 text-primary relative" />
+                      </div>
+                    )}
+                    {isOwner && (
+                      <button onClick={() => { setEditNameValue(name); setEditingName(true); }} className="ml-1 p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">{pro.category_name}</p>
+              
+              {!editingName && (
+                <p className="text-sm text-muted-foreground truncate">{pro.category_name}</p>
+              )}
+              
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold mt-0.5 ${
                 pro.user_type === "company" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
               }`}>

@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Ticket } from "lucide-react";
+import { Ticket, MailCheck } from "lucide-react"; // Adicionei MailCheck para o aviso
 import StepAccountType from "@/components/signup/StepAccountType";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
 import StepDocuments from "@/components/signup/StepDocuments";
@@ -13,7 +13,7 @@ import StepPlanSelect from "@/components/signup/StepPlanSelect";
 import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
 
 type AccountType = "client" | "professional";
-type Step = "type" | "basic" | "documents" | "profile" | "plan";
+type Step = "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email"; // Adicionei step de aguardar e-mail
 
 const friendlyError = (msg: string) => {
   if (msg.includes("already registered")) return "Este e-mail já está cadastrado.";
@@ -51,6 +51,7 @@ const Signup = () => {
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
+  const [resending, setResending] = useState(false); // Estado para o botão de reenviar
 
   // ✅ NOVO: Memória para saber se a conta já foi criada no banco
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
@@ -87,8 +88,26 @@ const Signup = () => {
 
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
-    localStorage.setItem("just_signed_up", "true");
-    navigate("/home");
+    // ✅ Alterado: Agora manda para o aviso de e-mail antes da home
+    setStep("awaiting-email");
+  };
+
+  // Função para reenviar o e-mail
+  const handleResendEmail = async () => {
+    if (!basicData?.email) return;
+    setResending(true);
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: basicData.email,
+      options: { emailRedirectTo: window.location.origin }
+    });
+    
+    if (error) {
+      toast({ title: "Aguarde um pouco", description: "Muitas tentativas. Tente novamente em 1 minuto.", variant: "destructive" });
+    } else {
+      toast({ title: "E-mail reenviado!", description: "Verifique sua caixa de entrada e spam." });
+    }
+    setResending(false);
   };
 
   const doSignup = async (pData: any, planId: string) => {
@@ -102,13 +121,10 @@ const Signup = () => {
           setLoading(false);
           setIsSubscriptionOpen(true);
         } else {
-          // Se o usuário desistiu de pagar e clicou no Grátis
           await supabase.from("subscriptions").update({ plan_id: "free" } as any).eq("user_id", createdUserId);
-          localStorage.setItem("just_signed_up", "true");
-          toast({ title: "Conta criada com sucesso!" });
-          navigate("/home");
+          setStep("awaiting-email");
         }
-        return; // Para a execução aqui para não dar o erro de e-mail duplicado
+        return; 
       }
 
       // 1. Cria a conta no Auth
@@ -134,8 +150,6 @@ const Signup = () => {
       }
 
       const userId = authData.user.id;
-      
-      // ✅ Salva o ID na memória para não tentar criar a conta de novo se ele fechar o modal
       setCreatedUserId(userId); 
 
       await new Promise((r) => setTimeout(r, 1000));
@@ -169,15 +183,13 @@ const Signup = () => {
         return;
       }
 
-      // 3. Se for plano pago, abre o modal agora (usuário já está logado)
+      // 3. Se for plano pago, abre o modal. Se for free, avisa do e-mail.
       if (accountType === "professional" && planId !== "free") {
         setLoading(false);
         setIsSubscriptionOpen(true);
       } else {
-        // Se for free, finaliza normal
-        localStorage.setItem("just_signed_up", "true");
-        toast({ title: "Conta criada com sucesso!" });
-        navigate("/home");
+        setLoading(false);
+        setStep("awaiting-email");
       }
     } catch (err: any) {
       toast({ title: "Erro ao criar conta.", description: translateError(err.message), variant: "destructive" });
@@ -197,6 +209,34 @@ const Signup = () => {
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Criando sua conta...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ Tela de aviso de verificação de e-mail
+  if (step === "awaiting-email") {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center">
+        <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
+          <MailCheck className="w-10 h-10 text-primary" />
+        </div>
+        <h1 className="text-2xl font-bold mb-2">Verifique seu e-mail</h1>
+        <p className="text-muted-foreground mb-8 max-w-xs">
+          Enviamos um link de confirmação para <strong>{basicData?.email}</strong>. 
+          Acesse seu e-mail para ativar sua conta.
+        </p>
+        <div className="space-y-3 w-full max-w-xs">
+          <button onClick={() => navigate("/login")} className="w-full py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all">
+            Ir para o Login
+          </button>
+          <button 
+            onClick={handleResendEmail} 
+            disabled={resending}
+            className="w-full py-3 border rounded-xl font-semibold text-sm disabled:opacity-50"
+          >
+            {resending ? "Enviando..." : "Não recebi o e-mail"}
+          </button>
         </div>
       </div>
     );

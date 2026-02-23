@@ -28,8 +28,16 @@ const Notifications = () => {
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
+    
     setNotifications((data as Notification[]) || []);
     setLoading(false);
+
+    // ✅ LIMPEZA AUTOMÁTICA SILENCIOSA:
+    // Se houver notificações não lidas, marca todas como lidas no banco sem o usuário precisar clicar em nada
+    const unread = (data as Notification[])?.filter(n => !n.read) || [];
+    if (unread.length > 0) {
+      await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+    }
   };
 
   useEffect(() => {
@@ -58,21 +66,7 @@ const Notifications = () => {
     };
   }, [user]);
 
-  const markAsRead = async (id: string) => {
-    await supabase.from("notifications").update({ read: true }).eq("id", id);
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  };
-
-  const markAllRead = async () => {
-    if (!user) return;
-    const unread = notifications.filter(n => !n.read);
-    if (unread.length === 0) return;
-    await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  };
-
   const handleClick = (n: Notification) => {
-    if (!n.read) markAsRead(n.id);
     if (n.link) navigate(n.link);
   };
 
@@ -87,18 +81,11 @@ const Notifications = () => {
     return `${days}d`;
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
-
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-foreground">Notificações</h1>
-          {unreadCount > 0 && (
-            <button onClick={markAllRead} className="text-xs text-primary font-medium hover:text-primary/80 transition-colors flex items-center gap-1">
-              <Check className="w-3.5 h-3.5" /> Marcar todas como lidas
-            </button>
-          )}
         </div>
 
         {loading ? (

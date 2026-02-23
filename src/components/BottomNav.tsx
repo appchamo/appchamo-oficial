@@ -1,6 +1,6 @@
 import { Home, Search, MessageSquare, Bell, User } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 const tabs = [
@@ -15,97 +15,113 @@ const BottomNav = () => {
   const location = useLocation();
   const [badges, setBadges] = useState<{ chat: number; notifications: number }>({ chat: 0, notifications: 0 });
 
-  useEffect(() => {
-    let cancelled = false;
+  // Transformado em useCallback para ser chamado pelo Polling
+  const fetchBadges = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
-    const fetchBadges = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || cancelled) return;
+    // Unread notifications count
+    const { count: notifCount } = await supabase
+      .from("notifications")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("read", false);
 
-      // Unread notifications count
-      const { count: notifCount } = await supabase
-        .from("notifications")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("read", false);
+    // Unread chat messages count
+    const { data: clientReqs } = await supabase
+      .from("service_requests")
+      .select("id")
+      .eq("client_id", user.id);
 
-      // Unread chat messages count
-      // Get all service_requests where user is client or professional
-      const { data: clientReqs } = await supabase
+    const { data: proData } = await supabase
+      .from("professionals")
+      .select("id")
+      .eq("user_id", user.id);
+
+    let proReqIds: string[] = [];
+    if (proData && proData.length > 0) {
+      const { data: proReqs } = await supabase
         .from("service_requests")
         .select("id")
-        .eq("client_id", user.id);
+        .in("professional_id", proData.map(p => p.id));
+      proReqIds = (proReqs || []).map(r => r.id);
+    }
 
-      const { data: proData } = await supabase
-        .from("professionals")
-        .select("id")
-        .eq("user_id", user.id);
+    const allReqIds = [
+      ...new Set([
+        ...(clientReqs || []).map(r => r.id),
+        ...proReqIds,
+      ]),
+    ];
 
-      let proReqIds: string[] = [];
-      if (proData && proData.length > 0) {
-        const { data: proReqs } = await supabase
-          .from("service_requests")
-          .select("id")
-          .in("professional_id", proData.map(p => p.id));
-        proReqIds = (proReqs || []).map(r => r.id);
-      }
+    let totalUnread = 0;
+    if (allReqIds.length > 0) {
+      const { data: readStatuses } = await supabase
+        .from("chat_read_status")
+        .select("request_id, last_read_at, manual_unread")
+        .eq("user_id", user.id)
+        .in("request_id", allReqIds);
 
-      const allReqIds = [
-        ...new Set([
-          ...(clientReqs || []).map(r => r.id),
-          ...proReqIds,
-        ]),
-      ];
+      const readMap = new Map((readStatuses || []).map(rs => [rs.request_id, rs]));
 
-      let totalUnread = 0;
-      if (allReqIds.length > 0) {
-        // Get read statuses
-        const { data: readStatuses } = await supabase
-          .from("chat_read_status")
-          .select("request_id, last_read_at")
-          .eq("user_id", user.id)
-          .in("request_id", allReqIds);
-
-        const readMap = new Map((readStatuses || []).map(rs => [rs.request_id, rs.last_read_at]));
-
-        // For each request, count unread messages
-        for (const reqId of allReqIds) {
-          const lastRead = readMap.get(reqId);
-          let query = supabase
-            .from("chat_messages")
-            .select("*", { count: "exact", head: true })
-            .eq("request_id", reqId)
-            .neq("sender_id", user.id);
-
-          if (lastRead) {
-            query = query.gt("created_at", lastRead);
-          }
-
-          const { count } = await query;
-          totalUnread += count || 0;
+      for (const reqId of allReqIds) {
+        const statusData = readMap.get(reqId) || { last_read_at: null, manual_unread: false };
+        
+        // Se o usuário marcou manualmente como não lido na lista de chats, soma 1
+        if (statusData.manual_unread) {
+           totalUnread += 1;
+           continue;
         }
-      }
 
-      if (!cancelled) {
-        setBadges({ chat: totalUnread, notifications: notifCount || 0 });
-      }
-    };
+        let query = supabase
+          .from("chat_messages")
+          .select("*", { count: "exact", head: true })
+          .eq("request_id", reqId)
+          .neq("sender_id", user.id);
 
+        if (statusData.last_read_at) {
+          query = query.gt("created_at", statusData.last_read_at);
+        }
+
+        const { count } = await query;
+        totalUnread += count || 0;
+      }
+    }
+
+    setBadges({ chat: totalUnread, notifications: notifCount || 0 });
+  }, []);
+
+  useEffect(() => {
     fetchBadges();
 
-    // Subscribe to realtime changes for notifications and chat_messages
+    // 1. Realtime Subscriptions
     const channel = supabase
       .channel("bottom-nav-badges")
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, () => { fetchBadges(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => { fetchBadges(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_read_status" }, () => { fetchBadges(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "service_requests" }, () => { fetchBadges(); }) // ✅ ADICIONADO: Ouve novas solicitações
       .subscribe();
 
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
+    // 2. BLINDAGEM: Polling Invisível a cada 8 segundos (Garante que nunca fique defasado)
+    const pollingInterval = setInterval(() => {
+      fetchBadges();
+    }, 8000);
+
+    // 3. Sensor de Foco (Atualiza na hora que o usuário voltar de outro App/Aba)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchBadges();
+      }
     };
-  }, []);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollingInterval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [fetchBadges]);
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t safe-area-bottom">
@@ -124,7 +140,7 @@ const BottomNav = () => {
               <div className="relative">
                 <tab.icon className={`w-5 h-5 ${isActive ? "stroke-[2.5]" : ""}`} />
                 {badgeCount > 0 && (
-                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center px-1">
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center px-1 shadow-sm">
                     {badgeCount > 99 ? "99+" : badgeCount}
                   </span>
                 )}

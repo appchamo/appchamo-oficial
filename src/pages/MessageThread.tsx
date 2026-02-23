@@ -31,7 +31,7 @@ const MessageThread = () => {
   const [isProfessional, setIsProfessional] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // NOVO: Guarda o ID do Profissional para enviar notificações pra ele
+  // Guarda o ID do Profissional para enviar notificações pra ele
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
 
   // Billing state
@@ -88,16 +88,22 @@ const MessageThread = () => {
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ MOTOR DE NOTIFICAÇÕES
+  // ✅ MOTOR DE NOTIFICAÇÕES CORRIGIDO
   const sendNotification = async (targetId: string | null, title: string, msg: string) => {
     if (!targetId) return;
     try {
-      await supabase.from("notifications").insert({
+      const { error } = await supabase.from("notifications").insert({
         user_id: targetId,
         title: title,
         message: msg,
-        is_read: false
+        read: false,     // CORRIGIDO: Era is_read
+        type: "system",  // CORRIGIDO: Adicionado campo obrigatório
+        link: null       // Opcional, mantido null
       } as any);
+
+      if (error) {
+        console.error("Erro banco notificação:", error);
+      }
     } catch (err) {
       console.error("Erro ao enviar notificação:", err);
     }

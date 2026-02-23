@@ -50,7 +50,7 @@ const ProfessionalProfile = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [callDialogOpen, setCallDialogOpen] = useState(false);
 
-  // NOVO: Estado para edição do nome
+  // Estado para edição do nome
   const [editingName, setEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState("");
 
@@ -61,20 +61,38 @@ const ProfessionalProfile = () => {
         .select("id, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, categories(name)")
         .eq("id", id!)
         .maybeSingle();
+        
       if (data) {
-        const { data: profile } = await supabase
-          .from("profiles_public" as any)
-          .select("full_name, avatar_url")
+        let profileData = null;
+
+        // 1. Tenta buscar da tabela principal 'profiles'
+        const { data: mainProfile } = await supabase
+          .from("profiles")
+          .select("full_name, avatar_url, user_type")
           .eq("user_id", data.user_id)
-          .maybeSingle() as { data: { full_name: string; avatar_url: string | null; user_type: string } | null };
+          .maybeSingle();
+        
+        if (mainProfile) {
+          profileData = mainProfile;
+        } else {
+          // 2. Fallback para a view 'profiles_public' caso exista bloqueio de segurança
+          const { data: publicProfile } = await supabase
+            .from("profiles_public" as any)
+            .select("full_name, avatar_url, user_type")
+            .eq("user_id", data.user_id)
+            .maybeSingle();
+          if (publicProfile) profileData = publicProfile;
+        }
+
         setPro({
           ...data,
-          full_name: profile?.full_name || "Profissional",
-          avatar_url: profile?.avatar_url || null,
+          full_name: profileData?.full_name || "Profissional",
+          avatar_url: profileData?.avatar_url || null,
           category_name: (data.categories as any)?.name || "Sem categoria",
           availability_status: (data as any).availability_status || "available",
-          user_type: "professional",
+          user_type: profileData?.user_type || "professional", // ✅ PUXA O TIPO CORRETO AGORA!
         });
+        
         const { data: { user } } = await supabase.auth.getUser();
         if (user && user.id === data.user_id) setIsOwner(true);
 
@@ -136,7 +154,6 @@ const ProfessionalProfile = () => {
     toast({ title: "Status atualizado!" });
   };
 
-  // NOVO: Função para salvar o nome
   const handleNameSave = async () => {
     if (!pro || !editNameValue.trim()) return;
     const { error } = await supabase.from("profiles").update({ full_name: editNameValue.trim() }).eq("user_id", pro.user_id);
@@ -184,7 +201,6 @@ const ProfessionalProfile = () => {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
-                {/* ✅ NOVO: Lógica de edição de nome inline */}
                 {editingName ? (
                   <div className="flex items-center gap-2 w-full">
                     <input
@@ -298,7 +314,7 @@ const ProfessionalProfile = () => {
           </div>
         )}
 
-        {/* Product Catalog - only for company accounts */}
+        {/* ✅ Product Catalog - AGORA PUXA CORRETAMENTE SE FOR EMPRESA */}
         {pro.user_type === "company" && (
           <ProductCatalog professionalId={pro.id} isOwner={isOwner} />
         )}

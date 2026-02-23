@@ -15,7 +15,7 @@ const BusinessCheckout = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [searchingCep, setSearchingCep] = useState(false);
-  const [showFullAddress, setShowFullAddress] = useState(false);
+  const [showFullAddress, setShowFullAddress] = useState(true); // Deixamos true por padrão para não sumir o número
   
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [fileNameOnly, setFileNameOnly] = useState<string | null>(localStorage.getItem('temp_pdf_name'));
@@ -35,7 +35,6 @@ const BusinessCheckout = () => {
     localStorage.setItem('business_info_draft', JSON.stringify(businessData));
   }, [cardForm, businessData]);
 
-  // ✅ CORREÇÃO DO CEP: Agora ele limpa o traço antes de testar se tem 8 dígitos
   const handleCepChange = async (value: string) => {
     const rawCep = value.replace(/\D/g, "");
     setBusinessData(d => ({ ...d, cep: formatCEP(value) }));
@@ -54,11 +53,7 @@ const BusinessCheckout = () => {
             state: data.uf 
           }));
           setShowFullAddress(true);
-        } else {
-          toast({ title: "CEP não encontrado", variant: "destructive" });
         }
-      } catch (err) {
-        toast({ title: "Erro ao buscar CEP", variant: "destructive" });
       } finally { 
         setSearchingCep(false); 
       }
@@ -81,7 +76,7 @@ const BusinessCheckout = () => {
     if (!proofFile) {
       toast({ 
         title: "Confirme o arquivo", 
-        description: "Toque no campo pontilhado verde e selecione o PDF novamente para confirmar.", 
+        description: "Toque no campo laranja e selecione o PDF novamente para confirmar.", 
         variant: "destructive" 
       });
       return;
@@ -146,12 +141,12 @@ const BusinessCheckout = () => {
                 <input placeholder="00000-000" value={businessData.cep} onChange={e => handleCepChange(e.target.value)} className="w-full p-3 border rounded-xl bg-background outline-none" />
               </div>
               <div>
-                <label className={`text-[11px] font-bold mb-1 block ${showFullAddress ? 'text-primary' : 'text-muted-foreground'}`}>Nº *</label>
-                <input placeholder="123" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className={`w-full p-3 border rounded-xl bg-background outline-none ${showFullAddress ? 'border-primary ring-2 ring-primary/10' : ''}`} />
+                <label className={`text-[11px] font-bold mb-1 block ${businessData.street ? 'text-primary' : 'text-muted-foreground'}`}>Nº *</label>
+                <input placeholder="123" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className={`w-full p-3 border rounded-xl bg-background outline-none ${businessData.street ? 'border-primary ring-2 ring-primary/10' : ''}`} />
               </div>
             </div>
 
-            {showFullAddress && (
+            {businessData.street && (
               <div className="p-3 bg-muted/50 rounded-xl border border-dashed space-y-1 animate-in fade-in">
                 <p className="text-xs font-bold text-foreground">{businessData.street}</p>
                 <p className="text-[10px] text-muted-foreground">{businessData.neighborhood} — {businessData.city}/{businessData.state}</p>
@@ -160,6 +155,7 @@ const BusinessCheckout = () => {
 
             <div>
               <label className="text-[11px] font-bold text-muted-foreground mb-1 block">Cartão CNPJ (PDF) *</label>
+              {/* ✅ CORREÇÃO VISUAL: Se estiver laranja, clique nele para reconfirmar o arquivo */}
               <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${proofFile ? 'border-emerald-500 bg-emerald-500/5' : (fileNameOnly ? 'border-amber-500 bg-amber-500/5' : 'border-muted-foreground/20')}`}>
                 {(proofFile || fileNameOnly) ? <FileText className={`w-8 h-8 ${proofFile ? 'text-emerald-600' : 'text-amber-600'}`} /> : <Upload className="w-8 h-8 text-muted-foreground" />}
                 <span className="text-sm font-bold text-center text-foreground px-2 truncate w-full">

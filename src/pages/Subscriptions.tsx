@@ -185,6 +185,12 @@ const Subscriptions = () => {
   }
 
   const handleSelectPlan = (planId: string) => {
+    // ✅ NOVO: Se for o plano Business, vai para a nova página e ignora o resto
+    if (planId === "business") {
+      navigate("/checkout/business");
+      return;
+    }
+
     if (planId === currentPlan?.id) return;
 
     const targetPlan = plans.find(p => p.id === planId);
@@ -399,7 +405,6 @@ const Subscriptions = () => {
               const Icon = details.icon;
               const isRecommended = (details as any).recommended;
 
-              // ✅ Usa os benefícios do banco se existirem, senão usa o padrão fixo
               const displayFeatures = planFeaturesDb[p.id] || details.features;
 
               return (
@@ -527,31 +532,22 @@ const Subscriptions = () => {
                             />
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Bairro</label>
-                            <input readOnly value={businessData.neighborhood} className="w-full border-b bg-transparent py-1 text-sm text-muted-foreground outline-none" />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Cidade/UF</label>
-                            <input readOnly value={`${businessData.city}/${businessData.state}`} className="w-full border-b bg-transparent py-1 text-sm text-muted-foreground outline-none" />
-                          </div>
-                        </div>
                       </div>
                     )}
 
-                    <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-violet-300 rounded-xl p-3 text-center cursor-pointer hover:bg-violet-50 transition-colors">
-                      <input type="file" ref={fileInputRef} hidden accept=".pdf,.png,.jpg" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
+                    {/* ✅ AJUSTE ANDROID: Usando tag <label> nativa para upload nos outros planos */}
+                    <label className="border-2 border-dashed border-violet-300 rounded-xl p-3 text-center cursor-pointer hover:bg-violet-50 transition-colors block">
+                      <input type="file" hidden accept="application/pdf" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
                       {proofFile ? (
                         <span className="text-xs text-emerald-600 font-bold flex items-center justify-center gap-1">
                           <Check className="w-4 h-4" /> Comprovante OK!
                         </span>
                       ) : (
                         <span className="text-[10px] font-bold text-muted-foreground uppercase flex items-center justify-center gap-1">
-                          <Upload className="w-3 h-3" /> Anexar Cartão CNPJ
+                          <Upload className="w-3 h-3" /> Anexar Cartão CNPJ (PDF)
                         </span>
                       )}
-                    </div>
+                    </label>
                   </div>
                 )}
 
@@ -607,7 +603,7 @@ const Subscriptions = () => {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Ao cancelar, você voltará para o plano <strong>Grátis</strong>.</p>
               <div className="flex gap-2">
-                <button onClick={() => setCancelOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Manter plano</button>
+                <button onClick={() => setCancelOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Mantêr plano</button>
                 <button onClick={handleCancelSubscription} disabled={cancelling} className="flex-1 py-2.5 rounded-xl bg-destructive text-white font-semibold text-sm">Confirmar Cancelamento</button>
               </div>
             </div>

@@ -1,13 +1,13 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Ticket, Trophy, Plus, Shuffle, Search, Percent, Settings2, Trash2, Power, PowerOff } from "lucide-react";
+import { Ticket, Trophy, Plus, Shuffle, Search, Percent, Settings2, Trash2, Power, PowerOff, Check } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const AdminCoupons = () => {
+  const [activeTab, setActiveTab] = useState<"campaigns" | "raffles">("campaigns");
   const [raffles, setRaffles] = useState<any[]>([]);
   const [couponCount, setCouponCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -99,7 +99,7 @@ const AdminCoupons = () => {
         title: "🎉 Você foi sorteado!",
         message: `Parabéns! Você foi o ganhador do sorteio "${raffle?.title || ""}". Entre em contato conosco para resgatar seu prêmio.`,
         type: "raffle_win",
-        link: "/coupons",
+        read: false,
       } as any);
       toast({ title: "Sorteio realizado com sucesso!" });
       fetchData();
@@ -148,7 +148,7 @@ const AdminCoupons = () => {
             ? "Você recebeu um cupom para o sorteio mensal!"
             : `Você recebeu um cupom de ${couponForm.discount_percent}% de desconto!`,
           type: "coupon",
-          link: "/coupons",
+          read: false,
         } as any);
         toast({ title: `Cupom adicionado para ${selectedUser.full_name}!` });
       } else {
@@ -182,7 +182,7 @@ const AdminCoupons = () => {
             ? "Você recebeu um cupom para o sorteio mensal!"
             : `Você recebeu um cupom de ${couponForm.discount_percent}% de desconto!`,
           type: "coupon",
-          link: "/coupons",
+          read: false,
         } as any);
         toast({ title: `Cupom sorteado para ${lucky.full_name}!` });
       }
@@ -197,7 +197,6 @@ const AdminCoupons = () => {
     setAddingCoupon(false);
   };
 
-  // ✅ NOVO: Funções de Campanha (Lotes de Desconto)
   const handleCreateCampaign = async () => {
     if (!campaignForm.discount_percent || !campaignForm.total_quantity) {
       toast({ title: "Preencha a % de desconto e a quantidade total.", variant: "destructive" }); 
@@ -263,134 +262,148 @@ const AdminCoupons = () => {
         </div>
       </div>
 
-      <Tabs defaultValue="campaigns" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-6 bg-muted/50 p-1 rounded-xl">
-          <TabsTrigger value="campaigns" className="rounded-lg font-semibold text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm">
+      {/* ABAS SEGURAS (SEM COMPONENTE EXTERNO) */}
+      <div className="mb-6">
+        <div className="flex w-full bg-muted/50 p-1 rounded-xl">
+          <button
+            onClick={() => setActiveTab("campaigns")}
+            className={`flex-1 rounded-lg font-semibold text-sm py-2 transition-all ${activeTab === "campaigns" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
             Distribuição Automática
-          </TabsTrigger>
-          <TabsTrigger value="raffles" className="rounded-lg font-semibold text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            Sorteios & Envios Manuais
-          </TabsTrigger>
-        </TabsList>
+          </button>
+          <button
+            onClick={() => setActiveTab("raffles")}
+            className={`flex-1 rounded-lg font-semibold text-sm py-2 transition-all ${activeTab === "raffles" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Sorteios Manuais
+          </button>
+        </div>
+      </div>
 
-        {/* ✅ ABA 1: Lotes de Cupons Automáticos (Plataforma banca) */}
-        <TabsContent value="campaigns" className="space-y-4">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <h2 className="font-semibold text-foreground">Lotes de Desconto</h2>
-              <p className="text-xs text-muted-foreground">Distribua cupons automaticamente no app</p>
+      {/* CONTEÚDO DAS ABAS */}
+      <div className="relative">
+        {/* ABA 1: Lotes de Cupons Automáticos (Plataforma banca) */}
+        {activeTab === "campaigns" && (
+          <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="font-semibold text-foreground">Lotes de Desconto</h2>
+                <p className="text-xs text-muted-foreground">Distribua cupons automaticamente no app</p>
+              </div>
+              <button onClick={() => setAddCampaignOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">
+                <Plus className="w-4 h-4" /> Novo Lote
+              </button>
             </div>
-            <button onClick={() => setAddCampaignOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">
-              <Plus className="w-4 h-4" /> Novo Lote
-            </button>
-          </div>
 
-          {loading ? (
-             <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
-          ) : campaigns.length === 0 ? (
-            <div className="text-center py-12 bg-card border rounded-xl border-dashed">
-              <Percent className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
-              <p className="text-sm font-medium text-foreground">Nenhum lote criado</p>
-              <p className="text-xs text-muted-foreground">O app não está distribuindo cupons no momento.</p>
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {campaigns.map((camp) => {
-                const isEsgotado = camp.used_quantity >= camp.total_quantity;
-                return (
-                  <div key={camp.id} className={`bg-card border rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all ${!camp.is_active || isEsgotado ? 'opacity-70' : ''}`}>
-                    <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-lg ${camp.is_active && !isEsgotado ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                        {camp.discount_percent}%
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold text-foreground">Lote de {camp.discount_percent}% OFF</p>
-                          {!camp.is_active ? (
-                            <span className="px-2 py-0.5 rounded-md bg-muted text-muted-foreground text-[10px] font-bold uppercase tracking-wider">Pausado</span>
-                          ) : isEsgotado ? (
-                            <span className="px-2 py-0.5 rounded-md bg-destructive/10 text-destructive text-[10px] font-bold uppercase tracking-wider">Esgotado</span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[10px] font-bold uppercase tracking-wider">Ativo</span>
-                          )}
+            {loading ? (
+               <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
+            ) : campaigns.length === 0 ? (
+              <div className="text-center py-12 bg-card border rounded-xl border-dashed">
+                <Percent className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+                <p className="text-sm font-medium text-foreground">Nenhum lote criado</p>
+                <p className="text-xs text-muted-foreground">O app não está distribuindo cupons no momento.</p>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {campaigns.map((camp) => {
+                  const isEsgotado = camp.used_quantity >= camp.total_quantity;
+                  return (
+                    <div key={camp.id} className={`bg-card border rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all ${!camp.is_active || isEsgotado ? 'opacity-70' : ''}`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-lg ${camp.is_active && !isEsgotado ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                          {camp.discount_percent}%
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Entregues: <span className="font-bold text-foreground">{camp.used_quantity}</span> de {camp.total_quantity}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground/80 mt-0.5">
-                          Regra: Pagamentos acima de R$ {camp.min_purchase_value} {camp.max_purchase_value ? `e até R$ ${camp.max_purchase_value}` : ''}
-                        </p>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold text-foreground">Lote de {camp.discount_percent}% OFF</p>
+                            {!camp.is_active ? (
+                              <span className="px-2 py-0.5 rounded-md bg-muted text-muted-foreground text-[10px] font-bold uppercase tracking-wider">Pausado</span>
+                            ) : isEsgotado ? (
+                              <span className="px-2 py-0.5 rounded-md bg-destructive/10 text-destructive text-[10px] font-bold uppercase tracking-wider">Esgotado</span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[10px] font-bold uppercase tracking-wider">Ativo</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Entregues: <span className="font-bold text-foreground">{camp.used_quantity}</span> de {camp.total_quantity}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+                            Regra: Pagamentos acima de R$ {camp.min_purchase_value} {camp.max_purchase_value ? `e até R$ ${camp.max_purchase_value}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 w-full sm:w-auto border-t sm:border-t-0 pt-3 sm:pt-0">
+                        <button onClick={() => toggleCampaignStatus(camp.id, camp.is_active)} className="flex-1 sm:flex-none flex items-center justify-center p-2 rounded-lg bg-accent hover:bg-accent/80 transition-colors text-muted-foreground" title={camp.is_active ? "Pausar Lote" : "Ativar Lote"}>
+                          {camp.is_active ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4 text-emerald-600" />}
+                        </button>
+                        <button onClick={() => deleteCampaign(camp.id)} className="flex-1 sm:flex-none flex items-center justify-center p-2 rounded-lg bg-destructive/10 hover:bg-destructive/20 transition-colors text-destructive" title="Apagar Lote">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-                    
-                    <div className="flex items-center gap-2 w-full sm:w-auto border-t sm:border-t-0 pt-3 sm:pt-0">
-                      <button onClick={() => toggleCampaignStatus(camp.id, camp.is_active)} className="flex-1 sm:flex-none flex items-center justify-center p-2 rounded-lg bg-accent hover:bg-accent/80 transition-colors text-muted-foreground" title={camp.is_active ? "Pausar Lote" : "Ativar Lote"}>
-                        {camp.is_active ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4 text-emerald-600" />}
-                      </button>
-                      <button onClick={() => deleteCampaign(camp.id)} className="flex-1 sm:flex-none flex items-center justify-center p-2 rounded-lg bg-destructive/10 hover:bg-destructive/20 transition-colors text-destructive" title="Apagar Lote">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </TabsContent>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ABA 2: Sorteios e Cupons Manuais (Antiga tela) */}
-        <TabsContent value="raffles" className="space-y-4">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <h2 className="font-semibold text-foreground">Sorteios Mensais</h2>
-              <p className="text-xs text-muted-foreground">Sorteios e envio manual de cupons</p>
+        {activeTab === "raffles" && (
+          <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="font-semibold text-foreground">Sorteios Mensais</h2>
+                <p className="text-xs text-muted-foreground">Sorteios e envio manual de cupons</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setAddCouponOpen(true); setSelectedUser(null); setUserSearch(""); setUserResults([]); }}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl bg-accent text-foreground text-xs font-medium hover:bg-accent/80 transition-colors">
+                  <Ticket className="w-3.5 h-3.5" /> Dar cupom
+                </button>
+                <button onClick={() => setDialogOpen(true)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
+                  <Trophy className="w-3.5 h-3.5" /> Novo sorteio
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => { setAddCouponOpen(true); setSelectedUser(null); setUserSearch(""); setUserResults([]); }}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-accent text-foreground text-xs font-medium hover:bg-accent/80 transition-colors">
-                <Ticket className="w-3.5 h-3.5" /> Dar cupom
-              </button>
-              <button onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
-                <Trophy className="w-3.5 h-3.5" /> Novo sorteio
-              </button>
-            </div>
-          </div>
 
-          {loading ? (
-            <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
-          ) : raffles.length === 0 ? (
-            <div className="text-center py-12 bg-card border rounded-xl border-dashed">
-              <Trophy className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
-              <p className="text-sm font-medium text-foreground">Nenhum sorteio criado</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {raffles.map((r) => (
-                <div key={r.id} className="bg-card border rounded-xl p-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-sm text-foreground">{r.title}</p>
-                    <p className="text-xs text-muted-foreground">Data: {new Date(r.draw_date).toLocaleDateString("pt-BR")}</p>
-                    {r.winner_user_id && <p className="text-xs text-primary mt-0.5 font-bold flex items-center gap-1"><Check className="w-3 h-3" /> Sorteado</p>}
+            {loading ? (
+              <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
+            ) : raffles.length === 0 ? (
+              <div className="text-center py-12 bg-card border rounded-xl border-dashed">
+                <Trophy className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+                <p className="text-sm font-medium text-foreground">Nenhum sorteio criado</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {raffles.map((r) => (
+                  <div key={r.id} className="bg-card border rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-sm text-foreground">{r.title}</p>
+                      <p className="text-xs text-muted-foreground">Data: {new Date(r.draw_date).toLocaleDateString("pt-BR")}</p>
+                      {r.winner_user_id && <p className="text-xs text-primary mt-0.5 font-bold flex items-center gap-1"><Check className="w-3 h-3" /> Sorteado</p>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {r.status === "upcoming" && (
+                        <button onClick={() => openDraw(r.id)} className="flex items-center gap-1 px-4 py-2 rounded-xl bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 transition-colors">
+                          <Shuffle className="w-3.5 h-3.5" /> Sortear Agora
+                        </button>
+                      )}
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        r.status === "upcoming" ? "bg-accent text-foreground" : "bg-muted text-muted-foreground"
+                      }`}>
+                        {r.status === "upcoming" ? "Próximo" : "Realizado"}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {r.status === "upcoming" && (
-                      <button onClick={() => openDraw(r.id)} className="flex items-center gap-1 px-4 py-2 rounded-xl bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 transition-colors">
-                        <Shuffle className="w-3.5 h-3.5" /> Sortear Agora
-                      </button>
-                    )}
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      r.status === "upcoming" ? "bg-accent text-foreground" : "bg-muted text-muted-foreground"
-                    }`}>
-                      {r.status === "upcoming" ? "Próximo" : "Realizado"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ✅ MODAL: Nova Campanha de Lote */}
       <Dialog open={addCampaignOpen} onOpenChange={setAddCampaignOpen}>

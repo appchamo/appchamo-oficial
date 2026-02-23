@@ -31,6 +31,9 @@ const MessageThread = () => {
   const [isProfessional, setIsProfessional] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // NOVO: Guarda o ID do Profissional para enviar notificações pra ele
+  const [chatProUserId, setChatProUserId] = useState<string | null>(null);
+
   // Billing state
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingStep, setBillingStep] = useState<"choose_type" | "app_form" | "presencial_confirm">("choose_type");
@@ -85,6 +88,21 @@ const MessageThread = () => {
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ✅ MOTOR DE NOTIFICAÇÕES
+  const sendNotification = async (targetId: string | null, title: string, msg: string) => {
+    if (!targetId) return;
+    try {
+      await supabase.from("notifications").insert({
+        user_id: targetId,
+        title: title,
+        message: msg,
+        is_read: false
+      } as any);
+    } catch (err) {
+      console.error("Erro ao enviar notificação:", err);
+    }
+  };
+
   useEffect(() => { loadFeeSettings(); }, []);
 
   useEffect(() => {
@@ -113,6 +131,7 @@ const MessageThread = () => {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro && pro.user_id === user.id) {
             setIsProfessional(true);
+            setChatProUserId(user.id); // É o próprio logado
             const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
             setProPlanId(sub?.plan_id || "free");
           }
@@ -121,6 +140,7 @@ const MessageThread = () => {
         if (isClient) {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
+            setChatProUserId(pro.user_id); // Salva o ID do profissional para as notificações
             const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
             if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
           }
@@ -542,6 +562,10 @@ const MessageThread = () => {
 
         if (error) throw error;
         setRewardCoupon({ type: "discount", value: percent });
+        
+        // Notifica o cliente do prêmio
+        await sendNotification(userId, "🎟️ Novo Cupom de Desconto!", `Você ganhou ${percent}% OFF para usar no seu próximo serviço. Confira na aba Meus Cupons.`);
+
       } else {
         const { error } = await supabase.from("coupons").insert({
           user_id: userId,
@@ -553,6 +577,9 @@ const MessageThread = () => {
 
         if (error) throw error;
         setRewardCoupon({ type: "raffle", value: 0 });
+
+        // Notifica o cliente do prêmio
+        await sendNotification(userId, "🎟️ Novo Cupom de Sorteio!", "Você ganhou um cupom para o Sorteio Mensal! Boa sorte.");
       }
 
       setRewardOpen(true);
@@ -699,10 +726,13 @@ const MessageThread = () => {
                 content: confirmContent
               });
 
-              // ✅ QUEIMA O CUPOM UTILIZADO AGORA FUNCIONA COM A NOVA POLICY
               if (selectedCouponId) {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
+
+              // ✅ NOTIFICAÇÕES DE SUCESSO DO PIX
+              await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
+              await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
 
               await awardPostPaymentCoupon();
 
@@ -733,10 +763,13 @@ const MessageThread = () => {
         content: confirmContent
       });
 
-      // ✅ QUEIMA O CUPOM UTILIZADO AGORA FUNCIONA COM A NOVA POLICY
       if (selectedCouponId) {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
+
+      // ✅ NOTIFICAÇÕES DE SUCESSO DO CARTÃO
+      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento no Cartão de Crédito no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
+      await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via Cartão no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
 
       await awardPostPaymentCoupon();
 
@@ -989,6 +1022,10 @@ const MessageThread = () => {
                 });
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
                 setRequestStatus("completed");
+                
+                // ✅ NOTIFICA O PROFISSIONAL
+                await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
+
                 setClosingCall(false);
                 toast({ title: "Chamada encerrada!" });
               }}
@@ -1306,6 +1343,10 @@ const MessageThread = () => {
                 });
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
                 setRequestStatus("completed");
+                
+                // ✅ NOTIFICA O PROFISSIONAL
+                await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
+
                 setBillingOpen(false);
                 setClosingCall(false);
                 toast({ title: "Chamada encerrada! O cliente poderá avaliar." });
@@ -1475,7 +1516,6 @@ const MessageThread = () => {
                 <p className="text-xs text-muted-foreground mt-2">{paymentData.desc}</p>
               </div>
 
-              {/* ✅ NOVA LISTA DE CUPONS MÚLTIPLOS (MÁXIMO 5) */}
               {!selectedCouponId && availableCoupons.length > 0 && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <p className="text-xs font-bold text-emerald-600 uppercase flex items-center gap-1">

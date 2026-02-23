@@ -1,7 +1,7 @@
 import AppLayout from "@/components/AppLayout";
 import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2, Navigation } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
@@ -55,7 +55,6 @@ const Search = () => {
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
   
-  // ✅ Estados do IBGE (Estado e Cidade)
   const [filterState, setFilterState] = useState<string>("");
   const [statesList, setStatesList] = useState<{ sigla: string; nome: string }[]>([]);
   const [filterCity, setFilterCity] = useState<string>("");
@@ -63,7 +62,6 @@ const Search = () => {
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCityDropdown, setShowCityDropdown] = useState(false);
 
-  // ✅ 1. Busca os Estados (UF) do IBGE ao carregar a tela
   useEffect(() => {
     const fetchStates = async () => {
       try {
@@ -77,7 +75,6 @@ const Search = () => {
     fetchStates();
   }, []);
 
-  // ✅ 2. Busca as Cidades SEMPRE que o Estado (filterState) mudar
   useEffect(() => {
     const fetchCities = async () => {
       if (!filterState) {
@@ -96,35 +93,32 @@ const Search = () => {
     fetchCities();
   }, [filterState]);
 
-  useEffect(() => {
-    const loadUserLocation = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        setUserCoords({ lat: -18.9431, lng: -46.9922 });
-        return;
-      }
-      
-      const { data } = await supabase.from("profiles").select("address_city, address_state, latitude, longitude").eq("user_id", user.id).single();
-      
-      if (data?.address_state) {
-        setUserState(data.address_state);
-        setFilterState((prev) => prev || data.address_state); // Preenche o estado
-      }
+  const loadUserLocation = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      setUserCoords({ lat: -18.9431, lng: -46.9922 });
+      return;
+    }
+    
+    const { data } = await supabase.from("profiles").select("address_city, address_state, latitude, longitude").eq("user_id", user.id).single();
+    
+    if (data?.address_state) {
+      setUserState(data.address_state);
+      setFilterState((prev) => prev || data.address_state); 
+    }
 
-      if (data?.address_city) {
-        setUserCity(data.address_city);
-        setFilterCity((prev) => prev || data.address_city); // Preenche a cidade
-      }
-      
-      if (data?.latitude && data?.longitude) {
-        setUserCoords({ lat: data.latitude, lng: data.longitude });
-      } else {
-        setUserCoords({ lat: -18.9431, lng: -46.9922 });
-      }
-    };
-    loadUserLocation();
-  }, []);
+    if (data?.address_city) {
+      setUserCity(data.address_city);
+      setFilterCity((prev) => prev || data.address_city); 
+    }
+    
+    if (data?.latitude && data?.longitude) {
+      setUserCoords({ lat: data.latitude, lng: data.longitude });
+    } else {
+      setUserCoords({ lat: -18.9431, lng: -46.9922 });
+    }
+  };
 
   useEffect(() => {
     const loadProfessions = async () => {
@@ -139,6 +133,7 @@ const Search = () => {
     loadProfessions();
   }, [filterCategory]);
 
+  // 🔥 OTIMIZAÇÃO: Busca Profissionais e Categorias de forma isolada e hiper-rápida
   const loadPros = async () => {
     setLoading(true);
     const [prosRes, catsRes] = await Promise.all([
@@ -170,18 +165,6 @@ const Search = () => {
 
     const mappedPros = prosRes.data.map((p) => {
       const loc = locationMap.get(p.user_id);
-      let distance = undefined;
-
-      if (userCoords && loc?.latitude && loc?.longitude) {
-        const R = 6371; 
-        const dLat = (loc.latitude - userCoords.lat) * Math.PI / 180;
-        const dLon = (loc.longitude - userCoords.lng) * Math.PI / 180;
-        const a = 
-          Math.sin(dLat/2) * Math.sin(dLat/2) +
-          Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(loc.latitude * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        distance = R * c;
-      }
 
       return {
         id: p.id,
@@ -199,57 +182,78 @@ const Search = () => {
         state: loc?.address_state || null,
         latitude: loc?.latitude || null,
         longitude: loc?.longitude || null,
-        distance: distance
       };
     });
-
-    if (userCoords) {
-      mappedPros.sort((a, b) => (a.distance || 999) - (b.distance || 999));
-    }
 
     setPros(mappedPros);
     setLoading(false);
   };
 
-  useEffect(() => { loadPros(); }, [userCoords]);
+  // 🔥 OTIMIZAÇÃO: Inicia as duas buscas em paralelo (não espera uma acabar para começar a outra)
+  useEffect(() => { 
+    loadUserLocation();
+    loadPros(); 
+  }, []); // <--- Array vazio faz rodar só uma vez e instantaneamente!
 
-  const filtered = pros.filter((p) => {
-    // ✅ NOVO: Limpa acentos e letras maiúsculas da busca (Ex: "João" vira "joao")
-    const q = search.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    if (q) {
-      // ✅ Limpa acentos e junta todas as infos do profissional para comparar
-      const target = `${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase();
+  // 🔥 OTIMIZAÇÃO: Calcula distância no front-end em milissegundos sem precisar recarregar o banco
+  const filteredAndSorted = useMemo(() => {
+    // 1. Calcula distâncias (se tiver a localização do usuário)
+    const prosWithDistance = pros.map(p => {
+      let distance = undefined;
+      if (userCoords && p.latitude && p.longitude) {
+        const R = 6371; 
+        const dLat = (p.latitude - userCoords.lat) * Math.PI / 180;
+        const dLon = (p.longitude - userCoords.lng) * Math.PI / 180;
+        const a = 
+          Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(p.latitude * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        distance = R * c;
+      }
+      return { ...p, distance };
+    });
+
+    // 2. Aplica os filtros
+    let result = prosWithDistance.filter((p) => {
+      const q = search.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      if (q) {
+        const target = `${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase();
+        
+        if (!target.includes(q)) return false;
+      }
       
-      // ✅ Exige que a busca esteja contida exatamente na string alvo
-      if (!target.includes(q)) return false;
-    }
-    
-    // Filtra pelo Estado
-    if (filterState) {
-      const pState = (p.state || "").toLowerCase();
-      const fState = filterState.toLowerCase();
-      if (pState !== fState) return false;
+      if (filterState) {
+        const pState = (p.state || "").toLowerCase();
+        const fState = filterState.toLowerCase();
+        if (pState !== fState) return false;
+      }
+
+      if (filterCity) {
+        const pCity = (p.city || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        const fCity = filterCity.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        if (!pCity.includes(fCity)) return false;
+      }
+
+      if (filterCategory && p.category_id !== filterCategory) return false;
+      if (filterProfession && p.profession_id !== filterProfession) return false;
+      if (filterMinRating > 0 && p.rating < filterMinRating) return false;
+      if (filterVerified && !p.verified) return false;
+      
+      if (p.distance !== undefined && p.distance > filterRadius) return false;
+      
+      return true;
+    });
+
+    // 3. Ordena por distância se o usuário estiver com GPS ativo
+    if (userCoords) {
+      result.sort((a, b) => (a.distance || 999) - (b.distance || 999));
     }
 
-    // Filtra pela cidade
-    if (filterCity) {
-      const pCity = (p.city || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      const fCity = filterCity.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      if (!pCity.includes(fCity)) return false;
-    }
-
-    if (filterCategory && p.category_id !== filterCategory) return false;
-    if (filterProfession && p.profession_id !== filterProfession) return false;
-    if (filterMinRating > 0 && p.rating < filterMinRating) return false;
-    if (filterVerified && !p.verified) return false;
-    
-    if (p.distance !== undefined && p.distance > filterRadius) return false;
-    
-    return true;
-  });
+    return result;
+  }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, filterRadius, userCoords]);
 
   const handleCityInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -302,7 +306,6 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
-                {/* Campo de Estado (UF) */}
                 <div>
                   <label className="text-sm font-bold flex items-center gap-2 mb-3">
                     <MapPin className="w-4 h-4 text-primary" /> Estado
@@ -311,7 +314,7 @@ const Search = () => {
                     value={filterState}
                     onChange={(e) => {
                       setFilterState(e.target.value);
-                      setFilterCity(""); // Limpa a cidade ao trocar de estado
+                      setFilterCity(""); 
                       setCitySuggestions([]);
                     }}
                     className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
@@ -323,7 +326,6 @@ const Search = () => {
                   </select>
                 </div>
 
-                {/* Campo de Cidade (Só funciona se um estado estiver selecionado) */}
                 <div className="relative">
                   <label className="text-sm font-bold flex items-center gap-2 mb-3">
                     <MapPin className="w-4 h-4 text-primary" /> Cidade
@@ -334,7 +336,7 @@ const Search = () => {
                     onChange={handleCityInputChange}
                     onFocus={() => { if (citySuggestions.length > 0) setShowCityDropdown(true) }}
                     placeholder={filterState ? "Ex: Patrocínio" : "Selecione um estado primeiro"}
-                    disabled={!filterState} // Bloqueia se não tiver estado
+                    disabled={!filterState} 
                     className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none disabled:opacity-50 disabled:bg-muted"
                   />
                   {showCityDropdown && citySuggestions.length > 0 && (
@@ -352,7 +354,6 @@ const Search = () => {
                   )}
                 </div>
 
-                {/* BARRA DE DISTÂNCIA */}
                 {userCoords && (
                   <div>
                     <div className="flex justify-between items-center mb-3">
@@ -416,8 +417,8 @@ const Search = () => {
                     setFilterMinRating(0); 
                     setFilterVerified(false); 
                     setFilterRadius(100); 
-                    setFilterState(userState || ""); // Volta para o estado do usuário
-                    setFilterCity(userCity || ""); // Volta para a cidade do usuário
+                    setFilterState(userState || ""); 
+                    setFilterCity(userCity || ""); 
                   }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
                   <button onClick={() => setIsSheetOpen(false)} className="py-3 text-sm font-bold text-white bg-primary rounded-xl">Aplicar</button>
                 </div>
@@ -432,7 +433,7 @@ const Search = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {filtered.map((pro) => (
+            {filteredAndSorted.map((pro) => (
               <Link key={pro.id} to={`/professional/${pro.id}`} className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group">
                 <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
                   {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : pro.full_name[0]}

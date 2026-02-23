@@ -117,7 +117,7 @@ const App = () => (
             <Route path="/how-to-hire" element={<ProtectedRoute><HowToHire /></ProtectedRoute>} />
             <Route path="/how-to-pay" element={<ProtectedRoute><HowToPay /></ProtectedRoute>} />
             <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
-            <Route path="/checkout/business" element={<ProtectedRoute><BusinessCheckout /></ProtectedRoute>} />
+            <Route path="/checkout/business" element={<BusinessCheckout />} />
 
             {/* ===== ADMIN PROTECTED ===== */}
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />

@@ -31,6 +31,16 @@ const JobDetail = () => {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [alreadyApplied, setAlreadyApplied] = useState(false);
 
+  // ✅ BLINDAGEM ANDROID: Reabre o modal se a página recarregar após o upload
+  useEffect(() => {
+    const savedJobId = localStorage.getItem('reopen_job_apply_id');
+    if (savedJobId && savedJobId === id) {
+      setApplyOpen(true);
+      localStorage.removeItem('reopen_job_apply_id');
+      toast({ title: "Retornando à candidatura..." });
+    }
+  }, [id]);
+
   useEffect(() => {
     const load = async () => {
       const { data } = await supabase
@@ -128,7 +138,6 @@ const JobDetail = () => {
       setAlreadyApplied(true);
       setApplyOpen(false);
 
-      // Notify the company owner
       if (job.company_user_id) {
         await supabase.from("notifications").insert({
           user_id: job.company_user_id,
@@ -249,10 +258,23 @@ const JobDetail = () => {
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Currículo (PDF, imagem)</label>
-                <label className="flex items-center gap-2 border rounded-xl px-3 py-2.5 cursor-pointer hover:bg-muted transition-colors">
+                {/* ✅ BLINDAGEM: Salva ID da vaga no localStorage ao clicar para abrir a galeria */}
+                <label 
+                  onClick={() => localStorage.setItem('reopen_job_apply_id', id || "")}
+                  className="flex items-center gap-2 border rounded-xl px-3 py-2.5 cursor-pointer hover:bg-muted transition-colors"
+                >
                   <Upload className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{resumeFile ? resumeFile.name : "Selecionar arquivo"}</span>
-                  <input type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => setResumeFile(e.target.files?.[0] || null)} />
+                  <span className="text-sm text-muted-foreground truncate">{resumeFile ? resumeFile.name : "Selecionar arquivo"}</span>
+                  <input 
+                    type="file" 
+                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" 
+                    className="hidden" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      setResumeFile(file);
+                      if (file) localStorage.removeItem('reopen_job_apply_id');
+                    }} 
+                  />
                 </label>
               </div>
               <div>

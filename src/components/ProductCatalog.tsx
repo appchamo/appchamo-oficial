@@ -107,7 +107,6 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
     fetchProducts();
   };
 
-  // ✅ FUNÇÃO MÁGICA: Abre o modal de compra
   const handleBuyClick = (p: Product) => {
     if (p.external_url) {
       window.open(p.external_url, '_blank');
@@ -117,7 +116,6 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
     setPurchaseModalOpen(true);
   };
 
-  // ✅ FUNÇÃO MÁGICA 2: Cria a solicitação e manda a foto do produto pro Chat
   const handleConfirmPurchase = async () => {
     if (!selectedProduct) return;
     setCreatingRequest(true);
@@ -171,9 +169,26 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
         content: productPayload
       });
 
+      // ✅ 4. NOTIFICA O PROFISSIONAL
+      const { data: proData } = await supabase
+        .from("professionals")
+        .select("user_id")
+        .eq("id", professionalId)
+        .single();
+
+      if (proData?.user_id) {
+        await supabase.from("notifications").insert({
+          user_id: proData.user_id,
+          title: "🛍️ Novo Interesse em Produto!",
+          message: `Um cliente quer comprar o seu produto: ${selectedProduct.name}. Acesse o chat!`,
+          type: "system",
+          read: false
+        } as any);
+      }
+
       toast({ title: "Solicitação enviada com sucesso!" });
       setPurchaseModalOpen(false);
-      navigate(`/messages/${reqId}`); // Redireciona o cliente pro chat!
+      navigate(`/messages/${reqId}`); // Redireciona o cliente pro chat
 
     } catch (err: any) {
       toast({ title: "Erro ao iniciar compra", description: err.message, variant: "destructive" });

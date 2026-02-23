@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { MessageSquare, MoreVertical, Archive, EyeOff, AlertTriangle, Inbox, Mic } from "lucide-react"; 
+import { MessageSquare, MoreVertical, Archive, EyeOff, AlertTriangle, Inbox, Mic, Package } from "lucide-react"; 
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,7 +19,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/hooks/use-toast";
 
 interface Thread {
   id: string;
@@ -157,11 +156,9 @@ const Messages = () => {
     if (!isBackgroundUpdate) setLoading(false);
   }, []);
 
-  // 🔥 BLINDAGEM TRIPLA PARA ATUALIZAÇÃO DA TELA
   useEffect(() => { 
     load(); 
 
-    // 1. Tenta o Realtime Nativo (com pequeno delay para o banco sincronizar)
     const channel = supabase.channel('messages-list-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
         setTimeout(() => load(true), 500); 
@@ -171,12 +168,10 @@ const Messages = () => {
       })
       .subscribe();
 
-    // 2. Polling Invisível (A cada 8 segundos verifica se chegou algo novo)
     const pollingInterval = setInterval(() => {
       load(true);
     }, 8000);
 
-    // 3. Sensor de Foco (Atualiza no milissegundo que o usuário abrir/voltar pro App)
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         load(true);
@@ -231,8 +226,11 @@ const Messages = () => {
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   };
 
+  // ✅ NOVO: Função que lê a mensagem de Produto na listagem e traduz para um card limpo
   const renderLastMessage = (msg: string | null) => {
     if (!msg) return "Nova conversa";
+    
+    // Tratamento para mensagem de Áudio
     if (msg.startsWith("[AUDIO:")) {
       return (
         <span className="flex items-center gap-1 text-primary">
@@ -240,6 +238,17 @@ const Messages = () => {
         </span>
       );
     }
+
+    // ✅ NOVO: Tratamento para a mensagem de Produto
+    if (msg.includes("[PRODUCT:")) {
+      return (
+        <span className="flex items-center gap-1 text-emerald-600 font-medium">
+          <Package className="w-3.5 h-3.5" /> Interesse em Produto
+        </span>
+      );
+    }
+
+    // Mensagem de texto normal
     return msg;
   };
 

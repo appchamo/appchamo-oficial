@@ -44,8 +44,6 @@ const MessageThread = () => {
   const [requestProtocol, setRequestProtocol] = useState<string | null>(null);
   const [hasRated, setHasRated] = useState(false);
   const [proPlanId, setProPlanId] = useState<string | null>(null);
-  
-  // ✅ NOVO: Estado para ver detalhes da cobrança enviada
   const [viewingBilling, setViewingBilling] = useState<any | null>(null);
 
   // Payment state
@@ -87,7 +85,6 @@ const MessageThread = () => {
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Carrega as taxas assim que o componente monta
   useEffect(() => { loadFeeSettings(); }, []);
 
   useEffect(() => {
@@ -304,7 +301,6 @@ const MessageThread = () => {
     }
   };
 
-  // ✅ CORRIGIDO: Mensagem da taxa do PIX
   const getBillingFeeLabel = () => {
     if (!billingMethod || !billingAmount) return null;
     const amount = parseFloat(billingAmount);
@@ -336,7 +332,6 @@ const MessageThread = () => {
     return null;
   };
 
-  // ✅ CORRIGIDO: Mostra só a % da taxa e o valor final
   const getBillingInstallmentOptions = () => {
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return [];
@@ -407,7 +402,6 @@ const MessageThread = () => {
     
     setClientPassFee(billing.passFee); 
 
-    // ✅ CORRIGIDO: NUNCA pula direto pro Cartão, sempre mostra o Resumo primeiro
     setPaymentMethod(billing.method);
     setCardStep(false); 
     
@@ -470,7 +464,6 @@ const MessageThread = () => {
     return baseAmount + fee;
   };
 
-  // ✅ CÁLCULO EXATO PARA MOSTRAR AO PROFISSIONAL NO "VER DETALHES"
   const calculateProfessionalReceive = (b: any) => {
     const amount = parseFloat(b.amount);
     if (b.passFee) return amount; 
@@ -706,6 +699,7 @@ const MessageThread = () => {
                 content: confirmContent
               });
 
+              // ✅ QUEIMA O CUPOM UTILIZADO AGORA FUNCIONA COM A NOVA POLICY
               if (selectedCouponId) {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
@@ -739,6 +733,7 @@ const MessageThread = () => {
         content: confirmContent
       });
 
+      // ✅ QUEIMA O CUPOM UTILIZADO AGORA FUNCIONA COM A NOVA POLICY
       if (selectedCouponId) {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
@@ -1424,7 +1419,6 @@ const MessageThread = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ NOVO: Dialog para o Profissional ver os detalhes da cobrança */}
       <Dialog open={!!viewingBilling} onOpenChange={(open) => !open && setViewingBilling(null)}>
         <DialogContent className="max-w-xs rounded-2xl">
           <DialogHeader><DialogTitle>Detalhes da Cobrança</DialogTitle></DialogHeader>
@@ -1481,25 +1475,33 @@ const MessageThread = () => {
                 <p className="text-xs text-muted-foreground mt-2">{paymentData.desc}</p>
               </div>
 
+              {/* ✅ NOVA LISTA DE CUPONS MÚLTIPLOS (MÁXIMO 5) */}
               {!selectedCouponId && availableCoupons.length > 0 && (
-                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                      <Ticket className="w-5 h-5 text-emerald-600" />
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                  <p className="text-xs font-bold text-emerald-600 uppercase flex items-center gap-1">
+                    <Ticket className="w-3.5 h-3.5" /> Seus Cupons
+                  </p>
+                  {availableCoupons.slice(0, 5).map((c) => (
+                    <div key={c.id} className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 flex items-center justify-between shadow-sm hover:bg-emerald-500/20 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                          <Ticket className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-emerald-700">{c.discount_percent}% de desconto</p>
+                          <p className="text-[9px] font-medium text-emerald-600/80">
+                            {c.expires_at ? `Expira: ${new Date(c.expires_at).toLocaleDateString("pt-BR")}` : "Sem validade"}
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => applyCoupon(c.id)} 
+                        className="px-3 py-1.5 bg-emerald-500 text-white text-[11px] font-bold rounded-lg hover:bg-emerald-600 transition-colors shadow-md"
+                      >
+                        Aplicar
+                      </button>
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-emerald-700">Você tem um cupom!</p>
-                      <p className="text-[10px] font-medium text-emerald-600/80">
-                        Aproveite {availableCoupons[0].discount_percent}% de desconto
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => applyCoupon(availableCoupons[0].id)} 
-                    className="px-4 py-2 bg-emerald-500 text-white text-xs font-bold rounded-lg hover:bg-emerald-600 transition-colors shadow-md"
-                  >
-                    Aplicar
-                  </button>
+                  ))}
                 </div>
               )}
 
@@ -1522,7 +1524,6 @@ const MessageThread = () => {
                 </div>
               )}
 
-              {/* ✅ MOSTRA O MÉTODO TRAVADO DEFINIDO PELO PROFISSIONAL */}
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground">Método definido pelo profissional:</p>
                 <div className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-primary bg-primary/5">

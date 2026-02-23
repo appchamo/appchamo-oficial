@@ -31,7 +31,6 @@ const JobApply = () => {
         return;
       }
       
-      // Busca dados da vaga para saber quem notificar
       const { data: jobData } = await supabase
         .from("job_postings")
         .select("title, professionals(user_id)")
@@ -59,11 +58,29 @@ const JobApply = () => {
     loadData();
   }, [id, navigate]);
 
+  // ✅ TRAVA DE SEGURANÇA: Só aceita PDF
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== "application/pdf") {
+      toast({ 
+        title: "Arquivo inválido", 
+        description: "Por favor, selecione apenas arquivos em formato PDF.", 
+        variant: "destructive" 
+      });
+      e.target.value = ""; // Limpa o campo
+      setResumeFile(null);
+      return;
+    }
+
+    setResumeFile(file);
+  };
+
   const handleApply = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !id) return;
 
-    // VALIDAÇÕES
     if (!form.full_name || !form.email || !form.phone) {
       toast({ title: "Preencha nome, email e telefone.", variant: "destructive" });
       return;
@@ -75,10 +92,8 @@ const JobApply = () => {
     }
 
     setApplying(true);
-    let resume_url: string | null = null;
-
+    
     try {
-      // UPLOAD DO PDF
       const ext = resumeFile.name.split(".").pop();
       const path = `resumes/${user.id}/${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("uploads").upload(path, resumeFile);
@@ -86,22 +101,19 @@ const JobApply = () => {
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(path);
-      resume_url = urlData.publicUrl;
 
-      // INSERIR CANDIDATURA
       const { error: insertError } = await supabase.from("job_applications").insert({
         job_id: id,
         applicant_id: user.id,
         full_name: form.full_name,
         email: form.email,
         phone: form.phone,
-        resume_url,
+        resume_url: urlData.publicUrl,
         description: form.description || null,
       });
 
       if (insertError) throw insertError;
 
-      // ENVIAR NOTIFICAÇÃO (Corrigido)
       if (jobOwnerId) {
         await supabase.from("notifications").insert({
           user_id: jobOwnerId,
@@ -109,7 +121,7 @@ const JobApply = () => {
           message: `${form.full_name} se candidatou para ${jobTitle}`,
           type: "job",
           link: "/my-jobs",
-        });
+        } as any);
       }
 
       toast({ title: "Candidatura enviada com sucesso!" });
@@ -117,14 +129,13 @@ const JobApply = () => {
       navigate(`/jobs/${id}`);
 
     } catch (err) {
-      console.error(err);
       toast({ title: "Erro ao processar candidatura.", variant: "destructive" });
     } finally {
       setApplying(false);
     }
   };
 
-  if (loading) return <div className="p-10 text-center">Carregando formulário...</div>;
+  if (loading) return <div className="p-10 text-center text-muted-foreground">Carregando formulário...</div>;
 
   return (
     <AppLayout>
@@ -176,8 +187,8 @@ const JobApply = () => {
               <input 
                 type="file" 
                 className="hidden" 
-                accept=".pdf" 
-                onChange={e => setResumeFile(e.target.files?.[0] || null)} 
+                accept="application/pdf" 
+                onChange={handleFileChange} // ✅ Usando a função com a trava
               />
             </label>
           </div>

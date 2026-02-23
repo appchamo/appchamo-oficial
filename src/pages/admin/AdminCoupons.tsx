@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Ticket, Trophy, Plus, Shuffle, Search, Percent, Settings2, Trash2, Power, PowerOff, Check } from "lucide-react";
+import { Ticket, Trophy, Plus, Shuffle, Search, Percent, Settings2, Trash2, Power, PowerOff, Check, User, Mail, Phone } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -20,6 +20,10 @@ const AdminCoupons = () => {
   const [winnerName, setWinnerName] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", draw_date: "" });
 
+  // Winner Details Dialog
+  const [winnerInfoOpen, setWinnerInfoOpen] = useState(false);
+  const [winnerData, setWinnerData] = useState<any>(null);
+
   // Add Coupon Dialogs
   const [addCouponOpen, setAddCouponOpen] = useState(false);
   const [couponForm, setCouponForm] = useState({ coupon_type: "raffle" as "raffle" | "discount", target: "individual" as "individual" | "random", discount_percent: "5", expires_days: "30" });
@@ -28,7 +32,7 @@ const AdminCoupons = () => {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [addingCoupon, setAddingCoupon] = useState(false);
 
-  // NOVO: Campanhas de Cupons (Lotes)
+  // Campanhas de Cupons (Lotes)
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [addCampaignOpen, setAddCampaignOpen] = useState(false);
   const [campaignForm, setCampaignForm] = useState({ 
@@ -39,26 +43,49 @@ const AdminCoupons = () => {
   });
   const [savingCampaign, setSavingCampaign] = useState(false);
 
+  // Chaves Globais
+  const [globalSettings, setGlobalSettings] = useState({ auto_discount: true, auto_raffle: true });
+
   const fetchData = async () => {
     const [
       { data: r }, 
       { count },
-      { data: camp }
+      { data: camp },
+      { data: settings }
     ] = await Promise.all([
       supabase.from("raffles").select("*").order("draw_date", { ascending: false }),
       supabase.from("coupons").select("*", { count: "exact", head: true }),
-      supabase.from("coupon_campaigns").select("*").order("created_at", { ascending: false })
+      supabase.from("coupon_campaigns").select("*").order("created_at", { ascending: false }),
+      supabase.from("platform_settings").select("*").in("key", ["auto_discount_active", "auto_raffle_active"])
     ]);
     
     setRaffles(r || []);
     setCouponCount(count || 0);
     setCampaigns(camp || []);
+
+    if (settings) {
+      const isDiscountActive = settings.find(s => s.key === "auto_discount_active")?.value === "true";
+      const isRaffleActive = settings.find(s => s.key === "auto_raffle_active")?.value === "true";
+      setGlobalSettings({ auto_discount: isDiscountActive, auto_raffle: isRaffleActive });
+    }
+
     setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, []);
 
   const drawnCount = raffles.filter(r => r.status === "drawn").length;
+
+  const toggleGlobalSetting = async (key: string, currentValue: boolean) => {
+    const newValue = !currentValue;
+    try {
+      await supabase.from("platform_settings").upsert({ key, value: String(newValue) }, { onConflict: "key" });
+      setGlobalSettings(prev => ({ ...prev, [key === "auto_discount_active" ? "auto_discount" : "auto_raffle"]: newValue }));
+      toast({ title: "Configuração atualizada!" });
+    } catch (error) {
+      toast({ title: "Erro ao atualizar configuração", variant: "destructive" });
+    }
+  };
 
   const handleCreateRaffle = async () => {
     if (!form.title || !form.draw_date) { toast({ title: "Preencha todos os campos", variant: "destructive" }); return; }
@@ -91,22 +118,38 @@ const AdminCoupons = () => {
       const winner = coupons[Math.floor(Math.random() * coupons.length)];
       await supabase.from("raffles").update({ status: "drawn", winner_user_id: winner.user_id }).eq("id", drawRaffleId);
       await supabase.from("coupons").update({ used: true, raffle_id: drawRaffleId }).eq("id", winner.id);
+      
       const { data: profile } = await supabase.from("profiles").select("full_name").eq("user_id", winner.user_id).maybeSingle();
       setWinnerName(profile?.full_name || "Usuário");
+      
       const raffle = raffles.find(r => r.id === drawRaffleId);
+      
+      // ✅ NOVA NOTIFICAÇÃO DO SORTEIO
       await supabase.from("notifications").insert({
         user_id: winner.user_id,
         title: "🎉 Você foi sorteado!",
-        message: `Parabéns! Você foi o ganhador do sorteio "${raffle?.title || ""}". Entre em contato conosco para resgatar seu prêmio.`,
+        message: `Parabéns! Você foi o ganhador do sorteio "${raffle?.title || ""}". Nossa equipe entrará em contato em até 24h para você receber seu prêmio.`,
         type: "raffle_win",
         read: false,
       } as any);
+      
       toast({ title: "Sorteio realizado com sucesso!" });
       fetchData();
     } catch (err: any) {
       toast({ title: "Erro no sorteio", description: err.message, variant: "destructive" });
     }
     setDrawing(false);
+  };
+
+  // ✅ FUNÇÃO PARA BUSCAR DETALHES DO GANHADOR
+  const handleViewWinner = async (userId: string) => {
+    try {
+      const { data } = await supabase.from("profiles").select("full_name, email, phone").eq("user_id", userId).single();
+      setWinnerData(data);
+      setWinnerInfoOpen(true);
+    } catch (error) {
+      toast({ title: "Erro ao buscar dados do ganhador", variant: "destructive" });
+    }
   };
 
   const searchUsers = async (q: string) => {
@@ -262,7 +305,6 @@ const AdminCoupons = () => {
         </div>
       </div>
 
-      {/* ABAS SEGURAS (SEM COMPONENTE EXTERNO) */}
       <div className="mb-6">
         <div className="flex w-full bg-muted/50 p-1 rounded-xl">
           <button
@@ -280,15 +322,49 @@ const AdminCoupons = () => {
         </div>
       </div>
 
-      {/* CONTEÚDO DAS ABAS */}
       <div className="relative">
-        {/* ABA 1: Lotes de Cupons Automáticos (Plataforma banca) */}
+        {/* ABA 1: Lotes de Cupons Automáticos */}
         {activeTab === "campaigns" && (
           <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* ✅ PAINEL MESTRE DE DISTRIBUIÇÃO */}
+            <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 mb-6">
+              <h3 className="font-bold text-primary mb-1 flex items-center gap-2"><Settings2 className="w-4 h-4" /> Controle Geral de Entregas</h3>
+              <p className="text-xs text-muted-foreground mb-4">Ligue ou desligue a entrega de cupons que acontece nos pagamentos ou cadastros do aplicativo.</p>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-card border rounded-xl">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">🎟️ Cupons de Sorteio</p>
+                    <p className="text-[10px] text-muted-foreground">O app pode entregar cupons para sorteios mensais?</p>
+                  </div>
+                  <button 
+                    onClick={() => toggleGlobalSetting("auto_raffle_active", globalSettings.auto_raffle)}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${globalSettings.auto_raffle ? "bg-primary" : "bg-muted-foreground/30"}`}
+                  >
+                    <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${globalSettings.auto_raffle ? "left-7" : "left-1"}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between p-3 bg-card border rounded-xl">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">🎉 Cupons de Desconto (Lotes)</p>
+                    <p className="text-[10px] text-muted-foreground">O app pode puxar cupons dos lotes abaixo e entregar aos clientes?</p>
+                  </div>
+                  <button 
+                    onClick={() => toggleGlobalSetting("auto_discount_active", globalSettings.auto_discount)}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${globalSettings.auto_discount ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                  >
+                    <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${globalSettings.auto_discount ? "left-7" : "left-1"}`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between mb-2">
               <div>
                 <h2 className="font-semibold text-foreground">Lotes de Desconto</h2>
-                <p className="text-xs text-muted-foreground">Distribua cupons automaticamente no app</p>
+                <p className="text-xs text-muted-foreground">Gerencie o estoque de descontos</p>
               </div>
               <button onClick={() => setAddCampaignOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">
                 <Plus className="w-4 h-4" /> Novo Lote
@@ -301,7 +377,7 @@ const AdminCoupons = () => {
               <div className="text-center py-12 bg-card border rounded-xl border-dashed">
                 <Percent className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
                 <p className="text-sm font-medium text-foreground">Nenhum lote criado</p>
-                <p className="text-xs text-muted-foreground">O app não está distribuindo cupons no momento.</p>
+                <p className="text-xs text-muted-foreground">Crie lotes para a plataforma distribuir descontos.</p>
               </div>
             ) : (
               <div className="grid gap-3">
@@ -383,19 +459,20 @@ const AdminCoupons = () => {
                     <div>
                       <p className="font-semibold text-sm text-foreground">{r.title}</p>
                       <p className="text-xs text-muted-foreground">Data: {new Date(r.draw_date).toLocaleDateString("pt-BR")}</p>
-                      {r.winner_user_id && <p className="text-xs text-primary mt-0.5 font-bold flex items-center gap-1"><Check className="w-3 h-3" /> Sorteado</p>}
+                      {r.winner_user_id && <p className="text-xs text-emerald-600 mt-0.5 font-bold flex items-center gap-1"><Check className="w-3 h-3" /> Sorteado</p>}
                     </div>
                     <div className="flex items-center gap-2">
-                      {r.status === "upcoming" && (
+                      {r.status === "upcoming" ? (
                         <button onClick={() => openDraw(r.id)} className="flex items-center gap-1 px-4 py-2 rounded-xl bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 transition-colors">
                           <Shuffle className="w-3.5 h-3.5" /> Sortear Agora
                         </button>
+                      ) : (
+                        /* ✅ NOVO BOTÃO DE DETALHES DO GANHADOR */
+                        <button onClick={() => handleViewWinner(r.winner_user_id)} className="flex items-center gap-1 px-4 py-2 rounded-xl bg-accent border text-foreground text-xs font-bold hover:bg-muted transition-colors">
+                          <User className="w-3.5 h-3.5" /> Ver Ganhador
+                        </button>
                       )}
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        r.status === "upcoming" ? "bg-accent text-foreground" : "bg-muted text-muted-foreground"
-                      }`}>
-                        {r.status === "upcoming" ? "Próximo" : "Realizado"}
-                      </span>
+                      
                     </div>
                   </div>
                 ))}
@@ -405,7 +482,48 @@ const AdminCoupons = () => {
         )}
       </div>
 
-      {/* ✅ MODAL: Nova Campanha de Lote */}
+      {/* ✅ MODAL: Dados do Ganhador */}
+      <Dialog open={winnerInfoOpen} onOpenChange={setWinnerInfoOpen}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-600"><Trophy className="w-5 h-5" /> Dados do Ganhador</DialogTitle>
+          </DialogHeader>
+          {winnerData ? (
+            <div className="space-y-4 pt-2">
+              <div className="bg-muted/50 p-4 rounded-xl space-y-3">
+                <div className="flex items-center gap-3">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Nome Completo</p>
+                    <p className="text-sm font-bold text-foreground">{winnerData.full_name}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 border-t pt-3">
+                  <Phone className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Telefone</p>
+                    <p className="text-sm font-semibold text-foreground">{winnerData.phone || "Não cadastrado"}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 border-t pt-3">
+                  <Mail className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">E-mail</p>
+                    <p className="text-sm font-medium text-foreground">{winnerData.email}</p>
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setWinnerInfoOpen(false)} className="w-full py-2.5 rounded-xl border font-semibold text-sm hover:bg-muted transition-colors">
+                Fechar
+              </button>
+            </div>
+          ) : (
+            <div className="py-8 text-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full mx-auto"></div></div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: Nova Campanha de Lote */}
       <Dialog open={addCampaignOpen} onOpenChange={setAddCampaignOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>

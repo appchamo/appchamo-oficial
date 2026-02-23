@@ -40,6 +40,7 @@ import HowToHire from "./pages/HowToHire";
 import HowToPay from "./pages/HowToPay";
 import Subscriptions from "./pages/Subscriptions";
 import NotFound from "./pages/NotFound";
+import JobApply from "./pages/JobApply";
 
 // Admin
 import AdminLogin from "./pages/admin/AdminLogin";
@@ -95,6 +96,7 @@ const App = () => (
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
             <Route path="/jobs/:id" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
+            <Route path="/jobs/:id/apply" element={<JobApply />} />
             <Route path="/my-jobs" element={<ProtectedRoute><MyJobPostings /></ProtectedRoute>} />
             <Route path="/my-catalog" element={<ProtectedRoute><MyCatalog /></ProtectedRoute>} />
             <Route path="/client" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />

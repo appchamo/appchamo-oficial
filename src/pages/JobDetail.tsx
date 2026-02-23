@@ -216,11 +216,11 @@ const JobDetail = () => {
             </div>
           ) : (
             <button
-              onClick={() => setApplyOpen(true)}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
-            >
-              <Send className="w-4 h-4" /> Candidatar-se
-            </button>
+  onClick={() => navigate(`/jobs/${id}/apply`)}
+  className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+>
+  <Send className="w-4 h-4" /> Candidatar-se
+</button>
           )}
         </div>
 

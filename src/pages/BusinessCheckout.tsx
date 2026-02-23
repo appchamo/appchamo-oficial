@@ -14,8 +14,11 @@ const formatCVV = (val: string) => val.replace(/\D/g, "").slice(0, 4);
 const BusinessCheckout = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const [searchingCep, setSearchingCep] = useState(false);
-  const [proofFile, setProofFile] = useState<File | null>(null);
+  
+  // ✅ O "Pulo do Gato": Salvamos apenas o LINK do arquivo para resistir ao refresh
+  const [proofUrl, setProofUrl] = useState<string | null>(localStorage.getItem('temp_business_pdf_url'));
 
   const [cardForm, setCardForm] = useState(() => {
     const saved = localStorage.getItem('business_card_draft');
@@ -30,12 +33,12 @@ const BusinessCheckout = () => {
   useEffect(() => {
     localStorage.setItem('business_card_draft', JSON.stringify(cardForm));
     localStorage.setItem('business_info_draft', JSON.stringify(businessData));
-  }, [cardForm, businessData]);
+    if (proofUrl) localStorage.setItem('temp_business_pdf_url', proofUrl);
+  }, [cardForm, businessData, proofUrl]);
 
   const handleCepChange = async (value: string) => {
     const rawCep = value.replace(/\D/g, "");
     setBusinessData(d => ({ ...d, cep: formatCEP(value) }));
-
     if (rawCep.length === 8) {
       setSearchingCep(true);
       try {
@@ -48,18 +51,43 @@ const BusinessCheckout = () => {
     }
   };
 
-  const handleSubscribe = async () => {
-    // Se o arquivo não estiver no estado, mas o input tiver um arquivo (fallback para o refresh do Android)
-    const fileInput = document.getElementById('pdf-upload') as HTMLInputElement;
-    const finalFile = proofFile || (fileInput?.files ? fileInput.files[0] : null);
+  // ✅ NOVO: Upload automático assim que seleciona
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      toast({ title: "Apenas PDF", variant: "destructive" });
+      return;
+    }
 
-    if (!finalFile) {
-      toast({ title: "Anexe o arquivo", description: "Selecione o PDF do cartão CNPJ.", variant: "destructive" });
+    setUploadingFile(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const path = `business-proofs/${user.id}/temp_${Date.now()}.pdf`;
+      const { error: uploadError } = await supabase.storage.from("business-proofs").upload(path, file);
+      
+      if (uploadError) throw uploadError;
+      
+      const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(path);
+      setProofUrl(urlData.publicUrl);
+      toast({ title: "Arquivo carregado com sucesso!" });
+    } catch (err) {
+      toast({ title: "Erro no upload", description: "Tente selecionar o arquivo novamente.", variant: "destructive" });
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleSubscribe = async () => {
+    if (!proofUrl) {
+      toast({ title: "Anexe o arquivo", description: "O PDF do CNPJ é obrigatório.", variant: "destructive" });
       return;
     }
     
     if (!cardForm.number || !cardForm.name || !businessData.cnpj || !businessData.number) {
-      toast({ title: "Campos incompletos", variant: "destructive" });
+      toast({ title: "Preencha tudo", variant: "destructive" });
       return;
     }
 
@@ -68,23 +96,19 @@ const BusinessCheckout = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Usuário não logado.");
 
-      const path = `business-proofs/${user.id}/${Date.now()}.pdf`;
-      const { error: uploadError } = await supabase.storage.from("business-proofs").upload(path, finalFile);
-      if (uploadError) throw new Error("Erro no upload do PDF.");
-      
-      const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(path);
       const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state}`;
 
       const { error: subError } = await supabase.from("subscriptions").upsert({
         user_id: user.id, plan_id: "business", status: "PENDING",
-        business_cnpj: businessData.cnpj, business_address: fullAddress, business_proof_url: urlData.publicUrl
+        business_cnpj: businessData.cnpj, business_address: fullAddress, business_proof_url: proofUrl
       });
 
       if (subError) throw subError;
 
-      toast({ title: "Solicitação enviada!" });
+      toast({ title: "Solicitação enviada com sucesso!" });
       localStorage.removeItem('business_card_draft');
       localStorage.removeItem('business_info_draft');
+      localStorage.removeItem('temp_business_pdf_url');
       navigate("/profile");
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
@@ -103,43 +127,38 @@ const BusinessCheckout = () => {
 
         <div className="space-y-5">
           <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-4">
-            <div>
-               <label className="text-[11px] font-bold text-muted-foreground mb-1 block">CNPJ *</label>
-               <input placeholder="00.000.000/0001-00" value={businessData.cnpj} onChange={e => setBusinessData({...businessData, cnpj: formatCNPJ(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none" />
-            </div>
-
+            <p className="text-[10px] font-bold text-muted-foreground uppercase border-b pb-2">Informações da Empresa</p>
+            <input placeholder="CNPJ" value={businessData.cnpj} onChange={e => setBusinessData({...businessData, cnpj: formatCNPJ(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none" />
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-muted-foreground mb-1 block flex items-center gap-1">CEP {searchingCep && <Clock className="w-3 h-3 animate-spin" />}</label>
-                <input placeholder="00000-000" value={businessData.cep} onChange={e => handleCepChange(e.target.value)} className="w-full p-3 border rounded-xl bg-background outline-none" />
-              </div>
-              <div>
-                <label className="text-[11px] font-bold text-muted-foreground mb-1 block">Nº *</label>
-                <input placeholder="123" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className="w-full p-3 border rounded-xl bg-background outline-none" />
-              </div>
+              <input placeholder="CEP" value={businessData.cep} onChange={e => handleCepChange(e.target.value)} className="w-full p-3 border rounded-xl bg-background outline-none" />
+              <input placeholder="Nº *" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className="w-full p-3 border rounded-xl bg-background outline-none" />
             </div>
-
-            {businessData.street && (
-              <div className="p-3 bg-muted/50 rounded-xl border border-dashed text-[11px]">
-                <p className="font-bold">{businessData.street}</p>
-                <p>{businessData.neighborhood} — {businessData.city}/{businessData.state}</p>
-              </div>
-            )}
 
             <div>
               <label className="text-[11px] font-bold text-muted-foreground mb-1 block">Cartão CNPJ (PDF) *</label>
-              <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${proofFile ? 'border-emerald-500 bg-emerald-500/5' : 'border-muted-foreground/20'}`}>
-                {proofFile ? <FileText className="w-8 h-8 text-emerald-600" /> : <Upload className="w-8 h-8 text-muted-foreground" />}
+              <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${proofUrl ? 'border-emerald-500 bg-emerald-500/5' : 'border-muted-foreground/20'}`}>
+                {uploadingFile ? (
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                ) : proofUrl ? (
+                  <FileText className="w-8 h-8 text-emerald-600" />
+                ) : (
+                  <Upload className="w-8 h-8 text-muted-foreground" />
+                )}
                 <span className="text-sm font-bold text-center text-foreground px-2 truncate w-full">
-                  {proofFile ? proofFile.name : "Selecionar PDF"}
+                  {uploadingFile ? "Enviando arquivo..." : proofUrl ? "PDF Carregado com Sucesso!" : "Selecionar PDF"}
                 </span>
-                <input id="pdf-upload" type="file" className="hidden" accept="application/pdf" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
+                <input type="file" className="hidden" accept="application/pdf" onChange={handleFileChange} disabled={uploadingFile} />
               </label>
+              {proofUrl && !uploadingFile && (
+                <p className="text-[10px] text-emerald-600 text-center font-bold mt-2 uppercase flex items-center justify-center gap-1">
+                  <Check className="w-3 h-3" /> Arquivo salvo na nuvem
+                </p>
+              )}
             </div>
           </div>
 
           <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-4">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase border-b pb-2 flex justify-between">
+             <p className="text-[10px] font-bold text-muted-foreground uppercase border-b pb-2 flex justify-between">
               <span><CreditCard className="w-3.5 h-3.5 inline mr-1" /> Pagamento</span> 
               <span className="text-primary font-bold">R$ 250,00</span>
             </p>
@@ -151,7 +170,7 @@ const BusinessCheckout = () => {
             </div>
           </div>
 
-          <button onClick={handleSubscribe} disabled={loading} className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
+          <button onClick={handleSubscribe} disabled={loading || uploadingFile} className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
             {loading ? <Loader2 className="animate-spin w-5 h-5" /> : "Confirmar Assinatura"}
           </button>
         </div>

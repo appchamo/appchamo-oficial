@@ -31,7 +31,6 @@ const MessageThread = () => {
   const [isProfessional, setIsProfessional] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Guarda o ID do Profissional para enviar notificações pra ele
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
 
   // Billing state
@@ -88,22 +87,21 @@ const MessageThread = () => {
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ MOTOR DE NOTIFICAÇÕES CORRIGIDO
+  // ✅ TRAVA DO TECLADO: Verifica se o chat tem mensagem de encerramento
+  const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
+  const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
+
   const sendNotification = async (targetId: string | null, title: string, msg: string) => {
     if (!targetId) return;
     try {
-      const { error } = await supabase.from("notifications").insert({
+      await supabase.from("notifications").insert({
         user_id: targetId,
         title: title,
         message: msg,
-        read: false,     // CORRIGIDO: Era is_read
-        type: "system",  // CORRIGIDO: Adicionado campo obrigatório
-        link: null       // Opcional, mantido null
+        read: false,
+        type: "system",
+        link: null
       } as any);
-
-      if (error) {
-        console.error("Erro banco notificação:", error);
-      }
     } catch (err) {
       console.error("Erro ao enviar notificação:", err);
     }
@@ -137,7 +135,7 @@ const MessageThread = () => {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro && pro.user_id === user.id) {
             setIsProfessional(true);
-            setChatProUserId(user.id); // É o próprio logado
+            setChatProUserId(user.id);
             const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
             setProPlanId(sub?.plan_id || "free");
           }
@@ -146,7 +144,7 @@ const MessageThread = () => {
         if (isClient) {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
-            setChatProUserId(pro.user_id); // Salva o ID do profissional para as notificações
+            setChatProUserId(pro.user_id);
             const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
             if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
           }
@@ -543,37 +541,64 @@ const MessageThread = () => {
     return options;
   };
 
-  const awardPostPaymentCoupon = async () => {
+  // ✅ NOVO MOTOR DE DISTRIBUIÇÃO CONECTADO AO PAINEL ADMIN
+  const awardPostPaymentCoupon = async (paymentAmount: number) => {
     if (!userId) return;
     try {
-      const isDiscount = Math.random() > 0.5;
+      // 1. Checa as chaves globais no banco
+      const { data: settings } = await supabase.from("platform_settings").select("*").in("key", ["auto_discount_active", "auto_raffle_active"]);
+      const isDiscountActive = settings?.find(s => s.key === "auto_discount_active")?.value === "true";
+      const isRaffleActive = settings?.find(s => s.key === "auto_raffle_active")?.value === "true";
 
-      if (isDiscount) {
-        const { data: settingsData } = await supabase.from("platform_settings").select("key, value").in("key", ["discount_coupon_percent", "discount_coupon_validity_days"]);
-        const settings: Record<string, any> = {};
-        (settingsData || []).forEach((s: any) => {settings[s.key] = s.value;});
-        
-        const percent = parseFloat(settings.discount_coupon_percent) || 10;
-        const days = parseInt(settings.discount_coupon_validity_days) || 30;
-        const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+      // Se tudo estiver desligado, não faz nada
+      if (!isDiscountActive && !isRaffleActive) return;
 
-        const { error } = await supabase.from("coupons").insert({
-          user_id: userId,
-          coupon_type: "discount",
-          source: "payment",
-          discount_percent: percent,
-          used: false,
-          expires_at: expiresAt
-        } as any);
+      let awardedDiscount = false;
 
-        if (error) throw error;
-        setRewardCoupon({ type: "discount", value: percent });
-        
-        // Notifica o cliente do prêmio
-        await sendNotification(userId, "🎟️ Novo Cupom de Desconto!", `Você ganhou ${percent}% OFF para usar no seu próximo serviço. Confira na aba Meus Cupons.`);
+      // 2. Tenta dar um Desconto primeiro (se estiver ativo)
+      if (isDiscountActive) {
+        // Busca Lotes Ativos que cabem no valor da compra
+        const { data: campaigns } = await supabase
+          .from("coupon_campaigns")
+          .select("*")
+          .eq("is_active", true)
+          .lte("min_purchase_value", paymentAmount)
+          .order("created_at", { ascending: true }); // Pega a campanha mais antiga primeiro
 
-      } else {
-        const { error } = await supabase.from("coupons").insert({
+        if (campaigns && campaigns.length > 0) {
+          // Filtra campanhas que tem estoque e não passam do valor máximo
+          const validCampaign = campaigns.find(c =>
+            (c.max_purchase_value === null || c.max_purchase_value === 0 || paymentAmount <= c.max_purchase_value) &&
+            (c.used_quantity < c.total_quantity)
+          );
+
+          if (validCampaign) {
+            const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString(); // Expira em 30 dias
+
+            // Entrega o cupom pro cliente
+            await supabase.from("coupons").insert({
+              user_id: userId,
+              coupon_type: "discount",
+              source: "payment",
+              discount_percent: validCampaign.discount_percent,
+              used: false,
+              expires_at: expiresAt
+            } as any);
+
+            // Desconta 1 do estoque da campanha
+            await supabase.from("coupon_campaigns").update({ used_quantity: validCampaign.used_quantity + 1 }).eq("id", validCampaign.id);
+
+            setRewardCoupon({ type: "discount", value: validCampaign.discount_percent });
+            await sendNotification(userId, "🎟️ Novo Cupom de Desconto!", `Você ganhou ${validCampaign.discount_percent}% OFF para usar no seu próximo serviço. Confira na aba Meus Cupons.`);
+            setRewardOpen(true);
+            awardedDiscount = true;
+          }
+        }
+      }
+
+      // 3. Se não deu desconto (porque não tinha lote ou tava desligado), tenta dar cupom de sorteio
+      if (!awardedDiscount && isRaffleActive) {
+        await supabase.from("coupons").insert({
           user_id: userId,
           coupon_type: "raffle",
           source: "payment",
@@ -581,14 +606,11 @@ const MessageThread = () => {
           used: false
         } as any);
 
-        if (error) throw error;
         setRewardCoupon({ type: "raffle", value: 0 });
-
-        // Notifica o cliente do prêmio
         await sendNotification(userId, "🎟️ Novo Cupom de Sorteio!", "Você ganhou um cupom para o Sorteio Mensal! Boa sorte.");
+        setRewardOpen(true);
       }
 
-      setRewardOpen(true);
     } catch (err) {
       console.error("Erro ao gerar cupom no banco:", err);
     }
@@ -736,11 +758,11 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
-              // ✅ NOTIFICAÇÕES DE SUCESSO DO PIX
               await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
               await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
 
-              await awardPostPaymentCoupon();
+              // ✅ CHAMA A NOVA FUNÇÃO DE CUPOM E PASSA O VALOR
+              await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
               toast({ title: "Pagamento PIX confirmado!" });
               setPixOpen(false);
@@ -773,11 +795,11 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
-      // ✅ NOTIFICAÇÕES DE SUCESSO DO CARTÃO
       await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento no Cartão de Crédito no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
       await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via Cartão no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
 
-      await awardPostPaymentCoupon();
+      // ✅ CHAMA A NOVA FUNÇÃO DE CUPOM E PASSA O VALOR
+      await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
       setProcessingPayment(false);
       setPaymentConfirmed(true);
@@ -1010,7 +1032,7 @@ const MessageThread = () => {
             <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
             <p className="text-[10px] text-muted-foreground">online</p>
           </div>
-          {isProfessional && requestStatus === "accepted" &&
+          {isProfessional && !isChatFinished && requestStatus === "accepted" &&
           <>
               <button
               onClick={async () => {await loadFeeSettings();setBillingOpen(true);}}
@@ -1029,7 +1051,6 @@ const MessageThread = () => {
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
                 setRequestStatus("completed");
                 
-                // ✅ NOTIFICA O PROFISSIONAL
                 await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
                 setClosingCall(false);
@@ -1045,7 +1066,7 @@ const MessageThread = () => {
       </header>
 
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
-        {!isProfessional && requestStatus === "pending" &&
+        {!isProfessional && requestStatus === "pending" && !isChatFinished &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 shadow-sm">
             <p className="text-sm font-semibold text-foreground text-center">Aguardando resposta</p>
             <p className="text-xs text-muted-foreground text-center">O profissional ainda não aceitou. Se desejar desistir, você pode cancelar a solicitação.</p>
@@ -1066,7 +1087,7 @@ const MessageThread = () => {
         </div>
         }
 
-        {isProfessional && requestStatus === "pending" &&
+        {isProfessional && requestStatus === "pending" && !isChatFinished &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2">
             <p className="text-sm font-semibold text-foreground text-center">Nova solicitação de serviço</p>
             <p className="text-xs text-muted-foreground text-center">Deseja aceitar esta chamada?</p>
@@ -1121,7 +1142,7 @@ const MessageThread = () => {
           const rendered = renderMessageContent(msg);
           if (rendered === null) return null;
 
-          const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada");
+          const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada") || msg.content.includes("❌ Chamada recusada");
           if (isSystemMsg) {
             return (
               <div key={msg.id} className="flex justify-center">
@@ -1156,7 +1177,8 @@ const MessageThread = () => {
         <div ref={bottomRef} />
       </main>
 
-      {requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" ?
+      {/* ✅ TRAVA DO TECLADO AQUI */}
+      {isChatFinished ?
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
           <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
             <p className="text-sm text-muted-foreground">
@@ -1350,7 +1372,6 @@ const MessageThread = () => {
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
                 setRequestStatus("completed");
                 
-                // ✅ NOTIFICA O PROFISSIONAL
                 await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
                 setBillingOpen(false);

@@ -45,7 +45,7 @@ const MessageThread = () => {
   const [hasRated, setHasRated] = useState(false);
   const [proPlanId, setProPlanId] = useState<string | null>(null);
 
-  // Payment state (client side)
+  // Payment state
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string;} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
@@ -56,29 +56,23 @@ const MessageThread = () => {
   const [processingPayment, setProcessingPayment] = useState(false);
   const [clientPassFee, setClientPassFee] = useState(false); 
 
-  // Rating state
+  // Rating & Coupon states
   const [ratingOpen, setRatingOpen] = useState(false);
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [requestStatus, setRequestStatus] = useState<string>("pending");
-
-  // Coupon state
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
   const [couponDiscount, setCouponDiscount] = useState<{type: string;value: number;} | null>(null);
-
-  // Reward coupon state
   const [rewardCoupon, setRewardCoupon] = useState<{type: string;value: number;} | null>(null);
   const [rewardOpen, setRewardOpen] = useState(false);
 
-  // PIX state
+  // PIX & Audio states
   const [pixData, setPixData] = useState<{qrCode: string;copyPaste: string;paymentId: string;} | null>(null);
   const [pixOpen, setPixOpen] = useState(false);
   const [pixPolling, setPixPolling] = useState(false);
   const [pixCopied, setPixCopied] = useState(false);
   const pixIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Audio recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -90,7 +84,6 @@ const MessageThread = () => {
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ NOVO: Verifica se o usuário já escondeu a caixa de comprovante nesta conversa antes
   useEffect(() => {
     if (threadId && localStorage.getItem(`receipt_dismissed_${threadId}`) === "true") {
       setDismissedReceipt(true);
@@ -516,6 +509,52 @@ const MessageThread = () => {
     return options;
   };
 
+  // ✅ FUNÇÃO QUE GERA E SALVA O CUPOM NO BANCO 100% BLINDADA
+  const awardPostPaymentCoupon = async () => {
+    if (!userId) return;
+    try {
+      const isDiscount = Math.random() > 0.5;
+
+      if (isDiscount) {
+        const { data: settingsData } = await supabase.from("platform_settings").select("key, value").in("key", ["discount_coupon_percent", "discount_coupon_validity_days"]);
+        const settings: Record<string, any> = {};
+        (settingsData || []).forEach((s: any) => {settings[s.key] = s.value;});
+        
+        const percent = parseFloat(settings.discount_coupon_percent) || 10;
+        const days = parseInt(settings.discount_coupon_validity_days) || 30;
+        const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+
+        // Envia todos os dados explicitamente para não dar erro
+        const { error } = await supabase.from("coupons").insert({
+          user_id: userId,
+          coupon_type: "discount",
+          source: "payment",
+          discount_percent: percent,
+          used: false,
+          expires_at: expiresAt
+        } as any);
+
+        if (error) throw error;
+        setRewardCoupon({ type: "discount", value: percent });
+      } else {
+        const { error } = await supabase.from("coupons").insert({
+          user_id: userId,
+          coupon_type: "raffle",
+          source: "payment",
+          discount_percent: 0,
+          used: false
+        } as any);
+
+        if (error) throw error;
+        setRewardCoupon({ type: "raffle", value: 0 });
+      }
+
+      setRewardOpen(true);
+    } catch (err) {
+      console.error("Erro ao gerar cupom no banco:", err);
+    }
+  };
+
   const handleConfirmPayment = async () => {
     if (!paymentMethod || !paymentData || !userId || !threadId) return;
 
@@ -658,13 +697,11 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
+              // ✅ Chama o prêmio logo após o pagamento confirmar
+              await awardPostPaymentCoupon();
+
               toast({ title: "Pagamento PIX confirmado!" });
               setPixOpen(false);
-              setTimeout(() => {
-                setRatingStars(0);
-                setRatingComment("");
-                setRatingOpen(true);
-              }, 350);
             }
           } catch (err) {
             console.error("PIX polling error:", err);
@@ -694,16 +731,13 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
+      // ✅ Chama o prêmio logo após o pagamento confirmar
+      await awardPostPaymentCoupon();
+
       setProcessingPayment(false);
       setPaymentConfirmed(true);
       setPaymentOpen(false);
       toast({ title: "Pagamento confirmado!" });
-
-      setTimeout(() => {
-        setRatingStars(0);
-        setRatingComment("");
-        setRatingOpen(true);
-      }, 350);
     } catch (err: any) {
       setProcessingPayment(false);
       toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
@@ -730,53 +764,6 @@ const MessageThread = () => {
     setRatingOpen(false);
     setHasRated(true);
     toast({ title: "Avaliação enviada! Obrigado!" });
-
-    // ✅ NOVO: Verifica se o pagamento foi via APP antes de liberar cupom
-    const hasAppPayment = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO"));
-    if (hasAppPayment) {
-      await awardPostPaymentCoupon();
-    }
-  };
-
-  const awardPostPaymentCoupon = async () => {
-    if (!userId) return;
-    try {
-      const isDiscount = Math.random() > 0.5;
-
-      if (isDiscount) {
-        const { data: settingsData } = await supabase.
-        from("platform_settings").
-        select("key, value").
-        in("key", ["discount_coupon_percent", "discount_coupon_validity_days"]);
-        const settings: Record<string, any> = {};
-        (settingsData || []).forEach((s: any) => {settings[s.key] = s.value;});
-        const percent = parseFloat(settings.discount_coupon_percent) || 10;
-        const days = parseInt(settings.discount_coupon_validity_days) || 30;
-        const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
-
-        await supabase.from("coupons").insert({
-          user_id: userId,
-          coupon_type: "discount",
-          source: "payment",
-          discount_percent: percent,
-          expires_at: expiresAt
-        } as any);
-
-        setRewardCoupon({ type: "discount", value: percent });
-      } else {
-        await supabase.from("coupons").insert({
-          user_id: userId,
-          coupon_type: "raffle",
-          source: "payment"
-        } as any);
-
-        setRewardCoupon({ type: "raffle", value: 0 });
-      }
-
-      setRewardOpen(true);
-    } catch (err) {
-      console.error("Error awarding coupon:", err);
-    }
   };
 
   const parseAudio = (content: string) => {
@@ -1144,7 +1131,7 @@ const MessageThread = () => {
                     <button 
                       onClick={() => {
                         setDismissedReceipt(true);
-                        if (threadId) localStorage.setItem(`receipt_dismissed_${threadId}`, "true"); // ✅ Salva no navegador do usuário
+                        if (threadId) localStorage.setItem(`receipt_dismissed_${threadId}`, "true"); 
                       }}
                       className="w-full py-2 rounded-xl text-muted-foreground text-[11px] font-medium hover:bg-muted transition-all"
                     >
@@ -1341,7 +1328,6 @@ const MessageThread = () => {
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
 
-              {/* ✅ NOVO: Toggle Com Juros / Sem Juros */}
               <div className="space-y-2 mt-2 pt-2 border-t">
                 <p className="text-xs font-medium text-muted-foreground">Quem pagará a taxa do sistema?</p>
                 <div className="flex gap-2">
@@ -1382,7 +1368,6 @@ const MessageThread = () => {
                 </button>
               </div>
 
-              {/* Fee display dinâmico */}
               {billingMethod && billingAmount && parseFloat(billingAmount) > 0 &&
             <div className="bg-muted/50 border rounded-xl p-3">
                   {billingMethod === "card" &&
@@ -1431,15 +1416,10 @@ const MessageThread = () => {
           {paymentData && !cardStep &&
           <div className="space-y-4">
               <div className="text-center p-4 bg-muted/50 rounded-xl relative">
-                {/* Mostra aviso se tiver juros embutidos */}
-                
                 {couponDiscount ?
               <>
                     <p className="text-sm line-through text-muted-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
                     <p className="text-3xl font-bold text-primary">R$ {getFinalAmountWithFee(paymentMethod === "card" ? parseInt(installments) : 1, paymentMethod).toFixed(2).replace(".", ",")}</p>
-                    <p className="text-[10px] text-primary font-medium mt-0.5">
-                      Desconto de {couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`} aplicado
-                    </p>
                   </> :
               <p className="text-3xl font-bold text-foreground">R$ {getFinalAmountWithFee(paymentMethod === "card" ? parseInt(installments) : 1, paymentMethod).toFixed(2).replace(".", ",")}</p>
               }
@@ -1453,41 +1433,47 @@ const MessageThread = () => {
                 <p className="text-xs text-muted-foreground mt-2">{paymentData.desc}</p>
               </div>
 
-              {/* Coupon Section */}
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Ticket className="w-3.5 h-3.5" /> Cupom de desconto
-                </p>
-                {selectedCouponId ?
-              <div className="flex items-center justify-between bg-primary/5 border border-primary/20 rounded-xl p-3">
-                    <div>
-                      <p className="text-sm font-semibold text-primary">
-                        {couponDiscount?.type === "percentage" ? `${couponDiscount.value}% OFF` : `R$ ${couponDiscount?.value.toFixed(2).replace(".", ",")} OFF`}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">Cupom aplicado</p>
+              {/* ✅ NOVO VISUAL DO CUPOM DE DESCONTO */}
+              {!selectedCouponId && availableCoupons.length > 0 && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                      <Ticket className="w-5 h-5 text-emerald-600" />
                     </div>
-                    <button onClick={removeCoupon} className="text-xs text-destructive font-medium hover:underline">Remover</button>
-                  </div> :
-              availableCoupons.length > 0 ?
-              <div className="space-y-1.5">
-                    {availableCoupons.slice(0, 3).map((c) =>
-                <button key={c.id} onClick={() => applyCoupon(c.id)}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl border hover:border-primary/30 hover:bg-primary/5 transition-colors">
-                        <div className="text-left">
-                          <p className="text-xs font-semibold text-foreground">
-                            {c.discount_percent > 0 ? `${c.discount_percent}% de desconto` : "Cupom de desconto"}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {c.expires_at ? `Expira: ${new Date(c.expires_at).toLocaleDateString("pt-BR")}` : "Sem expiração"}
-                          </p>
-                        </div>
-                        <span className="text-xs font-semibold text-primary">Aplicar</span>
-                      </button>
-                )}
-                  </div> :
-              <p className="text-xs text-muted-foreground py-2">Nenhum cupom disponível</p>
-              }
-              </div>
+                    <div>
+                      <p className="text-sm font-bold text-emerald-700">Você tem um cupom!</p>
+                      <p className="text-[10px] font-medium text-emerald-600/80">
+                        Aproveite {availableCoupons[0].discount_percent}% de desconto
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => applyCoupon(availableCoupons[0].id)} 
+                    className="px-4 py-2 bg-emerald-500 text-white text-xs font-bold rounded-lg hover:bg-emerald-600 transition-colors shadow-md"
+                  >
+                    Aplicar
+                  </button>
+                </div>
+              )}
+
+              {selectedCouponId && couponDiscount && (
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in zoom-in">
+                  <div>
+                    <p className="text-sm font-bold text-primary flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" /> Cupom Aplicado
+                    </p>
+                    <p className="text-[10px] font-medium text-muted-foreground">
+                      Desconto de {couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`} no serviço
+                    </p>
+                  </div>
+                  <button 
+                    onClick={removeCoupon} 
+                    className="text-xs text-destructive font-bold hover:underline"
+                  >
+                    Remover
+                  </button>
+                </div>
+              )}
 
               {paymentMethod ?
             <div className="space-y-2">

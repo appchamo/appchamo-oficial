@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Send, Upload, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Upload, Loader2, FileText } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -11,127 +11,183 @@ const JobApply = () => {
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [jobOwnerId, setJobOwnerId] = useState<string | null>(null);
+  const [jobTitle, setJobTitle] = useState("");
   
-  // Aqui ele tenta recuperar o que você já digitou caso a página atualize
   const [form, setForm] = useState(() => {
     const saved = localStorage.getItem(`job_form_${id}`);
     return saved ? JSON.parse(saved) : { full_name: "", email: "", phone: "", description: "" };
   });
 
-  // Toda vez que você digita, ele salva no "cartão de memória" do navegador
   useEffect(() => {
     localStorage.setItem(`job_form_${id}`, JSON.stringify(form));
   }, [form, id]);
 
   useEffect(() => {
-    const checkAuth = async () => {
+    const loadData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         navigate("/login");
         return;
       }
       
-      // Se for a primeira vez abrindo, tenta puxar os dados do seu perfil
+      // Busca dados da vaga para saber quem notificar
+      const { data: jobData } = await supabase
+        .from("job_postings")
+        .select("title, professionals(user_id)")
+        .eq("id", id!)
+        .maybeSingle();
+
+      if (jobData) {
+        setJobTitle(jobData.title);
+        setJobOwnerId((jobData as any).professionals?.user_id);
+      }
+
       if (!form.full_name) {
         const { data: profile } = await supabase.from("profiles").select("full_name, email, phone").eq("user_id", user.id).maybeSingle();
         if (profile) {
-          setForm((f: any) => ({ ...f, full_name: profile.full_name || "", email: profile.email || "", phone: profile.phone || "" }));
+          setForm((f: any) => ({ 
+            ...f, 
+            full_name: profile.full_name || "", 
+            email: profile.email || "", 
+            phone: profile.phone || "" 
+          }));
         }
       }
       setLoading(false);
     };
-    checkAuth();
+    loadData();
   }, [id, navigate]);
 
   const handleApply = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !id) return;
-    if (!form.full_name || !form.email) {
-      toast({ title: "Preencha nome e email.", variant: "destructive" });
+
+    // VALIDAÇÕES
+    if (!form.full_name || !form.email || !form.phone) {
+      toast({ title: "Preencha nome, email e telefone.", variant: "destructive" });
+      return;
+    }
+
+    if (!resumeFile) {
+      toast({ title: "O envio do currículo em PDF é obrigatório.", variant: "destructive" });
       return;
     }
 
     setApplying(true);
     let resume_url: string | null = null;
 
-    if (resumeFile) {
+    try {
+      // UPLOAD DO PDF
       const ext = resumeFile.name.split(".").pop();
       const path = `resumes/${user.id}/${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("uploads").upload(path, resumeFile);
-      if (uploadError) {
-        toast({ title: "Erro ao enviar arquivo.", variant: "destructive" });
-        setApplying(false);
-        return;
-      }
+      
+      if (uploadError) throw uploadError;
+
       const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(path);
       resume_url = urlData.publicUrl;
-    }
 
-    const { error } = await supabase.from("job_applications").insert({
-      job_id: id,
-      applicant_id: user.id,
-      full_name: form.full_name,
-      email: form.email,
-      phone: form.phone || null,
-      resume_url,
-      description: form.description || null,
-    });
+      // INSERIR CANDIDATURA
+      const { error: insertError } = await supabase.from("job_applications").insert({
+        job_id: id,
+        applicant_id: user.id,
+        full_name: form.full_name,
+        email: form.email,
+        phone: form.phone,
+        resume_url,
+        description: form.description || null,
+      });
 
-    if (error) {
-      toast({ title: "Erro ao enviar candidatura.", variant: "destructive" });
-    } else {
+      if (insertError) throw insertError;
+
+      // ENVIAR NOTIFICAÇÃO (Corrigido)
+      if (jobOwnerId) {
+        await supabase.from("notifications").insert({
+          user_id: jobOwnerId,
+          title: "Nova candidatura recebida",
+          message: `${form.full_name} se candidatou para ${jobTitle}`,
+          type: "job",
+          link: "/my-jobs",
+        });
+      }
+
       toast({ title: "Candidatura enviada com sucesso!" });
-      localStorage.removeItem(`job_form_${id}`); // Limpa o rascunho após o sucesso
+      localStorage.removeItem(`job_form_${id}`);
       navigate(`/jobs/${id}`);
+
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Erro ao processar candidatura.", variant: "destructive" });
+    } finally {
+      setApplying(false);
     }
-    setApplying(false);
   };
 
-  if (loading) return <div className="p-10 text-center">Carregando...</div>;
+  if (loading) return <div className="p-10 text-center">Carregando formulário...</div>;
 
   return (
     <AppLayout>
       <main className="max-w-md mx-auto px-4 py-5">
         <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <ArrowLeft className="w-4 h-4" /> Voltar para a vaga
+          <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
 
-        <h1 className="text-xl font-bold mb-6 text-foreground">Candidatura</h1>
+        <h1 className="text-xl font-bold mb-6 text-foreground text-center">Finalizar Candidatura</h1>
 
-        <div className="space-y-5 bg-card border p-5 rounded-2xl shadow-sm">
+        <div className="space-y-4 bg-card border p-5 rounded-2xl shadow-sm">
           <div>
-            <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1.5">Nome completo</label>
+            <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1">Nome completo *</label>
             <input 
                 value={form.full_name} 
                 onChange={e => setForm({...form, full_name: e.target.value})} 
                 className="w-full border rounded-xl px-4 py-3 bg-background outline-none focus:ring-2 focus:ring-primary/30" 
             />
           </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1">E-mail de contato *</label>
+              <input 
+                  type="email"
+                  value={form.email} 
+                  onChange={e => setForm({...form, email: e.target.value})} 
+                  className="w-full border rounded-xl px-4 py-3 bg-background outline-none focus:ring-2 focus:ring-primary/30" 
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1">Telefone / WhatsApp *</label>
+              <input 
+                  type="tel"
+                  value={form.phone} 
+                  onChange={e => setForm({...form, phone: e.target.value})} 
+                  className="w-full border rounded-xl px-4 py-3 bg-background outline-none focus:ring-2 focus:ring-primary/30" 
+              />
+            </div>
+          </div>
           
           <div>
-            <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1.5">Currículo ou Foto (Opcional)</label>
-            <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer hover:bg-muted/50 transition-all border-muted-foreground/20">
-              <Upload className="w-6 h-6 text-primary" />
-              <span className="text-sm font-medium text-foreground text-center">
-                {resumeFile ? resumeFile.name : "Clique para selecionar arquivo"}
+            <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1">Currículo (PDF obrigatório) *</label>
+            <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${resumeFile ? 'border-primary bg-primary/5' : 'border-muted-foreground/20 hover:bg-muted/50'}`}>
+              {resumeFile ? <FileText className="w-8 h-8 text-primary" /> : <Upload className="w-8 h-8 text-muted-foreground" />}
+              <span className="text-sm font-medium text-foreground text-center px-2 truncate max-w-full">
+                {resumeFile ? resumeFile.name : "Selecionar PDF"}
               </span>
-              <span className="text-[10px] text-muted-foreground uppercase">PDF, PNG ou JPG</span>
               <input 
                 type="file" 
                 className="hidden" 
-                accept=".pdf,.png,.jpg,.jpeg" 
+                accept=".pdf" 
                 onChange={e => setResumeFile(e.target.files?.[0] || null)} 
               />
             </label>
           </div>
 
           <div>
-            <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1.5">Apresentação</label>
+            <label className="text-xs font-bold text-muted-foreground uppercase ml-1 block mb-1">Apresentação adicional</label>
             <textarea 
                 value={form.description} 
                 onChange={e => setForm({...form, description: e.target.value})} 
-                rows={4} 
-                placeholder="Fale um pouco sobre sua experiência..."
+                rows={3} 
                 className="w-full border rounded-xl px-4 py-3 bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" 
             />
           </div>
@@ -139,9 +195,9 @@ const JobApply = () => {
           <button 
             onClick={handleApply} 
             disabled={applying}
-            className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-primary/20 active:scale-95 transition-transform"
+            className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            {applying ? <Loader2 className="animate-spin w-5 h-5" /> : <><Send className="w-4 h-4" /> Enviar Candidatura</>}
+            {applying ? <Loader2 className="animate-spin w-5 h-5" /> : "Enviar Candidatura"}
           </button>
         </div>
       </main>

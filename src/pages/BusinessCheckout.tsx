@@ -1,149 +1,116 @@
-import { useParams, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { ArrowLeft, Send, Upload, Loader2, FileText, CreditCard, Building2 } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowLeft, Upload, Loader2, FileText, Check } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
 const BusinessCheckout = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [applying, setApplying] = useState(false);
-  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [hasFile, setHasFile] = useState(false);
   
-  // Igual ao das vagas: salva o texto para não perder no refresh
   const [form, setForm] = useState(() => {
-    const saved = localStorage.getItem(`business_form_draft`);
-    return saved ? JSON.parse(saved) : { cnpj: "", address: "", card_name: "", card_number: "", expiry: "", cvv: "" };
+    const saved = localStorage.getItem(`bus_draft`);
+    return saved ? JSON.parse(saved) : { cnpj: "", card: "" };
   });
 
   useEffect(() => {
-    localStorage.setItem(`business_form_draft`, JSON.stringify(form));
+    localStorage.setItem(`bus_draft`, JSON.stringify(form));
   }, [form]);
 
+  // ✅ BLOQUEIO DE REFRESH: Se o Android tentar atualizar, ele vai perguntar se você quer sair
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        navigate("/login");
-        return;
-      }
-      setLoading(false);
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
     };
-    checkAuth();
-  }, [navigate]);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
-  const handleApply = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  const handleFileChange = () => {
+    if (fileInputRef.current?.files?.[0]) {
+      setHasFile(true);
+      toast({ title: "Arquivo detectado!" });
+    }
+  };
 
-    if (!form.cnpj || !form.card_number || !resumeFile) {
-      toast({ title: "Preencha os dados e anexe o PDF", variant: "destructive" });
+  const handleFinish = async () => {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file || !form.cnpj) {
+      toast({ title: "Preencha o CNPJ e selecione o PDF", variant: "destructive" });
       return;
     }
 
-    setApplying(true);
-
+    setLoading(true);
     try {
-      // 1. Upload do Arquivo (Exatamente como nas vagas)
-      const ext = resumeFile.name.split(".").pop();
-      const path = `business-proofs/${user.id}/${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("business-proofs").upload(path, resumeFile);
-      
-      if (uploadError) throw uploadError;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
+      const path = `business-proofs/${user.id}/${Date.now()}.pdf`;
+      await supabase.storage.from("business-proofs").upload(path, file);
       const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(path);
 
-      // 2. Salva a Assinatura
-      const { error } = await supabase.from("subscriptions").upsert({
+      await supabase.from("subscriptions").upsert({
         user_id: user.id,
         plan_id: "business",
         status: "PENDING",
         business_cnpj: form.cnpj,
-        business_address: form.address,
         business_proof_url: urlData.publicUrl,
       });
 
-      if (error) throw error;
-
-      toast({ title: "Solicitação enviada!" });
-      localStorage.removeItem(`business_form_draft`);
+      toast({ title: "Sucesso!" });
+      localStorage.removeItem("bus_draft");
       navigate("/profile");
-
     } catch (err) {
-      toast({ title: "Erro ao enviar", variant: "destructive" });
+      toast({ title: "Erro no envio", variant: "destructive" });
     } finally {
-      setApplying(false);
+      setLoading(false);
     }
   };
 
-  if (loading) return <div className="p-10 text-center">Carregando...</div>;
-
   return (
     <AppLayout>
-      <main className="max-w-md mx-auto px-4 py-5">
-        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <ArrowLeft className="w-4 h-4" /> Voltar
+      <main className="max-w-md mx-auto px-4 py-8">
+        <button onClick={() => navigate(-1)} className="mb-6 flex items-center gap-2 text-muted-foreground">
+          <ArrowLeft size={18} /> Voltar
         </button>
 
-        <h1 className="text-xl font-bold mb-6">Assinatura Business</h1>
+        <div className="bg-card border rounded-2xl p-6 shadow-sm space-y-6">
+          <h1 className="text-xl font-bold text-center">Assinatura Business</h1>
 
-        <div className="space-y-5 bg-card border p-5 rounded-2xl shadow-sm">
-          {/* Dados da Empresa */}
-          <div className="space-y-3">
-            <p className="text-[10px] font-bold text-primary uppercase flex items-center gap-1"><Building2 className="w-3 h-3" /> Empresa</p>
-            <input 
-              placeholder="CNPJ"
-              value={form.cnpj} 
-              onChange={e => setForm({...form, cnpj: e.target.value})} 
-              className="w-full border rounded-xl px-4 py-3 bg-background outline-none" 
-            />
-            <input 
-              placeholder="Endereço"
-              value={form.address} 
-              onChange={e => setForm({...form, address: e.target.value})} 
-              className="w-full border rounded-xl px-4 py-3 bg-background outline-none" 
-            />
-          </div>
+          <input 
+            placeholder="Digite seu CNPJ" 
+            value={form.cnpj}
+            onChange={e => setForm({...form, cnpj: e.target.value})}
+            className="w-full p-4 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary"
+          />
 
-          {/* Upload (O segredo que funcionou nas vagas) */}
-          <div className="space-y-2">
-            <p className="text-[10px] font-bold text-primary uppercase ml-1">Cartão CNPJ (PDF)</p>
-            <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer hover:bg-muted/50 transition-all border-muted-foreground/20">
-              {resumeFile ? <FileText className="w-6 h-6 text-primary" /> : <Upload className="w-6 h-6 text-primary" />}
-              <span className="text-sm font-medium text-center">
-                {resumeFile ? resumeFile.name : "Clique para selecionar PDF"}
-              </span>
-              <input 
-                type="file" 
-                className="hidden" 
-                accept="application/pdf" 
-                onChange={e => setResumeFile(e.target.files?.[0] || null)} 
-              />
-            </label>
-          </div>
-
-          {/* Pagamento */}
-          <div className="space-y-3 pt-2">
-            <p className="text-[10px] font-bold text-primary uppercase flex items-center gap-1"><CreditCard className="w-3 h-3" /> Pagamento</p>
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer transition-colors ${hasFile ? 'border-green-500 bg-green-50' : 'border-muted-foreground/20'}`}
+          >
             <input 
-              placeholder="Número do Cartão"
-              value={form.card_number} 
-              onChange={e => setForm({...form, card_number: e.target.value})} 
-              className="w-full border rounded-xl px-4 py-3 bg-background outline-none" 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="application/pdf" 
+              onChange={handleFileChange}
             />
-            <div className="grid grid-cols-2 gap-2">
-              <input placeholder="MM/AA" value={form.expiry} onChange={e => setForm({...form, expiry: e.target.value})} className="border rounded-xl px-4 py-3 bg-background outline-none" />
-              <input placeholder="CVV" value={form.cvv} onChange={e => setForm({...form, cvv: e.target.value})} className="border rounded-xl px-4 py-3 bg-background outline-none" />
-            </div>
+            {hasFile ? <Check className="text-green-600 mb-2" /> : <Upload className="text-muted-foreground mb-2" />}
+            <span className="text-sm font-medium">
+              {hasFile ? "PDF Selecionado" : "Toque para selecionar o PDF"}
+            </span>
           </div>
 
           <button 
-            onClick={handleApply} 
-            disabled={applying}
-            className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 transition-transform active:scale-95"
+            onClick={handleFinish} 
+            disabled={loading}
+            className="w-full py-4 bg-primary text-white rounded-xl font-bold shadow-lg disabled:opacity-50"
           >
-            {applying ? <Loader2 className="animate-spin w-5 h-5" /> : "Finalizar Assinatura"}
+            {loading ? <Loader2 className="animate-spin mx-auto" /> : "Finalizar Agora"}
           </button>
         </div>
       </main>

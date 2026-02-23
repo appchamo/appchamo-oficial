@@ -1,7 +1,7 @@
 import AppLayout from "@/components/AppLayout";
 import { MessageSquare, MoreVertical, Archive, EyeOff, AlertTriangle, Inbox, Mic } from "lucide-react"; 
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   DropdownMenu,
@@ -51,12 +51,15 @@ const Messages = () => {
   const [reportReason, setReportReason] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+  // ✅ Função load envolvida em useCallback para podermos usá-la no Tempo Real (Realtime)
+  const load = useCallback(async () => {
+    // Só mostramos o loading na primeira vez, para não piscar a tela no Realtime
+    if (threads.length === 0) setLoading(true); 
+    
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
-    // Load support thread info
+    // 1. Suporte (Mantido igual)
     const { data: supportMsgs, count: totalSupport } = await supabase
       .from("support_messages")
       .select("*", { count: "exact" })
@@ -78,6 +81,7 @@ const Messages = () => {
       }
     }
 
+    // 2. Busca todas as solicitações (Cliente e Profissional)
     const { data: requests } = await supabase.from("service_requests").select("*").eq("client_id", user.id).order("updated_at", { ascending: false });
     const { data: proData } = await supabase.from("professionals").select("id").eq("user_id", user.id);
     let proRequests: any[] = [];
@@ -91,6 +95,12 @@ const Messages = () => {
     const unique = Array.from(new Map(allReqs.map(r => [r.id, r])).values());
     const threadIds = unique.map(r => r.id);
 
+    if (threadIds.length === 0) {
+      setThreads([]);
+      setLoading(false);
+      return;
+    }
+
     const { data: readStatuses } = await supabase
       .from("chat_read_status" as any)
       .select("request_id, last_read_at, is_archived, is_deleted, manual_unread")
@@ -99,25 +109,30 @@ const Messages = () => {
     
     const statusMap = new Map((readStatuses || []).map(rs => [rs.request_id, rs]));
 
+    // 🔥 OTIMIZAÇÃO DE VELOCIDADE: Busca todos os profissionais e perfis de uma vez (Bulk Fetch)
+    const proIdsUniq = unique.map(r => r.professional_id);
+    const { data: allPros } = await supabase.from("professionals").select("id, user_id").in("id", proIdsUniq);
+    const proUserIdMap = new Map((allPros || []).map(p => [p.id, p.user_id]));
+
+    const usersToFetch = unique.map(req => {
+      return req.client_id === user.id ? proUserIdMap.get(req.professional_id) : req.client_id;
+    }).filter(Boolean) as string[];
+
+    const { data: allProfiles } = await supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", usersToFetch);
+    const profileMap = new Map((allProfiles || []).map(p => [p.user_id, p]));
+
+    // 3. Monta a lista final (Bem mais rápido agora)
     const enriched: Thread[] = await Promise.all(unique.map(async (req: any) => {
       const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
       
       if (statusData.is_deleted) return null as any;
 
       const isClient = req.client_id === user.id;
-      let otherName = "Usuário";
-      let otherAvatar: string | null = null;
-
-      if (isClient) {
-        const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
-        if (pro) {
-          const { data: profile } = await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle() as { data: { full_name: string; avatar_url: string | null } | null };
-          if (profile) { otherName = profile.full_name || "Profissional"; otherAvatar = profile.avatar_url; }
-        }
-      } else {
-        const { data: profile } = await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle() as { data: { full_name: string; avatar_url: string | null } | null };
-        if (profile) { otherName = profile.full_name || "Cliente"; otherAvatar = profile.avatar_url; }
-      }
+      const targetUserId = isClient ? proUserIdMap.get(req.professional_id) : req.client_id;
+      const profile = targetUserId ? profileMap.get(targetUserId) : null;
+      
+      const otherName = profile?.full_name || (isClient ? "Profissional" : "Cliente");
+      const otherAvatar = profile?.avatar_url || null;
 
       const { data: lastMsg } = await supabase.from("chat_messages").select("content, created_at").eq("request_id", req.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
 
@@ -146,9 +161,25 @@ const Messages = () => {
     const finalThreads = enriched.filter(t => t !== null).sort((a, b) => new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime());
     setThreads(finalThreads);
     setLoading(false);
-  };
+  }, [threads.length]);
 
-  useEffect(() => { load(); }, []);
+  // 🔥 TEMPO REAL (REALTIME): Avisa o app para recarregar se houver nova mensagem ou solicitação
+  useEffect(() => { 
+    load(); 
+
+    const channel = supabase.channel('messages-list-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, () => {
+        load(); // Recarrega quando alguém manda mensagem
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_requests' }, () => {
+        load(); // Recarrega quando entra nova solicitação ou muda status
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [load]);
 
   const handleArchive = async (chatId: string, current: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -190,7 +221,6 @@ const Messages = () => {
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   };
 
-  // ✅ Função Auxiliar para renderizar a última mensagem limpa
   const renderLastMessage = (msg: string | null) => {
     if (!msg) return "Nova conversa";
     if (msg.startsWith("[AUDIO:")) {
@@ -242,7 +272,6 @@ const Messages = () => {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs truncate text-muted-foreground">
-                  {/* ✅ Suporte também mascarando áudio se houver */}
                   {renderLastMessage(supportLastMsg || "Fale com o suporte")}
                 </div>
                 {supportUnread > 0 && <span className="min-w-[20px] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5">{supportUnread}</span>}
@@ -255,7 +284,6 @@ const Messages = () => {
           {currentList.map((t) => {
             const initials = t.otherName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
             const hasUnread = t.unreadCount > 0 || t.manual_unread;
-            // ✅ Identifica se o chat já foi finalizado (esconde botão de arquivar se estiver ativo)
             const isChatFinished = t.status === "completed" || t.status === "closed" || t.status === "cancelled" || t.status === "rejected";
 
             return (
@@ -279,7 +307,6 @@ const Messages = () => {
                   <div className="flex-1 min-w-0">
                     <p className={`text-sm truncate ${hasUnread ? "font-bold text-foreground" : "font-semibold text-foreground"}`}>{t.otherName}</p>
                     <div className={`text-xs truncate mt-0.5 flex items-center gap-1 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                      {/* ✅ Chamando a função para esconder o link do áudio */}
                       {renderLastMessage(t.lastMessage)}
                     </div>
                   </div>
@@ -302,7 +329,6 @@ const Messages = () => {
                         <span className="font-medium text-sm">{t.manual_unread ? "Marcar como lida" : "Marcar como não lida"}</span>
                       </DropdownMenuItem>
                       
-                      {/* ✅ BLOQUEIO AQUI: Só mostra o arquivar se o chat estiver finalizado/cancelado */}
                       {isChatFinished && (
                         <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2">
                           <Archive className="w-4 h-4 text-muted-foreground" />

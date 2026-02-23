@@ -541,41 +541,37 @@ const MessageThread = () => {
     return options;
   };
 
-  // ✅ NOVO MOTOR DE DISTRIBUIÇÃO CONECTADO AO PAINEL ADMIN
+  // ✅ MOTOR DE DISTRIBUIÇÃO APENAS REGISTRA, MAS NÃO ABRE O MODAL NA HORA
   const awardPostPaymentCoupon = async (paymentAmount: number) => {
     if (!userId) return;
     try {
-      // 1. Checa as chaves globais no banco
       const { data: settings } = await supabase.from("platform_settings").select("*").in("key", ["auto_discount_active", "auto_raffle_active"]);
       const isDiscountActive = settings?.find(s => s.key === "auto_discount_active")?.value === "true";
       const isRaffleActive = settings?.find(s => s.key === "auto_raffle_active")?.value === "true";
 
-      // Se tudo estiver desligado, não faz nada
-      if (!isDiscountActive && !isRaffleActive) return;
+      if (!isDiscountActive && !isRaffleActive) {
+        setRewardCoupon(null);
+        return;
+      }
 
       let awardedDiscount = false;
 
-      // 2. Tenta dar um Desconto primeiro (se estiver ativo)
       if (isDiscountActive) {
-        // Busca Lotes Ativos que cabem no valor da compra
         const { data: campaigns } = await supabase
           .from("coupon_campaigns")
           .select("*")
           .eq("is_active", true)
           .lte("min_purchase_value", paymentAmount)
-          .order("created_at", { ascending: true }); // Pega a campanha mais antiga primeiro
+          .order("created_at", { ascending: true }); 
 
         if (campaigns && campaigns.length > 0) {
-          // Filtra campanhas que tem estoque e não passam do valor máximo
           const validCampaign = campaigns.find(c =>
             (c.max_purchase_value === null || c.max_purchase_value === 0 || paymentAmount <= c.max_purchase_value) &&
             (c.used_quantity < c.total_quantity)
           );
 
           if (validCampaign) {
-            const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString(); // Expira em 30 dias
-
-            // Entrega o cupom pro cliente
+            const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
             await supabase.from("coupons").insert({
               user_id: userId,
               coupon_type: "discount",
@@ -585,18 +581,15 @@ const MessageThread = () => {
               expires_at: expiresAt
             } as any);
 
-            // Desconta 1 do estoque da campanha
             await supabase.from("coupon_campaigns").update({ used_quantity: validCampaign.used_quantity + 1 }).eq("id", validCampaign.id);
 
             setRewardCoupon({ type: "discount", value: validCampaign.discount_percent });
             await sendNotification(userId, "🎟️ Novo Cupom de Desconto!", `Você ganhou ${validCampaign.discount_percent}% OFF para usar no seu próximo serviço. Confira na aba Meus Cupons.`);
-            setRewardOpen(true);
             awardedDiscount = true;
           }
         }
       }
 
-      // 3. Se não deu desconto (porque não tinha lote ou tava desligado), tenta dar cupom de sorteio
       if (!awardedDiscount && isRaffleActive) {
         await supabase.from("coupons").insert({
           user_id: userId,
@@ -608,7 +601,6 @@ const MessageThread = () => {
 
         setRewardCoupon({ type: "raffle", value: 0 });
         await sendNotification(userId, "🎟️ Novo Cupom de Sorteio!", "Você ganhou um cupom para o Sorteio Mensal! Boa sorte.");
-        setRewardOpen(true);
       }
 
     } catch (err) {
@@ -758,14 +750,26 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
+              // ✅ ENCERRA O CHAT IMEDIATAMENTE (PIX)
+              await supabase.from("chat_messages").insert({
+                request_id: threadId,
+                sender_id: userId,
+                content: "🔒 CHAMADA ENCERRADA automaticamente após pagamento."
+              });
+              await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
+              setRequestStatus("completed");
+
               await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
               await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
+              await sendNotification(chatProUserId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
-              // ✅ CHAMA A NOVA FUNÇÃO DE CUPOM E PASSA O VALOR
               await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
               toast({ title: "Pagamento PIX confirmado!" });
               setPixOpen(false);
+              
+              // ABRE A AVALIAÇÃO OBRIGATÓRIA
+              setRatingOpen(true);
             }
           } catch (err) {
             console.error("PIX polling error:", err);
@@ -795,19 +799,42 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
+      // ✅ ENCERRA O CHAT IMEDIATAMENTE (CARTÃO)
+      await supabase.from("chat_messages").insert({
+        request_id: threadId,
+        sender_id: userId,
+        content: "🔒 CHAMADA ENCERRADA automaticamente após pagamento."
+      });
+      await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
+      setRequestStatus("completed");
+
       await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento no Cartão de Crédito no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
       await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via Cartão no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
+      await sendNotification(chatProUserId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
-      // ✅ CHAMA A NOVA FUNÇÃO DE CUPOM E PASSA O VALOR
       await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
       setProcessingPayment(false);
       setPaymentConfirmed(true);
       setPaymentOpen(false);
       toast({ title: "Pagamento confirmado!" });
+
+      // ABRE A AVALIAÇÃO OBRIGATÓRIA
+      setRatingOpen(true);
+
     } catch (err: any) {
       setProcessingPayment(false);
       toast({ title: err.message || "Erro ao processar pagamento", variant: "destructive" });
+    }
+  };
+
+  // ✅ FUNÇÃO QUE FECHA A AVALIAÇÃO E LIBERA O CUPOM (SE HOUVER)
+  const closeRatingAndShowReward = () => {
+    setRatingOpen(false);
+    if (rewardCoupon) {
+      setTimeout(() => {
+        setRewardOpen(true);
+      }, 500);
     }
   };
 
@@ -828,9 +855,11 @@ const MessageThread = () => {
       setRequestStatus("completed");
     }
 
-    setRatingOpen(false);
     setHasRated(true);
     toast({ title: "Avaliação enviada! Obrigado!" });
+    
+    // Passa a vez para o cupom
+    closeRatingAndShowReward();
   };
 
   const parseAudio = (content: string) => {
@@ -1726,8 +1755,14 @@ const MessageThread = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Rating Dialog */}
-      <Dialog open={ratingOpen} onOpenChange={setRatingOpen}>
+      {/* ✅ NOVA LÓGICA DE MODAIS: Avaliação aparece primeiro! */}
+      <Dialog open={ratingOpen} onOpenChange={(open) => {
+        if (!open) {
+          closeRatingAndShowReward();
+        } else {
+          setRatingOpen(true);
+        }
+      }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Avalie o profissional</DialogTitle>
@@ -1759,8 +1794,11 @@ const MessageThread = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Reward Coupon Dialog */}
-      <Dialog open={rewardOpen} onOpenChange={setRewardOpen}>
+      {/* Reward Coupon Dialog (Só abre depois da avaliação, se houver cupom) */}
+      <Dialog open={rewardOpen} onOpenChange={(open) => {
+        setRewardOpen(open);
+        if (!open) setRewardCoupon(null); // Limpa para não abrir duas vezes
+      }}>
         <DialogContent className="max-w-sm">
           <div className="text-center space-y-4 py-4">
             <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
@@ -1786,7 +1824,10 @@ const MessageThread = () => {
               </div>
             }
             <button
-              onClick={() => setRewardOpen(false)}
+              onClick={() => {
+                setRewardOpen(false);
+                setRewardCoupon(null);
+              }}
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
 
               Entendido!

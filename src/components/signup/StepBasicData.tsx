@@ -167,9 +167,11 @@ const StepBasicData = ({ accountType, onNext, onBack }: Props) => {
     } catch { setCitySuggestions([]); }
   }, []);
 
+  // ✅ APENAS ESTA FUNÇÃO FOI AJUSTADA PARA APLICAR A MÁSCARA VISUAL 00000-000
   const handleCepChange = (val: string) => {
     const clean = val.replace(/\D/g, "").slice(0, 8);
-    setAddressZip(clean);
+    const masked = clean.replace(/^(\d{5})(\d)/, "$1-$2");
+    setAddressZip(masked);
     if (clean.length === 8) fetchCepAuto(clean);
   };
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, CreditCard, Building2, Upload, Loader2, Check, FileText, Clock, ShieldCheck, Lock } from "lucide-react";
+import { ArrowLeft, CreditCard, Building2, Upload, Loader2, Check, FileText, ShieldCheck, Lock, FileUp } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -13,28 +13,22 @@ const formatCVV = (val: string) => val.replace(/\D/g, "").slice(0, 4);
 
 const BusinessCheckout = () => {
   const navigate = useNavigate();
+  const [step, setStep] = useState(1); // 1: Dados, 2: Upload
   const [loading, setLoading] = useState(false);
-  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [searchingCep, setSearchingCep] = useState(false);
   
-  // ✅ O "Pulo do Gato": Salvamos apenas o LINK do arquivo para resistir ao refresh
-  const [proofUrl, setProofUrl] = useState<string | null>(localStorage.getItem('temp_business_pdf_url'));
+  const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "" });
+  const [businessData, setBusinessData] = useState({ cnpj: "", cep: "", street: "", number: "", neighborhood: "", city: "", state: "" });
 
-  const [cardForm, setCardForm] = useState(() => {
-    const saved = localStorage.getItem('business_card_draft');
-    return saved ? JSON.parse(saved) : { number: "", name: "", expiry: "", cvv: "" };
-  });
-
-  const [businessData, setBusinessData] = useState(() => {
-    const saved = localStorage.getItem('business_info_draft');
-    return saved ? JSON.parse(saved) : { cnpj: "", cep: "", street: "", number: "", neighborhood: "", city: "", state: "" };
-  });
-
+  // Tenta recuperar se o usuário já passou do passo 1 (ajuda no refresh do Android)
   useEffect(() => {
-    localStorage.setItem('business_card_draft', JSON.stringify(cardForm));
-    localStorage.setItem('business_info_draft', JSON.stringify(businessData));
-    if (proofUrl) localStorage.setItem('temp_business_pdf_url', proofUrl);
-  }, [cardForm, businessData, proofUrl]);
+    const savedStep = localStorage.getItem('business_step');
+    if (savedStep === '2') setStep(2);
+
+    const savedBus = localStorage.getItem('bus_data');
+    if (savedBus) setBusinessData(JSON.parse(savedBus));
+  }, []);
 
   const handleCepChange = async (value: string) => {
     const rawCep = value.replace(/\D/g, "");
@@ -45,14 +39,26 @@ const BusinessCheckout = () => {
         const res = await fetch(`https://viacep.com.br/ws/${rawCep}/json/`);
         const data = await res.json();
         if (!data.erro) {
-          setBusinessData(d => ({ ...d, street: data.logradouro, neighborhood: data.bairro, city: data.localidade, state: data.uf }));
+          const newData = { ...businessData, cep: formatCEP(value), street: data.logradouro, neighborhood: data.bairro, city: data.localidade, state: data.uf };
+          setBusinessData(newData);
+          localStorage.setItem('bus_data', JSON.stringify(newData));
         }
       } finally { setSearchingCep(false); }
     }
   };
 
-  // ✅ NOVO: Upload automático assim que seleciona
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const goToStep2 = () => {
+    if (!businessData.cnpj || !businessData.number || !cardForm.number) {
+      toast({ title: "Preencha os dados", variant: "destructive" });
+      return;
+    }
+    localStorage.setItem('business_step', '2');
+    localStorage.setItem('bus_data', JSON.stringify(businessData));
+    setStep(2);
+    window.scrollTo(0, 0);
+  };
+
+  const handleUploadAndFinish = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.type !== "application/pdf") {
@@ -60,120 +66,110 @@ const BusinessCheckout = () => {
       return;
     }
 
-    setUploadingFile(true);
+    setUploading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) throw new Error("Logue novamente");
 
-      const path = `business-proofs/${user.id}/temp_${Date.now()}.pdf`;
-      const { error: uploadError } = await supabase.storage.from("business-proofs").upload(path, file);
-      
-      if (uploadError) throw uploadError;
-      
+      // Faz o upload direto
+      const path = `business-proofs/${user.id}/${Date.now()}.pdf`;
+      await supabase.storage.from("business-proofs").upload(path, file);
       const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(path);
-      setProofUrl(urlData.publicUrl);
-      toast({ title: "Arquivo carregado com sucesso!" });
-    } catch (err) {
-      toast({ title: "Erro no upload", description: "Tente selecionar o arquivo novamente.", variant: "destructive" });
-    } finally {
-      setUploadingFile(false);
-    }
-  };
 
-  const handleSubscribe = async () => {
-    if (!proofUrl) {
-      toast({ title: "Anexe o arquivo", description: "O PDF do CNPJ é obrigatório.", variant: "destructive" });
-      return;
-    }
-    
-    if (!cardForm.number || !cardForm.name || !businessData.cnpj || !businessData.number) {
-      toast({ title: "Preencha tudo", variant: "destructive" });
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não logado.");
-
+      // Salva no banco
       const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state}`;
-
-      const { error: subError } = await supabase.from("subscriptions").upsert({
+      await supabase.from("subscriptions").upsert({
         user_id: user.id, plan_id: "business", status: "PENDING",
-        business_cnpj: businessData.cnpj, business_address: fullAddress, business_proof_url: proofUrl
+        business_cnpj: businessData.cnpj, business_address: fullAddress, business_proof_url: urlData.publicUrl
       });
 
-      if (subError) throw subError;
-
-      toast({ title: "Solicitação enviada com sucesso!" });
-      localStorage.removeItem('business_card_draft');
-      localStorage.removeItem('business_info_draft');
-      localStorage.removeItem('temp_business_pdf_url');
+      toast({ title: "Sucesso!", description: "Sua assinatura está em análise." });
+      localStorage.removeItem('business_step');
+      localStorage.removeItem('bus_data');
       navigate("/profile");
     } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
-    } finally { setLoading(false); }
+      toast({ title: "Erro", description: "Ocorreu um erro no upload. Tente novamente.", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
     <AppLayout>
       <main className="max-w-md mx-auto px-4 py-5 pb-10">
-        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-sm text-muted-foreground mb-6"><ArrowLeft className="w-4 h-4" /> Voltar</button>
-
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-violet-500/10 flex items-center justify-center"><ShieldCheck className="w-6 h-6 text-violet-600" /></div>
-          <div><h1 className="text-xl font-bold">Plano Business</h1><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Verificação Empresa</p></div>
-        </div>
-
-        <div className="space-y-5">
-          <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-4">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase border-b pb-2">Informações da Empresa</p>
-            <input placeholder="CNPJ" value={businessData.cnpj} onChange={e => setBusinessData({...businessData, cnpj: formatCNPJ(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none" />
-            <div className="grid grid-cols-2 gap-3">
-              <input placeholder="CEP" value={businessData.cep} onChange={e => handleCepChange(e.target.value)} className="w-full p-3 border rounded-xl bg-background outline-none" />
-              <input placeholder="Nº *" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className="w-full p-3 border rounded-xl bg-background outline-none" />
+        
+        {step === 1 ? (
+          <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center"><CreditCard className="w-6 h-6 text-primary" /></div>
+              <div><h1 className="text-xl font-bold">Plano Business</h1><p className="text-xs text-muted-foreground uppercase tracking-widest font-bold">Passo 1 de 2</p></div>
             </div>
 
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground mb-1 block">Cartão CNPJ (PDF) *</label>
-              <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${proofUrl ? 'border-emerald-500 bg-emerald-500/5' : 'border-muted-foreground/20'}`}>
-                {uploadingFile ? (
-                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
-                ) : proofUrl ? (
-                  <FileText className="w-8 h-8 text-emerald-600" />
-                ) : (
-                  <Upload className="w-8 h-8 text-muted-foreground" />
-                )}
-                <span className="text-sm font-bold text-center text-foreground px-2 truncate w-full">
-                  {uploadingFile ? "Enviando arquivo..." : proofUrl ? "PDF Carregado com Sucesso!" : "Selecionar PDF"}
-                </span>
-                <input type="file" className="hidden" accept="application/pdf" onChange={handleFileChange} disabled={uploadingFile} />
-              </label>
-              {proofUrl && !uploadingFile && (
-                <p className="text-[10px] text-emerald-600 text-center font-bold mt-2 uppercase flex items-center justify-center gap-1">
-                  <Check className="w-3 h-3" /> Arquivo salvo na nuvem
-                </p>
-              )}
+            <div className="space-y-5">
+              <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-4">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase border-b pb-2">Dados da Empresa</p>
+                <input placeholder="CNPJ" value={businessData.cnpj} onChange={e => setBusinessData({...businessData, cnpj: formatCNPJ(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input placeholder="CEP" value={businessData.cep} onChange={e => handleCepChange(e.target.value)} className="w-full p-3 border rounded-xl bg-background outline-none" />
+                  <input placeholder="Nº" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className="w-full p-3 border rounded-xl bg-background outline-none" />
+                </div>
+              </div>
+
+              <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-4">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase border-b pb-2">Cartão de Crédito</p>
+                <input placeholder="NOME NO CARTÃO" value={cardForm.name} onChange={e => setCardForm({...cardForm, name: e.target.value.toUpperCase()})} className="w-full p-3 border rounded-xl bg-background outline-none" />
+                <input placeholder="NÚMERO DO CARTÃO" value={cardForm.number} onChange={e => setCardForm({...cardForm, number: formatCardNumber(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input placeholder="MM/AA" value={cardForm.expiry} onChange={e => setCardForm({...cardForm, expiry: formatExpiry(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none text-center" />
+                  <input placeholder="CVV" value={cardForm.cvv} onChange={e => setCardForm({...cardForm, cvv: formatCVV(e.target.value)})} type="password" className="w-full p-3 border rounded-xl bg-background outline-none text-center" />
+                </div>
+              </div>
+
+              <button onClick={goToStep2} className="w-full py-4 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg">
+                Próximo Passo <ArrowLeft className="w-4 h-4 rotate-180" />
+              </button>
             </div>
           </div>
+        ) : (
+          <div className="animate-in fade-in zoom-in-95 duration-300">
+            <button onClick={() => setStep(1)} className="flex items-center gap-2 text-sm text-muted-foreground mb-6"><ArrowLeft className="w-4 h-4" /> Voltar aos dados</button>
+            
+            <div className="flex flex-col items-center text-center mb-8">
+              <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 flex items-center justify-center mb-4">
+                <FileUp className="w-10 h-10 text-emerald-600" />
+              </div>
+              <h1 className="text-2xl font-bold">Último Passo!</h1>
+              <p className="text-muted-foreground text-sm mt-2 px-6">Precisamos do PDF do seu cartão CNPJ para validar sua empresa.</p>
+            </div>
 
-          <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-4">
-             <p className="text-[10px] font-bold text-muted-foreground uppercase border-b pb-2 flex justify-between">
-              <span><CreditCard className="w-3.5 h-3.5 inline mr-1" /> Pagamento</span> 
-              <span className="text-primary font-bold">R$ 250,00</span>
-            </p>
-            <input placeholder="NOME NO CARTÃO" value={cardForm.name} onChange={e => setCardForm({...cardForm, name: e.target.value.toUpperCase()})} className="w-full p-3 border rounded-xl bg-background outline-none uppercase" />
-            <input placeholder="0000 0000 0000 0000" value={cardForm.number} onChange={e => setCardForm({...cardForm, number: formatCardNumber(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none font-mono" />
-            <div className="grid grid-cols-2 gap-3">
-              <input placeholder="MM/AA" value={cardForm.expiry} onChange={e => setCardForm({...cardForm, expiry: formatExpiry(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none text-center" />
-              <input placeholder="CVV" value={cardForm.cvv} onChange={e => setCardForm({...cardForm, cvv: formatCVV(e.target.value)})} type="password" className="w-full p-3 border rounded-xl bg-background outline-none text-center" />
+            <div className="bg-card border-2 border-dashed border-emerald-500/30 rounded-3xl p-8 shadow-sm">
+               <label className="flex flex-col items-center justify-center cursor-pointer group">
+                  {uploading ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 className="w-12 h-12 text-primary animate-spin" />
+                      <p className="text-sm font-bold text-primary animate-pulse">Enviando documento...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg group-active:scale-90 transition-transform mb-4">
+                        <Upload className="w-8 h-8" />
+                      </div>
+                      <p className="font-bold text-lg">Selecionar PDF</p>
+                      <p className="text-xs text-muted-foreground mt-1">Toque aqui para abrir sua galeria</p>
+                    </>
+                  )}
+                  <input type="file" className="hidden" accept="application/pdf" onChange={handleUploadAndFinish} disabled={uploading} />
+               </label>
+            </div>
+
+            <div className="mt-8 p-4 bg-muted/50 rounded-2xl flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-muted-foreground mt-0.5" />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Se a página atualizar ao selecionar o arquivo, não se preocupe. O Chamô vai te manter nesta tela de upload para você tentar novamente.
+              </p>
             </div>
           </div>
-
-          <button onClick={handleSubscribe} disabled={loading || uploadingFile} className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
-            {loading ? <Loader2 className="animate-spin w-5 h-5" /> : "Confirmar Assinatura"}
-          </button>
-        </div>
+        )}
       </main>
     </AppLayout>
   );

@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useState, useRef } from "react";
@@ -44,10 +44,13 @@ const MessageThread = () => {
   const [requestProtocol, setRequestProtocol] = useState<string | null>(null);
   const [hasRated, setHasRated] = useState(false);
   const [proPlanId, setProPlanId] = useState<string | null>(null);
+  
+  // ✅ NOVO: Estado para ver detalhes da cobrança enviada
+  const [viewingBilling, setViewingBilling] = useState<any | null>(null);
 
   // Payment state
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string;} | null>(null);
+  const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string; installments: string} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [cardStep, setCardStep] = useState(false);
@@ -83,6 +86,9 @@ const MessageThread = () => {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Carrega as taxas assim que o componente monta
+  useEffect(() => { loadFeeSettings(); }, []);
 
   useEffect(() => {
     if (threadId && localStorage.getItem(`receipt_dismissed_${threadId}`) === "true") {
@@ -298,13 +304,14 @@ const MessageThread = () => {
     }
   };
 
+  // ✅ CORRIGIDO: Mensagem da taxa do PIX
   const getBillingFeeLabel = () => {
     if (!billingMethod || !billingAmount) return null;
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return null;
 
     if (passFeeToClient) {
-      return { fee: 0, label: `✅ Você receberá R$ ${amount.toFixed(2).replace(".", ",")}. As taxas do parcelamento serão cobradas do cliente.` };
+      return { fee: 0, label: `✅ Você receberá R$ ${amount.toFixed(2).replace(".", ",")}. ${billingMethod === 'pix' ? 'A taxa do PIX será cobrada' : 'As taxas do parcelamento serão cobradas'} do cliente.` };
     }
 
     if (billingMethod === "pix") {
@@ -329,6 +336,7 @@ const MessageThread = () => {
     return null;
   };
 
+  // ✅ CORRIGIDO: Mostra só a % da taxa e o valor final
   const getBillingInstallmentOptions = () => {
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return [];
@@ -342,11 +350,10 @@ const MessageThread = () => {
       if (passFeeToClient) {
         const totalWithFee = amount + fee;
         const val = (totalWithFee / i).toFixed(2).replace(".", ",");
-        options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista) - C/ Juros` : `${i}x de R$ ${val} - C/ Juros` });
+        options.push({ value: String(i), label: `${i}x de R$ ${val} (Taxa: ${feePct}%)` });
       } else {
         const val = (amount / i).toFixed(2).replace(".", ",");
-        const feeLabel = fee > 0 ? ` (- R$ ${fee.toFixed(2).replace(".", ",")} de taxa)` : "";
-        options.push({ value: String(i), label: i === 1 ? `1x de R$ ${val} (à vista)${feeLabel}` : `${i}x de R$ ${val}${feeLabel}` });
+        options.push({ value: String(i), label: `${i}x de R$ ${val} (Sua taxa: ${feePct}%)` });
       }
     }
     return options;
@@ -357,7 +364,7 @@ const MessageThread = () => {
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) {toast({ title: "Valor inválido", variant: "destructive" });return;}
 
-    const methodLabel = billingMethod === "pix" ? "PIX" : `Cartão ${billingInstallments}x`;
+    const methodLabel = billingMethod === "pix" ? "PIX" : `Cartão`;
     const feeText = passFeeToClient ? "\nTaxa: Por conta do cliente" : "";
     
     const billingContent = `💰 COBRANÇA\nValor base: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}${feeText}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}:${passFeeToClient ? "true" : "false"}]`;
@@ -396,22 +403,14 @@ const MessageThread = () => {
     await loadFeeSettings(); 
     const billing = parseBilling(msg.content);
     if (!billing) return;
-    setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id });
+    setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id, installments: billing.installments });
     
     setClientPassFee(billing.passFee); 
 
-    if (billing.method) {
-      setPaymentMethod(billing.method);
-      if (billing.method === "card") {
-        setCardStep(true);
-        setInstallments(billing.installments);
-      } else {
-        setCardStep(false);
-      }
-    } else {
-      setPaymentMethod(null);
-      setCardStep(false);
-    }
+    // ✅ CORRIGIDO: NUNCA pula direto pro Cartão, sempre mostra o Resumo primeiro
+    setPaymentMethod(billing.method);
+    setCardStep(false); 
+    
     setPaymentConfirmed(false);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
     if (!billing.method) setInstallments("1");
@@ -471,6 +470,22 @@ const MessageThread = () => {
     return baseAmount + fee;
   };
 
+  // ✅ CÁLCULO EXATO PARA MOSTRAR AO PROFISSIONAL NO "VER DETALHES"
+  const calculateProfessionalReceive = (b: any) => {
+    const amount = parseFloat(b.amount);
+    if (b.passFee) return amount; 
+    let fee = 0;
+    if (b.method === 'pix') {
+      fee = (amount * parseFloat(feeSettings.pix_fee_pct || "0") / 100) + parseFloat(feeSettings.pix_fee_fixed || "0");
+    } else if (b.method === 'card') {
+      const i = parseInt(b.installments || "1");
+      const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
+      const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
+      fee = (amount * feePct / 100) + feeFixed;
+    }
+    return amount - fee;
+  }
+
   const formatCardNumber = (value: string) => {
     const digits = value.replace(/\D/g, "").slice(0, 16);
     return digits.replace(/(\d{4})(?=\d)/g, "$1 ");
@@ -509,7 +524,6 @@ const MessageThread = () => {
     return options;
   };
 
-  // ✅ FUNÇÃO QUE GERA E SALVA O CUPOM NO BANCO 100% BLINDADA
   const awardPostPaymentCoupon = async () => {
     if (!userId) return;
     try {
@@ -524,7 +538,6 @@ const MessageThread = () => {
         const days = parseInt(settings.discount_coupon_validity_days) || 30;
         const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
 
-        // Envia todos os dados explicitamente para não dar erro
         const { error } = await supabase.from("coupons").insert({
           user_id: userId,
           coupon_type: "discount",
@@ -697,7 +710,6 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
-              // ✅ Chama o prêmio logo após o pagamento confirmar
               await awardPostPaymentCoupon();
 
               toast({ title: "Pagamento PIX confirmado!" });
@@ -731,7 +743,6 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
-      // ✅ Chama o prêmio logo após o pagamento confirmar
       await awardPostPaymentCoupon();
 
       setProcessingPayment(false);
@@ -851,11 +862,17 @@ const MessageThread = () => {
           </div>
           <p className="text-lg font-bold">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
           
-          {billing.passFee && !isMine && <p className="text-[10px] font-medium text-destructive mt-0 mb-1">+ Taxas no momento do pagamento</p>}
+          {billing.passFee && !isMine && <p className="text-[10px] font-medium text-destructive mt-0 mb-1">+ Taxas no pagamento</p>}
           
           <p className="text-xs opacity-80">{billing.desc}</p>
           
-          {!isMine && (
+          {isMine ? (
+             <button
+                onClick={() => setViewingBilling(billing)}
+                className="mt-1 w-full py-2 rounded-lg bg-background/20 backdrop-blur-sm text-xs font-semibold hover:bg-background/30 transition-colors border border-current/20 flex items-center justify-center gap-1">
+                <Info className="w-3.5 h-3.5" /> Detalhes da cobrança
+              </button>
+          ) : (
             alreadyPaid ? (
               <div className="mt-2 w-full py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-600 text-center flex items-center justify-center gap-1.5 uppercase">
                 <CheckCircle2 className="w-3 h-3" /> Pagamento efetuado
@@ -1211,7 +1228,7 @@ const MessageThread = () => {
       }
       <BottomNav />
 
-      {/* Billing Dialog */}
+      {/* Billing Dialog (Profissional) */}
       <Dialog open={billingOpen} onOpenChange={(open) => {
         setBillingOpen(open);
         if (open) {loadFeeSettings();setBillingStep("choose_type");}
@@ -1372,7 +1389,7 @@ const MessageThread = () => {
             <div className="bg-muted/50 border rounded-xl p-3">
                   {billingMethod === "card" &&
               <div className="mb-2">
-                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Simulação de Parcelas</label>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Simulação de Parcelas (O cliente poderá alterar)</label>
                       <select
                   value={billingInstallments}
                   onChange={(e) => setBillingInstallments(e.target.value)}
@@ -1407,12 +1424,43 @@ const MessageThread = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Payment Dialog */}
+      {/* ✅ NOVO: Dialog para o Profissional ver os detalhes da cobrança */}
+      <Dialog open={!!viewingBilling} onOpenChange={(open) => !open && setViewingBilling(null)}>
+        <DialogContent className="max-w-xs rounded-2xl">
+          <DialogHeader><DialogTitle>Detalhes da Cobrança</DialogTitle></DialogHeader>
+          {viewingBilling && (
+            <div className="space-y-3 text-sm pt-2">
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-muted-foreground">Valor Base:</span>
+                <span className="font-bold">R$ {parseFloat(viewingBilling.amount).toFixed(2).replace(".", ",")}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-muted-foreground">Método escolhido:</span>
+                <span className="font-semibold">{viewingBilling.method === 'pix' ? 'PIX' : `Cartão`}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-muted-foreground">Taxa do sistema:</span>
+                <span className="font-semibold text-amber-600">{viewingBilling.passFee ? 'Cliente vai pagar' : 'Você assumiu'}</span>
+              </div>
+              <div className="flex justify-between pt-1">
+                <span className="text-foreground font-bold">Você receberá:</span>
+                <span className="font-extrabold text-lg text-emerald-600">
+                  R$ {calculateProfessionalReceive(viewingBilling).toFixed(2).replace(".", ",")}
+                </span>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Dialog (Cliente) */}
       <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{cardStep ? "Dados do cartão" : "Pagamento"}</DialogTitle>
+            <DialogTitle>{cardStep ? "Dados do cartão" : "Resumo do Pagamento"}</DialogTitle>
           </DialogHeader>
+          
+          {/* TELA 1: RESUMO E CUPOM */}
           {paymentData && !cardStep &&
           <div className="space-y-4">
               <div className="text-center p-4 bg-muted/50 rounded-xl relative">
@@ -1433,7 +1481,6 @@ const MessageThread = () => {
                 <p className="text-xs text-muted-foreground mt-2">{paymentData.desc}</p>
               </div>
 
-              {/* ✅ NOVO VISUAL DO CUPOM DE DESCONTO */}
               {!selectedCouponId && availableCoupons.length > 0 && (
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2">
                   <div className="flex items-center gap-3">
@@ -1475,60 +1522,38 @@ const MessageThread = () => {
                 </div>
               )}
 
-              {paymentMethod ?
-            <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Método de pagamento:</p>
-                  <div className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-primary bg-primary/5">
-                    <span className="text-lg">{paymentMethod === "pix" ? "📱" : "💳"}</span>
-                    <div className="text-left">
-                      <p className="text-sm font-semibold text-foreground">{paymentMethod === "pix" ? "PIX" : "Cartão de crédito"}</p>
-                      <p className="text-[10px] text-muted-foreground">{paymentMethod === "pix" ? "Pagamento instantâneo" : "Parcelamento disponível"}</p>
-                    </div>
+              {/* ✅ MOSTRA O MÉTODO TRAVADO DEFINIDO PELO PROFISSIONAL */}
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Método definido pelo profissional:</p>
+                <div className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-primary bg-primary/5">
+                  <span className="text-lg">{paymentMethod === "pix" ? "📱" : "💳"}</span>
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-foreground">{paymentMethod === "pix" ? "PIX" : "Cartão de Crédito"}</p>
+                    <p className="text-[10px] text-muted-foreground">{paymentMethod === "pix" ? "Pagamento instantâneo" : "Pagamento seguro"}</p>
                   </div>
-                </div> :
-
-            <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Escolha o método de pagamento:</p>
-                  <button
-                onClick={() => handleSelectMethod("pix")}
-                className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-border hover:border-primary/30 transition-colors">
-                    <span className="text-lg">📱</span>
-                    <div className="text-left">
-                      <p className="text-sm font-semibold text-foreground">PIX</p>
-                      <p className="text-[10px] text-muted-foreground">Pagamento instantâneo</p>
-                    </div>
-                  </button>
-                  <button
-                onClick={() => handleSelectMethod("card")}
-                className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-border hover:border-primary/30 transition-colors">
-                    <span className="text-lg">💳</span>
-                    <div className="text-left">
-                      <p className="text-sm font-semibold text-foreground">Cartão de crédito</p>
-                      <p className="text-[10px] text-muted-foreground">Parcelamento disponível</p>
-                    </div>
-                  </button>
                 </div>
-            }
+              </div>
 
               {paymentMethod === "pix" &&
-            <button
-              onClick={handleConfirmPayment}
-              disabled={processingPayment}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-                  {processingPayment ? "Processando..." : "Confirmar pagamento via PIX"}
+                <button
+                  onClick={handleConfirmPayment}
+                  disabled={processingPayment}
+                  className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 mt-4">
+                  {processingPayment ? "Processando..." : "Confirmar e Gerar PIX"}
                 </button>
-            }
+              }
 
               {paymentMethod === "card" &&
-            <button
-              onClick={() => setCardStep(true)}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-                  Prosseguir com cartão
+                <button
+                  onClick={() => setCardStep(true)}
+                  className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors mt-4">
+                  Prosseguir para o Cartão
                 </button>
-            }
+              }
             </div>
           }
 
+          {/* TELA 2: FORMULÁRIO DO CARTÃO (Se for cartão) */}
           {paymentData && cardStep &&
           <div className="space-y-4">
               <div className="bg-muted/50 rounded-xl p-3 text-center">
@@ -1617,7 +1642,7 @@ const MessageThread = () => {
 
               <div className="flex gap-2">
                 <button
-                onClick={() => {setCardStep(false);setPaymentMethod(null);}}
+                onClick={() => setCardStep(false)}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
                   Voltar
                 </button>

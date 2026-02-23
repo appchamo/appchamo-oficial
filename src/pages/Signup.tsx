@@ -52,6 +52,9 @@ const Signup = () => {
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
 
+  // ✅ NOVO: Memória para saber se a conta já foi criada no banco
+  const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
     setStep("basic");
@@ -74,7 +77,6 @@ const Signup = () => {
     else doSignup(data, "free");
   };
 
-  // ✅ Inicia o cadastro primeiro para garantir o login
   const handlePlanSelect = async (planId: string) => {
     if (!profileData) return;
     setSelectedPlanId(planId);
@@ -94,6 +96,21 @@ const Signup = () => {
     setLoading(true);
 
     try {
+      // ✅ PROTEÇÃO: Se a conta já foi criada, apenas atualiza o plano ou reabre o modal
+      if (createdUserId) {
+        if (accountType === "professional" && planId !== "free") {
+          setLoading(false);
+          setIsSubscriptionOpen(true);
+        } else {
+          // Se o usuário desistiu de pagar e clicou no Grátis
+          await supabase.from("subscriptions").update({ plan_id: "free" } as any).eq("user_id", createdUserId);
+          localStorage.setItem("just_signed_up", "true");
+          toast({ title: "Conta criada com sucesso!" });
+          navigate("/home");
+        }
+        return; // Para a execução aqui para não dar o erro de e-mail duplicado
+      }
+
       // 1. Cria a conta no Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: basicData.email,
@@ -117,6 +134,10 @@ const Signup = () => {
       }
 
       const userId = authData.user.id;
+      
+      // ✅ Salva o ID na memória para não tentar criar a conta de novo se ele fechar o modal
+      setCreatedUserId(userId); 
+
       await new Promise((r) => setTimeout(r, 1000));
 
       const docFilesPayload = await Promise.all(
@@ -148,7 +169,7 @@ const Signup = () => {
         return;
       }
 
-      // 3. ✅ Se for plano pago, abre o modal agora (usuário já está logado)
+      // 3. Se for plano pago, abre o modal agora (usuário já está logado)
       if (accountType === "professional" && planId !== "free") {
         setLoading(false);
         setIsSubscriptionOpen(true);

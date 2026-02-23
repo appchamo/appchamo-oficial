@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Loader2, ShieldCheck, CreditCard } from "lucide-react";
 
 interface SubscriptionDialogProps {
   isOpen: boolean;
@@ -11,13 +11,38 @@ interface SubscriptionDialogProps {
   onSuccess: () => void;
 }
 
+// ✅ Funções de Máscara (Formatação automática)
+const formatCardNumber = (val: string) => {
+  return val.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 ").slice(0, 19);
+};
+
+const formatExpiry = (val: string) => {
+  return val.replace(/\D/g, "").replace(/(\d{2})(?=\d)/, "$1/").slice(0, 5);
+};
+
+const formatCVV = (val: string) => {
+  return val.replace(/\D/g, "").slice(0, 4);
+};
+
+const formatCpfCnpj = (val: string) => {
+  const v = val.replace(/\D/g, "");
+  if (v.length <= 11) {
+    return v.replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+  } else {
+    return v.replace(/(\d{2})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1/$2").replace(/(\d{4})(\d{1,2})$/, "$1-$2").slice(0, 18);
+  }
+};
+
+const formatCEP = (val: string) => {
+  return val.replace(/\D/g, "").replace(/(\d{5})(\d)/, "$1-$2").slice(0, 9);
+};
+
 export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess }: SubscriptionDialogProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     holderName: "",
     number: "",
-    expiryMonth: "",
-    expiryYear: "",
+    expiry: "", // Usando um campo único MM/AA
     ccv: "",
     cpfCnpj: "",
     postalCode: "",
@@ -25,6 +50,22 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
   });
 
   const handleSubscribe = async () => {
+    // Validação básica antes de enviar
+    if (!formData.holderName || !formData.number || !formData.expiry || !formData.ccv || !formData.cpfCnpj || !formData.postalCode || !formData.addressNumber) {
+      toast({ title: "Atenção", description: "Preencha todos os campos do pagamento.", variant: "destructive" });
+      return;
+    }
+
+    if (formData.number.length < 19) {
+      toast({ title: "Cartão inválido", description: "Verifique o número do cartão.", variant: "destructive" });
+      return;
+    }
+
+    if (formData.expiry.length < 5) {
+      toast({ title: "Validade inválida", description: "Preencha no formato MM/AA.", variant: "destructive" });
+      return;
+    }
+
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -33,9 +74,20 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
       const planValues = { pro: "49.90", vip: "140.00", business: "250.00" };
       const value = planValues[planId as keyof typeof planValues];
 
+      // Separa o MM/AA em Mês e Ano (adicionando "20" na frente do ano para a API)
+      const [expMonth, expYearShort] = formData.expiry.split("/");
+      const expYear = `20${expYearShort}`;
+
       const { data, error } = await supabase.functions.invoke("create-subscription", {
         body: {
-          ...formData,
+          holderName: formData.holderName,
+          number: formData.number.replace(/\s/g, ""), // Tira os espaços para a API
+          expiryMonth: expMonth,
+          expiryYear: expYear,
+          ccv: formData.ccv,
+          cpfCnpj: formData.cpfCnpj.replace(/\D/g, ""), // Tira os pontos/traços
+          postalCode: formData.postalCode.replace(/\D/g, ""),
+          addressNumber: formData.addressNumber,
           userId: user.id,
           email: user.email,
           planId: planId,
@@ -56,40 +108,101 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-md overflow-y-auto max-h-[90vh]">
+      <DialogContent className="max-w-md overflow-y-auto max-h-[90vh] rounded-2xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ShieldCheck className="text-primary" /> Dados do Pagamento
+          <DialogTitle className="flex items-center gap-2 text-primary">
+            <ShieldCheck className="w-5 h-5" /> Dados do Pagamento
           </DialogTitle>
         </DialogHeader>
         
-        <div className="space-y-3 py-4">
-          <input placeholder="Nome no cartão" className="w-full p-2 border rounded" 
-            onChange={e => setFormData({...formData, holderName: e.target.value})} />
+        <div className="space-y-4 py-2">
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Nome no cartão</label>
+            <input 
+              placeholder="NOME COMPLETO" 
+              value={formData.holderName}
+              className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary uppercase transition-all" 
+              onChange={e => setFormData({...formData, holderName: e.target.value.toUpperCase()})} 
+            />
+          </div>
           
-          <input placeholder="Número do cartão" className="w-full p-2 border rounded" 
-            onChange={e => setFormData({...formData, number: e.target.value})} />
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Número do cartão</label>
+            <div className="relative">
+              <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input 
+                placeholder="0000 0000 0000 0000" 
+                value={formData.number}
+                maxLength={19}
+                className="w-full p-3 pl-9 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all" 
+                onChange={e => setFormData({...formData, number: formatCardNumber(e.target.value)})} 
+              />
+            </div>
+          </div>
           
-          <div className="grid grid-cols-3 gap-2">
-            <input placeholder="Mês (MM)" className="p-2 border rounded" onChange={e => setFormData({...formData, expiryMonth: e.target.value})} />
-            <input placeholder="Ano (AAAA)" className="p-2 border rounded" onChange={e => setFormData({...formData, expiryYear: e.target.value})} />
-            <input placeholder="CVV" className="p-2 border rounded" onChange={e => setFormData({...formData, ccv: e.target.value})} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Validade</label>
+              <input 
+                placeholder="MM/AA" 
+                value={formData.expiry}
+                maxLength={5}
+                className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all text-center" 
+                onChange={e => setFormData({...formData, expiry: formatExpiry(e.target.value)})} 
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CVV</label>
+              <input 
+                placeholder="123" 
+                value={formData.ccv}
+                maxLength={4}
+                type="password"
+                className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all text-center" 
+                onChange={e => setFormData({...formData, ccv: formatCVV(e.target.value)})} 
+              />
+            </div>
           </div>
 
-          <input placeholder="CPF ou CNPJ" className="w-full p-2 border rounded" 
-            onChange={e => setFormData({...formData, cpfCnpj: e.target.value})} />
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CPF ou CNPJ do titular</label>
+            <input 
+              placeholder="000.000.000-00" 
+              value={formData.cpfCnpj}
+              maxLength={18}
+              className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all" 
+              onChange={e => setFormData({...formData, cpfCnpj: formatCpfCnpj(e.target.value)})} 
+            />
+          </div>
           
-          <div className="grid grid-cols-2 gap-2">
-            <input placeholder="CEP" className="p-2 border rounded" onChange={e => setFormData({...formData, postalCode: e.target.value})} />
-            <input placeholder="Nº da Residência" className="p-2 border rounded" onChange={e => setFormData({...formData, addressNumber: e.target.value})} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CEP</label>
+              <input 
+                placeholder="00000-000" 
+                value={formData.postalCode}
+                maxLength={9}
+                className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all" 
+                onChange={e => setFormData({...formData, postalCode: formatCEP(e.target.value)})} 
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Nº da Residência</label>
+              <input 
+                placeholder="Ex: 123" 
+                value={formData.addressNumber}
+                className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" 
+                onChange={e => setFormData({...formData, addressNumber: e.target.value})} 
+              />
+            </div>
           </div>
 
           <button 
             onClick={handleSubscribe} 
             disabled={loading}
-            className="w-full py-3 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2"
+            className="w-full py-3.5 mt-2 bg-primary hover:bg-primary/90 transition-colors text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            {loading ? <Loader2 className="animate-spin" /> : "Confirmar Assinatura"}
+            {loading ? <Loader2 className="animate-spin w-5 h-5" /> : "Confirmar Assinatura"}
           </button>
         </div>
       </DialogContent>

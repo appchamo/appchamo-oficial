@@ -51,15 +51,12 @@ const Messages = () => {
   const [reportReason, setReportReason] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
-  // ✅ Função load envolvida em useCallback para podermos usá-la no Tempo Real (Realtime)
-  const load = useCallback(async () => {
-    // Só mostramos o loading na primeira vez, para não piscar a tela no Realtime
-    if (threads.length === 0) setLoading(true); 
+  const load = useCallback(async (isBackgroundUpdate = false) => {
+    if (!isBackgroundUpdate) setLoading(true); 
     
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) { if (!isBackgroundUpdate) setLoading(false); return; }
 
-    // 1. Suporte (Mantido igual)
     const { data: supportMsgs, count: totalSupport } = await supabase
       .from("support_messages")
       .select("*", { count: "exact" })
@@ -81,7 +78,6 @@ const Messages = () => {
       }
     }
 
-    // 2. Busca todas as solicitações (Cliente e Profissional)
     const { data: requests } = await supabase.from("service_requests").select("*").eq("client_id", user.id).order("updated_at", { ascending: false });
     const { data: proData } = await supabase.from("professionals").select("id").eq("user_id", user.id);
     let proRequests: any[] = [];
@@ -97,7 +93,7 @@ const Messages = () => {
 
     if (threadIds.length === 0) {
       setThreads([]);
-      setLoading(false);
+      if (!isBackgroundUpdate) setLoading(false);
       return;
     }
 
@@ -109,7 +105,6 @@ const Messages = () => {
     
     const statusMap = new Map((readStatuses || []).map(rs => [rs.request_id, rs]));
 
-    // 🔥 OTIMIZAÇÃO DE VELOCIDADE: Busca todos os profissionais e perfis de uma vez (Bulk Fetch)
     const proIdsUniq = unique.map(r => r.professional_id);
     const { data: allPros } = await supabase.from("professionals").select("id, user_id").in("id", proIdsUniq);
     const proUserIdMap = new Map((allPros || []).map(p => [p.id, p.user_id]));
@@ -121,7 +116,6 @@ const Messages = () => {
     const { data: allProfiles } = await supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", usersToFetch);
     const profileMap = new Map((allProfiles || []).map(p => [p.user_id, p]));
 
-    // 3. Monta a lista final (Bem mais rápido agora)
     const enriched: Thread[] = await Promise.all(unique.map(async (req: any) => {
       const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
       
@@ -160,37 +154,53 @@ const Messages = () => {
 
     const finalThreads = enriched.filter(t => t !== null).sort((a, b) => new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime());
     setThreads(finalThreads);
-    setLoading(false);
-  }, [threads.length]);
+    if (!isBackgroundUpdate) setLoading(false);
+  }, []);
 
-  // 🔥 TEMPO REAL (REALTIME): Avisa o app para recarregar se houver nova mensagem ou solicitação
+  // 🔥 BLINDAGEM TRIPLA PARA ATUALIZAÇÃO DA TELA
   useEffect(() => { 
     load(); 
 
+    // 1. Tenta o Realtime Nativo (com pequeno delay para o banco sincronizar)
     const channel = supabase.channel('messages-list-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, () => {
-        load(); // Recarrega quando alguém manda mensagem
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
+        setTimeout(() => load(true), 500); 
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'service_requests' }, () => {
-        load(); // Recarrega quando entra nova solicitação ou muda status
+        setTimeout(() => load(true), 500);
       })
       .subscribe();
 
+    // 2. Polling Invisível (A cada 8 segundos verifica se chegou algo novo)
+    const pollingInterval = setInterval(() => {
+      load(true);
+    }, 8000);
+
+    // 3. Sensor de Foco (Atualiza no milissegundo que o usuário abrir/voltar pro App)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        load(true);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollingInterval);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [load]);
 
   const handleArchive = async (chatId: string, current: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("chat_read_status" as any).update({ is_archived: !current }).eq("user_id", user?.id).eq("request_id", chatId);
-    load();
+    load(true);
   };
 
   const handleMarkUnread = async (chatId: string, current: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("chat_read_status" as any).update({ manual_unread: !current }).eq("user_id", user?.id).eq("request_id", chatId);
-    load();
+    load(true);
   };
 
   const handleReportSubmit = async () => {

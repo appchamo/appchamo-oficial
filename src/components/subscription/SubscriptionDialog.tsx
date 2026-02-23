@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -19,7 +19,6 @@ const formatCNPJ = (val: string) => val.replace(/\D/g, "").replace(/^(\d{2})(\d{
 
 export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess }: SubscriptionDialogProps) {
   const [loading, setLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Estados do Cartão
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "" });
@@ -32,7 +31,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
   const [searchingCep, setSearchingCep] = useState(false);
   const [showFullAddress, setShowFullAddress] = useState(false);
 
-  // Busca de Endereço Automática via CEP (Igual ao Subscriptions.tsx)
+  // Busca de Endereço Automática via CEP
   const handleCepChange = async (value: string) => {
     const cep = value.replace(/\D/g, "");
     setBusinessData(d => ({ ...d, cep: cep.replace(/^(\d{5})(\d{3})/, "$1-$2") }));
@@ -101,7 +100,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
         return;
       }
 
-      // 3. Prepara Upload e Variáveis (Igualzinho ao Subscriptions.tsx)
+      // 3. Prepara Upload e Variáveis
       const planValues = { pro: "49.90", vip: "140.00", business: "250.00" };
       const value = planValues[planId as keyof typeof planValues];
       
@@ -131,7 +130,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
 
       if (upsertError) throw new Error("Erro ao registrar assinatura no banco.");
 
-      // 5. Envia pro Asaas via Edge Function (payload exato)
+      // 5. Envia pro Asaas via Edge Function
       const expiryParts = cardForm.expiry.split("/");
       const res = await supabase.functions.invoke("create_subscription", {
         body: {
@@ -180,7 +179,6 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
         </DialogHeader>
         
         <div className="space-y-4 py-2">
-          {/* Se for plano BUSINESS, mostra a inteligência de CNPJ igual ao Subscriptions */}
           {planId === "business" && (
             <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4 space-y-3">
               <p className="text-[10px] font-bold text-violet-600 uppercase flex items-center gap-1">
@@ -231,8 +229,9 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
                 </div>
               )}
 
-              <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-violet-300 rounded-xl p-3 text-center cursor-pointer hover:bg-violet-50 transition-colors">
-                <input type="file" ref={fileInputRef} hidden accept=".pdf,.png,.jpg" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
+              {/* ✅ CORREÇÃO DO ANDROID: Usando a tag nativa <label> em vez de <div onClick> */}
+              <label className="border-2 border-dashed border-violet-300 rounded-xl p-3 text-center cursor-pointer hover:bg-violet-50 transition-colors block">
+                <input type="file" hidden accept="image/jpeg,image/png,application/pdf" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
                 {proofFile ? (
                   <span className="text-xs text-emerald-600 font-bold flex items-center justify-center gap-1">
                     <Check className="w-4 h-4" /> Comprovante Anexado!
@@ -242,7 +241,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
                     <Upload className="w-3 h-3" /> Anexar Cartão CNPJ
                   </span>
                 )}
-              </div>
+              </label>
             </div>
           )}
 

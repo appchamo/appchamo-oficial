@@ -85,7 +85,6 @@ const MessageThread = () => {
 
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
@@ -860,13 +859,13 @@ const MessageThread = () => {
     return null;
   };
 
-  // ✅ NOVO: Parse do Produto Mágico
   const parseProduct = (content: string) => {
     const match = content.match(/\[PRODUCT:(.+):(.+):(.+):(.+)\]/);
     if (match) return { id: match[1], name: match[2], price: match[3], image: match[4] === 'null' ? null : match[4] };
     return null;
   };
 
+  // ✅ CORREÇÃO DO ANDROID: Transformado o botão em <label> para não recarregar a página
   const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userId || !threadId) return;
@@ -918,7 +917,6 @@ const MessageThread = () => {
       return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={isMine} />;
     }
 
-    // ✅ RENDERIZA O CARD DO PRODUTO NO CHAT
     if (isProductReq && product) {
       return (
         <div className="space-y-2 max-w-[200px]">
@@ -1246,14 +1244,17 @@ const MessageThread = () => {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    <button 
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploadingReceipt}
-                      className="w-full py-2.5 rounded-xl bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider hover:bg-primary/20 transition-all flex items-center justify-center gap-2"
-                    >
+                    <label className={`w-full py-2.5 rounded-xl bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider hover:bg-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer ${uploadingReceipt ? 'opacity-50 pointer-events-none' : ''}`}>
                       {uploadingReceipt ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
                       Selecionar Imagem ou PDF
-                    </button>
+                      <input 
+                        type="file" 
+                        className="hidden" 
+                        accept="image/jpeg,image/png,application/pdf"
+                        onChange={handleUploadReceipt}
+                        disabled={uploadingReceipt}
+                      />
+                    </label>
                     <button 
                       onClick={() => {
                         setDismissedReceipt(true);
@@ -1265,17 +1266,9 @@ const MessageThread = () => {
                     </button>
                   </div>
                 )}
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  accept="image/*,application/pdf"
-                  onChange={handleUploadReceipt}
-                />
               </div>
             )}
 
-            {/* SE O CHAT FECHOU (Por pagamento ou manual) E NÃO TEM AVALIAÇÃO, MOSTRA O BOTÃO */}
             {!isProfessional && !hasRated && requestStatus !== "rejected" && requestStatus !== "cancelled" &&
               <button
                 onClick={() => {setRatingStars(0);setRatingComment("");setRatingOpen(true);}}
@@ -1775,7 +1768,7 @@ const MessageThread = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ AVALIAÇÃO AGORA É PRIORITÁRIA */}
+      {/* ✅ AVALIAÇÃO OBRIGATÓRIA */}
       <Dialog open={ratingOpen} onOpenChange={(open) => {
         if (!open) {
           closeRatingAndShowReward();

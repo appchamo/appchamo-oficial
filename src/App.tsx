@@ -41,6 +41,7 @@ import HowToPay from "./pages/HowToPay";
 import Subscriptions from "./pages/Subscriptions";
 import NotFound from "./pages/NotFound";
 import JobApply from "./pages/JobApply";
+import BusinessCheckout from "./pages/BusinessCheckout";
 
 // Admin
 import AdminLogin from "./pages/admin/AdminLogin";
@@ -116,6 +117,7 @@ const App = () => (
             <Route path="/how-to-hire" element={<ProtectedRoute><HowToHire /></ProtectedRoute>} />
             <Route path="/how-to-pay" element={<ProtectedRoute><HowToPay /></ProtectedRoute>} />
             <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
+            <Route path="/checkout/business" element={<ProtectedRoute><BusinessCheckout /></ProtectedRoute>} />
 
             {/* ===== ADMIN PROTECTED ===== */}
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />

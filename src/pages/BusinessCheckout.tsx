@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, CreditCard, Building2, Upload, Loader2, Check, FileText, Clock, ShieldCheck, Lock, AlertCircle } from "lucide-react";
+import { ArrowLeft, CreditCard, Building2, Upload, Loader2, Check, FileText, Clock, ShieldCheck, Lock } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -15,10 +15,7 @@ const BusinessCheckout = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [searchingCep, setSearchingCep] = useState(false);
-  const [showFullAddress, setShowFullAddress] = useState(true); // Deixamos true por padrão para não sumir o número
-  
   const [proofFile, setProofFile] = useState<File | null>(null);
-  const [fileNameOnly, setFileNameOnly] = useState<string | null>(localStorage.getItem('temp_pdf_name'));
 
   const [cardForm, setCardForm] = useState(() => {
     const saved = localStorage.getItem('business_card_draft');
@@ -45,45 +42,24 @@ const BusinessCheckout = () => {
         const res = await fetch(`https://viacep.com.br/ws/${rawCep}/json/`);
         const data = await res.json();
         if (!data.erro) {
-          setBusinessData(d => ({ 
-            ...d, 
-            street: data.logradouro, 
-            neighborhood: data.bairro, 
-            city: data.localidade, 
-            state: data.uf 
-          }));
-          setShowFullAddress(true);
+          setBusinessData(d => ({ ...d, street: data.logradouro, neighborhood: data.bairro, city: data.localidade, state: data.uf }));
         }
-      } finally { 
-        setSearchingCep(false); 
-      }
+      } finally { setSearchingCep(false); }
     }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      toast({ title: "Apenas PDF", variant: "destructive" });
-      return;
-    }
-    setProofFile(file);
-    setFileNameOnly(file.name);
-    localStorage.setItem('temp_pdf_name', file.name);
   };
 
   const handleSubscribe = async () => {
-    if (!proofFile) {
-      toast({ 
-        title: "Confirme o arquivo", 
-        description: "Toque no campo laranja e selecione o PDF novamente para confirmar.", 
-        variant: "destructive" 
-      });
+    // Se o arquivo não estiver no estado, mas o input tiver um arquivo (fallback para o refresh do Android)
+    const fileInput = document.getElementById('pdf-upload') as HTMLInputElement;
+    const finalFile = proofFile || (fileInput?.files ? fileInput.files[0] : null);
+
+    if (!finalFile) {
+      toast({ title: "Anexe o arquivo", description: "Selecione o PDF do cartão CNPJ.", variant: "destructive" });
       return;
     }
     
     if (!cardForm.number || !cardForm.name || !businessData.cnpj || !businessData.number) {
-      toast({ title: "Preencha todos os campos", variant: "destructive" });
+      toast({ title: "Campos incompletos", variant: "destructive" });
       return;
     }
 
@@ -93,7 +69,7 @@ const BusinessCheckout = () => {
       if (!user) throw new Error("Usuário não logado.");
 
       const path = `business-proofs/${user.id}/${Date.now()}.pdf`;
-      const { error: uploadError } = await supabase.storage.from("business-proofs").upload(path, proofFile);
+      const { error: uploadError } = await supabase.storage.from("business-proofs").upload(path, finalFile);
       if (uploadError) throw new Error("Erro no upload do PDF.");
       
       const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(path);
@@ -106,10 +82,9 @@ const BusinessCheckout = () => {
 
       if (subError) throw subError;
 
-      toast({ title: "Solicitação enviada com sucesso!" });
+      toast({ title: "Solicitação enviada!" });
       localStorage.removeItem('business_card_draft');
       localStorage.removeItem('business_info_draft');
-      localStorage.removeItem('temp_pdf_name');
       navigate("/profile");
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
@@ -123,16 +98,14 @@ const BusinessCheckout = () => {
 
         <div className="flex items-center gap-3 mb-6">
           <div className="w-12 h-12 rounded-2xl bg-violet-500/10 flex items-center justify-center"><ShieldCheck className="w-6 h-6 text-violet-600" /></div>
-          <div><h1 className="text-xl font-bold">Assinatura Business</h1><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Verificação Empresa</p></div>
+          <div><h1 className="text-xl font-bold">Plano Business</h1><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Verificação Empresa</p></div>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-5">
           <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-4">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1.5 border-b pb-2"><Building2 className="w-3.5 h-3.5" /> Informações</p>
-            
             <div>
                <label className="text-[11px] font-bold text-muted-foreground mb-1 block">CNPJ *</label>
-               <input placeholder="00.000.000/0001-00" value={businessData.cnpj} onChange={e => setBusinessData({...businessData, cnpj: formatCNPJ(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-violet-500/20" />
+               <input placeholder="00.000.000/0001-00" value={businessData.cnpj} onChange={e => setBusinessData({...businessData, cnpj: formatCNPJ(e.target.value)})} className="w-full p-3 border rounded-xl bg-background outline-none" />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -141,34 +114,27 @@ const BusinessCheckout = () => {
                 <input placeholder="00000-000" value={businessData.cep} onChange={e => handleCepChange(e.target.value)} className="w-full p-3 border rounded-xl bg-background outline-none" />
               </div>
               <div>
-                <label className={`text-[11px] font-bold mb-1 block ${businessData.street ? 'text-primary' : 'text-muted-foreground'}`}>Nº *</label>
-                <input placeholder="123" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className={`w-full p-3 border rounded-xl bg-background outline-none ${businessData.street ? 'border-primary ring-2 ring-primary/10' : ''}`} />
+                <label className="text-[11px] font-bold text-muted-foreground mb-1 block">Nº *</label>
+                <input placeholder="123" value={businessData.number} onChange={e => setBusinessData({...businessData, number: e.target.value})} className="w-full p-3 border rounded-xl bg-background outline-none" />
               </div>
             </div>
 
             {businessData.street && (
-              <div className="p-3 bg-muted/50 rounded-xl border border-dashed space-y-1 animate-in fade-in">
-                <p className="text-xs font-bold text-foreground">{businessData.street}</p>
-                <p className="text-[10px] text-muted-foreground">{businessData.neighborhood} — {businessData.city}/{businessData.state}</p>
+              <div className="p-3 bg-muted/50 rounded-xl border border-dashed text-[11px]">
+                <p className="font-bold">{businessData.street}</p>
+                <p>{businessData.neighborhood} — {businessData.city}/{businessData.state}</p>
               </div>
             )}
 
             <div>
               <label className="text-[11px] font-bold text-muted-foreground mb-1 block">Cartão CNPJ (PDF) *</label>
-              {/* ✅ CORREÇÃO VISUAL: Se estiver laranja, clique nele para reconfirmar o arquivo */}
-              <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${proofFile ? 'border-emerald-500 bg-emerald-500/5' : (fileNameOnly ? 'border-amber-500 bg-amber-500/5' : 'border-muted-foreground/20')}`}>
-                {(proofFile || fileNameOnly) ? <FileText className={`w-8 h-8 ${proofFile ? 'text-emerald-600' : 'text-amber-600'}`} /> : <Upload className="w-8 h-8 text-muted-foreground" />}
+              <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${proofFile ? 'border-emerald-500 bg-emerald-500/5' : 'border-muted-foreground/20'}`}>
+                {proofFile ? <FileText className="w-8 h-8 text-emerald-600" /> : <Upload className="w-8 h-8 text-muted-foreground" />}
                 <span className="text-sm font-bold text-center text-foreground px-2 truncate w-full">
-                  {proofFile ? proofFile.name : (fileNameOnly || "Selecionar PDF")}
+                  {proofFile ? proofFile.name : "Selecionar PDF"}
                 </span>
-                <input type="file" className="hidden" accept="application/pdf" onChange={handleFileChange} />
+                <input id="pdf-upload" type="file" className="hidden" accept="application/pdf" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
               </label>
-              {(fileNameOnly && !proofFile) && (
-                <div className="mt-2 flex items-center justify-center gap-1.5 text-amber-600 animate-pulse">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <p className="text-[10px] font-black uppercase">Toque acima para reconfirmar o PDF</p>
-                </div>
-              )}
             </div>
           </div>
 
@@ -186,9 +152,8 @@ const BusinessCheckout = () => {
           </div>
 
           <button onClick={handleSubscribe} disabled={loading} className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
-            {loading ? <Loader2 className="animate-spin w-5 h-5" /> : "Assinar Plano Business"}
+            {loading ? <Loader2 className="animate-spin w-5 h-5" /> : "Confirmar Assinatura"}
           </button>
-          <p className="text-[10px] text-muted-foreground text-center flex items-center justify-center gap-1.5"><Lock className="w-3 h-3" /> Transação 100% segura e criptografada</p>
         </div>
       </main>
     </AppLayout>

@@ -91,12 +91,14 @@ const App = () => {
     initPush();
   }, []);
 
-  // ✅ 2. EFEITO VIGIA: DESLOGA SE O DISPOSITIVO FOR EXPULSO REMOTAMENTE
+  // ✅ 2. EFEITO VIGIA ATUALIZADO: DESLOGA SE O DISPOSITIVO FOR EXPULSO REMOTAMENTE
   useEffect(() => {
     const deviceId = localStorage.getItem("chamo_device_id");
     if (!deviceId) return;
 
-    // Ouve em tempo real se a linha desse aparelho sumiu da tabela user_devices
+    console.log("🕵️ Vigia de dispositivo ativo:", deviceId);
+
+    // Ouve em tempo real se qualquer linha for deletada na tabela user_devices
     const channel = supabase
       .channel('device_expulsion')
       .on(
@@ -104,22 +106,27 @@ const App = () => {
         {
           event: 'DELETE',
           schema: 'public',
-          table: 'user_devices',
-          filter: `device_id=eq.${deviceId}`
+          table: 'user_devices'
         },
-        async () => {
-          console.log("🚫 Sessão encerrada: outro aparelho se conectou.");
-          
-          // Logout imediato
-          await supabase.auth.signOut();
-          localStorage.clear();
-          sessionStorage.clear();
-          
-          // Recarrega para a página de login
-          window.location.href = "/login?expelled=true";
+        async (payload) => {
+          // Verifica se o ID deletado no banco coincide com o ID deste navegador
+          if (payload.old && payload.old.device_id === deviceId) {
+            console.log("🚫 Sessão encerrada: este dispositivo foi desconectado pelo servidor.");
+            
+            // Logout imediato e limpeza nuclear
+            await supabase.auth.signOut();
+            localStorage.clear();
+            sessionStorage.clear();
+            
+            // Alerta amigável antes de redirecionar
+            alert("Sua sessão foi encerrada porque você se conectou em outro dispositivo.");
+            window.location.href = "/login?expelled=true";
+          }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("📡 Conexão Realtime (Vigia):", status);
+      });
 
     return () => {
       supabase.removeChannel(channel);

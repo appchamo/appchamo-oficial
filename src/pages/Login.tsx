@@ -45,6 +45,28 @@ const Login = () => {
   };
 
   useEffect(() => {
+    // ✅ NOVO: Verificação inteligente para redirecionar usuários novos vindos do Social Login
+    const checkUserStatus = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("cpf")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        // Se logou mas não tem CPF, é porque não terminou o cadastro
+        if (!profile?.cpf) {
+          localStorage.setItem("signup_in_progress", "true");
+          navigate("/signup");
+        } else {
+          navigate("/home");
+        }
+      }
+    };
+
+    checkUserStatus();
+
     supabase.
     from("platform_settings").
     select("value").
@@ -56,7 +78,7 @@ const Login = () => {
         if (val) setBgUrl(val);
       }
     });
-  }, []);
+  }, [navigate]);
 
   const handleResendEmail = async () => {
     if (!email) { toast({ title: "Digite seu e-mail acima." }); return; }
@@ -95,33 +117,21 @@ const Login = () => {
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    // ✅ Garante que não há flag de cadastro ativa
+    // Remove a flag antes de tentar o login social puro
     localStorage.removeItem("signup_in_progress");
     
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        redirectTo: `${window.location.origin}/home`,
-        // ✅ Força a escolha da conta no Google (prompt: select_account)
+        // Redireciona para cá mesmo, o useEffect lá em cima decide o destino
+        redirectTo: window.location.href,
         queryParams: {
           prompt: 'select_account',
           access_type: 'offline',
         },
       }
     });
-
-    if (error) {
-      // ✅ Tratamento para conta não encontrada ou erro de autorização
-      if (error.message.includes("user_not_found") || error.message.includes("not authorized")) {
-        toast({ 
-          title: "Conta não encontrada", 
-          description: "Este e-mail não possui cadastro. Clique em 'Criar conta'.", 
-          variant: "destructive" 
-        });
-      } else {
-        toast({ title: `Erro ao conectar com ${provider}`, variant: "destructive" });
-      }
-    }
+    if (error) toast({ title: `Erro ao conectar com ${provider}`, variant: "destructive" });
   };
 
   return (

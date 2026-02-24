@@ -32,6 +32,46 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
+  // ✅ FUNÇÃO NOVA: A "Blitz" que verifica se o perfil está completo
+  const checkProfileAndRedirect = async (userId: string) => {
+    setLoading(true);
+    try {
+      // Busca os dados do perfil
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("cpf, onboarding_completed")
+        .eq("id", userId)
+        .single();
+
+      // REGRA INVERTIDA: Se NÃO tem CPF e NÃO concluiu onboarding = É usuário novo!
+      if (!profile?.cpf && !profile?.onboarding_completed) {
+        // Ativa a flag do fluxo de cadastro e chuta pro Signup
+        localStorage.setItem("signup_in_progress", "true");
+        navigate("/signup");
+        return;
+      }
+
+      // Se já concluiu, verifica os cargos (Login Normal)
+      const { data: roles } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", userId);
+        
+      const isAdmin = roles?.some((r: any) =>
+        ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
+      );
+      
+      if (isAdmin) {
+        navigate("/admin");
+      } else {
+        navigate("/home");
+      }
+    } catch (err) {
+      console.error("Erro ao verificar perfil:", err);
+      setLoading(false);
+    }
+  };
+
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
@@ -45,10 +85,7 @@ const Login = () => {
   };
 
   useEffect(() => {
-    // ✅ CORRIGIDO: Removido checkUserStatus daqui.
-    // O login não deve redirecionar automaticamente ao carregar a página, 
-    // apenas após a ação de autenticação.
-    
+    // 1. Carrega o Background (Mantido intacto)
     supabase.
     from("platform_settings").
     select("value").
@@ -60,7 +97,28 @@ const Login = () => {
         if (val) setBgUrl(val);
       }
     });
-  }, []);
+
+    // 2. Verifica se o usuário já está logado ou se ACABOU de voltar do Google/Apple
+    const checkExistingSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await checkProfileAndRedirect(session.user.id);
+      }
+    };
+    
+    checkExistingSession();
+
+    // 3. Fica escutando a mudança de estado (para quando o redirecionamento OAuth terminar)
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        checkProfileAndRedirect(session.user.id);
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [navigate]);
 
   const handleResendEmail = async () => {
     if (!email) { toast({ title: "Digite seu e-mail acima." }); return; }
@@ -76,6 +134,7 @@ const Login = () => {
     setErrorType(null);
     if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
+    
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       const type = getErrorType(error.message);
@@ -84,30 +143,20 @@ const Login = () => {
       setLoading(false);
       return;
     }
-    const { data: roles } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", data.user.id);
-    const isAdmin = roles?.some((r: any) =>
-      ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
-    );
-    if (isAdmin) {
-      navigate("/admin");
-    } else {
-      navigate("/home");
-    }
+    
+    // ✅ Se passou na senha, vai pra blitz antes de liberar
+    await checkProfileAndRedirect(data.user.id);
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    // ✅ Limpa a flag de cadastro para garantir que o sistema entenda como um LOGIN puro
+    // Limpa a flag de cadastro para garantir que o sistema entenda como um LOGIN puro inicialmente
     localStorage.removeItem("signup_in_progress");
     
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        // ✅ Redireciona para a Home. Se o perfil estiver incompleto, 
-        // a própria Home (ou o Guard de rotas) deve lidar com isso.
-        redirectTo: `${window.location.origin}/home`,
+        // ✅ MUDANÇA AQUI: Em vez de /home, ele volta para o /login para passar pela Blitz
+        redirectTo: `${window.location.origin}/login`,
         queryParams: {
           prompt: 'select_account',
           access_type: 'offline',

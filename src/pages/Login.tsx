@@ -90,12 +90,20 @@ const Login = () => {
     if (isAdmin) {
       navigate("/admin");
     } else {
+      // Aqui também poderíamos checar se o perfil está completo,
+      // mas por enquanto vamos manter a Home para login com senha.
       navigate("/home");
     }
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider });
+    const { error } = await supabase.auth.signInWithOAuth({ 
+      provider,
+      options: {
+        // 👈 REDIRECIONAMENTO ADICIONADO AQUI
+        redirectTo: `${window.location.origin}/complete-signup`,
+      }
+    });
     if (error) toast({ title: `Erro ao conectar com ${provider}`, variant: "destructive" });
   };
 

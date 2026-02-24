@@ -13,6 +13,7 @@ import Index from "./pages/Index";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import CompleteSignup from "./pages/CompleteSignup"; // 👈 ADICIONADO: Importação da nova página
 import ResetPassword from "./pages/ResetPassword";
 import Search from "./pages/Search";
 import Categories from "./pages/Categories";
@@ -112,6 +113,10 @@ const App = () => {
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
+              
+              {/* 🔥 ADICIONADO: Rota para finalizar cadastro após login social */}
+              <Route path="/complete-signup" element={<CompleteSignup />} />
+
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/admin/login" element={<AdminLogin />} />
 

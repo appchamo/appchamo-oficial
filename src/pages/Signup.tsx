@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react"; // Adicionado useEffect
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Ticket, MailCheck, Mail, ArrowRight } from "lucide-react"; // Adicionado Mail e ArrowRight
+import { Ticket, MailCheck, Mail, ArrowRight } from "lucide-react";
 import StepAccountType from "@/components/signup/StepAccountType";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
 import StepDocuments from "@/components/signup/StepDocuments";
@@ -13,7 +13,6 @@ import StepPlanSelect from "@/components/signup/StepPlanSelect";
 import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
 
 type AccountType = "client" | "professional";
-// Adicionado 'method-choice' ao Step
 type Step = "method-choice" | "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email";
 
 const friendlyError = (msg: string) => {
@@ -38,7 +37,7 @@ const fileToBase64 = (file: File): Promise<string> =>
 const Signup = () => {
   const navigate = useNavigate();
   const [accountType, setAccountType] = useState<AccountType>("client");
-  const [step, setStep] = useState<Step>("method-choice"); // Alterado para começar na escolha de método
+  const [step, setStep] = useState<Step>("method-choice");
   const [basicData, setBasicData] = useState<BasicData | null>(null);
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [profileData, setProfileData] = useState<{
@@ -53,15 +52,32 @@ const Signup = () => {
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [resending, setResending] = useState(false);
-
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // Função para Login Social (Google/Apple)
+  // ✅ NOVO: Verifica se o usuário já logou socialmente para pular etapas
+  useEffect(() => {
+    const checkSocialUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Se o usuário existe mas caiu no Signup, ele veio do Google/Apple
+        setCreatedUserId(user.id);
+        setBasicData({
+          name: user.user_metadata?.full_name || "",
+          email: user.email || "",
+          password: "", // Social não tem senha
+          documentType: "cpf"
+        });
+        setStep("type"); // Pula a escolha de método e vai direto para Cliente/Profissional
+      }
+    };
+    checkSocialUser();
+  }, []);
+
   const handleSocialSignup = async (provider: "google" | "apple") => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/complete-signup`,
+        redirectTo: window.location.href, // Volta para esta mesma página após logar
       }
     });
     if (error) toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
@@ -69,6 +85,7 @@ const Signup = () => {
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
+    // Se for usuário social, podemos pular o StepBasicData ou ir para ele apenas para confirmar CPF/Telefone
     setStep("basic");
   };
 
@@ -97,7 +114,9 @@ const Signup = () => {
 
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
-    setStep("awaiting-email");
+    // Se for social, não precisa confirmar e-mail (Google já confirmou)
+    if (createdUserId) navigate("/home");
+    else setStep("awaiting-email");
   };
 
   const handleResendEmail = async () => {
@@ -122,42 +141,32 @@ const Signup = () => {
     setLoading(true);
 
     try {
-      if (createdUserId) {
-        if (accountType === "professional" && planId !== "free") {
+      // ✅ MODIFICADO: Se for social (já tem createdUserId), pula a criação do Auth e vai direto pro Invoke
+      let userId = createdUserId;
+
+      if (!userId) {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: basicData.email,
+          password: basicData.password,
+          options: {
+            emailRedirectTo: window.location.origin,
+            data: { full_name: basicData.name },
+          },
+        });
+
+        if (authError) {
+          toast({ title: friendlyError(authError.message), variant: "destructive" });
           setLoading(false);
-          setIsSubscriptionOpen(true);
-        } else {
-          await supabase.from("subscriptions").update({ plan_id: "free" } as any).eq("user_id", createdUserId);
-          setStep("awaiting-email");
+          return;
         }
-        return; 
+        userId = authData.user?.id || null;
       }
 
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: basicData.email,
-        password: basicData.password,
-        options: {
-          emailRedirectTo: window.location.origin,
-          data: { full_name: basicData.name },
-        },
-      });
-
-      if (authError) {
-        toast({ title: friendlyError(authError.message), variant: "destructive" });
-        setLoading(false);
-        return;
-      }
-
-      if (!authData.user) {
+      if (!userId) {
         toast({ title: "Erro inesperado ao criar conta.", variant: "destructive" });
         setLoading(false);
         return;
       }
-
-      const userId = authData.user.id;
-      setCreatedUserId(userId); 
-
-      await new Promise((r) => setTimeout(r, 1000));
 
       const docFilesPayload = await Promise.all(
         docFiles.map(async (file) => ({
@@ -192,7 +201,9 @@ const Signup = () => {
         setIsSubscriptionOpen(true);
       } else {
         setLoading(false);
-        setStep("awaiting-email");
+        // Se for social, vai direto para Home
+        if (createdUserId) navigate("/home");
+        else setStep("awaiting-email");
       }
     } catch (err: any) {
       toast({ title: "Erro ao criar conta.", description: translateError(err.message), variant: "destructive" });
@@ -246,7 +257,6 @@ const Signup = () => {
 
   return (
     <>
-      {/* NOVO: Passo de escolha de método estilo Canva */}
       {step === "method-choice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 animate-in fade-in duration-500">
           <div className="w-full max-w-sm space-y-8">
@@ -301,7 +311,7 @@ const Signup = () => {
       )}
 
       {step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
-      {step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep("type")} />}
+      {step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep(createdUserId ? "method-choice" : "type")} />}
       {step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
       {step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
       {step === "plan" && <StepPlanSelect onSelect={handlePlanSelect} onBack={() => setStep("profile")} />}

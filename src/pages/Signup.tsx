@@ -70,19 +70,36 @@ const Signup = () => {
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
 
       try {
-        const { data: profile, error: dbError } = await supabase
+        let hasCompletedProfile = false;
+
+        // 1. Tenta achar pelo ID (caso padrão)
+        const { data: profileById } = await supabase
           .from("profiles")
-          .select("*")
+          .select("cpf, onboarding_completed")
           .eq("id", user.id)
           .maybeSingle();
 
-        // 🚨 O ALARME DE DETETIVE VAI APARECER AQUI 🚨
-        alert(`🔍 MODO DETETIVE: \n\nE-mail logado: ${user.email}\nID Gerado: ${user.id}\n\nO banco achou perfil na tabela profiles? ${profile ? 'SIM' : 'NÃO'}\nTem CPF preenchido nesse perfil? ${profile?.cpf ? 'SIM (' + profile.cpf + ')' : 'NÃO'}\nAlgum Erro de RLS? ${dbError?.message || 'Nenhum'}`);
+        if (profileById?.cpf || profileById?.onboarding_completed) {
+          hasCompletedProfile = true;
+        }
 
-        const hasCompletedProfile = profile?.cpf || profile?.onboarding_completed;
+        // 2. A MÁGICA: Tenta achar pelo E-MAIL (Pega as contas duplicadas do Google)
+        if (!hasCompletedProfile && user.email) {
+          const { data: profileByEmail } = await supabase
+            .from("profiles")
+            .select("cpf, onboarding_completed")
+            .eq("email", user.email)
+            .maybeSingle();
+            
+          if (profileByEmail?.cpf || profileByEmail?.onboarding_completed) {
+            hasCompletedProfile = true;
+          }
+        }
 
         if (hasCompletedProfile) {
+          // 🛑 ERRO: Tentou criar conta mas o e-mail já existe no banco!
           localStorage.removeItem("signup_in_progress");
+          
           await supabase.auth.signOut(); 
           window.history.replaceState(null, "", window.location.pathname);
 
@@ -98,6 +115,7 @@ const Signup = () => {
           return;
         }
 
+        // ✅ CONTA TOTALMENTE NOVA: Segue o fluxo
         if (isSignupFlow) {
           localStorage.removeItem("signup_in_progress");
           window.history.replaceState(null, "", window.location.pathname);

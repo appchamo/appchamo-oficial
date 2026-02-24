@@ -54,40 +54,46 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // ✅ FUNÇÃO HARD RESET: Simula o "Clear Site Data" do F12 > Application
+  // ✅ FUNÇÃO HARD RESET: Simula o "Clear Site Data" de forma definitiva
   const forceExitToLogin = async () => {
     setLoading(true);
     try {
-      // 1. Tenta deslogar oficialmente
-      await supabase.auth.signOut();
-
-      // 2. Limpeza de LocalStorage e SessionStorage
-      localStorage.clear();
-      sessionStorage.clear();
-
-      // 3. LIMPEZA DE INDEXEDDB (Onde o fantasma do Google mora no Android)
-      const dbs = await window.indexedDB.databases();
-      dbs.forEach(db => {
-        if (db.name) window.indexedDB.deleteDatabase(db.name);
-      });
-
-      // 4. LIMPEZA DE COOKIES
-      const cookies = document.cookie.split(";");
-      for (let i = 0; i < cookies.length; i++) {
-        const cookie = cookies[i];
-        const eqPos = cookie.indexOf("=");
-        const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
-        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-      }
-
-      // 5. Sinaliza intenção manual para o useAuth bloquear o auto-login
+      // 1. Sinaliza intenção manual IMEDIATAMENTE para travar qualquer useEffect
       localStorage.setItem("manual_login_intent", "true");
 
-      // 6. REDIRECIONAMENTO BRUTO (window.location.replace mata o histórico)
-      window.location.replace("/login");
+      // 2. Tenta o logout oficial no servidor
+      await supabase.auth.signOut();
+
+      // 3. Limpeza de LocalStorage e SessionStorage (preservando apenas a trava)
+      const manualIntent = localStorage.getItem("manual_login_intent");
+      localStorage.clear();
+      sessionStorage.clear();
+      if (manualIntent) localStorage.setItem("manual_login_intent", manualIntent);
+
+      // 4. LIMPEZA AGRESSIVA DE INDEXEDDB
+      // Listamos e deletamos todos os bancos (onde fica o token do Supabase)
+      const dbs = await window.indexedDB.databases();
+      await Promise.all(dbs.map(db => {
+        return new Promise((resolve) => {
+          if (!db.name) return resolve(true);
+          const req = window.indexedDB.deleteDatabase(db.name);
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => resolve(true);
+          req.onblocked = () => resolve(true); // Força a continuação mesmo se bloqueado
+        });
+      }));
+
+      // 5. LIMPEZA DE COOKIES
+      document.cookie.split(";").forEach(c => {
+        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+      });
+
+      // 6. REDIRECIONAMENTO COM REFRESH TOTAL
+      // Limpa a URL e força o navegador a recarregar o app do zero
+      window.location.href = window.location.origin + "/login";
     } catch (err) {
       console.error("Erro no Hard Reset:", err);
-      window.location.replace("/login");
+      window.location.href = window.location.origin + "/login";
     }
   };
 

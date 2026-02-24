@@ -54,36 +54,48 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // ✅ REGRA DE BLOQUEIO ATUALIZADA: Sinaliza intenção manual e limpa IndexedDB
+  // ✅ FUNÇÃO HARD RESET: Simula o "Clear Site Data" do F12 > Application
   const forceExitToLogin = async () => {
     setLoading(true);
     try {
-      // 1. Ativa a trava de segurança para o Login.tsx
-      localStorage.setItem("manual_login_intent", "true");
-      localStorage.removeItem("signup_in_progress");
-
-      // 2. Tenta encerrar a sessão no servidor
+      // 1. Tenta deslogar oficialmente
       await supabase.auth.signOut();
 
-      // 3. LIMPEZA NUCLEAR DO INDEXEDDB (Onde o Android guarda a sessão viciada)
+      // 2. Limpeza de LocalStorage e SessionStorage
+      localStorage.clear();
+      sessionStorage.clear();
+
+      // 3. LIMPEZA DE INDEXEDDB (Onde o fantasma do Google mora no Android)
       const dbs = await window.indexedDB.databases();
       dbs.forEach(db => {
         if (db.name) window.indexedDB.deleteDatabase(db.name);
       });
 
-      // 4. Limpa memória local restante
-      sessionStorage.clear();
+      // 4. LIMPEZA DE COOKIES
+      const cookies = document.cookie.split(";");
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i];
+        const eqPos = cookie.indexOf("=");
+        const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+      }
 
-      // 5. Redirecionamento Bruto (Força o app a reiniciar do zero)
-      window.location.href = "/login";
+      // 5. Sinaliza intenção manual para o useAuth bloquear o auto-login
+      localStorage.setItem("manual_login_intent", "true");
+
+      // 6. REDIRECIONAMENTO BRUTO (window.location.replace mata o histórico)
+      window.location.replace("/login");
     } catch (err) {
-      console.error("Erro ao sair:", err);
-      window.location.href = "/login";
+      console.error("Erro no Hard Reset:", err);
+      window.location.replace("/login");
     }
   };
 
   useEffect(() => {
     const checkSocialUser = async () => {
+      // Só checa se não houver intenção de login manual (limpeza em curso)
+      if (localStorage.getItem("manual_login_intent") === "true") return;
+
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session?.user) {
@@ -133,14 +145,13 @@ const Signup = () => {
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
+    localStorage.removeItem("manual_login_intent");
     
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: window.location.href,
-        queryParams: {
-          prompt: 'select_account',
-        },
+        queryParams: { prompt: 'select_account' },
       }
     });
     if (error) {
@@ -265,11 +276,6 @@ const Signup = () => {
     }
   };
 
-  const handleCouponClose = () => {
-    setCouponPopup(false);
-    navigate("/home");
-  };
-
   const handleResendEmail = async () => {
     if (!basicData?.email) return;
     setResending(true);
@@ -281,6 +287,11 @@ const Signup = () => {
     if (error) toast({ title: "Aguarde um pouco", variant: "destructive" });
     else toast({ title: "E-mail reenviado!" });
     setResending(false);
+  };
+
+  const handleCouponClose = () => {
+    setCouponPopup(false);
+    navigate("/home");
   };
 
   if (loading && step !== "basic") { 

@@ -112,13 +112,14 @@ const Signup = () => {
     setStep("basic");
   };
 
-  // ✅ A BARREIRA BLINDADA ESTÁ AQUI (Usando a Chave Mestra do SQL)
+  // ✅ A BARREIRA BLINDADA AGORA TEM "PASSE VIP" PARA OAUTH
   const handleBasicNext = async (data: BasicData) => {
     setLoading(true);
 
     try {
-      if (data.email) {
-        // Chama a nossa função especial que ignora o bloqueio do RLS
+      // Se NÃO tiver o createdUserId, significa que ele está digitando um e-mail novo na mão.
+      // Aí sim a gente checa se o e-mail já existe no banco pra barrar os espertinhos.
+      if (data.email && !createdUserId) {
         const { data: emailExists, error: rpcError } = await supabase.rpc('check_email_exists', { 
           user_email: data.email 
         });
@@ -135,13 +136,13 @@ const Signup = () => {
           });
           
           setLoading(false);
-          // Volta pra tela inicial ou pra login
+          // Volta pra tela de login
           navigate("/login"); 
           return;
         }
       }
 
-      // ✅ TUDO CERTO: E-mail novinho em folha, pode avançar
+      // ✅ TUDO CERTO: Se veio do Google/Apple (tem createdUserId) OU é e-mail novinho em folha, pode avançar!
       setBasicData(data);
       if (accountType === "professional") setStep("documents");
       else setStep("profile");

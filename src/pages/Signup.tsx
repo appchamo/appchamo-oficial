@@ -61,7 +61,6 @@ const Signup = () => {
 
       if (session?.user) {
         if (isSignupFlow) {
-          // Se é usuário do fluxo de criar conta, pega os dados e manda escolher o tipo (Cliente/Profissional)
           localStorage.removeItem("signup_in_progress");
           setCreatedUserId(session.user.id);
           setBasicData({
@@ -83,7 +82,6 @@ const Signup = () => {
           });
           setStep("type"); 
         } else {
-          // Se já estava logado e não clicou em "Criar conta", vai pra Home
           navigate("/home");
         }
       }
@@ -114,22 +112,19 @@ const Signup = () => {
     setStep("basic");
   };
 
-  // ✅ A NOVA BARREIRA ESTÁ AQUI (Quando ele clica em "Próximo" nos dados básicos)
+  // ✅ A BARREIRA BLINDADA ESTÁ AQUI (Usando a Chave Mestra do SQL)
   const handleBasicNext = async (data: BasicData) => {
     setLoading(true);
 
     try {
       if (data.email) {
-        // Verifica no banco se esse e-mail já existe e possui CPF cadastrado
-        const { data: existingProfiles } = await supabase
-          .from("profiles")
-          .select("cpf, onboarding_completed")
-          .eq("email", data.email);
+        // Chama a nossa função especial que ignora o bloqueio do RLS
+        const { data: emailExists, error: rpcError } = await supabase.rpc('check_email_exists', { 
+          user_email: data.email 
+        });
 
-        const hasCompletedProfile = existingProfiles?.some(p => p.cpf || p.onboarding_completed);
-
-        if (hasCompletedProfile) {
-          // 🛑 CONTA JÁ EXISTE: Derruba a sessão fantasma e mostra o erro
+        if (emailExists) {
+          // 🛑 CONTA JÁ EXISTE: Expulsa o intruso
           await supabase.auth.signOut();
           
           toast({ 
@@ -140,11 +135,13 @@ const Signup = () => {
           });
           
           setLoading(false);
-          return; // Trava o usuário na tela atual, não deixa avançar
+          // Volta pra tela inicial ou pra login
+          navigate("/login"); 
+          return;
         }
       }
 
-      // ✅ TUDO CERTO: Salva os dados e vai para a próxima etapa
+      // ✅ TUDO CERTO: E-mail novinho em folha, pode avançar
       setBasicData(data);
       if (accountType === "professional") setStep("documents");
       else setStep("profile");
@@ -274,7 +271,7 @@ const Signup = () => {
     navigate("/home");
   };
 
-  if (loading && step !== "basic") { // Não mostra a tela em branco se o loading for no botão Próximo
+  if (loading && step !== "basic") { 
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
         <div className="text-center">

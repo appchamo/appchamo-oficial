@@ -370,15 +370,19 @@ const Signup = () => {
         </p>
       )}
 
-      {/* MODAL DO CUPOM RESTAURADO E FUNCIONAL */}
-     <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
+      {/* MODAL DO CUPOM ATUALIZADO */}
+      <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />
-            <p className="text-sm font-medium text-foreground">Você ganhou 1 cupom!</p>
+            <p className="text-sm font-medium text-foreground">
+              Você ganhou 1 cupom para o sorteio mensal do Chamô, confira!
+            </p>
           </div>
-          <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors">Entendi!</button>
+          <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors">
+            Entendi!
+          </button>
         </DialogContent>
       </Dialog>
     </>

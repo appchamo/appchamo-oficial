@@ -73,16 +73,17 @@ const Login = () => {
       if (deviceError) {
         console.error("Erro ao verificar aparelhos:", deviceError);
         // Em caso de erro técnico na verificação, deixamos passar por segurança
+        await proceedToRedirect(userId);
       } else if (canLogin === false) {
         // Limite atingido! Parar fluxo de login.
         setDeviceLimitHit(true);
         setPendingUserId(userId);
         setLoading(false);
         return;
+      } else {
+        // Se passou na verificação de aparelhos, prossegue com o login normal
+        await proceedToRedirect(userId);
       }
-
-      // Se passou na verificação de aparelhos, prossegue com o login normal
-      await proceedToRedirect(userId);
 
     } catch (err) {
       console.error("Erro na verificação do dispositivo:", err);
@@ -160,10 +161,9 @@ const Login = () => {
     setDeviceLimitHit(false);
     setPendingUserId(null);
     await supabase.auth.signOut(); // Desloga do supabase
+    setLoading(false);
   };
 
-  // ... (o resto das funções do useEffect, handleResendEmail e handleForgotPassword mantêm-se iguais)
-  
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
@@ -198,7 +198,7 @@ const Login = () => {
           console.log("Bloqueando redirecionamento porque o usuário veio do botão Entrar.");
           setLoading(false);
         } else {
-          // Usa a nova função que verifica o limite antes
+          // ✅ VERIFICA O LIMITE MESMO SE JÁ TIVER SESSÃO
           await checkDeviceLimitAndRedirect(session.user.id);
         }
       }
@@ -208,8 +208,8 @@ const Login = () => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+      // ✅ VERIFICA O LIMITE NO LOGIN AUTOMÁTICO (ex: após login social)
       if (event === "SIGNED_IN" && session?.user && !isManualIntent) {
-        // Usa a nova função que verifica o limite antes
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
@@ -318,7 +318,6 @@ const Login = () => {
             </div>
           </div>
         ) : forgotMode ? (
-          // ... FORMULÁRIO DE ESQUECEU A SENHA NORMAL ...
           <form onSubmit={handleForgotPassword} className="bg-card border rounded-2xl p-6 shadow-card space-y-4">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">E-mail</label>
@@ -332,7 +331,6 @@ const Login = () => {
             </button>
           </form>
         ) : (
-          // ... FORMULÁRIO DE LOGIN NORMAL ...
           <div className="bg-card border rounded-2xl p-6 shadow-card">
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
@@ -403,7 +401,6 @@ const Login = () => {
           </div>
         )}
 
-        {/* Links do rodapé só aparecem se não estiver na tela de limite */}
         {!deviceLimitHit && (
           <>
             <p className="text-center text-xs text-muted-foreground mt-4">

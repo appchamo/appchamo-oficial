@@ -32,7 +32,7 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // ✅ BLITZ AJUSTADA: Agora cobre todos os 4 cenários perfeitamente
+  // ✅ BLITZ AJUSTADA: Agora com "user_id" para encontrar a coluna certa no seu banco
   const checkProfileAndRedirect = async (userId: string) => {
     setLoading(true);
     try {
@@ -40,7 +40,7 @@ const Login = () => {
       const { data: profile } = await supabase
         .from("profiles")
         .select("*")
-        .eq("id", userId)
+        .eq("user_id", userId) // ⬅️ CORREÇÃO AQUI
         .single();
 
       // Verifica se o usuário é realmente novo (não tem documento, nem cpf, nem telefone)

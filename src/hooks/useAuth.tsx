@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ✅ ADICIONADO: Estado para controlar se estamos em processo de saída
+  // ✅ ADICIONADO: Trava de estado para ignorar sessões fantasmas durante o logout
   const [isSignOutInProgress, setIsSignOutInProgress] = useState(false);
 
   const isAdmin = useMemo(() => {
@@ -88,8 +88,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [roles]);
 
   const loadUserData = async (sess: Session | null) => {
-    // 🛑 BLOQUEIO CRÍTICO: Se o usuário quer sair ou entrar manualmente, não carrega dados
+    // 🛑 REGRA DE OURO: Se houver intenção manual de login ou logout ativo, não carregue os dados.
+    // Isso impede as chamadas automáticas que você viu no Network.
     const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+    
     if (isSignOutInProgress || isManualIntent) {
       setLoading(false);
       return;
@@ -109,24 +111,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userId = sess.user.id;
     const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
     
-    // Segunda verificação para evitar que os dados "voltem" no meio do logout
+    // Verificação dupla antes de preencher o estado para garantir que não houve logout no meio do processo
     if (!isSignOutInProgress) {
       setProfile(p);
       setRoles(r);
     }
-    
+
     setLoading(false);
   };
 
   useEffect(() => {
-    // 1) sessão inicial
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      loadUserData(s);
-    });
+    // 1) sessão inicial - Só carrega se não houver intenção manual de estar na tela de login
+    const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+    if (!isManualIntent) {
+      supabase.auth.getSession().then(({ data: { session: s } }) => {
+        loadUserData(s);
+      });
+    } else {
+      setLoading(false);
+    }
 
     // 2) mudanças de auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      // ✅ Se o evento for saída real, limpa tudo imediatamente
+      // Se o usuário saiu explicitamente, limpamos tudo e paramos aqui
       if (_event === 'SIGNED_OUT') {
         setUser(null);
         setSession(null);
@@ -136,9 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // 🛑 Se houver trava de logout ou intenção manual, ignore o evento de login automático
-      const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-      if (!isSignOutInProgress && !isManualIntent) {
+      // 🛑 Só dispara o carregamento se não estivermos saindo ou em modo manual
+      const manualMode = localStorage.getItem("manual_login_intent") === "true";
+      if (!isSignOutInProgress && !manualMode) {
         setTimeout(() => loadUserData(sess), 0);
       }
     });
@@ -147,25 +154,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isSignOutInProgress]);
 
   const signOut = async () => {
-    // ✅ Ativa a trava antes de começar
+    // Ativa a trava imediatamente
     setIsSignOutInProgress(true);
     
     try {
-      await supabase.auth.signOut();
+      // Remove a flag de progresso de cadastro
+      localStorage.removeItem("signup_in_progress");
       
-      // Limpa estados locais manualmente
+      await supabase.auth.signOut();
+
+      // Limpa os estados locais
       setUser(null);
       setSession(null);
       setProfile(null);
       setRoles([]);
       
-      // Limpa as flags de controle
-      localStorage.removeItem("signup_in_progress");
-      
-      // Mantém a trava por 1 segundo para o Android WebView limpar o cache
+      // ✅ Mantém a trava por 1 segundo para o cache do navegador limpar
       setTimeout(() => setIsSignOutInProgress(false), 1000);
     } catch (error) {
-      console.error("Erro no signOut:", error);
+      console.error("Erro ao deslogar:", error);
       setIsSignOutInProgress(false);
     }
   };

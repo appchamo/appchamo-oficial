@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { User, Phone, IdCard, MapPin, ArrowRight, Building2, Search as SearchIcon } from "lucide-react";
+import { User, Phone, IdCard, MapPin, ArrowRight, Building2, Search } from "lucide-react";
 
 type AccountType = "client" | "professional";
 
@@ -18,7 +18,7 @@ const CompleteSignup = () => {
     cpf: "",
     phone: "",
     cep: "",
-    street: "", // Alterado de address para street
+    street: "",
     number: "",
     neighborhood: "",
     city: "",
@@ -27,14 +27,14 @@ const CompleteSignup = () => {
 
   useEffect(() => {
     const loadData = async () => {
-      // 1. Carregar Background
+      // 1. Carregar Background do Admin (Igual Login/Signup)
       const { data: settings } = await supabase.from("platform_settings").select("value").eq("key", "login_bg_url").maybeSingle();
       if (settings?.value) {
         const val = typeof settings.value === "string" ? settings.value : JSON.stringify(settings.value).replace(/^"|"$/g, "");
         setBgUrl(val);
       }
 
-      // 2. Carregar Nome do Google
+      // 2. Carregar dados do Google (Nome)
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setFormData(prev => ({ ...prev, full_name: user.user_metadata?.full_name || "" }));
@@ -43,6 +43,7 @@ const CompleteSignup = () => {
     loadData();
   }, []);
 
+  // Busca ViaCEP
   const handleFetchAddress = async (cep: string) => {
     const cleanCep = cep.replace(/\D/g, "");
     if (cleanCep.length === 8) {
@@ -71,25 +72,26 @@ const CompleteSignup = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // ✅ MAPEAMENTO DAS COLUNAS PARA O SUPABASE
+    // Concatenando tudo em 'address' para evitar erros de colunas inexistentes no banco (como 'cep' ou 'city')
+    const fullAddressString = `${formData.street}, ${formData.number} - ${formData.neighborhood}, ${formData.city}/${formData.state} (CEP: ${formData.cep})`;
+
     const { error } = await supabase
       .from("profiles")
       .update({
         full_name: formData.full_name,
         cpf: formData.cpf,
         phone: formData.phone,
-        cep: formData.cep,
-        street: formData.street,      // Nome comum no banco
-        number: formData.number,      // Nome comum no banco
-        neighborhood: formData.neighborhood,
-        city: formData.city,
-        state: formData.state,
+        address: fullAddressString, // Usando a coluna principal de texto
         onboarding_completed: true
-      })
+      } as any)
       .eq("id", user.id);
 
     if (error) {
-      toast({ title: "Erro ao salvar", description: "Uma ou mais colunas não existem no banco de dados.", variant: "destructive" });
+      toast({ 
+        title: "Erro ao salvar", 
+        description: "Verifique se a coluna 'address' existe no seu banco.", 
+        variant: "destructive" 
+      });
       console.error("Erro Supabase:", error);
     } else {
       toast({ title: "Tudo pronto!", description: "Bem-vindo ao Chamô." });
@@ -98,6 +100,7 @@ const CompleteSignup = () => {
     setLoading(false);
   };
 
+  // Máscaras de Input
   const maskCPF = (v: string) => v.replace(/\D/g, "").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})/, "$1-$2").replace(/(-\d{2})\d+?$/, "$1");
   const maskPhone = (v: string) => v.replace(/\D/g, "").replace(/(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2").replace(/(-\d{4})\d+?$/, "$1");
   const maskCEP = (v: string) => v.replace(/\D/g, "").replace(/(\d{5})(\d)/, "$1-$2").replace(/(-\d{3})\d+?$/, "$1");
@@ -105,53 +108,62 @@ const CompleteSignup = () => {
   return (
     <div className={`min-h-[100dvh] w-full flex flex-col items-center justify-center px-4 relative ${!bgUrl ? "bg-background" : ""}`}
       style={bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
+      
       {bgUrl && <div className="absolute inset-0 backdrop-blur-sm bg-[#454545]/[0.12]" />}
 
       <div className="w-full max-w-sm relative z-10">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-gradient mb-2">Chamô</h1>
-          <p className="text-sm text-muted-foreground">Finalize seu cadastro rápido</p>
+          <p className="text-sm text-muted-foreground">Para continuar, escolha seu perfil</p>
         </div>
 
         {step === "type" ? (
-          <div className="space-y-4">
-            <button onClick={() => { setAccountType("client"); setStep("data"); }} className="w-full p-6 bg-card border-2 border-transparent hover:border-primary rounded-2xl transition-all text-left flex items-center gap-4">
+          <div className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
+            <button onClick={() => { setAccountType("client"); setStep("data"); }} className="w-full p-6 bg-card border hover:border-primary rounded-2xl flex items-center gap-4 transition-all shadow-sm">
               <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center"><User className="text-primary" /></div>
-              <div><b className="block">Sou Cliente</b><span className="text-xs text-muted-foreground">Quero contratar serviços</span></div>
+              <div className="text-left"><b className="block">Sou Cliente</b><span className="text-xs text-muted-foreground">Quero contratar serviços</span></div>
             </button>
-            <button onClick={() => { setAccountType("professional"); setStep("data"); }} className="w-full p-6 bg-card border-2 border-transparent hover:border-primary rounded-2xl transition-all text-left flex items-center gap-4">
+            <button onClick={() => { setAccountType("professional"); setStep("data"); }} className="w-full p-6 bg-card border hover:border-primary rounded-2xl flex items-center gap-4 transition-all shadow-sm">
               <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center"><Building2 className="text-primary" /></div>
-              <div><b className="block">Sou Profissional</b><span className="text-xs text-muted-foreground">Quero oferecer meu trabalho</span></div>
+              <div className="text-left"><b className="block">Sou Profissional</b><span className="text-xs text-muted-foreground">Quero oferecer serviços</span></div>
             </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-6 shadow-card space-y-4">
+          <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-6 shadow-card space-y-3">
             <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-              <input required placeholder="Nome Completo" value={formData.full_name} onChange={e => setFormData({ ...formData, full_name: e.target.value })} className="w-full bg-muted/30 border rounded-xl px-3 py-2.5 text-sm outline-none" />
-              <input required placeholder="CPF" value={formData.cpf} onChange={e => setFormData({ ...formData, cpf: maskCPF(e.target.value) })} className="w-full bg-muted/30 border rounded-xl px-3 py-2.5 text-sm outline-none" />
-              <input required placeholder="Telefone" value={formData.phone} onChange={e => setFormData({ ...formData, phone: maskPhone(e.target.value) })} className="w-full bg-muted/30 border rounded-xl px-3 py-2.5 text-sm outline-none" />
-              
-              <div className="relative">
-                <input required placeholder="CEP" value={formData.cep} onChange={e => { const v = maskCEP(e.target.value); setFormData({ ...formData, cep: v }); handleFetchAddress(v); }} className="w-full bg-muted/30 border rounded-xl px-3 py-2.5 text-sm outline-none" />
-                <SearchIcon className="absolute right-3 top-3 w-4 h-4 text-muted-foreground" />
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Dados Pessoais</label>
+                <input required placeholder="Nome Completo" value={formData.full_name} onChange={e => setFormData({ ...formData, full_name: e.target.value })} className="w-full bg-muted/20 border rounded-xl px-3 py-2.5 text-sm outline-none" />
+                <input required placeholder="CPF" value={formData.cpf} onChange={e => setFormData({ ...formData, cpf: maskCPF(e.target.value) })} className="w-full bg-muted/20 border rounded-xl px-3 py-2.5 text-sm outline-none" />
+                <input required placeholder="Telefone" value={formData.phone} onChange={e => setFormData({ ...formData, phone: maskPhone(e.target.value) })} className="w-full bg-muted/20 border rounded-xl px-3 py-2.5 text-sm outline-none" />
               </div>
 
-              {formData.city && (
-                <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
-                  <input required placeholder="Rua / Logradouro" value={formData.street} onChange={e => setFormData({ ...formData, street: e.target.value })} className="w-full bg-muted/30 border rounded-xl px-3 py-2.5 text-sm outline-none" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input required placeholder="Número" value={formData.number} onChange={e => setFormData({ ...formData, number: e.target.value })} className="w-full bg-muted/30 border rounded-xl px-3 py-2.5 text-sm outline-none" />
-                    <input required placeholder="Bairro" value={formData.neighborhood} onChange={e => setFormData({ ...formData, neighborhood: e.target.value })} className="w-full bg-muted/30 border rounded-xl px-3 py-2.5 text-sm outline-none" />
-                  </div>
-                  <input readOnly value={`${formData.city} - ${formData.state}`} className="w-full bg-muted/10 border rounded-xl px-3 py-2.5 text-sm outline-none text-muted-foreground" />
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-muted-foreground ml-1">Endereço</label>
+                <div className="relative">
+                  <input required placeholder="CEP" value={formData.cep} onChange={e => { const v = maskCEP(e.target.value); setFormData({ ...formData, cep: v }); handleFetchAddress(v); }} className="w-full bg-muted/20 border rounded-xl px-3 py-2.5 text-sm outline-none" />
+                  <Search className="absolute right-3 top-3 w-4 h-4 text-muted-foreground" />
                 </div>
-              )}
+
+                {formData.city && (
+                  <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
+                    <input required placeholder="Rua / Logradouro" value={formData.street} onChange={e => setFormData({ ...formData, street: e.target.value })} className="w-full bg-muted/20 border rounded-xl px-3 py-2.5 text-sm outline-none" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input required placeholder="Número" value={formData.number} onChange={e => setFormData({ ...formData, number: e.target.value })} className="w-full bg-muted/20 border rounded-xl px-3 py-2.5 text-sm outline-none" />
+                      <input required placeholder="Bairro" value={formData.neighborhood} onChange={e => setFormData({ ...formData, neighborhood: e.target.value })} className="w-full bg-muted/20 border rounded-xl px-3 py-2.5 text-sm outline-none" />
+                    </div>
+                    <div className="w-full bg-muted/10 border rounded-xl px-3 py-2 text-xs text-muted-foreground">
+                      {formData.city} - {formData.state}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-all">
+            <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 py-3 mt-2 rounded-xl bg-primary text-white font-bold hover:opacity-90 transition-all shadow-md">
               {loading ? "Salvando..." : "Finalizar cadastro"} <ArrowRight className="w-4 h-4" />
             </button>
-            <button type="button" onClick={() => setStep("type")} className="w-full text-xs text-muted-foreground py-2 hover:underline">Voltar</button>
+            <button type="button" onClick={() => setStep("type")} className="w-full text-xs text-muted-foreground py-2 hover:underline text-center">Voltar e alterar perfil</button>
           </form>
         )}
       </div>

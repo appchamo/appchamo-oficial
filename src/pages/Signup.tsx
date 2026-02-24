@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Ticket, MailCheck } from "lucide-react"; // Adicionei MailCheck para o aviso
+import { Ticket, MailCheck, Mail, ArrowRight } from "lucide-react"; // Adicionado Mail e ArrowRight
 import StepAccountType from "@/components/signup/StepAccountType";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
 import StepDocuments from "@/components/signup/StepDocuments";
@@ -13,7 +13,8 @@ import StepPlanSelect from "@/components/signup/StepPlanSelect";
 import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
 
 type AccountType = "client" | "professional";
-type Step = "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email"; // Adicionei step de aguardar e-mail
+// Adicionado 'method-choice' ao Step
+type Step = "method-choice" | "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email";
 
 const friendlyError = (msg: string) => {
   if (msg.includes("already registered")) return "Este e-mail já está cadastrado.";
@@ -37,7 +38,7 @@ const fileToBase64 = (file: File): Promise<string> =>
 const Signup = () => {
   const navigate = useNavigate();
   const [accountType, setAccountType] = useState<AccountType>("client");
-  const [step, setStep] = useState<Step>("type");
+  const [step, setStep] = useState<Step>("method-choice"); // Alterado para começar na escolha de método
   const [basicData, setBasicData] = useState<BasicData | null>(null);
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [profileData, setProfileData] = useState<{
@@ -51,10 +52,20 @@ const Signup = () => {
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
-  const [resending, setResending] = useState(false); // Estado para o botão de reenviar
+  const [resending, setResending] = useState(false);
 
-  // ✅ NOVO: Memória para saber se a conta já foi criada no banco
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+
+  // Função para Login Social (Google/Apple)
+  const handleSocialSignup = async (provider: "google" | "apple") => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/complete-signup`,
+      }
+    });
+    if (error) toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
+  };
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -81,18 +92,14 @@ const Signup = () => {
   const handlePlanSelect = async (planId: string) => {
     if (!profileData) return;
     setSelectedPlanId(planId);
-    
-    // Dispara o cadastro. Se for pago, o doSignup abrirá o modal após o sucesso.
     doSignup(profileData, planId);
   };
 
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
-    // ✅ Alterado: Agora manda para o aviso de e-mail antes da home
     setStep("awaiting-email");
   };
 
-  // Função para reenviar o e-mail
   const handleResendEmail = async () => {
     if (!basicData?.email) return;
     setResending(true);
@@ -115,7 +122,6 @@ const Signup = () => {
     setLoading(true);
 
     try {
-      // ✅ PROTEÇÃO: Se a conta já foi criada, apenas atualiza o plano ou reabre o modal
       if (createdUserId) {
         if (accountType === "professional" && planId !== "free") {
           setLoading(false);
@@ -127,7 +133,6 @@ const Signup = () => {
         return; 
       }
 
-      // 1. Cria a conta no Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: basicData.email,
         password: basicData.password,
@@ -162,7 +167,6 @@ const Signup = () => {
         }))
       );
 
-      // 2. Completa o perfil via Edge Function
       const { data: result, error: fnError } = await supabase.functions.invoke(
         "complete-signup",
         {
@@ -183,7 +187,6 @@ const Signup = () => {
         return;
       }
 
-      // 3. Se for plano pago, abre o modal. Se for free, avisa do e-mail.
       if (accountType === "professional" && planId !== "free") {
         setLoading(false);
         setIsSubscriptionOpen(true);
@@ -214,7 +217,6 @@ const Signup = () => {
     );
   }
 
-  // ✅ Tela de aviso de verificação de e-mail
   if (step === "awaiting-email") {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center">
@@ -244,6 +246,60 @@ const Signup = () => {
 
   return (
     <>
+      {/* NOVO: Passo de escolha de método estilo Canva */}
+      {step === "method-choice" && (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 animate-in fade-in duration-500">
+          <div className="w-full max-w-sm space-y-8">
+            <div className="text-center">
+              <h1 className="text-3xl font-extrabold text-gradient mb-2">Chamô</h1>
+              <p className="text-sm text-muted-foreground">Crie sua conta em segundos</p>
+            </div>
+
+            <div className="space-y-3">
+              <button 
+                onClick={() => handleSocialSignup("google")}
+                className="w-full flex items-center justify-center gap-3 py-3 border rounded-xl font-medium hover:bg-muted transition-all"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                </svg>
+                Continuar com Google
+              </button>
+
+              <button 
+                onClick={() => handleSocialSignup("apple")}
+                className="w-full flex items-center justify-center gap-3 py-3 border rounded-xl font-medium hover:bg-muted transition-all"
+              >
+                <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                  <path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.248-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.67.91-1.377 0-2.332-1.26-3.428-2.8-1.287-1.82-2.323-4.63-2.323-7.28 0-4.28 2.797-6.55 5.552-6.55 1.448 0 2.67.95 3.6.95.865 0 2.222-1.01 3.902-1.01.61 0 2.886.06 4.012 1.81-2.277 1.39-2.56 4.22-1.48 5.81 1.08 1.59 2.51 2.05 2.414 2.12z" />
+                </svg>
+                Continuar com Apple
+              </button>
+
+              <div className="relative py-4">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border"></div></div>
+                <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Ou</span></div>
+              </div>
+
+              <button 
+                onClick={() => setStep("type")}
+                className="w-full flex items-center justify-center gap-3 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all shadow-md"
+              >
+                <Mail className="w-5 h-5" />
+                Continuar com e-mail
+              </button>
+            </div>
+
+            <p className="text-center text-xs text-muted-foreground">
+              Já tem uma conta? <button onClick={() => navigate("/login")} className="text-primary font-bold hover:underline">Entrar</button>
+            </p>
+          </div>
+        </div>
+      )}
+
       {step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
       {step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep("type")} />}
       {step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}

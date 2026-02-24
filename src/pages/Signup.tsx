@@ -48,6 +48,7 @@ const Signup = () => {
     services?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(true); // ✅ Novo estado para evitar "pulo" de tela
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
@@ -56,13 +57,14 @@ const Signup = () => {
 
   useEffect(() => {
     const checkSocialUser = async () => {
-      // ✅ VERIFICAÇÃO DE FLAG: Só inicia onboarding se veio do fluxo de Signup
+      setVerifying(true);
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
       
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
-        // ✅ VERIFICAÇÃO DE PERFIL EXISTENTE: Se logou mas já tem cadastro completo
+        // ✅ VERIFICAÇÃO DE PERFIL EXISTENTE: 
+        // Se o usuário logou, precisamos saber se ele já é cadastrado de fato (tem CPF)
         const { data: profile } = await supabase
           .from("profiles")
           .select("cpf")
@@ -70,15 +72,15 @@ const Signup = () => {
           .maybeSingle();
 
         if (profile?.cpf) {
-          // Usuário já é da casa, limpa flag e manda pra home
+          // 👈 CASO JÁ TENHA CONTA: Independentemente de onde clicou, manda pra Home
           localStorage.removeItem("signup_in_progress");
-          toast({ title: "Você já possui cadastro!", description: "Redirecionando para sua conta..." });
+          toast({ title: "Você já possui cadastro!", description: "Entrando na sua conta..." });
           navigate("/home");
           return;
         }
 
         if (isSignupFlow) {
-          // Se é cadastro e não tem perfil, inicia os steps
+          // 👈 CASO NOVO USUÁRIO (Vindo do botão Criar Conta): Inicia Onboarding
           localStorage.removeItem("signup_in_progress");
           setCreatedUserId(user.id);
           setBasicData({
@@ -100,16 +102,18 @@ const Signup = () => {
           });
           setStep("type"); 
         } else {
-          // Se não há flag nem perfil completo, mas está logado, manda pra home (ou login decidirá)
+          // Logado, sem CPF e sem flag de signup: Provavelmente tentou logar mas não tem conta
+          // O Login.tsx já cuida disso, mas por segurança mandamos pra Home para o Guard agir
           navigate("/home");
         }
       }
+      setVerifying(false);
     };
     checkSocialUser();
   }, [navigate]);
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
-    // ✅ ATIVA A FLAG: Marcamos que o usuário está tentando se cadastrar
+    // ✅ ATIVA A FLAG: Marcamos que o usuário clicou explicitamente em Criar Conta
     localStorage.setItem("signup_in_progress", "true");
     
     const { error } = await supabase.auth.signInWithOAuth({
@@ -256,13 +260,16 @@ const Signup = () => {
     navigate("/home");
   };
 
-  if (loading) {
+  // ✅ Tela de Loading para quando o componente está decidindo o fluxo
+  if (verifying || loading) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
         <div className="text-center">
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Criando sua conta...</p>
+          <p className="text-sm text-muted-foreground">
+            {verifying ? "Verificando sua conta..." : "Processando..."}
+          </p>
         </div>
       </div>
     );

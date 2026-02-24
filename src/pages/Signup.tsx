@@ -61,21 +61,24 @@ const Signup = () => {
 
       if (session?.user) {
         if (isSignupFlow) {
-          // ✅ A BLITZ COMEÇA AQUI: Trava a tela no loading pra não piscar
+          // ✅ A BLITZ DO CADASTRO AGORA TÁ ESPERTA (Igual do Login)
           setLoading(true);
           
           try {
-            // Pergunta pro banco se esse usuário do Google já tem um perfil completo
+            // 1. Puxa TODOS os dados usando a coluna certa (user_id)
             const { data: profile } = await supabase
               .from("profiles")
-              .select("cpf, onboarding_completed")
-              .eq("id", session.user.id)
+              .select("*")
+              .eq("user_id", session.user.id)
               .single();
 
-            // Se já tem CPF ou já terminou o onboarding = É CONTA VELHA!
-            if (profile?.cpf || profile?.onboarding_completed) {
+            // 2. Verifica se o perfil já tem dados reais
+            const isProfileIncomplete = !profile || (!profile.cpf && !profile.document && !profile.phone);
+
+            if (!isProfileIncomplete) {
+              // 🛑 CONTA JÁ EXISTE E ESTÁ COMPLETA! Bloqueia e chuta pro Login.
               localStorage.removeItem("signup_in_progress");
-              await supabase.auth.signOut(); // Desloga o penetra
+              await supabase.auth.signOut();
               
               toast({ 
                 title: "Conta já existente", 
@@ -85,11 +88,11 @@ const Signup = () => {
               });
               
               setLoading(false);
-              navigate("/login"); // Manda pro lugar certo
+              navigate("/login"); 
               return;
             }
 
-            // Se passou na blitz (é perfil vazio), libera pro cadastro!
+            // Se passou na blitz (é realmente novo), libera para continuar o cadastro
             localStorage.removeItem("signup_in_progress");
             setCreatedUserId(session.user.id);
             setBasicData({

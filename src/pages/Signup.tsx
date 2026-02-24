@@ -61,26 +61,60 @@ const Signup = () => {
 
       if (session?.user) {
         if (isSignupFlow) {
-          localStorage.removeItem("signup_in_progress");
-          setCreatedUserId(session.user.id);
-          setBasicData({
-            name: session.user.user_metadata?.full_name || "",
-            email: session.user.email || "",
-            password: "", 
-            phone: "",
-            document: "",
-            documentType: "cpf",
-            birthDate: "",
-            addressZip: "",
-            addressStreet: "",
-            addressNumber: "",
-            addressComplement: "",
-            addressNeighborhood: "",
-            addressCity: "",
-            addressState: "",
-            addressCountry: "Brasil"
-          });
-          setStep("type"); 
+          // ✅ A BLITZ COMEÇA AQUI: Trava a tela no loading pra não piscar
+          setLoading(true);
+          
+          try {
+            // Pergunta pro banco se esse usuário do Google já tem um perfil completo
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("cpf, onboarding_completed")
+              .eq("id", session.user.id)
+              .single();
+
+            // Se já tem CPF ou já terminou o onboarding = É CONTA VELHA!
+            if (profile?.cpf || profile?.onboarding_completed) {
+              localStorage.removeItem("signup_in_progress");
+              await supabase.auth.signOut(); // Desloga o penetra
+              
+              toast({ 
+                title: "Conta já existente", 
+                description: "Este e-mail já possui cadastro. Por favor, faça login.", 
+                variant: "destructive",
+                duration: 5000
+              });
+              
+              setLoading(false);
+              navigate("/login"); // Manda pro lugar certo
+              return;
+            }
+
+            // Se passou na blitz (é perfil vazio), libera pro cadastro!
+            localStorage.removeItem("signup_in_progress");
+            setCreatedUserId(session.user.id);
+            setBasicData({
+              name: session.user.user_metadata?.full_name || "",
+              email: session.user.email || "",
+              password: "", 
+              phone: "",
+              document: "",
+              documentType: "cpf",
+              birthDate: "",
+              addressZip: "",
+              addressStreet: "",
+              addressNumber: "",
+              addressComplement: "",
+              addressNeighborhood: "",
+              addressCity: "",
+              addressState: "",
+              addressCountry: "Brasil"
+            });
+            setStep("type"); 
+          } catch (err) {
+            console.error("Erro ao verificar conta:", err);
+          } finally {
+            setLoading(false);
+          }
         } else {
           navigate("/home");
         }
@@ -112,37 +146,29 @@ const Signup = () => {
     setStep("basic");
   };
 
-  // ✅ A BARREIRA BLINDADA AGORA TEM "PASSE VIP" PARA OAUTH
   const handleBasicNext = async (data: BasicData) => {
     setLoading(true);
 
     try {
-      // Se NÃO tiver o createdUserId, significa que ele está digitando um e-mail novo na mão.
-      // Aí sim a gente checa se o e-mail já existe no banco pra barrar os espertinhos.
       if (data.email && !createdUserId) {
         const { data: emailExists, error: rpcError } = await supabase.rpc('check_email_exists', { 
           user_email: data.email 
         });
 
         if (emailExists) {
-          // 🛑 CONTA JÁ EXISTE: Expulsa o intruso
           await supabase.auth.signOut();
-          
           toast({ 
             title: "E-mail já cadastrado", 
             description: "Este e-mail já possui conta. Por favor, faça login.", 
             variant: "destructive",
             duration: 5000
           });
-          
           setLoading(false);
-          // Volta pra tela de login
           navigate("/login"); 
           return;
         }
       }
 
-      // ✅ TUDO CERTO: Se veio do Google/Apple (tem createdUserId) OU é e-mail novinho em folha, pode avançar!
       setBasicData(data);
       if (accountType === "professional") setStep("documents");
       else setStep("profile");

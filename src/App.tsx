@@ -13,7 +13,7 @@ import Index from "./pages/Index";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
-import CompleteSignup from "./pages/CompleteSignup"; // 👈 ADICIONADO: Importação da nova página
+// ❌ Removido o import da página antiga para evitar conflitos
 import ResetPassword from "./pages/ResetPassword";
 import Search from "./pages/Search";
 import Categories from "./pages/Categories";
@@ -114,8 +114,8 @@ const App = () => {
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
               
-              {/* 🔥 ADICIONADO: Rota para finalizar cadastro após login social */}
-              <Route path="/complete-signup" element={<CompleteSignup />} />
+              {/* ✅ CORRIGIDO: Agora aponta para o componente Signup que possui a "Blitz" de segurança */}
+              <Route path="/complete-signup" element={<Signup />} />
 
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/admin/login" element={<AdminLogin />} />

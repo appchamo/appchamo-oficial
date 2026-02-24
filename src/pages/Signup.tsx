@@ -49,12 +49,8 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   
-  const [verifying, setVerifying] = useState(() => {
-    if (typeof window !== "undefined") {
-      return window.location.hash.includes("access_token") || window.location.hash.includes("error");
-    }
-    return false;
-  });
+  // ✅ COMEÇA TRUE: A tela nasce bloqueada no Loading para evitar "pulos" visuais
+  const [verifying, setVerifying] = useState(true); 
   
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
@@ -65,14 +61,22 @@ const Signup = () => {
   useEffect(() => {
     let isMounted = true;
 
-    const processAuth = async (user: any) => {
-      if (!user) return;
+    const verifyUserAndProfile = async () => {
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
+      const { data: { session } } = await supabase.auth.getSession();
+
+      // Se não tem ninguém logado, destranca a tela imediatamente para o usuário ver as opções
+      if (!session?.user) {
+        if (isMounted) setVerifying(false);
+        return;
+      }
+
+      const user = session.user;
 
       try {
         let hasCompletedProfile = false;
 
-        // 1. Tenta achar pelo ID (caso padrão)
+        // 1. Tenta achar o CPF pelo ID (caso normal)
         const { data: profileById } = await supabase
           .from("profiles")
           .select("cpf, onboarding_completed")
@@ -83,7 +87,7 @@ const Signup = () => {
           hasCompletedProfile = true;
         }
 
-        // 2. A MÁGICA: Tenta achar pelo E-MAIL (Pega as contas duplicadas do Google)
+        // 2. Tenta achar pelo E-MAIL (caso o Google tenha gerado um ID duplicado)
         if (!hasCompletedProfile && user.email) {
           const { data: profileByEmail } = await supabase
             .from("profiles")
@@ -96,10 +100,11 @@ const Signup = () => {
           }
         }
 
+        // 🛑 CONTA JÁ EXISTE: Expulsa o usuário de forma agressiva
         if (hasCompletedProfile) {
-          // 🛑 ERRO: Tentou criar conta mas o e-mail já existe no banco!
           localStorage.removeItem("signup_in_progress");
           
+          // Mata a sessão antes que o "Guarda Global" do seu app tente jogar ele pra Home
           await supabase.auth.signOut(); 
           window.history.replaceState(null, "", window.location.pathname);
 
@@ -109,13 +114,14 @@ const Signup = () => {
               description: "Este e-mail já possui conta. Por favor, faça login.", 
               variant: "destructive" 
             });
+            setStep("method-choice"); // Garante que volta pra tela dos botões
             setVerifying(false);
-            navigate("/"); 
+            navigate("/"); // Manda pra raiz (Print 3)
           }
           return;
         }
 
-        // ✅ CONTA TOTALMENTE NOVA: Segue o fluxo
+        // ✅ CONTA NOVA: Tudo certo, libera a tela "Cliente ou Profissional"
         if (isSignupFlow) {
           localStorage.removeItem("signup_in_progress");
           window.history.replaceState(null, "", window.location.pathname);
@@ -140,9 +146,10 @@ const Signup = () => {
               addressCountry: "Brasil"
             });
             setStep("type");
-            setVerifying(false);
+            setVerifying(false); // Destranca a tela
           }
         } else {
+          // Se entrou de penetra, manda pra home
           navigate("/home");
         }
       } catch (err) {
@@ -150,17 +157,14 @@ const Signup = () => {
       }
     };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        processAuth(session.user);
-      }
-    });
+    // Roda a checagem assim que o componente nasce
+    verifyUserAndProfile();
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        processAuth(session.user);
-      } else if (!window.location.hash.includes("access_token")) {
-        if (isMounted) setVerifying(false);
+    // Escuta o Google terminando de processar
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        setVerifying(true); // Tranca a tela de novo
+        verifyUserAndProfile();
       }
     });
 

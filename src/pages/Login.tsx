@@ -32,7 +32,6 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // ✅ BLITZ AJUSTADA: Removida a coluna "document" e adicionada trava de loop
   const checkProfileAndRedirect = async (userId: string) => {
     setLoading(true);
     try {
@@ -89,7 +88,6 @@ const Login = () => {
   };
 
   useEffect(() => {
-    // 1. Carrega o Background
     supabase.
     from("platform_settings").
     select("value").
@@ -102,18 +100,14 @@ const Login = () => {
       }
     });
 
-    // 2. Verifica sessão com BLOQUEIO DE LOOP
     const checkExistingSession = async () => {
-      // 🛑 Se o usuário clicou em "Entrar" manualmente, ignoramos o auto-login uma vez
       const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-      
       const { data: { session } } = await supabase.auth.getSession();
       
       if (session?.user) {
         if (isManualIntent) {
-          // Limpamos a flag e deixamos ele na tela de login
-          console.log("Login automático bloqueado por intenção manual.");
-          localStorage.removeItem("manual_login_intent");
+          // ✅ O SEGREDO ESTÁ AQUI: Nós NÃO apagamos a flag. Deixamos ela protegendo a tela.
+          console.log("Bloqueando redirecionamento porque o usuário veio do botão Entrar.");
           setLoading(false);
         } else {
           await checkProfileAndRedirect(session.user.id);
@@ -124,8 +118,8 @@ const Login = () => {
     checkExistingSession();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      // Se for um login social novo (redirecionamento), a intenção manual não existirá, então ele segue normal
       const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+      // A trava continua viva aqui, impedindo a piscada
       if (event === "SIGNED_IN" && session?.user && !isManualIntent) {
         checkProfileAndRedirect(session.user.id);
       }
@@ -151,8 +145,12 @@ const Login = () => {
     if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
     
-    // Ao fazer login manual, garantimos que qualquer trava de intenção seja removida
+    // ✅ Quando o usuário clica de verdade no Login, aí sim apagamos as travas
     localStorage.removeItem("manual_login_intent");
+    localStorage.removeItem("signup_in_progress");
+
+    // Limpa a sessão bugada antes de tentar uma nova
+    await supabase.auth.signOut();
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
@@ -167,9 +165,13 @@ const Login = () => {
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
+    // ✅ Apaga a trava apenas no momento em que ele clica para logar de verdade
     localStorage.removeItem("signup_in_progress");
-    localStorage.removeItem("manual_login_intent"); // Limpa intenção ao iniciar login social novo
+    localStorage.removeItem("manual_login_intent");
     
+    // Força o logout de qualquer "fantasma" antes de logar
+    await supabase.auth.signOut();
+
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {

@@ -1,13 +1,28 @@
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { ArrowRight, Shield, Gift, Users } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 const Index = () => {
+  const navigate = useNavigate();
+
+  // ✅ Função que limpa a sessão e a flag antes de ir para o Login
+  const handleLoginClick = async () => {
+    localStorage.removeItem("signup_in_progress");
+    await supabase.auth.signOut();
+    navigate("/login");
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="px-4 py-4 flex items-center justify-between max-w-screen-lg mx-auto w-full">
         <span className="text-2xl font-extrabold text-gradient tracking-tight">Chamô</span>
-        {/* ✅ Rota separada para Login no Header */}
-        <Link to="/login" className="text-sm font-medium text-primary hover:underline">Entrar</Link>
+        {/* ✅ Alterado para botão com regra de encerramento de sessão */}
+        <button 
+          onClick={handleLoginClick} 
+          className="text-sm font-medium text-primary hover:underline bg-transparent border-none cursor-pointer"
+        >
+          Entrar
+        </button>
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center px-4 text-center max-w-md mx-auto gap-6">
@@ -18,14 +33,21 @@ const Index = () => {
           Contrate com segurança e concorra a prêmios mensais.
         </p>
         <div className="flex gap-3 w-full">
-          {/* ✅ Rota de Cadastro para novos usuários */}
-          <Link to="/signup" className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
+          {/* ✅ Mantido para Cadastro */}
+          <button 
+            onClick={() => navigate("/signup")}
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors"
+          >
             Criar conta <ArrowRight className="w-4 h-4" />
-          </Link>
-          {/* ✅ Rota de Login para quem já tem conta */}
-          <Link to="/login" className="flex-1 flex items-center justify-center py-3 rounded-xl border font-medium text-sm text-foreground hover:bg-muted transition-colors">
+          </button>
+          
+          {/* ✅ Alterado para botão com regra de encerramento de sessão */}
+          <button 
+            onClick={handleLoginClick}
+            className="flex-1 flex items-center justify-center py-3 rounded-xl border font-medium text-sm text-foreground hover:bg-muted transition-colors bg-transparent"
+          >
             Entrar
-          </Link>
+          </button>
         </div>
 
         <div className="grid grid-cols-3 gap-3 w-full mt-4">

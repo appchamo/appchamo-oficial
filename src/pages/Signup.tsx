@@ -367,12 +367,13 @@ const Signup = () => {
               <button 
                 onClick={async () => {
                   setLoading(true);
-                  // ✅ Limpa flag e encerra sessão pendente antes de ir pro Login
+                  // ✅ RESET TOTAL DA SESSÃO: Limpa flag e encerra sessão zumbi
                   localStorage.removeItem("signup_in_progress");
                   await supabase.auth.signOut();
-                  navigate("/login");
+                  // Forçamos o reload do estado para o roteador não bugar
+                  window.location.href = "/login";
                 }} 
-                className="text-primary font-bold hover:underline"
+                className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer"
               >
                 Entrar
               </button>
@@ -402,6 +403,24 @@ const Signup = () => {
         planId={selectedPlanId}
         onSuccess={handleSubscriptionSuccess}
       />
+
+      {/* ✅ Adicionado reset de sessão no rodapé das outras etapas também para segurança total */}
+      {(step !== "method-choice" && step !== "awaiting-email") && (
+        <p className="text-center text-xs text-muted-foreground mt-8">
+          Já tem uma conta?{" "}
+          <button 
+            onClick={async () => {
+              setLoading(true);
+              localStorage.removeItem("signup_in_progress");
+              await supabase.auth.signOut();
+              window.location.href = "/login";
+            }} 
+            className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer"
+          >
+            Entrar
+          </button>
+        </p>
+      )}
 
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">

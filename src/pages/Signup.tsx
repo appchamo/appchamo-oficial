@@ -371,8 +371,8 @@ const Signup = () => {
       )}
 
       {/* MODAL DO CUPOM RESTAURADO E FUNCIONAL */}
-      <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
-        <DialogContent className="max-w-xs text-center [&>button]:hidden">
+     <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
+        <DialogContent className="max-w-xs text-center">
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />

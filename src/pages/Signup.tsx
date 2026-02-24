@@ -63,22 +63,28 @@ const Signup = () => {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
+        // ✅ VERIFICAÇÃO DE PERFIL: Primeiro checamos se ele já existe
         const { data: profile } = await supabase
           .from("profiles")
           .select("cpf")
           .eq("id", user.id)
           .maybeSingle();
 
-        // ✅ TRAVA DE SEGURANÇA: Se já tem CPF, desloga e avisa para fazer login
         if (profile?.cpf) {
+          // 🛑 ERRO: Usuário já cadastrado selecionou conta no Google
           localStorage.removeItem("signup_in_progress");
-          await supabase.auth.signOut(); // Desloga para limpar a sessão intrusa
+          
+          // Desloga imediatamente para não deixar sessão aberta no Signup
+          await supabase.auth.signOut();
+          
           toast({ 
             title: "E-mail já cadastrado", 
             description: "Este e-mail já possui conta. Por favor, faça login.", 
             variant: "destructive" 
           });
-          setStep("method-choice"); // Volta para o início do cadastro
+
+          // 👈 FORÇA VOLTAR PARA A TELA INICIAL (Print 2)
+          setStep("method-choice"); 
           setVerifying(false);
           return;
         }
@@ -119,9 +125,9 @@ const Signup = () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: window.location.href,
+        redirectTo: window.location.href, // Volta para cá para o useEffect barrar se necessário
         queryParams: {
-          prompt: 'select_account',
+          prompt: 'select_account', // Garante a escolha da conta
         },
       }
     });

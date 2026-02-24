@@ -49,7 +49,7 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // ✅ A GRANDE MÁGICA ESTÁ AQUI: Se a URL tiver um token do Google, a tela já nasce "congelada" carregando.
+  // Congela a tela em "loading" se perceber que está voltando do Google
   const [verifying, setVerifying] = useState(() => {
     if (typeof window !== "undefined") {
       return window.location.hash.includes("access_token") || window.location.hash.includes("error");
@@ -66,25 +66,29 @@ const Signup = () => {
   useEffect(() => {
     let isMounted = true;
 
-    // Função central que processa o usuário assim que o Supabase confirma o login
     const processAuth = async (user: any) => {
       if (!user) return;
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
 
       try {
-        // 1. Vai no banco checar se esse e-mail já tem um perfil completo
+        // Busca todo o perfil para ter certeza se ele já completou o onboarding
         const { data: profile } = await supabase
           .from("profiles")
-          .select("cpf")
+          .select("*")
           .eq("id", user.id)
           .maybeSingle();
 
-        // 🛑 CONTA JÁ EXISTE: O sistema expulsa o usuário de volta pra tela de "method-choice" imediatamente
-        if (profile?.cpf) {
+        // ✅ VERIFICAÇÃO RIGOROSA: Se o perfil tem CPF ou onboarding concluído, ele já é cadastrado!
+        const hasCompletedProfile = profile?.cpf || profile?.onboarding_completed;
+
+        if (hasCompletedProfile) {
+          // 🛑 ERRO: Tentou criar conta mas já existe.
           localStorage.removeItem("signup_in_progress");
-          await supabase.auth.signOut(); // Derruba a sessão pra não atravessar
           
-          // Limpa a URL para o React não entrar em loop infinito
+          // Desloga o usuário para não deixar sessão fantasma
+          await supabase.auth.signOut(); 
+          
+          // Limpa a sujeira do token na URL
           window.history.replaceState(null, "", window.location.pathname);
 
           if (isMounted) {
@@ -93,13 +97,14 @@ const Signup = () => {
               description: "Este e-mail já possui conta. Por favor, faça login.", 
               variant: "destructive" 
             });
-            setStep("method-choice");
-            setVerifying(false); // Libera a tela
+            setVerifying(false);
+            // 👈 REDIRECIONA PARA A TELA INICIAL DO APP (Print 3)
+            navigate("/"); 
           }
           return;
         }
 
-        // ✅ CONTA NOVA: Segue o fluxo normal de cadastro (Vai para "Cliente ou Profissional")
+        // ✅ CONTA NOVA: Segue o fluxo para a tela "Cliente/Profissional"
         if (isSignupFlow) {
           localStorage.removeItem("signup_in_progress");
           window.history.replaceState(null, "", window.location.pathname);
@@ -127,7 +132,7 @@ const Signup = () => {
             setVerifying(false);
           }
         } else {
-          // Se de alguma forma absurda não foi fluxo de signup, manda pra home
+          // Se caiu de paraquedas aqui logado sem flag, manda pra home
           navigate("/home");
         }
       } catch (err) {
@@ -135,19 +140,18 @@ const Signup = () => {
       }
     };
 
-    // 2. OUVINTE DE SESSÃO: É ele quem captura o exato milissegundo que o Google loga
+    // Fica escutando a sessão. Assim que o Google devolver o token, ele processa.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         processAuth(session.user);
       }
     });
 
-    // 3. Fallback: Checa se já havia um usuário logado ANTES de carregar a página
+    // Caso o redirecionamento seja muito rápido, checa a sessão inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         processAuth(session.user);
       } else if (!window.location.hash.includes("access_token")) {
-        // Só tira o loading se não estivermos esperando o Google responder
         if (isMounted) setVerifying(false);
       }
     });

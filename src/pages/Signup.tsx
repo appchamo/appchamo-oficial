@@ -54,52 +54,40 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // ✅ FUNÇÃO HARD RESET: Simula o "Clear Site Data" de forma definitiva
+  // ✅ FUNÇÃO LIMPEZA TOTAL (NUCLEAR)
+  // Essa função garante que nada sobra no navegador antes de ir para o login
   const forceExitToLogin = async () => {
     setLoading(true);
+    
     try {
-      // 1. Sinaliza intenção manual IMEDIATAMENTE para travar qualquer useEffect
-      localStorage.setItem("manual_login_intent", "true");
-
-      // 2. Tenta o logout oficial no servidor
+      // Tenta avisar o Supabase que estamos saindo (se falhar, não tem problema)
       await supabase.auth.signOut();
-
-      // 3. Limpeza de LocalStorage e SessionStorage (preservando apenas a trava)
-      const manualIntent = localStorage.getItem("manual_login_intent");
+    } catch (error) {
+      console.error("Erro silencioso ao sair:", error);
+    } finally {
+      // AQUI A MÁGICA ACONTECE:
+      // 1. Limpa o armazenamento local do navegador (token, flags, tudo)
       localStorage.clear();
       sessionStorage.clear();
-      if (manualIntent) localStorage.setItem("manual_login_intent", manualIntent);
 
-      // 4. LIMPEZA AGRESSIVA DE INDEXEDDB
-      // Listamos e deletamos todos os bancos (onde fica o token do Supabase)
-      const dbs = await window.indexedDB.databases();
-      await Promise.all(dbs.map(db => {
-        return new Promise((resolve) => {
-          if (!db.name) return resolve(true);
-          const req = window.indexedDB.deleteDatabase(db.name);
-          req.onsuccess = () => resolve(true);
-          req.onerror = () => resolve(true);
-          req.onblocked = () => resolve(true); // Força a continuação mesmo se bloqueado
-        });
-      }));
-
-      // 5. LIMPEZA DE COOKIES
-      document.cookie.split(";").forEach(c => {
-        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+      // 2. Limpa os Cookies (sessões persistentes)
+      document.cookie.split(";").forEach((c) => {
+        document.cookie = c
+          .replace(/^ +/, "")
+          .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
       });
 
-      // 6. REDIRECIONAMENTO COM REFRESH TOTAL
-      // Limpa a URL e força o navegador a recarregar o app do zero
-      window.location.href = window.location.origin + "/login";
-    } catch (err) {
-      console.error("Erro no Hard Reset:", err);
-      window.location.href = window.location.origin + "/login";
+      // 3. Define a intenção manual DEPOIS de limpar tudo (para o Login saber que é você)
+      localStorage.setItem("manual_login_intent", "true");
+
+      // 4. Força o navegador a carregar a página de Login do zero (sem memória anterior)
+      window.location.href = "/login";
     }
   };
 
   useEffect(() => {
     const checkSocialUser = async () => {
-      // Só checa se não houver intenção de login manual (limpeza em curso)
+      // Se você acabou de clicar em sair, não roda essa verificação
       if (localStorage.getItem("manual_login_intent") === "true") return;
 
       const { data: { session } } = await supabase.auth.getSession();
@@ -151,13 +139,16 @@ const Signup = () => {
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
+    // Remove a intenção manual para permitir o fluxo normal de cadastro
     localStorage.removeItem("manual_login_intent");
     
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: window.location.href,
-        queryParams: { prompt: 'select_account' },
+        queryParams: {
+          prompt: 'select_account',
+        },
       }
     });
     if (error) {
@@ -282,6 +273,11 @@ const Signup = () => {
     }
   };
 
+  const handleCouponClose = () => {
+    setCouponPopup(false);
+    navigate("/home");
+  };
+
   const handleResendEmail = async () => {
     if (!basicData?.email) return;
     setResending(true);
@@ -293,11 +289,6 @@ const Signup = () => {
     if (error) toast({ title: "Aguarde um pouco", variant: "destructive" });
     else toast({ title: "E-mail reenviado!" });
     setResending(false);
-  };
-
-  const handleCouponClose = () => {
-    setCouponPopup(false);
-    navigate("/home");
   };
 
   if (loading && step !== "basic") { 

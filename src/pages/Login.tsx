@@ -32,18 +32,16 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // ✅ BLITZ AJUSTADA: Removida a coluna "document" que causava o erro 400
+  // ✅ BLITZ AJUSTADA: Removida a coluna "document" e adicionada trava de loop
   const checkProfileAndRedirect = async (userId: string) => {
     setLoading(true);
     try {
-      // 1. Puxa TODOS os dados do perfil
       const { data: profile } = await supabase
         .from("profiles")
         .select("*")
         .eq("user_id", userId)
         .single();
 
-      // 2. Puxa os cargos
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
@@ -53,26 +51,23 @@ const Login = () => {
         ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
       );
 
-      // 🔑 CARTEIRADA DO ADMIN: Se for admin, limpa flag e vai direto!
       if (isAdmin) {
         localStorage.removeItem("signup_in_progress");
+        localStorage.removeItem("manual_login_intent");
         navigate("/admin");
         return;
       }
 
-      // 🛑 BLITZ DOS USUÁRIOS COMUNS
-      // Removida a coluna .document que não existe no seu Supabase
       const isProfileIncomplete = !profile || (!profile.cpf && !profile.phone);
 
       if (isProfileIncomplete) {
-        // Cenário 1: Entrou sem cadastro -> Manda pro Signup concluir
         localStorage.setItem("signup_in_progress", "true");
         navigate("/signup");
         return;
       }
 
-      // ✅ Se chegou aqui, o perfil está completo! 
       localStorage.removeItem("signup_in_progress"); 
+      localStorage.removeItem("manual_login_intent");
       navigate("/home");
       
     } catch (err) {
@@ -94,7 +89,7 @@ const Login = () => {
   };
 
   useEffect(() => {
-    // 1. Carrega o Background (Mantido intacto)
+    // 1. Carrega o Background
     supabase.
     from("platform_settings").
     select("value").
@@ -107,19 +102,31 @@ const Login = () => {
       }
     });
 
-    // 2. Verifica se o usuário já está logado ou se ACABOU de voltar do Google/Apple
+    // 2. Verifica sessão com BLOQUEIO DE LOOP
     const checkExistingSession = async () => {
+      // 🛑 Se o usuário clicou em "Entrar" manualmente, ignoramos o auto-login uma vez
+      const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+      
       const { data: { session } } = await supabase.auth.getSession();
+      
       if (session?.user) {
-        await checkProfileAndRedirect(session.user.id);
+        if (isManualIntent) {
+          // Limpamos a flag e deixamos ele na tela de login
+          console.log("Login automático bloqueado por intenção manual.");
+          localStorage.removeItem("manual_login_intent");
+          setLoading(false);
+        } else {
+          await checkProfileAndRedirect(session.user.id);
+        }
       }
     };
     
     checkExistingSession();
 
-    // 3. Fica escutando a mudança de estado (para quando o redirecionamento OAuth terminar)
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
+      // Se for um login social novo (redirecionamento), a intenção manual não existirá, então ele segue normal
+      const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+      if (event === "SIGNED_IN" && session?.user && !isManualIntent) {
         checkProfileAndRedirect(session.user.id);
       }
     });
@@ -144,6 +151,9 @@ const Login = () => {
     if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
     
+    // Ao fazer login manual, garantimos que qualquer trava de intenção seja removida
+    localStorage.removeItem("manual_login_intent");
+
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       const type = getErrorType(error.message);
@@ -153,18 +163,16 @@ const Login = () => {
       return;
     }
     
-    // Se passou na senha, vai pra blitz antes de liberar
     await checkProfileAndRedirect(data.user.id);
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    // Limpa a flag de cadastro para garantir que o sistema entenda como um LOGIN puro inicialmente
     localStorage.removeItem("signup_in_progress");
+    localStorage.removeItem("manual_login_intent"); // Limpa intenção ao iniciar login social novo
     
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        // Ele volta para o /login para passar pela Blitz
         redirectTo: `${window.location.origin}/login`,
         queryParams: {
           prompt: 'select_account',

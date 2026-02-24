@@ -62,7 +62,6 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // Guardamos o step atual numa referência para o useEffect não se perder com as atualizações
   const stepRef = useRef(step);
   useEffect(() => { stepRef.current = step; }, [step]);
 
@@ -74,36 +73,57 @@ const Signup = () => {
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
 
       try {
-        // Tenta achar o perfil do usuário atual
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("cpf, onboarding_completed")
-          .eq("id", user.id)
-          .maybeSingle();
+        let hasCompletedProfile = false;
 
-        const hasCompletedProfile = profile?.cpf || profile?.onboarding_completed;
+        // ✅ MÁGICA AQUI: Pega TODOS os perfis com esse e-mail (Resolve o bug da duplicata)
+        if (user.email) {
+          const { data: profilesByEmail } = await supabase
+            .from("profiles")
+            .select("cpf, onboarding_completed")
+            .eq("email", user.email);
 
+          // Se achou algum e qualquer um deles tiver CPF, o cara já existe!
+          if (profilesByEmail && profilesByEmail.length > 0) {
+            const achouCpf = profilesByEmail.some(p => p.cpf || p.onboarding_completed);
+            if (achouCpf) hasCompletedProfile = true;
+          }
+        }
+
+        // Fallback de segurança pelo ID
+        if (!hasCompletedProfile) {
+          const { data: profileById } = await supabase
+            .from("profiles")
+            .select("cpf, onboarding_completed")
+            .eq("id", user.id)
+            .limit(1); // Usa limit em vez de maybeSingle
+          
+          if (profileById?.[0]?.cpf || profileById?.[0]?.onboarding_completed) {
+            hasCompletedProfile = true;
+          }
+        }
+
+        // 🛑 CONTA JÁ EXISTE NO BANCO: Bloqueia tudo e expulsa
         if (hasCompletedProfile) {
-          // 🛑 ERRO: Já tem conta!
           localStorage.removeItem("signup_in_progress");
-          await supabase.auth.signOut(); 
           window.history.replaceState(null, "", window.location.pathname);
+          
+          await supabase.auth.signOut();
 
           if (isMounted) {
             toast({ 
               title: "E-mail já cadastrado", 
-              description: "Este e-mail já possui conta. Por favor, faça login.", 
-              variant: "destructive" 
+              description: "Identificamos que este e-mail já possui conta. Por favor, faça login.", 
+              variant: "destructive",
+              duration: 5000
             });
-            setVerifying(false);
-            navigate("/"); 
+            navigate("/"); // Joga pra página de login / home (Print 3)
           }
           return;
         }
 
-        // ✅ CONTA NOVA: Inicia o fluxo de cadastro
+        // ✅ CONTA É NOVA DE FATO
         if (isSignupFlow) {
-          localStorage.removeItem("signup_in_progress"); // Limpa para não dar loop
+          localStorage.removeItem("signup_in_progress");
           window.history.replaceState(null, "", window.location.pathname);
           
           if (isMounted) {
@@ -129,9 +149,6 @@ const Signup = () => {
             setVerifying(false);
           }
         } else {
-          // 🔥 AQUI ESTAVA O BUG DOS 5 SEGUNDOS 🔥
-          // Só redireciona para a Home se ele estiver na tela inicial de escolha e não tiver flag.
-          // Se ele já estiver na tela "type" (Cliente/Profissional), não faz nada, deixa ele preencher!
           if (stepRef.current === "method-choice" && isMounted) {
             navigate("/home");
           }
@@ -143,6 +160,7 @@ const Signup = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
+        setVerifying(true);
         processAuth(session.user);
       }
     });

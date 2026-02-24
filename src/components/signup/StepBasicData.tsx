@@ -28,6 +28,7 @@ interface Props {
   accountType: AccountType;
   onNext: (data: BasicData) => void;
   onBack: () => void;
+  initialData?: Partial<BasicData>; // ✅ ADICIONADO: Para receber dados do Google
 }
 
 import { formatCpf, formatCnpj, formatPhone } from "@/lib/formatters";
@@ -100,9 +101,9 @@ const TermsDialogFromAdmin = ({ open, onClose, onAccept }: { open: boolean; onCl
   );
 };
 
-const StepBasicData = ({ accountType, onNext, onBack }: Props) => {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
+  const [name, setName] = useState(initialData?.name || ""); // ✅ Preenche se vier do Google
+  const [email, setEmail] = useState(initialData?.email || ""); // ✅ Preenche se vier do Google
   const [phone, setPhone] = useState("");
   const [documentType, setDocumentType] = useState<"cpf" | "cnpj">("cpf");
   const [document, setDocument] = useState("");
@@ -123,6 +124,9 @@ const StepBasicData = ({ accountType, onNext, onBack }: Props) => {
   const [validating, setValidating] = useState(false);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
+
+  // ✅ Identifica se é login social para esconder senhas
+  const isSocialSignup = !!initialData?.email;
 
   const isUnderage = (dateStr: string) => {
     if (!dateStr) return false;
@@ -189,12 +193,22 @@ const StepBasicData = ({ accountType, onNext, onBack }: Props) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !password || !phone || !birthDate) { toast({ title: "Preencha todos os campos obrigatórios." }); return; }
+    
+    // ✅ Validação ajustada: Senha só é obrigatória se NÃO for social
+    if (!name || !email || (!isSocialSignup && !password) || !phone || !birthDate) { 
+      toast({ title: "Preencha todos os campos obrigatórios." }); 
+      return; 
+    }
+    
     if (!addressCity || !addressState) { toast({ title: "Informe pelo menos sua cidade e estado." }); return; }
     if (isUnderage(birthDate)) { toast({ title: "Você precisa ter 18 anos ou mais para se cadastrar.", variant: "destructive" }); return; }
     if (!termsAccepted) { toast({ title: "Aceite os termos de uso para continuar." }); return; }
-    if (password.length < 6) { toast({ title: "A senha deve ter pelo menos 6 caracteres." }); return; }
-    if (password !== confirmPassword) { toast({ title: "As senhas não conferem." }); return; }
+    
+    // ✅ Validação de senha condicional
+    if (!isSocialSignup) {
+      if (password.length < 6) { toast({ title: "A senha deve ter pelo menos 6 caracteres." }); return; }
+      if (password !== confirmPassword) { toast({ title: "As senhas não conferem." }); return; }
+    }
     
     const docClean = document.replace(/\D/g, "");
     if (accountType === "professional" && !docClean) { toast({ title: "CPF ou CNPJ é obrigatório para profissionais." }); return; }
@@ -242,7 +256,8 @@ const StepBasicData = ({ accountType, onNext, onBack }: Props) => {
 
           <InputRow icon={Mail} label="E-mail *">
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+              disabled={isSocialSignup} // ✅ Bloqueia edição se vier do Google
+              className={`flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground ${isSocialSignup ? 'opacity-60 cursor-not-allowed' : ''}`} />
           </InputRow>
 
           <InputRow icon={Phone} label="Telefone *">
@@ -324,15 +339,20 @@ const StepBasicData = ({ accountType, onNext, onBack }: Props) => {
   </div>
 </div>
 
-          <InputRow icon={Lock} label="Senha *">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
-          </InputRow>
+          {/* ✅ CAMPOS DE SENHA ESCONDIDOS SE FOR SOCIAL */}
+          {!isSocialSignup && (
+            <>
+              <InputRow icon={Lock} label="Senha *">
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+              </InputRow>
 
-          <InputRow icon={Lock} label="Confirmar senha *">
-            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repita a senha"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
-          </InputRow>
+              <InputRow icon={Lock} label="Confirmar senha *">
+                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repita a senha"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+              </InputRow>
+            </>
+          )}
 
           {/* Address section */}
           <div className="border-t pt-3 mt-2">

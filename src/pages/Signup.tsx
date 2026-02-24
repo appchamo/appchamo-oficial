@@ -54,20 +54,30 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // ✅ REGRA DE BLOQUEIO ATUALIZADA: Sinaliza intenção manual para o Login
+  // ✅ REGRA DE BLOQUEIO ATUALIZADA: Sinaliza intenção manual e limpa IndexedDB
   const forceExitToLogin = async () => {
     setLoading(true);
     try {
-      // 1. Sinaliza para o Login ignorar a Blitz automática
+      // 1. Ativa a trava de segurança para o Login.tsx
       localStorage.setItem("manual_login_intent", "true");
-      // 2. Remove a flag que força o redirecionamento para o signup
       localStorage.removeItem("signup_in_progress");
-      // 3. Mata a sessão zumbi no Supabase
+
+      // 2. Tenta encerrar a sessão no servidor
       await supabase.auth.signOut();
-      // 4. Força um reload limpo na rota de login
+
+      // 3. LIMPEZA NUCLEAR DO INDEXEDDB (Onde o Android guarda a sessão viciada)
+      const dbs = await window.indexedDB.databases();
+      dbs.forEach(db => {
+        if (db.name) window.indexedDB.deleteDatabase(db.name);
+      });
+
+      // 4. Limpa memória local restante
+      sessionStorage.clear();
+
+      // 5. Redirecionamento Bruto (Força o app a reiniciar do zero)
       window.location.href = "/login";
-    } catch (error) {
-      console.error("Erro ao sair:", error);
+    } catch (err) {
+      console.error("Erro ao sair:", err);
       window.location.href = "/login";
     }
   };
@@ -155,7 +165,7 @@ const Signup = () => {
         if (emailExists) {
           toast({ 
             title: "E-mail já cadastrado", 
-            description: "Por favor, faça login com sua conta existente.", 
+            description: "Por favor, entre com sua conta.", 
             variant: "destructive"
           });
           await forceExitToLogin();
@@ -217,11 +227,7 @@ const Signup = () => {
         }
         userId = authData.user?.id || null;
       }
-
-      if (!userId) {
-        setLoading(false);
-        return;
-      }
+      if (!userId) { setLoading(false); return; }
 
       const docFilesPayload = await Promise.all(
         docFiles.map(async (file) => ({
@@ -272,12 +278,8 @@ const Signup = () => {
       email: basicData.email,
       options: { emailRedirectTo: window.location.origin }
     });
-    
-    if (error) {
-      toast({ title: "Aguarde um pouco", variant: "destructive" });
-    } else {
-      toast({ title: "E-mail reenviado!" });
-    }
+    if (error) toast({ title: "Aguarde um pouco", variant: "destructive" });
+    else toast({ title: "E-mail reenviado!" });
     setResending(false);
   };
 
@@ -288,28 +290,6 @@ const Signup = () => {
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Processando...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (step === "awaiting-email") {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center">
-        <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
-          <MailCheck className="w-10 h-10 text-primary" />
-        </div>
-        <h1 className="text-2xl font-bold mb-2">Verifique seu e-mail</h1>
-        <p className="text-muted-foreground mb-8 max-w-xs">
-          Enviamos um link de confirmação para <strong>{basicData?.email}</strong>. 
-        </p>
-        <div className="space-y-3 w-full max-w-xs">
-          <button onClick={forceExitToLogin} className="w-full py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all">
-            Ir para o Login
-          </button>
-          <button onClick={handleResendEmail} disabled={resending} className="w-full py-3 border rounded-xl font-semibold text-sm disabled:opacity-50">
-            {resending ? "Enviando..." : "Não recebi o e-mail"}
-          </button>
         </div>
       </div>
     );
@@ -368,24 +348,12 @@ const Signup = () => {
       )}
 
       {step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
-      {step === "basic" && (
-        <StepBasicData 
-          accountType={accountType} 
-          onNext={handleBasicNext} 
-          onBack={() => setStep(createdUserId ? "method-choice" : "type")} 
-          initialData={basicData || undefined}
-        />
-      )}
+      {step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep(createdUserId ? "method-choice" : "type")} initialData={basicData || undefined} />}
       {step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
       {step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
       {step === "plan" && <StepPlanSelect onSelect={handlePlanSelect} onBack={() => setStep("profile")} />}
 
-      <SubscriptionDialog 
-        isOpen={isSubscriptionOpen}
-        onClose={() => setIsSubscriptionOpen(false)}
-        planId={selectedPlanId}
-        onSuccess={handleSubscriptionSuccess}
-      />
+      <SubscriptionDialog isOpen={isSubscriptionOpen} onClose={() => setIsSubscriptionOpen(false)} planId={selectedPlanId} onSuccess={handleSubscriptionSuccess} />
 
       {/* ✅ Repetindo o botão de saída segura em todas as etapas */}
       {(step !== "method-choice" && step !== "awaiting-email") && (

@@ -56,44 +56,26 @@ const Signup = () => {
 
   useEffect(() => {
     const checkSocialUser = async () => {
-      const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session?.user) {
-        if (isSignupFlow) {
-          // ✅ A BLITZ DO CADASTRO AGORA TÁ ESPERTA (Igual do Login)
-          setLoading(true);
-          
-          try {
-            // 1. Puxa TODOS os dados usando a coluna certa (user_id)
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("*")
-              .eq("user_id", session.user.id)
-              .single();
+        setLoading(true);
+        try {
+          // 1. Puxa dados reais para verificação rígida
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("cpf, phone, document")
+            .eq("user_id", session.user.id)
+            .maybeSingle();
 
-            // 2. Verifica se o perfil já tem dados reais
-            const isProfileIncomplete = !profile || (!profile.cpf && !profile.document && !profile.phone);
+          const isComplete = profile?.cpf || profile?.phone || profile?.document;
 
-            if (!isProfileIncomplete) {
-              // 🛑 CONTA JÁ EXISTE E ESTÁ COMPLETA! Bloqueia e chuta pro Login.
-              localStorage.removeItem("signup_in_progress");
-              await supabase.auth.signOut();
-              
-              toast({ 
-                title: "Conta já existente", 
-                description: "Este e-mail já possui cadastro. Por favor, faça login.", 
-                variant: "destructive",
-                duration: 5000
-              });
-              
-              setLoading(false);
-              navigate("/login"); 
-              return;
-            }
-
-            // Se passou na blitz (é realmente novo), libera para continuar o cadastro
+          if (isComplete) {
+            // ✅ Perfil completo: Limpa flag e vai pra Home
             localStorage.removeItem("signup_in_progress");
+            navigate("/home");
+          } else {
+            // 🆕 Perfil incompleto: Continua no fluxo (não remove a flag aqui)
             setCreatedUserId(session.user.id);
             setBasicData({
               name: session.user.user_metadata?.full_name || "",
@@ -112,14 +94,12 @@ const Signup = () => {
               addressState: "",
               addressCountry: "Brasil"
             });
-            setStep("type"); 
-          } catch (err) {
-            console.error("Erro ao verificar conta:", err);
-          } finally {
-            setLoading(false);
+            setStep("type");
           }
-        } else {
-          navigate("/home");
+        } catch (err) {
+          console.error("Erro na Blitz Social:", err);
+        } finally {
+          setLoading(false);
         }
       }
     };
@@ -202,6 +182,7 @@ const Signup = () => {
 
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
+    localStorage.removeItem("signup_in_progress"); // Limpa após sucesso
     if (createdUserId) navigate("/home");
     else setStep("awaiting-email");
   };
@@ -287,6 +268,7 @@ const Signup = () => {
         setIsSubscriptionOpen(true);
       } else {
         setLoading(false);
+        localStorage.removeItem("signup_in_progress"); // Limpa no final
         if (createdUserId) navigate("/home");
         else setStep("awaiting-email");
       }

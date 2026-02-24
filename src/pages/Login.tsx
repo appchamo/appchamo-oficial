@@ -32,18 +32,18 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // ✅ BLITZ AJUSTADA: Agora o Admin tem passe livre!
+  // ✅ BLITZ AJUSTADA: Agora o Admin tem passe livre e limpamos a flag de progresso
   const checkProfileAndRedirect = async (userId: string) => {
     setLoading(true);
     try {
-      // 1. Puxa TODOS os dados do perfil (para não dar erro de nome de coluna)
+      // 1. Puxa TODOS os dados do perfil
       const { data: profile } = await supabase
         .from("profiles")
         .select("*")
         .eq("user_id", userId)
         .single();
 
-      // 2. Puxa os cargos ANTES de barrar a pessoa
+      // 2. Puxa os cargos
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
@@ -53,7 +53,7 @@ const Login = () => {
         ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
       );
 
-      // 🔑 CARTEIRADA DO ADMIN: Se for admin, ignora a verificação de perfil e vai direto!
+      // 🔑 CARTEIRADA DO ADMIN: Se for admin, limpa flag e vai direto!
       if (isAdmin) {
         localStorage.removeItem("signup_in_progress");
         navigate("/admin");
@@ -61,17 +61,16 @@ const Login = () => {
       }
 
       // 🛑 BLITZ DOS USUÁRIOS COMUNS
-      // Verifica se o usuário é realmente novo (não tem documento, nem cpf, nem telefone)
       const isProfileIncomplete = !profile || (!profile.cpf && !profile.document && !profile.phone);
 
       if (isProfileIncomplete) {
-        // Cenário 1: Entrou sem cadastro -> Manda pro Signup concluir
         localStorage.setItem("signup_in_progress", "true");
         navigate("/signup");
         return;
       }
 
-      // Cenário 3: Entrou COM cadastro e não é admin -> Segue para a Home
+      // ✅ Se chegou aqui, o perfil está completo! 
+      localStorage.removeItem("signup_in_progress"); 
       navigate("/home");
       
     } catch (err) {

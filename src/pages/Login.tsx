@@ -4,6 +4,20 @@ import { Mail, Lock, ArrowRight, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
+// Isso roda ANTES do React e do Supabase acordarem na página de Login
+if (localStorage.getItem("manual_login_intent") === "true") {
+  console.log("💥 Limpeza Nuclear disparada antes do carregamento!");
+  // Limpa tudo
+  localStorage.clear();
+  sessionStorage.clear();
+  
+  // Limpa o cache do Supabase localmente de forma síncrona
+  for (let key in localStorage) {
+    if (key.startsWith("sb-")) {
+      localStorage.removeItem(key);
+    }
+  }
+}
 
 type LoginError = "email_not_confirmed" | "invalid_login" | "rate_limit" | "generic";
 

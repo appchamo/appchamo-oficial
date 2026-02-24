@@ -79,17 +79,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // ✅ ADICIONADO: Trava para impedir o "relogin" automático durante o logout
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  // ✅ ADICIONADO: Estado para controlar se estamos saindo
+  const [isSignOutInProgress, setIsSignOutInProgress] = useState(false);
 
   const isAdmin = useMemo(() => {
     return roles.some((r) => String(r).endsWith("_admin"));
   }, [roles]);
 
   const loadUserData = async (sess: Session | null) => {
-    // 🛑 REGRA DE BLOQUEIO: Se estivermos deslogando, ignore qualquer tentativa de carregar dados
-    if (isLoggingOut) return;
+    // 🛑 REGRA DE OURO: Se estivermos em processo de logout ou intenção manual, ignore!
+    const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+    if (isSignOutInProgress || isManualIntent) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setSession(sess);
@@ -104,54 +108,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const userId = sess.user.id;
     const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
-    setProfile(p);
-    setRoles(r);
+    
+    // Segunda checagem para evitar race conditions (conflito de velocidade)
+    if (!isSignOutInProgress) {
+      setProfile(p);
+      setRoles(r);
+    }
+
     setLoading(false);
   };
 
   useEffect(() => {
+    // 1) sessão inicial
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       loadUserData(s);
     });
 
+    // 2) mudanças de auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      // ✅ Se o evento for de saída ou se a trava estiver ativa, limpamos tudo e paramos
+      // ✅ Se o evento for de saída, limpa tudo imediatamente
       if (_event === 'SIGNED_OUT') {
-        setSession(null);
         setUser(null);
+        setSession(null);
         setProfile(null);
         setRoles([]);
         setLoading(false);
         return;
       }
 
-      // 🛑 Só carregamos dados se NÃO estivermos no processo de logout
-      if (!isLoggingOut) {
+      // 🛑 Se estivermos deslogando ou com intenção manual, ignore o evento de SIGNED_IN reativo
+      const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+      if (!isSignOutInProgress && !isManualIntent) {
         setTimeout(() => loadUserData(sess), 0);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [isLoggingOut]); // ✅ Adicionado isLoggingOut como dependência
+  }, [isSignOutInProgress]);
 
   const signOut = async () => {
-    // ✅ Ativa a trava antes de qualquer coisa
-    setIsLoggingOut(true);
+    // ✅ Ativa a trava de segurança
+    setIsSignOutInProgress(true);
     
     try {
       await supabase.auth.signOut();
       
-      // Limpa os estados manualmente para garantir
+      // Limpa estados locais
       setUser(null);
       setSession(null);
       setProfile(null);
       setRoles([]);
       
-      // ✅ Pequeno delay antes de liberar a trava para o próximo login
-      setTimeout(() => setIsLoggingOut(false), 1000);
+      // ✅ Limpa flags de cadastro
+      localStorage.removeItem("signup_in_progress");
+      
+      // ✅ Libera a trava após 1 segundo (tempo pro Android WebView respirar)
+      setTimeout(() => setIsSignOutInProgress(false), 1000);
     } catch (error) {
       console.error("Erro no signOut:", error);
-      setIsLoggingOut(false);
+      setIsSignOutInProgress(false);
     }
   };
 

@@ -1282,7 +1282,10 @@ const MessageThread = () => {
           </div>
         </div> :
 
-      <div className="sticky bottom-20 bg-background border-t px-4 py-3">
+      <div 
+        className="sticky bottom-20 bg-background border-t px-4 py-3"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 16px) + 12px)" }}
+      >
           <div className="flex items-center gap-2 max-w-screen-lg mx-auto">
             {isRecording ?
           <>
@@ -1781,7 +1784,7 @@ const MessageThread = () => {
             <DialogTitle>Avalie o profissional</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground text-center">Como foi sua experiência com {otherParty.name}?</p>
+            <p className="text-sm text-muted-foreground text-center">Como foi sua experiênca com {otherParty.name}?</p>
             <div className="flex justify-center gap-2">
               {[1, 2, 3, 4, 5].map((s) =>
               <button key={s} onClick={() => setRatingStars(s)} className="transition-transform hover:scale-110">

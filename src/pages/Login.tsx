@@ -96,11 +96,11 @@ const Login = () => {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center px-4 relative"
+      className={`min-h-[100dvh] w-full flex flex-col items-center justify-center px-4 relative ${!bgUrl ? "bg-background" : ""}`}
       style={bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
 
       {bgUrl && <div className="absolute inset-0 backdrop-blur-sm bg-[#454545]/[0.12]" />}
-      <div className={`w-full max-w-sm relative z-10 ${!bgUrl ? "bg-background" : ""}`}>
+      <div className="w-full max-w-sm relative z-10">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-gradient mb-2">Chamô</h1>
           <p className="text-sm text-muted-foreground">
@@ -163,13 +163,6 @@ const Login = () => {
           className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
           {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}
         </button>
-        {!forgotMode && (
-          <button type="button" onClick={handleResendEmail} disabled={resending || !email}
-            className="mx-auto mt-1 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors disabled:opacity-40">
-            <RefreshCw className={`w-3 h-3 ${resending ? "animate-spin" : ""}`} />
-            Reenviar e-mail de verificação
-          </button>
-        )}
       </div>
     </div>);
 };

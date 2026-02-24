@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 
     <title>Chamô</title>
     <meta name="description" content="Chamô - Encontre profissionais qualificados" />
@@ -18,26 +18,54 @@
     <meta name="twitter:title" content="Chamô" />
     <meta name="twitter:description" content="Chamô - Encontre profissionais qualificados" />
 
-    <!-- OneSignal SDK -->
     <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
     <script>
       window.OneSignalDeferred = window.OneSignalDeferred || [];
-
       OneSignalDeferred.push(async function (OneSignal) {
         await OneSignal.init({
           appId: "f27cc462-b38d-4dd1-b96d-a6f1c4ed9d48",
-
-          notifyButton: {
-            enable: false,
-          },
-
+          notifyButton: { enable: false },
           allowLocalhostAsSecureOrigin: true,
         });
-
-        console.log("OneSignal iniciado corretamente");
       });
     </script>
+
+    <style>
+      :root {
+        /* Detecta a área da câmera ou usa 44px como margem de segurança padrão */
+        --safe-top: env(safe-area-inset-top, 44px);
+      }
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background-color: #ffffff;
+      }
+
+      /* Empurra o conteúdo principal para baixo da barra de status */
+      #root {
+        padding-top: var(--safe-top) !important;
+      }
+
+      /* FORÇA qualquer elemento 'sticky' (seu Header) a respeitar a margem superior */
+      .sticky, [class*="sticky"] {
+        top: var(--safe-top) !important;
+      }
+
+      /* ESCUDO VISUAL: Garante que nada passe por trás da barra de status ao rolar */
+      body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: var(--safe-top);
+        background-color: #ffffff; /* Cor sólida para cobrir o conteúdo que sobe */
+        z-index: 999; /* Fica acima de tudo */
+      }
+    </style>
   </head>
 
   <body>

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "416235355259",
+    "project_id": "chamo-9cd5b",
+    "storage_bucket": "chamo-9cd5b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:416235355259:android:be92b0c6df3ca525adb6de",
+        "android_client_info": {
+          "package_name": "com.chamo.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAyNEYyx3Dp_NsBXg1z6w37dmyF99wUmBk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

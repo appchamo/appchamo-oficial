@@ -32,17 +32,35 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // ✅ BLITZ AJUSTADA: Agora com "user_id" para encontrar a coluna certa no seu banco
+  // ✅ BLITZ AJUSTADA: Agora o Admin tem passe livre!
   const checkProfileAndRedirect = async (userId: string) => {
     setLoading(true);
     try {
-      // Puxa TODOS os dados do perfil (para não dar erro de nome de coluna)
+      // 1. Puxa TODOS os dados do perfil (para não dar erro de nome de coluna)
       const { data: profile } = await supabase
         .from("profiles")
         .select("*")
-        .eq("user_id", userId) // ⬅️ CORREÇÃO AQUI
+        .eq("user_id", userId)
         .single();
 
+      // 2. Puxa os cargos ANTES de barrar a pessoa
+      const { data: roles } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", userId);
+        
+      const isAdmin = roles?.some((r: any) =>
+        ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
+      );
+
+      // 🔑 CARTEIRADA DO ADMIN: Se for admin, ignora a verificação de perfil e vai direto!
+      if (isAdmin) {
+        localStorage.removeItem("signup_in_progress");
+        navigate("/admin");
+        return;
+      }
+
+      // 🛑 BLITZ DOS USUÁRIOS COMUNS
       // Verifica se o usuário é realmente novo (não tem documento, nem cpf, nem telefone)
       const isProfileIncomplete = !profile || (!profile.cpf && !profile.document && !profile.phone);
 
@@ -53,21 +71,9 @@ const Login = () => {
         return;
       }
 
-      // Cenário 3: Entrou COM cadastro -> Segue para a Home (ou Admin)
-      const { data: roles } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId);
-        
-      const isAdmin = roles?.some((r: any) =>
-        ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
-      );
+      // Cenário 3: Entrou COM cadastro e não é admin -> Segue para a Home
+      navigate("/home");
       
-      if (isAdmin) {
-        navigate("/admin");
-      } else {
-        navigate("/home");
-      }
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);
@@ -278,4 +284,4 @@ const Login = () => {
     </div>);
 };
 
-export default Login; 
+export default Login;

@@ -55,39 +55,30 @@ const Signup = () => {
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
   // ✅ FUNÇÃO LIMPEZA TOTAL (NUCLEAR)
-  // Essa função garante que nada sobra no navegador antes de ir para o login
   const forceExitToLogin = async () => {
     setLoading(true);
     
     try {
-      // Tenta avisar o Supabase que estamos saindo (se falhar, não tem problema)
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Erro silencioso ao sair:", error);
     } finally {
-      // AQUI A MÁGICA ACONTECE:
-      // 1. Limpa o armazenamento local do navegador (token, flags, tudo)
       localStorage.clear();
       sessionStorage.clear();
 
-      // 2. Limpa os Cookies (sessões persistentes)
       document.cookie.split(";").forEach((c) => {
         document.cookie = c
           .replace(/^ +/, "")
           .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
       });
 
-      // 3. Define a intenção manual DEPOIS de limpar tudo (para o Login saber que é você)
       localStorage.setItem("manual_login_intent", "true");
-
-      // 4. Força o navegador a carregar a página de Login do zero (sem memória anterior)
       window.location.href = "/login";
     }
   };
 
   useEffect(() => {
     const checkSocialUser = async () => {
-      // Se você acabou de clicar em sair, não roda essa verificação
       if (localStorage.getItem("manual_login_intent") === "true") return;
 
       const { data: { session } } = await supabase.auth.getSession();
@@ -139,7 +130,6 @@ const Signup = () => {
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
-    // Remove a intenção manual para permitir o fluxo normal de cadastro
     localStorage.removeItem("manual_login_intent");
     
     const { error } = await supabase.auth.signInWithOAuth({
@@ -207,11 +197,11 @@ const Signup = () => {
     doSignup(profileData, planId);
   };
 
+  // ✅ CORREÇÃO: Mostra o cupom após a assinatura
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
     localStorage.removeItem("signup_in_progress"); 
-    if (createdUserId) navigate("/home");
-    else setStep("awaiting-email");
+    setCouponPopup(true); // Abre o modal em vez de redirecionar direto
   };
 
   const doSignup = async (pData: any, planId: string) => {
@@ -264,18 +254,13 @@ const Signup = () => {
       } else {
         setLoading(false);
         localStorage.removeItem("signup_in_progress");
-        if (createdUserId) navigate("/home");
-        else setStep("awaiting-email");
+        // ✅ CORREÇÃO: Mostra o cupom após o cadastro grátis/cliente
+        setCouponPopup(true); 
       }
     } catch (err: any) {
       toast({ title: "Erro ao criar conta.", variant: "destructive" });
       setLoading(false);
     }
-  };
-
-  const handleCouponClose = () => {
-    setCouponPopup(false);
-    navigate("/home");
   };
 
   const handleResendEmail = async () => {
@@ -289,6 +274,16 @@ const Signup = () => {
     if (error) toast({ title: "Aguarde um pouco", variant: "destructive" });
     else toast({ title: "E-mail reenviado!" });
     setResending(false);
+  };
+
+  // ✅ CORREÇÃO: Faz o redirecionamento SÓ DEPOIS que o usuário clica em "Entendi"
+  const handleCouponClose = () => {
+    setCouponPopup(false);
+    if (createdUserId) {
+      navigate("/home");
+    } else {
+      setStep("awaiting-email");
+    }
   };
 
   if (loading && step !== "basic") { 
@@ -363,7 +358,6 @@ const Signup = () => {
 
       <SubscriptionDialog isOpen={isSubscriptionOpen} onClose={() => setIsSubscriptionOpen(false)} planId={selectedPlanId} onSuccess={handleSubscriptionSuccess} />
 
-      {/* ✅ Repetindo o botão de saída segura em todas as etapas */}
       {(step !== "method-choice" && step !== "awaiting-email") && (
         <p className="text-center text-xs text-muted-foreground mt-8">
           Já tem uma conta?{" "}
@@ -376,14 +370,15 @@ const Signup = () => {
         </p>
       )}
 
+      {/* MODAL DO CUPOM RESTAURADO E FUNCIONAL */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
-        <DialogContent className="max-w-xs text-center">
+        <DialogContent className="max-w-xs text-center [&>button]:hidden">
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />
             <p className="text-sm font-medium text-foreground">Você ganhou 1 cupom!</p>
           </div>
-          <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold">Entendi!</button>
+          <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors">Entendi!</button>
         </DialogContent>
       </Dialog>
     </>

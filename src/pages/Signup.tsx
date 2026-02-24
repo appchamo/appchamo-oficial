@@ -49,7 +49,6 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // Congela a tela em "loading" se perceber que está voltando do Google
   const [verifying, setVerifying] = useState(() => {
     if (typeof window !== "undefined") {
       return window.location.hash.includes("access_token") || window.location.hash.includes("error");
@@ -71,24 +70,20 @@ const Signup = () => {
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
 
       try {
-        // Busca todo o perfil para ter certeza se ele já completou o onboarding
-        const { data: profile } = await supabase
+        const { data: profile, error: dbError } = await supabase
           .from("profiles")
           .select("*")
           .eq("id", user.id)
           .maybeSingle();
 
-        // ✅ VERIFICAÇÃO RIGOROSA: Se o perfil tem CPF ou onboarding concluído, ele já é cadastrado!
+        // 🚨 O ALARME DE DETETIVE VAI APARECER AQUI 🚨
+        alert(`🔍 MODO DETETIVE: \n\nE-mail logado: ${user.email}\nID Gerado: ${user.id}\n\nO banco achou perfil na tabela profiles? ${profile ? 'SIM' : 'NÃO'}\nTem CPF preenchido nesse perfil? ${profile?.cpf ? 'SIM (' + profile.cpf + ')' : 'NÃO'}\nAlgum Erro de RLS? ${dbError?.message || 'Nenhum'}`);
+
         const hasCompletedProfile = profile?.cpf || profile?.onboarding_completed;
 
         if (hasCompletedProfile) {
-          // 🛑 ERRO: Tentou criar conta mas já existe.
           localStorage.removeItem("signup_in_progress");
-          
-          // Desloga o usuário para não deixar sessão fantasma
           await supabase.auth.signOut(); 
-          
-          // Limpa a sujeira do token na URL
           window.history.replaceState(null, "", window.location.pathname);
 
           if (isMounted) {
@@ -98,13 +93,11 @@ const Signup = () => {
               variant: "destructive" 
             });
             setVerifying(false);
-            // 👈 REDIRECIONA PARA A TELA INICIAL DO APP (Print 3)
             navigate("/"); 
           }
           return;
         }
 
-        // ✅ CONTA NOVA: Segue o fluxo para a tela "Cliente/Profissional"
         if (isSignupFlow) {
           localStorage.removeItem("signup_in_progress");
           window.history.replaceState(null, "", window.location.pathname);
@@ -132,7 +125,6 @@ const Signup = () => {
             setVerifying(false);
           }
         } else {
-          // Se caiu de paraquedas aqui logado sem flag, manda pra home
           navigate("/home");
         }
       } catch (err) {
@@ -140,14 +132,12 @@ const Signup = () => {
       }
     };
 
-    // Fica escutando a sessão. Assim que o Google devolver o token, ele processa.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         processAuth(session.user);
       }
     });
 
-    // Caso o redirecionamento seja muito rápido, checa a sessão inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         processAuth(session.user);

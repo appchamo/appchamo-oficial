@@ -7,13 +7,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import { supabase } from "@/integrations/supabase/client"; // ✅ Importado o supabase
 
 // Pages
 import Index from "./pages/Index";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
-// ❌ Removido: import CompleteSignup from "./pages/CompleteSignup"; 
 import ResetPassword from "./pages/ResetPassword";
 import Search from "./pages/Search";
 import Categories from "./pages/Categories";
@@ -70,34 +70,60 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 const queryClient = new QueryClient();
 
 const App = () => {
-  // FUNÇÃO QUE PEDE PERMISSÃO DE NOTIFICAÇÃO ASSIM QUE O APP ABRE
+  // 1. EFEITO PARA NOTIFICAÇÕES PUSH
   useEffect(() => {
     const initPush = async () => {
       try {
-        // Pede a permissão pro usuário
         const permStatus = await PushNotifications.requestPermissions();
-        
         if (permStatus.receive === 'granted') {
-          // Se ele aceitou, registra o celular no Firebase
           await PushNotifications.register();
         }
-
-        // Ouve se deu certo e pega o "código" desse celular
         PushNotifications.addListener('registration', (token) => {
           console.log('Notificações ativadas! Token:', token.value);
         });
-
-        // Ouve se deu algum erro
         PushNotifications.addListener('registrationError', (error) => {
           console.log('Erro ao registrar notificações:', JSON.stringify(error));
         });
-
       } catch (e) {
         console.log("Notificações só funcionam no celular nativo.", e);
       }
     };
-
     initPush();
+  }, []);
+
+  // ✅ 2. EFEITO VIGIA: DESLOGA SE O DISPOSITIVO FOR EXPULSO REMOTAMENTE
+  useEffect(() => {
+    const deviceId = localStorage.getItem("chamo_device_id");
+    if (!deviceId) return;
+
+    // Ouve em tempo real se a linha desse aparelho sumiu da tabela user_devices
+    const channel = supabase
+      .channel('device_expulsion')
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'user_devices',
+          filter: `device_id=eq.${deviceId}`
+        },
+        async () => {
+          console.log("🚫 Sessão encerrada: outro aparelho se conectou.");
+          
+          // Logout imediato
+          await supabase.auth.signOut();
+          localStorage.clear();
+          sessionStorage.clear();
+          
+          // Recarrega para a página de login
+          window.location.href = "/login?expelled=true";
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (
@@ -108,19 +134,13 @@ const App = () => {
         <BrowserRouter>
           <AuthProvider>
             <Routes>
-
               {/* ===== PUBLIC ===== */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
-              
-              {/* ✅ CORRIGIDO: Agora a rota de finalizar cadastro também usa o componente SEGURO (Signup) */}
               <Route path="/complete-signup" element={<Signup />} />
-
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/admin/login" element={<AdminLogin />} />
-
-              {/* 🔥 IMPORTANTE: NÃO PROTEGER signup-pro */}
               <Route path="/signup-pro" element={<BecomeProfessional />} />
 
               {/* ===== PROTECTED (LOGGED-IN) ===== */}
@@ -179,7 +199,6 @@ const App = () => {
 
               {/* ===== CATCH ALL ===== */}
               <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
-
             </Routes>
           </AuthProvider>
         </BrowserRouter>

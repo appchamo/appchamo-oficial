@@ -79,15 +79,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // ✅ ADICIONADO: Trava para impedir o "relogin" automático durante o logout
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const isAdmin = useMemo(() => {
-    // "admin total" = qualquer role *_admin
     return roles.some((r) => String(r).endsWith("_admin"));
   }, [roles]);
 
   const loadUserData = async (sess: Session | null) => {
-    setLoading(true);
+    // 🛑 REGRA DE BLOQUEIO: Se estivermos deslogando, ignore qualquer tentativa de carregar dados
+    if (isLoggingOut) return;
 
+    setLoading(true);
     setSession(sess);
     setUser(sess?.user ?? null);
 
@@ -99,35 +103,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const userId = sess.user.id;
-
     const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
     setProfile(p);
     setRoles(r);
-
     setLoading(false);
   };
 
   useEffect(() => {
-    // 1) sessão inicial
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       loadUserData(s);
     });
 
-    // 2) mudanças de auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      // evita “travada” de setState sincronamente
-      setTimeout(() => loadUserData(sess), 0);
+      // ✅ Se o evento for de saída ou se a trava estiver ativa, limpamos tudo e paramos
+      if (_event === 'SIGNED_OUT') {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setRoles([]);
+        setLoading(false);
+        return;
+      }
+
+      // 🛑 Só carregamos dados se NÃO estivermos no processo de logout
+      if (!isLoggingOut) {
+        setTimeout(() => loadUserData(sess), 0);
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [isLoggingOut]); // ✅ Adicionado isLoggingOut como dependência
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setSession(null);
-    setProfile(null);
-    setRoles([]);
+    // ✅ Ativa a trava antes de qualquer coisa
+    setIsLoggingOut(true);
+    
+    try {
+      await supabase.auth.signOut();
+      
+      // Limpa os estados manualmente para garantir
+      setUser(null);
+      setSession(null);
+      setProfile(null);
+      setRoles([]);
+      
+      // ✅ Pequeno delay antes de liberar a trava para o próximo login
+      setTimeout(() => setIsLoggingOut(false), 1000);
+    } catch (error) {
+      console.error("Erro no signOut:", error);
+      setIsLoggingOut(false);
+    }
   };
 
   const refreshProfile = async () => {

@@ -95,17 +95,33 @@ const Login = () => {
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    // ✅ Removida a flag 'signup_in_progress' para garantir que seja apenas login
+    // ✅ Garante que não há flag de cadastro ativa
     localStorage.removeItem("signup_in_progress");
     
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        // ✅ Redirecionando para a Home, evitando o funil de cadastro
         redirectTo: `${window.location.origin}/home`,
+        // ✅ Força a escolha da conta no Google (prompt: select_account)
+        queryParams: {
+          prompt: 'select_account',
+          access_type: 'offline',
+        },
       }
     });
-    if (error) toast({ title: `Erro ao conectar com ${provider}`, variant: "destructive" });
+
+    if (error) {
+      // ✅ Tratamento para conta não encontrada ou erro de autorização
+      if (error.message.includes("user_not_found") || error.message.includes("not authorized")) {
+        toast({ 
+          title: "Conta não encontrada", 
+          description: "Este e-mail não possui cadastro. Clique em 'Criar conta'.", 
+          variant: "destructive" 
+        });
+      } else {
+        toast({ title: `Erro ao conectar com ${provider}`, variant: "destructive" });
+      }
+    }
   };
 
   return (

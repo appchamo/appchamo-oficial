@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -48,135 +48,47 @@ const Signup = () => {
     services?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
-  
-  const [verifying, setVerifying] = useState(() => {
-    if (typeof window !== "undefined") {
-      return window.location.hash.includes("access_token") || window.location.hash.includes("error");
-    }
-    return false;
-  });
-  
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  const stepRef = useRef(step);
-  useEffect(() => { stepRef.current = step; }, [step]);
-
   useEffect(() => {
-    let isMounted = true;
-
-    const processAuth = async (user: any) => {
-      if (!user) return;
+    const checkSocialUser = async () => {
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
+      const { data: { session } } = await supabase.auth.getSession();
 
-      try {
-        let hasCompletedProfile = false;
-
-        // ✅ MÁGICA AQUI: Pega TODOS os perfis com esse e-mail (Resolve o bug da duplicata)
-        if (user.email) {
-          const { data: profilesByEmail } = await supabase
-            .from("profiles")
-            .select("cpf, onboarding_completed")
-            .eq("email", user.email);
-
-          // Se achou algum e qualquer um deles tiver CPF, o cara já existe!
-          if (profilesByEmail && profilesByEmail.length > 0) {
-            const achouCpf = profilesByEmail.some(p => p.cpf || p.onboarding_completed);
-            if (achouCpf) hasCompletedProfile = true;
-          }
-        }
-
-        // Fallback de segurança pelo ID
-        if (!hasCompletedProfile) {
-          const { data: profileById } = await supabase
-            .from("profiles")
-            .select("cpf, onboarding_completed")
-            .eq("id", user.id)
-            .limit(1); // Usa limit em vez de maybeSingle
-          
-          if (profileById?.[0]?.cpf || profileById?.[0]?.onboarding_completed) {
-            hasCompletedProfile = true;
-          }
-        }
-
-        // 🛑 CONTA JÁ EXISTE NO BANCO: Bloqueia tudo e expulsa
-        if (hasCompletedProfile) {
-          localStorage.removeItem("signup_in_progress");
-          window.history.replaceState(null, "", window.location.pathname);
-          
-          await supabase.auth.signOut();
-
-          if (isMounted) {
-            toast({ 
-              title: "E-mail já cadastrado", 
-              description: "Identificamos que este e-mail já possui conta. Por favor, faça login.", 
-              variant: "destructive",
-              duration: 5000
-            });
-            navigate("/"); // Joga pra página de login / home (Print 3)
-          }
-          return;
-        }
-
-        // ✅ CONTA É NOVA DE FATO
-        if (isSignupFlow) {
-          localStorage.removeItem("signup_in_progress");
-          window.history.replaceState(null, "", window.location.pathname);
-          
-          if (isMounted) {
-            setCreatedUserId(user.id);
-            setBasicData({
-              name: user.user_metadata?.full_name || "",
-              email: user.email || "",
-              password: "", 
-              phone: "",
-              document: "",
-              documentType: "cpf",
-              birthDate: "",
-              addressZip: "",
-              addressStreet: "",
-              addressNumber: "",
-              addressComplement: "",
-              addressNeighborhood: "",
-              addressCity: "",
-              addressState: "",
-              addressCountry: "Brasil"
-            });
-            setStep("type");
-            setVerifying(false);
-          }
-        } else {
-          if (stepRef.current === "method-choice" && isMounted) {
-            navigate("/home");
-          }
-        }
-      } catch (err) {
-        if (isMounted) setVerifying(false);
-      }
-    };
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        setVerifying(true);
-        processAuth(session.user);
-      }
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        processAuth(session.user);
-      } else if (!window.location.hash.includes("access_token")) {
-        if (isMounted) setVerifying(false);
+        if (isSignupFlow) {
+          // Se é usuário do fluxo de criar conta, pega os dados e manda escolher o tipo (Cliente/Profissional)
+          localStorage.removeItem("signup_in_progress");
+          setCreatedUserId(session.user.id);
+          setBasicData({
+            name: session.user.user_metadata?.full_name || "",
+            email: session.user.email || "",
+            password: "", 
+            phone: "",
+            document: "",
+            documentType: "cpf",
+            birthDate: "",
+            addressZip: "",
+            addressStreet: "",
+            addressNumber: "",
+            addressComplement: "",
+            addressNeighborhood: "",
+            addressCity: "",
+            addressState: "",
+            addressCountry: "Brasil"
+          });
+          setStep("type"); 
+        } else {
+          // Se já estava logado e não clicou em "Criar conta", vai pra Home
+          navigate("/home");
+        }
       }
-    });
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
     };
+    checkSocialUser();
   }, [navigate]);
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
@@ -202,10 +114,46 @@ const Signup = () => {
     setStep("basic");
   };
 
-  const handleBasicNext = (data: BasicData) => {
-    setBasicData(data);
-    if (accountType === "professional") setStep("documents");
-    else setStep("profile");
+  // ✅ A NOVA BARREIRA ESTÁ AQUI (Quando ele clica em "Próximo" nos dados básicos)
+  const handleBasicNext = async (data: BasicData) => {
+    setLoading(true);
+
+    try {
+      if (data.email) {
+        // Verifica no banco se esse e-mail já existe e possui CPF cadastrado
+        const { data: existingProfiles } = await supabase
+          .from("profiles")
+          .select("cpf, onboarding_completed")
+          .eq("email", data.email);
+
+        const hasCompletedProfile = existingProfiles?.some(p => p.cpf || p.onboarding_completed);
+
+        if (hasCompletedProfile) {
+          // 🛑 CONTA JÁ EXISTE: Derruba a sessão fantasma e mostra o erro
+          await supabase.auth.signOut();
+          
+          toast({ 
+            title: "E-mail já cadastrado", 
+            description: "Este e-mail já possui conta. Por favor, faça login.", 
+            variant: "destructive",
+            duration: 5000
+          });
+          
+          setLoading(false);
+          return; // Trava o usuário na tela atual, não deixa avançar
+        }
+      }
+
+      // ✅ TUDO CERTO: Salva os dados e vai para a próxima etapa
+      setBasicData(data);
+      if (accountType === "professional") setStep("documents");
+      else setStep("profile");
+
+    } catch (error) {
+      toast({ title: "Erro de verificação", description: "Ocorreu um erro ao checar os dados.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDocumentsNext = (files: File[]) => {
@@ -326,15 +274,13 @@ const Signup = () => {
     navigate("/home");
   };
 
-  if (verifying || loading) {
+  if (loading && step !== "basic") { // Não mostra a tela em branco se o loading for no botão Próximo
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
         <div className="text-center">
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">
-            {verifying ? "Verificando sua conta..." : "Processando..."}
-          </p>
+          <p className="text-sm text-muted-foreground">Processando...</p>
         </div>
       </div>
     );

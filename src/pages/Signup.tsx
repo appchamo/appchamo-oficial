@@ -54,19 +54,21 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // ✅ REGRA DE BLOQUEIO: Função mestre para sair do fluxo de cadastro com segurança
+  // ✅ REGRA DE BLOQUEIO ATUALIZADA: Sinaliza intenção manual para o Login
   const forceExitToLogin = async () => {
     setLoading(true);
     try {
-      // 1. Remove a flag que força o redirecionamento para o signup
+      // 1. Sinaliza para o Login ignorar a Blitz automática
+      localStorage.setItem("manual_login_intent", "true");
+      // 2. Remove a flag que força o redirecionamento para o signup
       localStorage.removeItem("signup_in_progress");
-      // 2. Mata a sessão zumbi no Supabase (Bloqueia Login automático vindo do Signup)
+      // 3. Mata a sessão zumbi no Supabase
       await supabase.auth.signOut();
-      // 3. Força um reload limpo na rota de login (Bloqueia Signup automático vindo do Login)
+      // 4. Força um reload limpo na rota de login
       window.location.href = "/login";
     } catch (error) {
       console.error("Erro ao sair:", error);
-      navigate("/login");
+      window.location.href = "/login";
     }
   };
 
@@ -151,7 +153,6 @@ const Signup = () => {
         });
 
         if (emailExists) {
-          // Se o e-mail já existe, bloqueamos aqui e forçamos a saída limpa
           toast({ 
             title: "E-mail já cadastrado", 
             description: "Por favor, faça login com sua conta existente.", 
@@ -263,6 +264,23 @@ const Signup = () => {
     navigate("/home");
   };
 
+  const handleResendEmail = async () => {
+    if (!basicData?.email) return;
+    setResending(true);
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: basicData.email,
+      options: { emailRedirectTo: window.location.origin }
+    });
+    
+    if (error) {
+      toast({ title: "Aguarde um pouco", variant: "destructive" });
+    } else {
+      toast({ title: "E-mail reenviado!" });
+    }
+    setResending(false);
+  };
+
   if (loading && step !== "basic") { 
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
@@ -270,6 +288,28 @@ const Signup = () => {
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Processando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === "awaiting-email") {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center">
+        <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
+          <MailCheck className="w-10 h-10 text-primary" />
+        </div>
+        <h1 className="text-2xl font-bold mb-2">Verifique seu e-mail</h1>
+        <p className="text-muted-foreground mb-8 max-w-xs">
+          Enviamos um link de confirmação para <strong>{basicData?.email}</strong>. 
+        </p>
+        <div className="space-y-3 w-full max-w-xs">
+          <button onClick={forceExitToLogin} className="w-full py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all">
+            Ir para o Login
+          </button>
+          <button onClick={handleResendEmail} disabled={resending} className="w-full py-3 border rounded-xl font-semibold text-sm disabled:opacity-50">
+            {resending ? "Enviando..." : "Não recebi o e-mail"}
+          </button>
         </div>
       </div>
     );
@@ -347,7 +387,7 @@ const Signup = () => {
         onSuccess={handleSubscriptionSuccess}
       />
 
-      {/* ✅ Repetindo o botão de saída segura em todas as etapas para evitar o loop */}
+      {/* ✅ Repetindo o botão de saída segura em todas as etapas */}
       {(step !== "method-choice" && step !== "awaiting-email") && (
         <p className="text-center text-xs text-muted-foreground mt-8">
           Já tem uma conta?{" "}

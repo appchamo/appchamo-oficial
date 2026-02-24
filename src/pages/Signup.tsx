@@ -48,7 +48,15 @@ const Signup = () => {
     services?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [verifying, setVerifying] = useState(true);
+  
+  // ✅ A GRANDE MÁGICA ESTÁ AQUI: Se a URL tiver um token do Google, a tela já nasce "congelada" carregando.
+  const [verifying, setVerifying] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.location.hash.includes("access_token") || window.location.hash.includes("error");
+    }
+    return false;
+  });
+  
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
@@ -56,66 +64,98 @@ const Signup = () => {
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    const checkSocialUser = async () => {
-      setVerifying(true);
+    let isMounted = true;
+
+    // Função central que processa o usuário assim que o Supabase confirma o login
+    const processAuth = async (user: any) => {
+      if (!user) return;
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        // ✅ VERIFICAÇÃO ANTECIPADA: Bloqueia antes de avançar para qualquer etapa
+
+      try {
+        // 1. Vai no banco checar se esse e-mail já tem um perfil completo
         const { data: profile } = await supabase
           .from("profiles")
           .select("cpf")
           .eq("id", user.id)
           .maybeSingle();
 
+        // 🛑 CONTA JÁ EXISTE: O sistema expulsa o usuário de volta pra tela de "method-choice" imediatamente
         if (profile?.cpf) {
-          // 🛑 CONTA JÁ EXISTE: Desloga e força erro na tela inicial
           localStorage.removeItem("signup_in_progress");
-          await supabase.auth.signOut();
+          await supabase.auth.signOut(); // Derruba a sessão pra não atravessar
           
-          toast({ 
-            title: "E-mail já cadastrado", 
-            description: "Este e-mail já possui conta. Por favor, faça login.", 
-            variant: "destructive" 
-          });
+          // Limpa a URL para o React não entrar em loop infinito
+          window.history.replaceState(null, "", window.location.pathname);
 
-          setStep("method-choice"); // Garante que fica na tela do Print 2
-          setVerifying(false);
+          if (isMounted) {
+            toast({ 
+              title: "E-mail já cadastrado", 
+              description: "Este e-mail já possui conta. Por favor, faça login.", 
+              variant: "destructive" 
+            });
+            setStep("method-choice");
+            setVerifying(false); // Libera a tela
+          }
           return;
         }
 
+        // ✅ CONTA NOVA: Segue o fluxo normal de cadastro (Vai para "Cliente ou Profissional")
         if (isSignupFlow) {
-          // Usuário novo: segue para escolha de tipo (Print 2 -> Escolha Perfil)
           localStorage.removeItem("signup_in_progress");
-          setCreatedUserId(user.id);
-          setBasicData({
-            name: user.user_metadata?.full_name || "",
-            email: user.email || "",
-            password: "", 
-            phone: "",
-            document: "",
-            documentType: "cpf",
-            birthDate: "",
-            addressZip: "",
-            addressStreet: "",
-            addressNumber: "",
-            addressComplement: "",
-            addressNeighborhood: "",
-            addressCity: "",
-            addressState: "",
-            addressCountry: "Brasil"
-          });
-          setStep("type"); 
+          window.history.replaceState(null, "", window.location.pathname);
+          
+          if (isMounted) {
+            setCreatedUserId(user.id);
+            setBasicData({
+              name: user.user_metadata?.full_name || "",
+              email: user.email || "",
+              password: "", 
+              phone: "",
+              document: "",
+              documentType: "cpf",
+              birthDate: "",
+              addressZip: "",
+              addressStreet: "",
+              addressNumber: "",
+              addressComplement: "",
+              addressNeighborhood: "",
+              addressCity: "",
+              addressState: "",
+              addressCountry: "Brasil"
+            });
+            setStep("type");
+            setVerifying(false);
+          }
         } else {
-          // Se não é fluxo de signup, apenas limpa e vai pra home
+          // Se de alguma forma absurda não foi fluxo de signup, manda pra home
           navigate("/home");
         }
+      } catch (err) {
+        if (isMounted) setVerifying(false);
       }
-      setVerifying(false);
     };
-    checkSocialUser();
+
+    // 2. OUVINTE DE SESSÃO: É ele quem captura o exato milissegundo que o Google loga
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        processAuth(session.user);
+      }
+    });
+
+    // 3. Fallback: Checa se já havia um usuário logado ANTES de carregar a página
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        processAuth(session.user);
+      } else if (!window.location.hash.includes("access_token")) {
+        // Só tira o loading se não estivermos esperando o Google responder
+        if (isMounted) setVerifying(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
   const handleSocialSignup = async (provider: "google" | "apple") => {

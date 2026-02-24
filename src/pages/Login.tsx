@@ -1,17 +1,15 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Mail, Lock, ArrowRight, RefreshCw } from "lucide-react";
+import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
-// Isso roda ANTES do React e do Supabase acordarem na página de Login
+
+// 💥 Limpeza Nuclear disparada antes do carregamento
 if (localStorage.getItem("manual_login_intent") === "true") {
   console.log("💥 Limpeza Nuclear disparada antes do carregamento!");
-  // Limpa tudo
   localStorage.clear();
   sessionStorage.clear();
-  
-  // Limpa o cache do Supabase localmente de forma síncrona
   for (let key in localStorage) {
     if (key.startsWith("sb-")) {
       localStorage.removeItem(key);
@@ -35,6 +33,16 @@ const friendlyError = (type: LoginError) => {
   return "Erro ao entrar. Tente novamente.";
 };
 
+// Gera ou recupera um ID único para este dispositivo/navegador
+const getDeviceId = () => {
+  let deviceId = localStorage.getItem("chamo_device_id");
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    localStorage.setItem("chamo_device_id", deviceId);
+  }
+  return deviceId;
+};
+
 const Login = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -45,9 +53,44 @@ const Login = () => {
   const [resending, setResending] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
+  
+  // Estado para controlo do limite de aparelhos
+  const [deviceLimitHit, setDeviceLimitHit] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
 
-  const checkProfileAndRedirect = async (userId: string) => {
-    setLoading(true);
+  const checkDeviceLimitAndRedirect = async (userId: string) => {
+    try {
+      const deviceId = getDeviceId();
+      const deviceName = navigator.userAgent.substring(0, 50); // Nome básico baseado no navegador
+
+      // 1. Chama a função do banco de dados para verificar e registar o aparelho
+      const { data: canLogin, error: deviceError } = await supabase.rpc('check_device_limit', {
+        p_user_id: userId,
+        p_device_id: deviceId,
+        p_device_name: deviceName
+      });
+
+      if (deviceError) {
+        console.error("Erro ao verificar aparelhos:", deviceError);
+        // Em caso de erro técnico na verificação, deixamos passar por segurança
+      } else if (canLogin === false) {
+        // Limite atingido! Parar fluxo de login.
+        setDeviceLimitHit(true);
+        setPendingUserId(userId);
+        setLoading(false);
+        return;
+      }
+
+      // Se passou na verificação de aparelhos, prossegue com o login normal
+      await proceedToRedirect(userId);
+
+    } catch (err) {
+      console.error("Erro na verificação do dispositivo:", err);
+      setLoading(false);
+    }
+  };
+
+  const proceedToRedirect = async (userId: string) => {
     try {
       const { data: profile } = await supabase
         .from("profiles")
@@ -82,13 +125,45 @@ const Login = () => {
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
       navigate("/home");
-      
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);
     }
   };
 
+  const forceDisconnectOtherDevices = async () => {
+    if (!pendingUserId) return;
+    setLoading(true);
+    
+    // Apaga os aparelhos registados (exceto o atual) para este utilizador
+    const deviceId = getDeviceId();
+    const { error } = await supabase
+      .from("user_devices")
+      .delete()
+      .eq("user_id", pendingUserId)
+      .neq("device_id", deviceId);
+
+    if (error) {
+      toast({ title: "Erro ao desligar aparelhos.", variant: "destructive" });
+      setLoading(false);
+      return;
+    }
+
+    toast({ title: "Aparelhos desligados com sucesso!" });
+    setDeviceLimitHit(false);
+    
+    // Agora tenta logar novamente e regista este novo aparelho
+    await checkDeviceLimitAndRedirect(pendingUserId);
+  };
+
+  const cancelDeviceLimit = async () => {
+    setDeviceLimitHit(false);
+    setPendingUserId(null);
+    await supabase.auth.signOut(); // Desloga do supabase
+  };
+
+  // ... (o resto das funções do useEffect, handleResendEmail e handleForgotPassword mantêm-se iguais)
+  
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
@@ -120,11 +195,11 @@ const Login = () => {
       
       if (session?.user) {
         if (isManualIntent) {
-          // ✅ O SEGREDO ESTÁ AQUI: Nós NÃO apagamos a flag. Deixamos ela protegendo a tela.
           console.log("Bloqueando redirecionamento porque o usuário veio do botão Entrar.");
           setLoading(false);
         } else {
-          await checkProfileAndRedirect(session.user.id);
+          // Usa a nova função que verifica o limite antes
+          await checkDeviceLimitAndRedirect(session.user.id);
         }
       }
     };
@@ -133,9 +208,9 @@ const Login = () => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-      // A trava continua viva aqui, impedindo a piscada
       if (event === "SIGNED_IN" && session?.user && !isManualIntent) {
-        checkProfileAndRedirect(session.user.id);
+        // Usa a nova função que verifica o limite antes
+        checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
@@ -159,11 +234,9 @@ const Login = () => {
     if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
     
-    // ✅ Quando o usuário clica de verdade no Login, aí sim apagamos as travas
     localStorage.removeItem("manual_login_intent");
     localStorage.removeItem("signup_in_progress");
 
-    // Limpa a sessão bugada antes de tentar uma nova
     await supabase.auth.signOut();
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -175,15 +248,13 @@ const Login = () => {
       return;
     }
     
-    await checkProfileAndRedirect(data.user.id);
+    // Inicia a verificação de limites
+    await checkDeviceLimitAndRedirect(data.user.id);
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    // ✅ Apaga a trava apenas no momento em que ele clica para logar de verdade
     localStorage.removeItem("signup_in_progress");
     localStorage.removeItem("manual_login_intent");
-    
-    // Força o logout de qualquer "fantasma" antes de logar
     await supabase.auth.signOut();
 
     const { error } = await supabase.auth.signInWithOAuth({ 
@@ -209,11 +280,45 @@ const Login = () => {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-gradient mb-2">Chamô</h1>
           <p className="text-sm text-muted-foreground">
-            {forgotMode ? "Recuperar sua senha" : "Entre na sua conta"}
+            {forgotMode ? "Recuperar sua senha" : deviceLimitHit ? "Limite de Aparelhos" : "Entre na sua conta"}
           </p>
         </div>
 
-        {forgotMode ? (
+        {/* MENSAGEM DE LIMITE ATINGIDO */}
+        {deviceLimitHit ? (
+          <div className="bg-card border border-destructive/20 rounded-2xl p-6 shadow-card space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex justify-center mb-2">
+              <div className="w-12 h-12 bg-destructive/10 text-destructive rounded-full flex items-center justify-center">
+                <Smartphone className="w-6 h-6" />
+              </div>
+            </div>
+            <h3 className="text-center font-bold text-foreground">Aparelhos a mais!</h3>
+            <p className="text-sm text-center text-muted-foreground">
+              Você atingiu o limite de aparelhos conectados simultaneamente para o seu plano atual.
+            </p>
+            <p className="text-xs text-center text-muted-foreground bg-muted p-2 rounded-lg">
+              Deseja desconectar todos os outros aparelhos e entrar apenas com este?
+            </p>
+            
+            <div className="space-y-2 pt-2">
+              <button 
+                onClick={forceDisconnectOtherDevices} 
+                disabled={loading}
+                className="w-full py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 transition-colors"
+              >
+                {loading ? "Desconectando..." : "Desconectar outros aparelhos"}
+              </button>
+              <button 
+                onClick={cancelDeviceLimit}
+                disabled={loading}
+                className="w-full py-2.5 rounded-xl border border-border text-foreground font-semibold text-sm hover:bg-muted transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : forgotMode ? (
+          // ... FORMULÁRIO DE ESQUECEU A SENHA NORMAL ...
           <form onSubmit={handleForgotPassword} className="bg-card border rounded-2xl p-6 shadow-card space-y-4">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">E-mail</label>
@@ -227,6 +332,7 @@ const Login = () => {
             </button>
           </form>
         ) : (
+          // ... FORMULÁRIO DE LOGIN NORMAL ...
           <div className="bg-card border rounded-2xl p-6 shadow-card">
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
@@ -297,16 +403,22 @@ const Login = () => {
           </div>
         )}
 
-        <p className="text-center text-xs text-muted-foreground mt-4">
-          Não tem conta?{" "}
-          <Link to="/signup" className="text-primary font-medium hover:underline">Criar conta</Link>
-        </p>
-        <button type="button" onClick={() => setForgotMode(!forgotMode)}
-          className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
-          {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}
-        </button>
+        {/* Links do rodapé só aparecem se não estiver na tela de limite */}
+        {!deviceLimitHit && (
+          <>
+            <p className="text-center text-xs text-muted-foreground mt-4">
+              Não tem conta?{" "}
+              <Link to="/signup" className="text-primary font-medium hover:underline">Criar conta</Link>
+            </p>
+            <button type="button" onClick={() => setForgotMode(!forgotMode)}
+              className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
+              {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}
+            </button>
+          </>
+        )}
       </div>
-    </div>);
+    </div>
+  );
 };
 
 export default Login;

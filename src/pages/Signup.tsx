@@ -54,6 +54,22 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
+  // ✅ REGRA DE BLOQUEIO: Função mestre para sair do fluxo de cadastro com segurança
+  const forceExitToLogin = async () => {
+    setLoading(true);
+    try {
+      // 1. Remove a flag que força o redirecionamento para o signup
+      localStorage.removeItem("signup_in_progress");
+      // 2. Mata a sessão zumbi no Supabase (Bloqueia Login automático vindo do Signup)
+      await supabase.auth.signOut();
+      // 3. Força um reload limpo na rota de login (Bloqueia Signup automático vindo do Login)
+      window.location.href = "/login";
+    } catch (error) {
+      console.error("Erro ao sair:", error);
+      navigate("/login");
+    }
+  };
+
   useEffect(() => {
     const checkSocialUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -61,22 +77,18 @@ const Signup = () => {
       if (session?.user) {
         setLoading(true);
         try {
-          // 1. Puxa dados reais para verificação rígida (Removido "document" que não existe)
           const { data: profile } = await supabase
             .from("profiles")
             .select("cpf, phone")
             .eq("user_id", session.user.id)
             .maybeSingle();
 
-          // ✅ Verificação corrigida: considera apenas as colunas que você tem no banco
           const isComplete = profile?.cpf || profile?.phone;
 
           if (isComplete) {
-            // ✅ Perfil completo: Limpa flag e vai pra Home
             localStorage.removeItem("signup_in_progress");
             navigate("/home");
           } else {
-            // 🆕 Perfil incompleto: Continua no fluxo (não remove a flag aqui)
             setCreatedUserId(session.user.id);
             setBasicData({
               name: session.user.user_metadata?.full_name || "",
@@ -132,33 +144,28 @@ const Signup = () => {
 
   const handleBasicNext = async (data: BasicData) => {
     setLoading(true);
-
     try {
       if (data.email && !createdUserId) {
-        const { data: emailExists, error: rpcError } = await supabase.rpc('check_email_exists', { 
+        const { data: emailExists } = await supabase.rpc('check_email_exists', { 
           user_email: data.email 
         });
 
         if (emailExists) {
-          await supabase.auth.signOut();
+          // Se o e-mail já existe, bloqueamos aqui e forçamos a saída limpa
           toast({ 
             title: "E-mail já cadastrado", 
-            description: "Este e-mail já possui conta. Por favor, faça login.", 
-            variant: "destructive",
-            duration: 5000
+            description: "Por favor, faça login com sua conta existente.", 
+            variant: "destructive"
           });
-          setLoading(false);
-          navigate("/login"); 
+          await forceExitToLogin();
           return;
         }
       }
-
       setBasicData(data);
       if (accountType === "professional") setStep("documents");
       else setStep("profile");
-
     } catch (error) {
-      toast({ title: "Erro de verificação", description: "Ocorreu um erro ao checar os dados.", variant: "destructive" });
+      toast({ title: "Erro de verificação", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -183,35 +190,16 @@ const Signup = () => {
 
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
-    localStorage.removeItem("signup_in_progress"); // Limpa após sucesso
+    localStorage.removeItem("signup_in_progress"); 
     if (createdUserId) navigate("/home");
     else setStep("awaiting-email");
-  };
-
-  const handleResendEmail = async () => {
-    if (!basicData?.email) return;
-    setResending(true);
-    const { error } = await supabase.auth.resend({
-      type: 'signup',
-      email: basicData.email,
-      options: { emailRedirectTo: window.location.origin }
-    });
-    
-    if (error) {
-      toast({ title: "Aguarde um pouco", description: "Muitas tentativas. Tente novamente em 1 minuto.", variant: "destructive" });
-    } else {
-      toast({ title: "E-mail reenviado!", description: "Verifique sua caixa de entrada e spam." });
-    }
-    setResending(false);
   };
 
   const doSignup = async (pData: any, planId: string) => {
     if (!basicData) return;
     setLoading(true);
-
     try {
       let userId = createdUserId;
-
       if (!userId) {
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: basicData.email,
@@ -221,7 +209,6 @@ const Signup = () => {
             data: { full_name: basicData.name },
           },
         });
-
         if (authError) {
           toast({ title: friendlyError(authError.message), variant: "destructive" });
           setLoading(false);
@@ -231,7 +218,6 @@ const Signup = () => {
       }
 
       if (!userId) {
-        toast({ title: "Erro inesperado ao criar conta.", variant: "destructive" });
         setLoading(false);
         return;
       }
@@ -247,14 +233,7 @@ const Signup = () => {
       const { data: result, error: fnError } = await supabase.functions.invoke(
         "complete-signup",
         {
-          body: {
-            userId,
-            accountType,
-            profileData: pData,
-            basicData,
-            docFiles: docFilesPayload,
-            planId,
-          },
+          body: { userId, accountType, profileData: pData, basicData, docFiles: docFilesPayload, planId },
         }
       );
 
@@ -269,12 +248,12 @@ const Signup = () => {
         setIsSubscriptionOpen(true);
       } else {
         setLoading(false);
-        localStorage.removeItem("signup_in_progress"); // Limpa no final
+        localStorage.removeItem("signup_in_progress");
         if (createdUserId) navigate("/home");
         else setStep("awaiting-email");
       }
     } catch (err: any) {
-      toast({ title: "Erro ao criar conta.", description: translateError(err.message), variant: "destructive" });
+      toast({ title: "Erro ao criar conta.", variant: "destructive" });
       setLoading(false);
     }
   };
@@ -291,33 +270,6 @@ const Signup = () => {
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Processando...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (step === "awaiting-email") {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center">
-        <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
-          <MailCheck className="w-10 h-10 text-primary" />
-        </div>
-        <h1 className="text-2xl font-bold mb-2">Verifique seu e-mail</h1>
-        <p className="text-muted-foreground mb-8 max-w-xs">
-          Enviamos um link de confirmação para <strong>{basicData?.email}</strong>. 
-          Acesse seu e-mail para ativar sua conta.
-        </p>
-        <div className="space-y-3 w-full max-w-xs">
-          <button onClick={() => navigate("/login")} className="w-full py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all">
-            Ir para o Login
-          </button>
-          <button 
-            onClick={handleResendEmail} 
-            disabled={resending}
-            className="w-full py-3 border rounded-xl font-semibold text-sm disabled:opacity-50"
-          >
-            {resending ? "Enviando..." : "Não recebi o e-mail"}
-          </button>
         </div>
       </div>
     );
@@ -365,14 +317,7 @@ const Signup = () => {
             <p className="text-center text-xs text-muted-foreground">
               Já tem uma conta?{" "}
               <button 
-                onClick={async () => {
-                  setLoading(true);
-                  // ✅ RESET TOTAL DA SESSÃO: Limpa flag e encerra sessão zumbi
-                  localStorage.removeItem("signup_in_progress");
-                  await supabase.auth.signOut();
-                  // Forçamos o reload do estado para o roteador não bugar
-                  window.location.href = "/login";
-                }} 
+                onClick={forceExitToLogin} 
                 className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer"
               >
                 Entrar
@@ -383,7 +328,6 @@ const Signup = () => {
       )}
 
       {step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
-      
       {step === "basic" && (
         <StepBasicData 
           accountType={accountType} 
@@ -392,7 +336,6 @@ const Signup = () => {
           initialData={basicData || undefined}
         />
       )}
-
       {step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
       {step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
       {step === "plan" && <StepPlanSelect onSelect={handlePlanSelect} onBack={() => setStep("profile")} />}
@@ -404,17 +347,12 @@ const Signup = () => {
         onSuccess={handleSubscriptionSuccess}
       />
 
-      {/* ✅ Adicionado reset de sessão no rodapé das outras etapas também para segurança total */}
+      {/* ✅ Repetindo o botão de saída segura em todas as etapas para evitar o loop */}
       {(step !== "method-choice" && step !== "awaiting-email") && (
         <p className="text-center text-xs text-muted-foreground mt-8">
           Já tem uma conta?{" "}
           <button 
-            onClick={async () => {
-              setLoading(true);
-              localStorage.removeItem("signup_in_progress");
-              await supabase.auth.signOut();
-              window.location.href = "/login";
-            }} 
+            onClick={forceExitToLogin} 
             className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer"
           >
             Entrar

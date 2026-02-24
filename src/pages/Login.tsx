@@ -32,26 +32,28 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // ✅ FUNÇÃO NOVA: A "Blitz" que verifica se o perfil está completo
+  // ✅ BLITZ AJUSTADA: Agora cobre todos os 4 cenários perfeitamente
   const checkProfileAndRedirect = async (userId: string) => {
     setLoading(true);
     try {
-      // Busca os dados do perfil
+      // Puxa TODOS os dados do perfil (para não dar erro de nome de coluna)
       const { data: profile } = await supabase
         .from("profiles")
-        .select("cpf, onboarding_completed")
+        .select("*")
         .eq("id", userId)
         .single();
 
-      // REGRA INVERTIDA: Se NÃO tem CPF e NÃO concluiu onboarding = É usuário novo!
-      if (!profile?.cpf && !profile?.onboarding_completed) {
-        // Ativa a flag do fluxo de cadastro e chuta pro Signup
+      // Verifica se o usuário é realmente novo (não tem documento, nem cpf, nem telefone)
+      const isProfileIncomplete = !profile || (!profile.cpf && !profile.document && !profile.phone);
+
+      if (isProfileIncomplete) {
+        // Cenário 1: Entrou sem cadastro -> Manda pro Signup concluir
         localStorage.setItem("signup_in_progress", "true");
         navigate("/signup");
         return;
       }
 
-      // Se já concluiu, verifica os cargos (Login Normal)
+      // Cenário 3: Entrou COM cadastro -> Segue para a Home (ou Admin)
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
@@ -144,7 +146,7 @@ const Login = () => {
       return;
     }
     
-    // ✅ Se passou na senha, vai pra blitz antes de liberar
+    // Se passou na senha, vai pra blitz antes de liberar
     await checkProfileAndRedirect(data.user.id);
   };
 
@@ -155,7 +157,7 @@ const Login = () => {
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        // ✅ MUDANÇA AQUI: Em vez de /home, ele volta para o /login para passar pela Blitz
+        // Ele volta para o /login para passar pela Blitz
         redirectTo: `${window.location.origin}/login`,
         queryParams: {
           prompt: 'select_account',

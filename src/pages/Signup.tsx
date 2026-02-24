@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -49,10 +49,9 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // Tranca a tela se perceber que é um redirecionamento do Google
   const [verifying, setVerifying] = useState(() => {
     if (typeof window !== "undefined") {
-      return window.location.hash.includes("access_token");
+      return window.location.hash.includes("access_token") || window.location.hash.includes("error");
     }
     return false;
   });
@@ -63,63 +62,48 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
+  // Guardamos o step atual numa referência para o useEffect não se perder com as atualizações
+  const stepRef = useRef(step);
+  useEffect(() => { stepRef.current = step; }, [step]);
+
   useEffect(() => {
     let isMounted = true;
 
     const processAuth = async (user: any) => {
       if (!user) return;
-      
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
 
       try {
-        let hasCompletedProfile = false;
-
-        // 1. Tenta achar o perfil pelo ID
-        const { data: profileById } = await supabase
+        // Tenta achar o perfil do usuário atual
+        const { data: profile } = await supabase
           .from("profiles")
-          .select("cpf")
+          .select("cpf, onboarding_completed")
           .eq("id", user.id)
           .maybeSingle();
 
-        if (profileById?.cpf) hasCompletedProfile = true;
+        const hasCompletedProfile = profile?.cpf || profile?.onboarding_completed;
 
-        // 2. Se não achou pelo ID, caça pelo Email (Essa é a trava)
-        if (!hasCompletedProfile && user.email) {
-          const { data: profileByEmail } = await supabase
-            .from("profiles")
-            .select("cpf")
-            .eq("email", user.email)
-            .maybeSingle();
-            
-          if (profileByEmail?.cpf) hasCompletedProfile = true;
-        }
-
-        // 🛑 CONTA JÁ EXISTE NO BANCO: Bloqueia tudo e expulsa
         if (hasCompletedProfile) {
+          // 🛑 ERRO: Já tem conta!
           localStorage.removeItem("signup_in_progress");
-          
-          // Limpa a URL antes de derrubar a sessão para evitar loop
+          await supabase.auth.signOut(); 
           window.history.replaceState(null, "", window.location.pathname);
-          
-          // Desloga o usuário
-          await supabase.auth.signOut();
 
           if (isMounted) {
             toast({ 
               title: "E-mail já cadastrado", 
-              description: "Identificamos que este e-mail já possui conta. Por favor, faça login.", 
-              variant: "destructive",
-              duration: 5000 // Deixa o erro na tela por mais tempo
+              description: "Este e-mail já possui conta. Por favor, faça login.", 
+              variant: "destructive" 
             });
-            // 👈 MANDA DIRETO PRA PÁGINA INICIAL RAIZ
-            navigate("/");
+            setVerifying(false);
+            navigate("/"); 
           }
           return;
         }
 
-        // ✅ CONTA É NOVA DE FATO
+        // ✅ CONTA NOVA: Inicia o fluxo de cadastro
         if (isSignupFlow) {
-          localStorage.removeItem("signup_in_progress");
+          localStorage.removeItem("signup_in_progress"); // Limpa para não dar loop
           window.history.replaceState(null, "", window.location.pathname);
           
           if (isMounted) {
@@ -145,7 +129,12 @@ const Signup = () => {
             setVerifying(false);
           }
         } else {
-          navigate("/home");
+          // 🔥 AQUI ESTAVA O BUG DOS 5 SEGUNDOS 🔥
+          // Só redireciona para a Home se ele estiver na tela inicial de escolha e não tiver flag.
+          // Se ele já estiver na tela "type" (Cliente/Profissional), não faz nada, deixa ele preencher!
+          if (stepRef.current === "method-choice" && isMounted) {
+            navigate("/home");
+          }
         }
       } catch (err) {
         if (isMounted) setVerifying(false);
@@ -153,14 +142,11 @@ const Signup = () => {
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Quando o Google confirma o login, ele tranca a tela e manda processar
       if (event === 'SIGNED_IN' && session?.user) {
-        setVerifying(true);
         processAuth(session.user);
       }
     });
 
-    // Caso já estivesse logado antes
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         processAuth(session.user);
@@ -329,7 +315,7 @@ const Signup = () => {
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">
-            {verifying ? "Aguarde um momento..." : "Criando sua conta..."}
+            {verifying ? "Verificando sua conta..." : "Processando..."}
           </p>
         </div>
       </div>

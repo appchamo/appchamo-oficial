@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 interface Plan {
   id: string;
   name: string;
+  description?: string;
   price_monthly: number;
   max_calls: number;
   has_featured: boolean;
@@ -13,6 +14,7 @@ interface Plan {
   has_job_postings: boolean;
   has_in_app_support: boolean;
   has_vip_event: boolean;
+  features?: string[]; // ✅ AGORA PUXA OS TEXTOS DO PAINEL ADMIN
 }
 
 interface Props {
@@ -39,12 +41,25 @@ const StepPlanSelect = ({ onSelect, onBack }: Props) => {
   const [selected, setSelected] = useState("free");
 
   useEffect(() => {
-    supabase.from("plans").select("*").eq("active", true).order("sort_order").then(({ data }) => {
-      setPlans((data as Plan[]) || []);
-    });
+    // Busca os planos do banco de dados e ordena conforme configurado no Admin
+    supabase
+      .from("plans")
+      .select("*")
+      .eq("active", true)
+      .order("sort_order")
+      .then(({ data }) => {
+        setPlans((data as Plan[]) || []);
+      });
   }, []);
 
-  const benefits = (plan: Plan) => {
+  // ✅ NOVA FUNÇÃO: Puxa o que você escreveu no Admin
+  const getBenefits = (plan: Plan) => {
+    // 1. Se você escreveu uma lista de benefícios no painel admin (coluna features), ele usa ela
+    if (plan.features && Array.isArray(plan.features) && plan.features.length > 0) {
+      return plan.features;
+    }
+    
+    // 2. Fallback (Garantia): Se a coluna de texto estiver vazia, ele monta pelas opções antigas
     const list: string[] = [];
     list.push(plan.max_calls === -1 ? "Chamadas ilimitadas" : `${plan.max_calls} chamadas/mês`);
     if (plan.has_in_app_support) list.push("Suporte no app");
@@ -69,11 +84,16 @@ const StepPlanSelect = ({ onSelect, onBack }: Props) => {
           {plans.map((plan) => {
             const Icon = planIcons[plan.id] || Zap;
             const isSelected = selected === plan.id;
+            
             return (
               <button
                 key={plan.id}
                 onClick={() => setSelected(plan.id)}
-                className={`relative text-left bg-card border-2 rounded-2xl p-4 transition-all ${isSelected ? planColors[plan.id] + " shadow-card ring-2 ring-primary/20" : "border-border hover:border-primary/20"}`}
+                className={`relative text-left bg-card border-2 rounded-2xl p-4 transition-all ${
+                  isSelected 
+                    ? planColors[plan.id] + " shadow-card ring-2 ring-primary/20" 
+                    : "border-border hover:border-primary/20"
+                }`}
               >
                 {isSelected && (
                   <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
@@ -81,20 +101,32 @@ const StepPlanSelect = ({ onSelect, onBack }: Props) => {
                   </div>
                 )}
                 <div className="flex items-center gap-3 mb-2">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${plan.id === "vip" ? "bg-amber-100 dark:bg-amber-900/30" : plan.id === "business" ? "bg-purple-100 dark:bg-purple-900/30" : "bg-accent"}`}>
-                    <Icon className={`w-5 h-5 ${plan.id === "vip" ? "text-amber-500" : plan.id === "business" ? "text-purple-500" : "text-primary"}`} />
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    plan.id === "vip" ? "bg-amber-100 dark:bg-amber-900/30" : 
+                    plan.id === "business" ? "bg-purple-100 dark:bg-purple-900/30" : "bg-accent"
+                  }`}>
+                    <Icon className={`w-5 h-5 ${
+                      plan.id === "vip" ? "text-amber-500" : 
+                      plan.id === "business" ? "text-purple-500" : "text-primary"
+                    }`} />
                   </div>
                   <div>
                     <p className="font-bold text-foreground">{plan.name}</p>
+                    {/* ✅ Exibição de preço formatada e sincronizada com o banco */}
                     <p className="text-xs text-muted-foreground">
-                      {plan.price_monthly === 0 ? "Grátis" : `R$ ${plan.price_monthly.toFixed(2).replace(".", ",")}/mês`}
+                      {Number(plan.price_monthly) === 0 
+                        ? "Grátis" 
+                        : `R$ ${Number(plan.price_monthly).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mês`}
                     </p>
                   </div>
                 </div>
-                <ul className="space-y-1">
-                  {benefits(plan).map((b, i) => (
-                    <li key={i} className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <Check className="w-3 h-3 text-primary flex-shrink-0" /> {b}
+
+                {/* ✅ Renderiza os benefícios atualizados em tempo real */}
+                <ul className="space-y-1 mt-3">
+                  {getBenefits(plan).map((benefitText, i) => (
+                    <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                      <Check className="w-3 h-3 text-primary flex-shrink-0 mt-0.5" /> 
+                      <span className="leading-tight">{benefitText}</span>
                     </li>
                   ))}
                 </ul>

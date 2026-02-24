@@ -1,8 +1,7 @@
 import { useState, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Calendar, ImagePlus, X, Send, Loader2 } from "lucide-react";
+import { ImagePlus, X, Send, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -18,7 +17,6 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
   const navigate = useNavigate();
   const [step, setStep] = useState<"ask" | "form">("ask");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState("");
   const [photos, setPhotos] = useState<{ file: File; preview: string }[]>([]);
   const [sending, setSending] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
@@ -27,7 +25,6 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
   const reset = () => {
     setStep("ask");
     setDescription("");
-    setDate("");
     setPhotos([]);
     setSending(false);
   };
@@ -124,16 +121,16 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
         });
       }
 
-      // 4. PRIMEIRA MENSAGEM COM FOTOS (Ajustado para image_urls)
+      // 4. PRIMEIRA MENSAGEM COM FOTOS (Ajustado para image_urls e sem data)
       const autoMsg = withDetails && description.trim()
-        ? `Olá! Gostaria de contratar seu serviço.\n\n${description.trim()}${date ? `\n\nData: ${date}` : ""}`
+        ? `Olá! Gostaria de contratar seu serviço.\n\n${description.trim()}`
         : "Olá! Gostaria de contratar seu serviço.";
 
       await supabase.from("chat_messages").insert({
         request_id: requestId,
         sender_id: user.id,
         content: autoMsg,
-        image_urls: photoUrls.length > 0 ? photoUrls : null // ✅ Envia o array de fotos aqui
+        image_urls: photoUrls.length > 0 ? photoUrls : null
       });
 
       // 5. Notificação
@@ -180,11 +177,6 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
           <div className="flex flex-col gap-4 pt-2">
             <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="O que você precisa?" className="rounded-xl" rows={3} />
             
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="pl-10 rounded-xl" />
-            </div>
-
             <div>
               <p className="text-[10px] font-bold uppercase text-muted-foreground mb-2">Fotos do problema ({photos.length}/4)</p>
               <div className="flex gap-2 flex-wrap">

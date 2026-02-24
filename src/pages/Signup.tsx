@@ -63,7 +63,7 @@ const Signup = () => {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
-        // ✅ VERIFICAÇÃO DE PERFIL: Primeiro checamos se ele já existe
+        // ✅ VERIFICAÇÃO ANTECIPADA: Bloqueia antes de avançar para qualquer etapa
         const { data: profile } = await supabase
           .from("profiles")
           .select("cpf")
@@ -71,10 +71,8 @@ const Signup = () => {
           .maybeSingle();
 
         if (profile?.cpf) {
-          // 🛑 ERRO: Usuário já cadastrado selecionou conta no Google
+          // 🛑 CONTA JÁ EXISTE: Desloga e força erro na tela inicial
           localStorage.removeItem("signup_in_progress");
-          
-          // Desloga imediatamente para não deixar sessão aberta no Signup
           await supabase.auth.signOut();
           
           toast({ 
@@ -83,13 +81,13 @@ const Signup = () => {
             variant: "destructive" 
           });
 
-          // 👈 FORÇA VOLTAR PARA A TELA INICIAL (Print 2)
-          setStep("method-choice"); 
+          setStep("method-choice"); // Garante que fica na tela do Print 2
           setVerifying(false);
           return;
         }
 
         if (isSignupFlow) {
+          // Usuário novo: segue para escolha de tipo (Print 2 -> Escolha Perfil)
           localStorage.removeItem("signup_in_progress");
           setCreatedUserId(user.id);
           setBasicData({
@@ -111,6 +109,7 @@ const Signup = () => {
           });
           setStep("type"); 
         } else {
+          // Se não é fluxo de signup, apenas limpa e vai pra home
           navigate("/home");
         }
       }
@@ -125,9 +124,9 @@ const Signup = () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: window.location.href, // Volta para cá para o useEffect barrar se necessário
+        redirectTo: window.location.href,
         queryParams: {
-          prompt: 'select_account', // Garante a escolha da conta
+          prompt: 'select_account',
         },
       }
     });

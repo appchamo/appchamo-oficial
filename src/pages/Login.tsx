@@ -32,7 +32,7 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // ✅ BLITZ AJUSTADA: Agora o Admin tem passe livre e limpamos a flag de progresso
+  // ✅ BLITZ AJUSTADA: Removida a coluna "document" que causava o erro 400
   const checkProfileAndRedirect = async (userId: string) => {
     setLoading(true);
     try {
@@ -61,9 +61,11 @@ const Login = () => {
       }
 
       // 🛑 BLITZ DOS USUÁRIOS COMUNS
-      const isProfileIncomplete = !profile || (!profile.cpf && !profile.document && !profile.phone);
+      // Removida a coluna .document que não existe no seu Supabase
+      const isProfileIncomplete = !profile || (!profile.cpf && !profile.phone);
 
       if (isProfileIncomplete) {
+        // Cenário 1: Entrou sem cadastro -> Manda pro Signup concluir
         localStorage.setItem("signup_in_progress", "true");
         navigate("/signup");
         return;

@@ -61,14 +61,15 @@ const Signup = () => {
       if (session?.user) {
         setLoading(true);
         try {
-          // 1. Puxa dados reais para verificação rígida
+          // 1. Puxa dados reais para verificação rígida (Removido "document" que não existe)
           const { data: profile } = await supabase
             .from("profiles")
-            .select("cpf, phone, document")
+            .select("cpf, phone")
             .eq("user_id", session.user.id)
             .maybeSingle();
 
-          const isComplete = profile?.cpf || profile?.phone || profile?.document;
+          // ✅ Verificação corrigida: considera apenas as colunas que você tem no banco
+          const isComplete = profile?.cpf || profile?.phone;
 
           if (isComplete) {
             // ✅ Perfil completo: Limpa flag e vai pra Home

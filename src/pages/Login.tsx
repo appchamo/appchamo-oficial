@@ -45,28 +45,10 @@ const Login = () => {
   };
 
   useEffect(() => {
-    // ✅ NOVO: Verificação inteligente para redirecionar usuários novos vindos do Social Login
-    const checkUserStatus = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("cpf")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        // Se logou mas não tem CPF, é porque não terminou o cadastro
-        if (!profile?.cpf) {
-          localStorage.setItem("signup_in_progress", "true");
-          navigate("/signup");
-        } else {
-          navigate("/home");
-        }
-      }
-    };
-
-    checkUserStatus();
-
+    // ✅ CORRIGIDO: Removido checkUserStatus daqui.
+    // O login não deve redirecionar automaticamente ao carregar a página, 
+    // apenas após a ação de autenticação.
+    
     supabase.
     from("platform_settings").
     select("value").
@@ -78,7 +60,7 @@ const Login = () => {
         if (val) setBgUrl(val);
       }
     });
-  }, [navigate]);
+  }, []);
 
   const handleResendEmail = async () => {
     if (!email) { toast({ title: "Digite seu e-mail acima." }); return; }
@@ -117,14 +99,15 @@ const Login = () => {
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    // Remove a flag antes de tentar o login social puro
+    // ✅ Limpa a flag de cadastro para garantir que o sistema entenda como um LOGIN puro
     localStorage.removeItem("signup_in_progress");
     
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        // Redireciona para cá mesmo, o useEffect lá em cima decide o destino
-        redirectTo: window.location.href,
+        // ✅ Redireciona para a Home. Se o perfil estiver incompleto, 
+        // a própria Home (ou o Guard de rotas) deve lidar com isso.
+        redirectTo: `${window.location.origin}/home`,
         queryParams: {
           prompt: 'select_account',
           access_type: 'offline',

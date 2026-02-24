@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
-import { supabase } from "@/integrations/supabase/client"; // ✅ Importado o supabase
+import { supabase } from "@/integrations/supabase/client";
 
 // Pages
 import Index from "./pages/Index";
@@ -91,14 +91,11 @@ const App = () => {
     initPush();
   }, []);
 
-  // ✅ 2. EFEITO VIGIA ATUALIZADO: DESLOGA SE O DISPOSITIVO FOR EXPULSO REMOTAMENTE
+  // ✅ 2. VIGIA DEFINITIVO: DESLOGA SE O DISPOSITIVO FOR EXPULSO
   useEffect(() => {
     const deviceId = localStorage.getItem("chamo_device_id");
     if (!deviceId) return;
 
-    console.log("🕵️ Vigia de dispositivo ativo:", deviceId);
-
-    // Ouve em tempo real se qualquer linha for deletada na tabela user_devices
     const channel = supabase
       .channel('device_expulsion')
       .on(
@@ -109,24 +106,22 @@ const App = () => {
           table: 'user_devices'
         },
         async (payload) => {
-          // Verifica se o ID deletado no banco coincide com o ID deste navegador
-          if (payload.old && payload.old.device_id === deviceId) {
-            console.log("🚫 Sessão encerrada: este dispositivo foi desconectado pelo servidor.");
+          // Com REPLICA IDENTITY FULL, o payload trará os dados da linha deletada
+          const expelledId = payload.old?.device_id;
+          
+          if (expelledId === deviceId) {
+            console.log("🚫 Dispositivo expulso detectado pelo Vigia.");
             
-            // Logout imediato e limpeza nuclear
             await supabase.auth.signOut();
             localStorage.clear();
             sessionStorage.clear();
             
-            // Alerta amigável antes de redirecionar
             alert("Sua sessão foi encerrada porque você se conectou em outro dispositivo.");
             window.location.href = "/login?expelled=true";
           }
         }
       )
-      .subscribe((status) => {
-        console.log("📡 Conexão Realtime (Vigia):", status);
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);

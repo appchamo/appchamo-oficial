@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ✅ ADICIONADO: Estado para controlar se estamos saindo
+  // ✅ ADICIONADO: Estado para controlar se estamos em processo de saída
   const [isSignOutInProgress, setIsSignOutInProgress] = useState(false);
 
   const isAdmin = useMemo(() => {
@@ -88,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [roles]);
 
   const loadUserData = async (sess: Session | null) => {
-    // 🛑 REGRA DE OURO: Se estivermos em processo de logout ou intenção manual, ignore!
+    // 🛑 BLOQUEIO CRÍTICO: Se o usuário quer sair ou entrar manualmente, não carrega dados
     const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
     if (isSignOutInProgress || isManualIntent) {
       setLoading(false);
@@ -109,12 +109,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userId = sess.user.id;
     const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
     
-    // Segunda checagem para evitar race conditions (conflito de velocidade)
+    // Segunda verificação para evitar que os dados "voltem" no meio do logout
     if (!isSignOutInProgress) {
       setProfile(p);
       setRoles(r);
     }
-
+    
     setLoading(false);
   };
 
@@ -126,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // 2) mudanças de auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      // ✅ Se o evento for de saída, limpa tudo imediatamente
+      // ✅ Se o evento for saída real, limpa tudo imediatamente
       if (_event === 'SIGNED_OUT') {
         setUser(null);
         setSession(null);
@@ -136,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // 🛑 Se estivermos deslogando ou com intenção manual, ignore o evento de SIGNED_IN reativo
+      // 🛑 Se houver trava de logout ou intenção manual, ignore o evento de login automático
       const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
       if (!isSignOutInProgress && !isManualIntent) {
         setTimeout(() => loadUserData(sess), 0);
@@ -147,22 +147,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isSignOutInProgress]);
 
   const signOut = async () => {
-    // ✅ Ativa a trava de segurança
+    // ✅ Ativa a trava antes de começar
     setIsSignOutInProgress(true);
     
     try {
       await supabase.auth.signOut();
       
-      // Limpa estados locais
+      // Limpa estados locais manualmente
       setUser(null);
       setSession(null);
       setProfile(null);
       setRoles([]);
       
-      // ✅ Limpa flags de cadastro
+      // Limpa as flags de controle
       localStorage.removeItem("signup_in_progress");
       
-      // ✅ Libera a trava após 1 segundo (tempo pro Android WebView respirar)
+      // Mantém a trava por 1 segundo para o Android WebView limpar o cache
       setTimeout(() => setIsSignOutInProgress(false), 1000);
     } catch (error) {
       console.error("Erro no signOut:", error);

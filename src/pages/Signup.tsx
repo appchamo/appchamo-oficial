@@ -49,8 +49,13 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // ✅ COMEÇA TRUE: A tela nasce bloqueada no Loading para evitar "pulos" visuais
-  const [verifying, setVerifying] = useState(true); 
+  // Tranca a tela se perceber que é um redirecionamento do Google
+  const [verifying, setVerifying] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.location.hash.includes("access_token");
+    }
+    return false;
+  });
   
   const [couponPopup, setCouponPopup] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
@@ -61,67 +66,58 @@ const Signup = () => {
   useEffect(() => {
     let isMounted = true;
 
-    const verifyUserAndProfile = async () => {
+    const processAuth = async (user: any) => {
+      if (!user) return;
+      
       const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
-      const { data: { session } } = await supabase.auth.getSession();
-
-      // Se não tem ninguém logado, destranca a tela imediatamente para o usuário ver as opções
-      if (!session?.user) {
-        if (isMounted) setVerifying(false);
-        return;
-      }
-
-      const user = session.user;
 
       try {
         let hasCompletedProfile = false;
 
-        // 1. Tenta achar o CPF pelo ID (caso normal)
+        // 1. Tenta achar o perfil pelo ID
         const { data: profileById } = await supabase
           .from("profiles")
-          .select("cpf, onboarding_completed")
+          .select("cpf")
           .eq("id", user.id)
           .maybeSingle();
 
-        if (profileById?.cpf || profileById?.onboarding_completed) {
-          hasCompletedProfile = true;
-        }
+        if (profileById?.cpf) hasCompletedProfile = true;
 
-        // 2. Tenta achar pelo E-MAIL (caso o Google tenha gerado um ID duplicado)
+        // 2. Se não achou pelo ID, caça pelo Email (Essa é a trava)
         if (!hasCompletedProfile && user.email) {
           const { data: profileByEmail } = await supabase
             .from("profiles")
-            .select("cpf, onboarding_completed")
+            .select("cpf")
             .eq("email", user.email)
             .maybeSingle();
             
-          if (profileByEmail?.cpf || profileByEmail?.onboarding_completed) {
-            hasCompletedProfile = true;
-          }
+          if (profileByEmail?.cpf) hasCompletedProfile = true;
         }
 
-        // 🛑 CONTA JÁ EXISTE: Expulsa o usuário de forma agressiva
+        // 🛑 CONTA JÁ EXISTE NO BANCO: Bloqueia tudo e expulsa
         if (hasCompletedProfile) {
           localStorage.removeItem("signup_in_progress");
           
-          // Mata a sessão antes que o "Guarda Global" do seu app tente jogar ele pra Home
-          await supabase.auth.signOut(); 
+          // Limpa a URL antes de derrubar a sessão para evitar loop
           window.history.replaceState(null, "", window.location.pathname);
+          
+          // Desloga o usuário
+          await supabase.auth.signOut();
 
           if (isMounted) {
             toast({ 
               title: "E-mail já cadastrado", 
-              description: "Este e-mail já possui conta. Por favor, faça login.", 
-              variant: "destructive" 
+              description: "Identificamos que este e-mail já possui conta. Por favor, faça login.", 
+              variant: "destructive",
+              duration: 5000 // Deixa o erro na tela por mais tempo
             });
-            setStep("method-choice"); // Garante que volta pra tela dos botões
-            setVerifying(false);
-            navigate("/"); // Manda pra raiz (Print 3)
+            // 👈 MANDA DIRETO PRA PÁGINA INICIAL RAIZ
+            navigate("/");
           }
           return;
         }
 
-        // ✅ CONTA NOVA: Tudo certo, libera a tela "Cliente ou Profissional"
+        // ✅ CONTA É NOVA DE FATO
         if (isSignupFlow) {
           localStorage.removeItem("signup_in_progress");
           window.history.replaceState(null, "", window.location.pathname);
@@ -146,10 +142,9 @@ const Signup = () => {
               addressCountry: "Brasil"
             });
             setStep("type");
-            setVerifying(false); // Destranca a tela
+            setVerifying(false);
           }
         } else {
-          // Se entrou de penetra, manda pra home
           navigate("/home");
         }
       } catch (err) {
@@ -157,14 +152,20 @@ const Signup = () => {
       }
     };
 
-    // Roda a checagem assim que o componente nasce
-    verifyUserAndProfile();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Quando o Google confirma o login, ele tranca a tela e manda processar
+      if (event === 'SIGNED_IN' && session?.user) {
+        setVerifying(true);
+        processAuth(session.user);
+      }
+    });
 
-    // Escuta o Google terminando de processar
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') {
-        setVerifying(true); // Tranca a tela de novo
-        verifyUserAndProfile();
+    // Caso já estivesse logado antes
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        processAuth(session.user);
+      } else if (!window.location.hash.includes("access_token")) {
+        if (isMounted) setVerifying(false);
       }
     });
 
@@ -328,7 +329,7 @@ const Signup = () => {
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">
-            {verifying ? "Verificando sua conta..." : "Processando..."}
+            {verifying ? "Aguarde um momento..." : "Criando sua conta..."}
           </p>
         </div>
       </div>

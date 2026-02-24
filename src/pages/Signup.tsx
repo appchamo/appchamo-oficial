@@ -56,40 +56,57 @@ const Signup = () => {
 
   useEffect(() => {
     const checkSocialUser = async () => {
+      // ✅ VERIFICAÇÃO DE FLAG: Só inicia onboarding se veio do fluxo de Signup
+      const isSignupFlow = localStorage.getItem("signup_in_progress") === "true";
+      
       const { data: { user } } = await supabase.auth.getUser();
+      
       if (user) {
-        setCreatedUserId(user.id);
-        setBasicData({
-          name: user.user_metadata?.full_name || "",
-          email: user.email || "",
-          password: "", 
-          phone: "",
-          document: "",
-          documentType: "cpf",
-          birthDate: "",
-          addressZip: "",
-          addressStreet: "",
-          addressNumber: "",
-          addressComplement: "",
-          addressNeighborhood: "",
-          addressCity: "",
-          addressState: "",
-          addressCountry: "Brasil"
-        });
-        setStep("type"); 
+        if (isSignupFlow) {
+          // Se é cadastro, limpa a flag e inicia os steps
+          localStorage.removeItem("signup_in_progress");
+          setCreatedUserId(user.id);
+          setBasicData({
+            name: user.user_metadata?.full_name || "",
+            email: user.email || "",
+            password: "", 
+            phone: "",
+            document: "",
+            documentType: "cpf",
+            birthDate: "",
+            addressZip: "",
+            addressStreet: "",
+            addressNumber: "",
+            addressComplement: "",
+            addressNeighborhood: "",
+            addressCity: "",
+            addressState: "",
+            addressCountry: "Brasil"
+          });
+          setStep("type"); 
+        } else {
+          // Se não há flag, é um login comum, manda para Home
+          navigate("/home");
+        }
       }
     };
     checkSocialUser();
-  }, []);
+  }, [navigate]);
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
+    // ✅ ATIVA A FLAG: Marcamos que o usuário está tentando se cadastrar
+    localStorage.setItem("signup_in_progress", "true");
+    
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: window.location.href,
       }
     });
-    if (error) toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
+    if (error) {
+      localStorage.removeItem("signup_in_progress");
+      toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
+    }
   };
 
   const handleTypeSelect = (type: AccountType) => {
@@ -271,7 +288,7 @@ const Signup = () => {
             </div>
 
             <div className="space-y-3">
-              <button onClick={() => handleSocialSignup("google")} className="w-full flex items-center justify-center gap-3 py-3 border rounded-xl font-medium hover:bg-muted transition-all">
+              <button onClick={() => handleSocialSignup("google")} className="w-full flex items-center justify-center gap-3 py-3 border rounded-xl font-medium hover:bg-muted transition-all shadow-sm active:scale-95">
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                   <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -281,7 +298,7 @@ const Signup = () => {
                 Continuar com Google
               </button>
 
-              <button onClick={() => handleSocialSignup("apple")} className="w-full flex items-center justify-center gap-3 py-3 border rounded-xl font-medium hover:bg-muted transition-all">
+              <button onClick={() => handleSocialSignup("apple")} className="w-full flex items-center justify-center gap-3 py-3 border rounded-xl font-medium hover:bg-muted transition-all shadow-sm active:scale-95">
                 <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                   <path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.248-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.67.91-1.377 0-2.332-1.26-3.428-2.8-1.287-1.82-2.323-4.63-2.323-7.28 0-4.28 2.797-6.55 5.552-6.55 1.448 0 2.67.95 3.6.95.865 0 2.222-1.01 3.902-1.01.61 0 2.886.06 4.012 1.81-2.277 1.39-2.56 4.22-1.48 5.81 1.08 1.59 2.51 2.05 2.414 2.12z" />
                 </svg>
@@ -293,7 +310,7 @@ const Signup = () => {
                 <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Ou</span></div>
               </div>
 
-              <button onClick={() => setStep("type")} className="w-full flex items-center justify-center gap-3 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all shadow-md">
+              <button onClick={() => setStep("type")} className="w-full flex items-center justify-center gap-3 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all shadow-md active:scale-95">
                 <Mail className="w-5 h-5" />
                 Continuar com e-mail
               </button>
@@ -308,7 +325,6 @@ const Signup = () => {
 
       {step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
       
-      {/* ✅ CORRIGIDO: Passando basicData como initialData para o StepBasicData */}
       {step === "basic" && (
         <StepBasicData 
           accountType={accountType} 

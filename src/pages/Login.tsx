@@ -90,18 +90,19 @@ const Login = () => {
     if (isAdmin) {
       navigate("/admin");
     } else {
-      // Aqui também poderíamos checar se o perfil está completo,
-      // mas por enquanto vamos manter a Home para login com senha.
       navigate("/home");
     }
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
+    // ✅ Removida a flag 'signup_in_progress' para garantir que seja apenas login
+    localStorage.removeItem("signup_in_progress");
+    
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        // 👈 REDIRECIONAMENTO ADICIONADO AQUI
-        redirectTo: `${window.location.origin}/complete-signup`,
+        // ✅ Redirecionando para a Home, evitando o funil de cadastro
+        redirectTo: `${window.location.origin}/home`,
       }
     });
     if (error) toast({ title: `Erro ao conectar com ${provider}`, variant: "destructive" });

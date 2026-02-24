@@ -363,7 +363,19 @@ const Signup = () => {
             </div>
 
             <p className="text-center text-xs text-muted-foreground">
-              Já tem uma conta? <button onClick={() => navigate("/login")} className="text-primary font-bold hover:underline">Entrar</button>
+              Já tem uma conta?{" "}
+              <button 
+                onClick={async () => {
+                  setLoading(true);
+                  // ✅ Limpa flag e encerra sessão pendente antes de ir pro Login
+                  localStorage.removeItem("signup_in_progress");
+                  await supabase.auth.signOut();
+                  navigate("/login");
+                }} 
+                className="text-primary font-bold hover:underline"
+              >
+                Entrar
+              </button>
             </p>
           </div>
         </div>

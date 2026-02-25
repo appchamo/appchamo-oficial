@@ -52,12 +52,13 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
+// 🚀 OTIMIZAÇÃO: Seleciona apenas campos essenciais para navegação rápida
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select("id, user_id, full_name, email, phone, avatar_url, user_type, is_blocked")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
 
   if (error) return null;
   return data as Profile;
@@ -76,11 +77,19 @@ async function fetchRoles(userId: string) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [roles, setRoles] = useState<AppRole[]>([]);
-  const [loading, setLoading] = useState(true);
+  
+  // 🚀 OTIMIZAÇÃO: Tenta carregar o perfil do LocalStorage para exibição instantânea (Cache)
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    const cached = localStorage.getItem("chamo_cached_profile");
+    return cached ? JSON.parse(cached) : null;
+  });
 
-  // ✅ ADICIONADO: Trava de estado para ignorar sessões fantasmas durante o logout
+  const [roles, setRoles] = useState<AppRole[]>(() => {
+    const cached = localStorage.getItem("chamo_cached_roles");
+    return cached ? JSON.parse(cached) : [];
+  });
+
+  const [loading, setLoading] = useState(true);
   const [isSignOutInProgress, setIsSignOutInProgress] = useState(false);
 
   const isAdmin = useMemo(() => {
@@ -88,8 +97,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [roles]);
 
   const loadUserData = async (sess: Session | null) => {
-    // 🛑 REGRA DE OURO: Se houver intenção manual de login ou logout ativo, não carregue os dados.
-    // Isso impede as chamadas automáticas que você viu no Network.
     const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
     
     if (isSignOutInProgress || isManualIntent) {
@@ -97,32 +104,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setLoading(true);
     setSession(sess);
     setUser(sess?.user ?? null);
 
     if (!sess?.user) {
       setProfile(null);
       setRoles([]);
+      localStorage.removeItem("chamo_cached_profile");
+      localStorage.removeItem("chamo_cached_roles");
       setLoading(false);
       return;
     }
 
-    const userId = sess.user.id;
-    const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
-    
-    // Verificação dupla antes de preencher o estado para garantir que não houve logout no meio do processo
-    if (!isSignOutInProgress) {
-      setProfile(p);
-      setRoles(r);
+    // 🚀 OTIMIZAÇÃO: Só busca do banco se não tivermos o perfil no estado 
+    // ou faz um "refresh silencioso" se já tivermos
+    try {
+      const userId = sess.user.id;
+      const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
+      
+      if (!isSignOutInProgress && p) {
+        setProfile(p);
+        setRoles(r);
+        // Salva no cache para a próxima vez que o app abrir ser instantâneo
+        localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
+        localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
+      }
+    } catch (e) {
+      console.error("Erro ao carregar dados de auth:", e);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   useEffect(() => {
-    // 1) sessão inicial - Só carrega se não houver intenção manual de estar na tela de login
     const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+    
+    // 1) sessão inicial
     if (!isManualIntent) {
       supabase.auth.getSession().then(({ data: { session: s } }) => {
         loadUserData(s);
@@ -132,21 +149,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // 2) mudanças de auth
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      // Se o usuário saiu explicitamente, limpamos tudo e paramos aqui
-      if (_event === 'SIGNED_OUT') {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sess) => {
+      if (event === 'SIGNED_OUT') {
         setUser(null);
         setSession(null);
         setProfile(null);
         setRoles([]);
+        localStorage.removeItem("chamo_cached_profile");
+        localStorage.removeItem("chamo_cached_roles");
         setLoading(false);
         return;
       }
 
-      // 🛑 Só dispara o carregamento se não estivermos saindo ou em modo manual
-      const manualMode = localStorage.getItem("manual_login_intent") === "true";
-      if (!isSignOutInProgress && !manualMode) {
-        setTimeout(() => loadUserData(sess), 0);
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        const manualMode = localStorage.getItem("manual_login_intent") === "true";
+        if (!isSignOutInProgress && !manualMode) {
+          loadUserData(sess);
+        }
       }
     });
 
@@ -154,22 +173,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isSignOutInProgress]);
 
   const signOut = async () => {
-    // Ativa a trava imediatamente
     setIsSignOutInProgress(true);
-    
     try {
-      // Remove a flag de progresso de cadastro
       localStorage.removeItem("signup_in_progress");
+      localStorage.removeItem("chamo_cached_profile");
+      localStorage.removeItem("chamo_cached_roles");
       
       await supabase.auth.signOut();
 
-      // Limpa os estados locais
       setUser(null);
       setSession(null);
       setProfile(null);
       setRoles([]);
       
-      // ✅ Mantém a trava por 1 segundo para o cache do navegador limpar
       setTimeout(() => setIsSignOutInProgress(false), 1000);
     } catch (error) {
       console.error("Erro ao deslogar:", error);
@@ -180,13 +196,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = async () => {
     if (!user) return;
     const p = await fetchProfile(user.id);
-    setProfile(p);
+    if (p) {
+      setProfile(p);
+      localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
+    }
   };
 
   const refreshRoles = async () => {
     if (!user) return;
     const r = await fetchRoles(user.id);
     setRoles(r);
+    localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
   };
 
   return (

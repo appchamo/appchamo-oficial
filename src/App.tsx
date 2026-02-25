@@ -10,6 +10,9 @@ import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
 
+// 👇 ADICIONADO: Importação do Capacitor Core para detectar a plataforma
+import { Capacitor } from "@capacitor/core";
+
 // Pages
 import Index from "./pages/Index";
 import Home from "./pages/Home";
@@ -99,7 +102,6 @@ const handleAuthRedirect = async (urlStr: string) => {
         console.log('✅ [VIGIA] Sessão injetada. Aguardando persistência...');
         
         // 3. O "PULO DO GATO": Delay de 500ms para o Android salvar o token no banco interno
-        // Isso evita que o app carregue a Home achando que ainda está deslogado
         setTimeout(() => {
           window.location.assign("/home");
         }, 500);
@@ -113,7 +115,6 @@ const handleAuthRedirect = async (urlStr: string) => {
   }
 };
 
-// Domínios autorizados (incluindo o seu site e o Supabase)
 const isAuthUrl = (url: string) => {
   return url.includes('com.chamo.app://') || 
          url.includes('appchamo.com') || 
@@ -158,7 +159,7 @@ const App = () => {
     initPush();
   }, []);
 
-  // VIGIA DE EXPULSÃO (Multi-dispositivo)
+  // VIGIA DE EXPULSÃO
   useEffect(() => {
     const deviceId = localStorage.getItem("chamo_device_id");
     if (!deviceId) return;
@@ -180,7 +181,7 @@ const App = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // COLD START (App fechado que abre com link)
+  // COLD START
   useEffect(() => {
     const checkColdStart = async () => {
       const launchUrl = await CapacitorApp.getLaunchUrl();
@@ -191,6 +192,44 @@ const App = () => {
     };
     checkColdStart();
   }, []);
+
+  // =========================================================================
+  // 🛡️ TRAVA DE SEGURANÇA WEB (LANDING PAGE)
+  // =========================================================================
+  const isWeb = Capacitor.getPlatform() === 'web';
+  const currentPath = window.location.pathname;
+  const currentHash = window.location.hash;
+  const currentSearch = window.location.search;
+  
+  // Exceções: Libera o Painel Admin e os Links de Recuperação de Senha do Supabase
+  const isAdminRoute = currentPath.startsWith('/admin');
+  const isPasswordRecovery = currentHash.includes("type=recovery") || currentSearch.includes("type=recovery");
+
+  if (isWeb && !isAdminRoute && !isPasswordRecovery) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
+        {/* Mostra a logo se existir, senão só exibe o texto */}
+        <div className="w-24 h-24 bg-primary rounded-2xl flex items-center justify-center mb-8 shadow-lg">
+           <span className="text-4xl text-primary-foreground font-bold">C</span>
+        </div>
+        
+        <h1 className="text-3xl font-bold text-foreground mb-4">O Chamô é 100% App! 🚀</h1>
+        <p className="text-muted-foreground mb-10 text-lg max-w-sm">
+          Para garantir a melhor experiência e segurança, nosso serviço funciona exclusivamente pelo aplicativo.
+        </p>
+        
+        <div className="flex flex-col w-full max-w-xs gap-4">
+          <a href="#" className="bg-primary text-primary-foreground py-4 rounded-xl font-bold text-lg shadow-md transition-transform hover:scale-105">
+            Baixar para Android
+          </a>
+          <a href="#" className="bg-foreground text-background py-4 rounded-xl font-bold text-lg shadow-md transition-transform hover:scale-105">
+            Baixar para iOS
+          </a>
+        </div>
+      </div>
+    );
+  }
+  // =========================================================================
 
   return (
     <QueryClientProvider client={queryClient}>

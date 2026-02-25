@@ -191,7 +191,7 @@ const App = () => {
         className="relative min-h-screen flex flex-col justify-center overflow-hidden font-sans bg-[#1A0B00]"
         style={{
           // ⚠️ TROQUE ESSA URL PELA FOTO QUE VOCÊ SUBIR NO SUPABASE
-          backgroundImage: 'url("https://images.unsplash.com/photo-1573164713988-8665fc963095?q=80&w=2069&auto=format&fit=crop")',
+          backgroundImage: 'url("https://mrfippvowbudtctahgag.supabase.co/storage/v1/object/public/uploads/tutorials/22386.jpg")',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}

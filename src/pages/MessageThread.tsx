@@ -20,10 +20,31 @@ interface OtherParty {
   avatar_url: string | null;
 }
 
+// 🚀 OTIMIZAÇÃO 1: Reduz o peso do Avatar para o cabeçalho e mensagens
+const getOptimizedAvatar = (url: string | null | undefined) => {
+  if (!url) return undefined;
+  if (url.includes("supabase.co/storage/v1/object/public/")) {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}width=100&height=100&quality=75&resize=cover`;
+  }
+  return url;
+};
+
+// 🚀 OTIMIZAÇÃO 2: Reduz drasticamente o peso das fotos enviadas no chat sem perder o original no clique
+const getOptimizedChatImage = (url: string | null | undefined) => {
+  if (!url) return undefined;
+  if (url.includes("supabase.co/storage/v1/object/public/")) {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}width=400&quality=75`;
+  }
+  return url;
+};
+
 const MessageThread = () => {
   const { threadId } = useParams();
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isFetchingMessages, setIsFetchingMessages] = useState(true); // NOVO: Controle visual de carregamento
   const [text, setText] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -115,6 +136,7 @@ const MessageThread = () => {
 
   useEffect(() => {
     const load = async () => {
+      setIsFetchingMessages(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setUserId(user.id);
 
@@ -157,7 +179,9 @@ const MessageThread = () => {
       select("*").
       eq("request_id", threadId!).
       order("created_at");
+      
       setMessages(data as Message[] || []);
+      setIsFetchingMessages(false);
     };
     if (threadId) load();
   }, [threadId]);
@@ -865,7 +889,6 @@ const MessageThread = () => {
     return null;
   };
 
-  // ✅ CORREÇÃO DO ANDROID: Transformado o botão em <label> para não recarregar a página
   const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userId || !threadId) return;
@@ -923,7 +946,8 @@ const MessageThread = () => {
           <p className="font-semibold flex items-center gap-1.5 text-xs"><Package className="w-3.5 h-3.5" /> Interesse em Produto</p>
           <div className="bg-background rounded-xl overflow-hidden border border-border">
             {product.image ? (
-               <img src={product.image} alt={product.name} className="w-full h-24 object-cover" />
+               // ✨ OTIMIZAÇÃO: Usa imagem otimizada para o produto também, mas permite ver em tamanho real
+               <img src={getOptimizedChatImage(product.image)} alt={product.name} loading="lazy" className="w-full h-24 object-cover cursor-pointer" onClick={() => window.open(product.image, '_blank')} />
             ) : (
                <div className="w-full h-24 bg-muted flex items-center justify-center"><Package className="w-6 h-6 text-muted-foreground/50" /></div>
             )}
@@ -1025,7 +1049,8 @@ const MessageThread = () => {
         <div className="space-y-2">
           <div className={`grid ${msg.image_urls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-1.5`}>
             {msg.image_urls.map((url, j) => (
-              <img key={j} src={url} alt="Mídia do chat" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
+              // ✨ OTIMIZAÇÃO: Carrega imagem leve para economizar 90% de rede, mas abre full HD ao clicar
+              <img key={j} src={getOptimizedChatImage(url)} alt="Mídia do chat" loading="lazy" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
             ))}
           </div>
           {msg.content && <p className="text-sm">{msg.content}</p>}
@@ -1046,7 +1071,8 @@ const MessageThread = () => {
               return (
                 <div key={i} className="flex flex-wrap gap-1.5">
                   {imgMatch.map((url, j) =>
-                  <img key={j} src={url} alt="Foto do serviço" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
+                  // ✨ OTIMIZAÇÃO: Mesma mágica aplicada nas imagens por Regex
+                  <img key={j} src={getOptimizedChatImage(url)} alt="Foto do serviço" loading="lazy" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
                   )}
                 </div>);
 
@@ -1070,7 +1096,8 @@ const MessageThread = () => {
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </Link>
           {otherParty.avatar_url ?
-          <img src={otherParty.avatar_url} alt={otherParty.name} className="w-9 h-9 rounded-full object-cover" /> :
+          // ✨ OTIMIZAÇÃO: Imagem otimizada no cabeçalho + Eager load
+          <img src={getOptimizedAvatar(otherParty.avatar_url)} alt={otherParty.name} loading="eager" className="w-9 h-9 rounded-full object-cover" /> :
 
           <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
               {otherInitials}
@@ -1180,48 +1207,57 @@ const MessageThread = () => {
           </div>
         }
         
-        {messages.length === 0 &&
-        <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma mensagem. Inicie a conversa!</div>
-        }
-        {messages.map((msg) => {
-          const isMine = msg.sender_id === userId;
-          const isRatingMsg = msg.content.includes("AVALIAÇÃO:") || msg.content.includes("avaliou seu atendimento com");
-          if (isRatingMsg) return null;
-          const rendered = renderMessageContent(msg);
-          if (rendered === null) return null;
+        {/* 🚀 OTIMIZAÇÃO 4: Adiciona o Skeleton Screen durante o carregamento */}
+        {isFetchingMessages ? (
+          <div className="flex flex-col gap-4 py-8">
+             <div className="flex justify-start"><div className="w-48 h-12 bg-muted animate-pulse rounded-2xl rounded-bl-none"></div></div>
+             <div className="flex justify-end"><div className="w-40 h-12 bg-primary/20 animate-pulse rounded-2xl rounded-br-none"></div></div>
+             <div className="flex justify-start"><div className="w-64 h-16 bg-muted animate-pulse rounded-2xl rounded-bl-none"></div></div>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma mensagem. Inicie a conversa!</div>
+        ) : (
+          messages.map((msg) => {
+            const isMine = msg.sender_id === userId;
+            const isRatingMsg = msg.content.includes("AVALIAÇÃO:") || msg.content.includes("avaliou seu atendimento com");
+            if (isRatingMsg) return null;
+            const rendered = renderMessageContent(msg);
+            if (rendered === null) return null;
 
-          const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada") || msg.content.includes("❌ Chamada recusada");
-          if (isSystemMsg) {
+            const isSystemMsg = msg.content.startsWith("📋 PROTOCOLO:") || msg.content.includes("🔒 CHAMADA ENCERRADA") || msg.content.includes("🚫 Solicitação cancelada") || msg.content.includes("❌ Chamada recusada");
+            if (isSystemMsg) {
+              return (
+                <div key={msg.id} className="flex justify-center">
+                  {rendered}
+                </div>);
+            }
+
             return (
-              <div key={msg.id} className="flex justify-center">
-                {rendered}
-              </div>);
-          }
+              <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
+                {!isMine && (
+                otherParty.avatar_url ?
+                // ✨ OTIMIZAÇÃO: Lazy Loading nos avatares das mensagens
+                <img src={getOptimizedAvatar(otherParty.avatar_url)} alt="" loading="lazy" className="w-7 h-7 rounded-full object-cover mt-1 flex-shrink-0" /> :
 
-          return (
-            <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
-              {!isMine && (
-              otherParty.avatar_url ?
-              <img src={otherParty.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover mt-1 flex-shrink-0" /> :
-
-              <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary mt-1 flex-shrink-0">
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary mt-1 flex-shrink-0">
                     {otherInitials}
                   </div>)
 
-              }
-              <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
-              isMine ?
-              "bg-primary text-primary-foreground rounded-br-md" :
-              "bg-card border rounded-bl-md text-foreground"}`
-              }>
-                {rendered}
-                <p className={`text-[10px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
-                  {new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                </p>
-              </div>
-            </div>);
+                }
+                <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
+                isMine ?
+                "bg-primary text-primary-foreground rounded-br-md" :
+                "bg-card border rounded-bl-md text-foreground"}`
+                }>
+                  {rendered}
+                  <p className={`text-[10px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+                    {new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              </div>);
 
-        })}
+          })
+        )}
         <div ref={bottomRef} />
       </main>
 

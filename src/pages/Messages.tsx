@@ -36,6 +36,16 @@ interface Thread {
   manual_unread: boolean;
 }
 
+// 🚀 OTIMIZAÇÃO: Função de compressão de avatar na nuvem
+const getOptimizedAvatar = (url: string | null | undefined) => {
+  if (!url) return undefined;
+  if (url.includes("supabase.co/storage/v1/object/public/")) {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}width=150&height=150&quality=75&resize=cover`;
+  }
+  return url;
+};
+
 const Messages = () => {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,16 +56,25 @@ const Messages = () => {
   const [showArchived, setShowArchived] = useState(false);
   const navigate = useNavigate();
 
+  // 🚀 OTIMIZAÇÃO: Estados de paginação
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
   const [reportingChatId, setReportingChatId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
   const load = useCallback(async (isBackgroundUpdate = false) => {
-    if (!isBackgroundUpdate) setLoading(true); 
+    // Só mostra o loading pesado se for a primeira vez que a tela abre
+    if (!isBackgroundUpdate && threads.length === 0) setLoading(true); 
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { if (!isBackgroundUpdate) setLoading(false); return; }
 
+    const PAGE_SIZE = 7;
+    const limitCount = (page + 1) * PAGE_SIZE;
+
+    // --- Suporte ---
     const { data: supportMsgs, count: totalSupport } = await supabase
       .from("support_messages")
       .select("*", { count: "exact" })
@@ -77,16 +96,31 @@ const Messages = () => {
       }
     }
 
-    const { data: requests } = await supabase.from("service_requests").select("*").eq("client_id", user.id).order("updated_at", { ascending: false });
+    // 🚀 OTIMIZAÇÃO: Busca única com limite (Acabou o N+1 da morte)
     const { data: proData } = await supabase.from("professionals").select("id").eq("user_id", user.id);
-    let proRequests: any[] = [];
-    if (proData && proData.length > 0) {
-      const proIds = proData.map(p => p.id);
-      const { data: pr } = await supabase.from("service_requests").select("*").in("professional_id", proIds).order("updated_at", { ascending: false });
-      proRequests = pr || [];
+    const proIds = proData?.map(p => p.id) || [];
+
+    let allReqs = [];
+    if (proIds.length > 0) {
+      const { data } = await supabase
+        .from("service_requests")
+        .select("*")
+        .or(`client_id.eq.${user.id},professional_id.in.(${proIds.join(',')})`)
+        .order("updated_at", { ascending: false })
+        .limit(limitCount);
+      allReqs = data || [];
+    } else {
+      const { data } = await supabase
+        .from("service_requests")
+        .select("*")
+        .eq("client_id", user.id)
+        .order("updated_at", { ascending: false })
+        .limit(limitCount);
+      allReqs = data || [];
     }
 
-    const allReqs = [...(requests || []), ...proRequests];
+    setHasMore(allReqs.length === limitCount);
+
     const unique = Array.from(new Map(allReqs.map(r => [r.id, r])).values());
     const threadIds = unique.map(r => r.id);
 
@@ -115,6 +149,7 @@ const Messages = () => {
     const { data: allProfiles } = await supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", usersToFetch);
     const profileMap = new Map((allProfiles || []).map(p => [p.user_id, p]));
 
+    // O Promise.all agora só roda para no máximo 7 itens, tornando o app super rápido
     const enriched: Thread[] = await Promise.all(unique.map(async (req: any) => {
       const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
       
@@ -154,7 +189,7 @@ const Messages = () => {
     const finalThreads = enriched.filter(t => t !== null).sort((a, b) => new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime());
     setThreads(finalThreads);
     if (!isBackgroundUpdate) setLoading(false);
-  }, []);
+  }, [page]); // Adicionado `page` como dependência para carregar mais quando mudar
 
   useEffect(() => { 
     load(); 
@@ -226,11 +261,9 @@ const Messages = () => {
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   };
 
-  // ✅ NOVO: Função que lê a mensagem de Produto na listagem e traduz para um card limpo
   const renderLastMessage = (msg: string | null) => {
     if (!msg) return "Nova conversa";
     
-    // Tratamento para mensagem de Áudio
     if (msg.startsWith("[AUDIO:")) {
       return (
         <span className="flex items-center gap-1 text-primary">
@@ -239,7 +272,6 @@ const Messages = () => {
       );
     }
 
-    // ✅ NOVO: Tratamento para a mensagem de Produto
     if (msg.includes("[PRODUCT:")) {
       return (
         <span className="flex items-center gap-1 text-emerald-600 font-medium">
@@ -248,11 +280,30 @@ const Messages = () => {
       );
     }
 
-    // Mensagem de texto normal
     return msg;
   };
 
-  if (loading) return <AppLayout><main className="max-w-screen-lg mx-auto px-4 py-10 text-center text-muted-foreground">Carregando...</main></AppLayout>;
+  // 🚀 OTIMIZAÇÃO: Skeleton Screen elegante para percepção de velocidade
+  if (loading && threads.length === 0) {
+    return (
+      <AppLayout>
+        <main className="max-w-screen-lg mx-auto px-4 py-5">
+          <div className="h-6 bg-muted rounded-full w-32 mb-6 animate-pulse"></div>
+          <div className="flex flex-col gap-2">
+            {[1, 2, 3, 4, 5, 6, 7].map(i => (
+              <div key={i} className="flex gap-3 items-center px-2 py-3 border-b animate-pulse">
+                <div className="w-14 h-14 rounded-full bg-muted flex-shrink-0"></div>
+                <div className="flex-1 space-y-2 py-1">
+                  <div className="h-4 bg-muted rounded-md w-1/2"></div>
+                  <div className="h-3 bg-muted rounded-md w-3/4"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </main>
+      </AppLayout>
+    );
+  }
 
   const activeThreads = threads.filter(t => !t.is_archived);
   const archivedThreads = threads.filter(t => t.is_archived);
@@ -316,7 +367,8 @@ const Messages = () => {
                 >
                   <div className="relative flex-shrink-0">
                     {t.otherAvatar ? (
-                      <img src={t.otherAvatar} alt={t.otherName} className="w-14 h-14 rounded-full object-cover border-2 border-background shadow-sm" />
+                      // ✨ OTIMIZAÇÃO: Imagem otimizada aplicada aqui com Lazy Loading nativo
+                      <img src={getOptimizedAvatar(t.otherAvatar)} alt={t.otherName} loading="lazy" className="w-14 h-14 rounded-full object-cover border-2 border-background shadow-sm" />
                     ) : (
                       <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary border-2 border-background shadow-sm">
                         {initials}
@@ -370,6 +422,15 @@ const Messages = () => {
             );
           })}
         </div>
+        
+        {/* 🚀 OTIMIZAÇÃO: Botão para carregar mais mensagens caso o usuário queira descer */}
+        {hasMore && !showArchived && (
+          <div className="flex justify-center mt-6 mb-4">
+             <Button variant="outline" onClick={() => setPage(p => p + 1)} className="rounded-full text-xs px-6 py-2 border-primary/20 hover:bg-primary/5">
+                Carregar mais conversas
+             </Button>
+          </div>
+        )}
 
         <Dialog open={!!reportingChatId} onOpenChange={(open) => !open && setReportingChatId(null)}>
           <DialogContent className="sm:max-w-md rounded-2xl">

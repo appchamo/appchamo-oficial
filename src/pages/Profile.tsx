@@ -16,6 +16,16 @@ const availabilityOptions = [
   { value: "unavailable", label: "Indisponível", icon: CalendarOff, color: "text-destructive" },
 ];
 
+// 🚀 NOVO: Função para otimizar a imagem do avatar (reduz peso e acelera o carregamento drásticamente)
+const getOptimizedAvatar = (url: string | null | undefined) => {
+  if (!url) return undefined;
+  if (url.includes("supabase.co/storage/v1/object/public/")) {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}width=200&height=200&quality=75&resize=cover`;
+  }
+  return url;
+};
+
 const Profile = () => {
   const navigate = useNavigate();
   const { profile, user, signOut, refreshProfile } = useAuth();
@@ -131,7 +141,13 @@ const Profile = () => {
           <div className="flex items-start gap-4">
             <div className="relative flex-shrink-0">
               {profile.avatar_url ? (
-                <img src={profile.avatar_url} alt="Avatar" className="w-20 h-20 rounded-2xl object-cover" />
+                // ✨ APLICADO AQUI: Passamos a URL original para a função que devolve a URL minificada
+                <img 
+                  src={getOptimizedAvatar(profile.avatar_url)} 
+                  alt="Avatar" 
+                  className="w-20 h-20 rounded-2xl object-cover"
+                  loading="eager" 
+                />
               ) : (
                 <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center text-xl font-bold text-muted-foreground">{initials}</div>
               )}

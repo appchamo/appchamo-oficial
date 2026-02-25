@@ -9,11 +9,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
-
-// Importação do Capacitor Core para detectar a plataforma
 import { Capacitor } from "@capacitor/core";
-
-// Ícones para a Landing Page Profissional
 import { CheckCircle2, Star } from "lucide-react";
 
 // Pages
@@ -77,7 +73,6 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 const queryClient = new QueryClient();
 
 const handleAuthRedirect = async (urlStr: string) => {
-  console.log('🚨 [VIGIA] Iniciando processamento de URL:', urlStr);
   try {
     const urlObj = new URL(urlStr);
     const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
@@ -175,31 +170,31 @@ const App = () => {
   }, []);
 
   // =========================================================================
-  // 🔥 LANDING PAGE: ESTILO HOTMART & BACKDOOR SECRETO
+  // 🔥 LANDING PAGE: ESTILO HOTMART (APENAS NA RAIZ DO DOMÍNIO)
   // =========================================================================
   const isWeb = Capacitor.getPlatform() === 'web';
   const currentPath = window.location.pathname;
   const currentHash = window.location.hash;
   const currentSearch = window.location.search;
   
-  // 🚀 BACKDOOR: Se acessar /key-login, salva a liberação no cache e recarrega pro /login
   if (currentPath === '/key-login') {
     localStorage.setItem('chamo_web_bypass', 'true');
     window.location.replace('/login');
-    return null; // Pausa a renderização enquanto recarrega
+    return null;
   }
 
-  const isAdminRoute = currentPath.startsWith('/admin');
+  // ✨ A MÁGICA AQUI: Só ativa a Landing Page se a URL for exatamente appchamo.com/
+  const isRootPath = currentPath === '/' || currentPath === '/index.html';
+  
   const isPasswordRecovery = currentHash.includes("type=recovery") || currentSearch.includes("type=recovery");
   const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
 
-  // Oculta a Landing Page se: é admin, tá recuperando senha, ou usou o /key-login
-  if (isWeb && !isAdminRoute && !isPasswordRecovery && !isWebBypassed) {
+  if (isWeb && isRootPath && !isPasswordRecovery && !isWebBypassed) {
     return (
       <div 
         className="relative min-h-screen flex flex-col justify-center overflow-hidden font-sans bg-[#1A0B00]"
         style={{
-          backgroundImage: 'url("https://mrfippvowbudtctahgag.supabase.co/storage/v1/object/public/uploads/tutorials/advertising-technology-holidays-concept-vertical-fulllength-shot-cheerful-gorgeous-ginger-girl-r.jpg")',
+          backgroundImage: 'url("https://mrfippvowbudtctahgag.supabase.co/storage/v1/object/public/uploads/tutorials/135419.png")',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
@@ -214,7 +209,8 @@ const App = () => {
              </div>
              <span className="text-3xl font-extrabold text-white tracking-tight">Chamô</span>
           </div>
-          <a href="/admin/login" className="text-sm font-semibold text-white/80 hover:text-white transition-colors">
+          {/* Link alterado para apontar para a página de Login normal do app */}
+          <a href="/login" className="text-sm font-semibold text-white/80 hover:text-white transition-colors">
             Acesso Restrito
           </a>
         </header>

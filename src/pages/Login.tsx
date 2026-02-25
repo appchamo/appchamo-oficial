@@ -252,15 +252,25 @@ const Login = () => {
     await checkDeviceLimitAndRedirect(data.user.id);
   };
 
+  // 🚀 FUNÇÃO ATUALIZADA PARA REDIRECIONAMENTO DE APK/IPHONE
   const handleSocialLogin = async (provider: "google" | "apple") => {
     localStorage.removeItem("signup_in_progress");
     localStorage.removeItem("manual_login_intent");
     await supabase.auth.signOut();
 
+    // Detecta se está rodando no App (Capacitor) ou Web
+    const isApp = window.location.protocol === 'capacitor:' || 
+                  window.location.hostname === 'localhost' ||
+                  /iPhone|Android/i.test(navigator.userAgent);
+
+    const redirectTo = isApp 
+      ? 'com.chamo.app://google-auth' 
+      : `${window.location.origin}/login`;
+
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
-        redirectTo: `${window.location.origin}/login`,
+        redirectTo: redirectTo,
         queryParams: {
           prompt: 'select_account',
           access_type: 'offline',

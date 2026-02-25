@@ -1,10 +1,11 @@
 import { useEffect } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom"; 
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
@@ -69,6 +70,27 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
+// Componente auxiliar para lidar com o botão de voltar (precisa estar dentro do BrowserRouter)
+const BackButtonHandler = () => {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const handler = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (canGoBack) {
+        window.history.back();
+      } else {
+        CapacitorApp.minimizeApp();
+      }
+    });
+
+    return () => {
+      handler.then(h => h.remove());
+    };
+  }, [navigate]);
+
+  return null;
+};
+
 const App = () => {
   // 1. EFEITO PARA NOTIFICAÇÕES PUSH
   useEffect(() => {
@@ -106,16 +128,13 @@ const App = () => {
           table: 'user_devices'
         },
         async (payload) => {
-          // Com REPLICA IDENTITY FULL, o payload trará os dados da linha deletada
           const expelledId = payload.old?.device_id;
           
           if (expelledId === deviceId) {
             console.log("🚫 Dispositivo expulso detectado pelo Vigia.");
-            
             await supabase.auth.signOut();
             localStorage.clear();
             sessionStorage.clear();
-            
             alert("Sua sessão foi encerrada porque você se conectou em outro dispositivo.");
             window.location.href = "/login?expelled=true";
           }
@@ -128,12 +147,40 @@ const App = () => {
     };
   }, []);
 
+  // 🚀 3. CAPTURAR RETORNO DO LOGIN SOCIAL (DEEP LINK CORRIGIDO)
+  useEffect(() => {
+    const linkHandler = CapacitorApp.addListener('appUrlOpen', async (event: any) => {
+      console.log('🔗 URL de retorno detectada:', event.url);
+      
+      // Se a URL contém o esquema do app ou indicadores de auth do Supabase
+      if (event.url.includes('com.chamo.app://') || event.url.includes('access_token') || event.url.includes('refresh_token')) {
+        
+        // Pequeno delay para garantir que o Supabase processou o fragmento da URL
+        setTimeout(async () => {
+          const { data, error } = await supabase.auth.getSession();
+          
+          if (data.session) {
+            console.log('✅ Sessão firmada! Redirecionando para Home...');
+            window.location.href = "/home";
+          } else if (error) {
+            console.error('❌ Erro ao capturar sessão:', error.message);
+          }
+        }, 500);
+      }
+    });
+
+    return () => {
+      linkHandler.then(h => h.remove());
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <BackButtonHandler />
           <AuthProvider>
             <Routes>
               {/* ===== PUBLIC ===== */}

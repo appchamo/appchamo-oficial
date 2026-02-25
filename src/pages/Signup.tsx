@@ -11,6 +11,7 @@ import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
 import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
+import { Capacitor } from "@capacitor/core"; // ✅ Adicionado para detectar o celular
 
 type AccountType = "client" | "professional";
 type Step = "method-choice" | "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email";
@@ -128,26 +129,33 @@ const Signup = () => {
     checkSocialUser();
   }, [navigate]);
 
+  // 🚀 FUNÇÃO CORRIGIDA PARA DEVOLVER PRO APP NATIVO
   const handleSocialSignup = async (provider: "google" | "apple") => {
-  localStorage.setItem("signup_in_progress", "true");
-  localStorage.removeItem("manual_login_intent");
-  
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider,
-    options: {
-      // 🟢 ALTERAÇÃO AQUI: Forçamos o redirecionamento para o domínio limpo
-      redirectTo: "https://appchamo.com/auth", 
-      queryParams: {
-        prompt: 'select_account',
-      },
-    }
-  });
+    localStorage.setItem("signup_in_progress", "true");
+    localStorage.removeItem("manual_login_intent");
+    
+    const isNative = Capacitor.isNativePlatform();
+    const redirectTo = isNative 
+      ? 'com.chamo.app://google-auth' 
+      : `${window.location.origin}/home`;
 
-  if (error) {
-    localStorage.removeItem("signup_in_progress");
-    toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
-  }
-};
+    console.log(`Iniciando cadastro ${provider}. Redirecionando para:`, redirectTo);
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: redirectTo, 
+        queryParams: {
+          prompt: 'select_account',
+        },
+      }
+    });
+
+    if (error) {
+      localStorage.removeItem("signup_in_progress");
+      toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
+    }
+  };
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
@@ -199,11 +207,10 @@ const Signup = () => {
     doSignup(profileData, planId);
   };
 
-  // ✅ CORREÇÃO: Mostra o cupom após a assinatura
   const handleSubscriptionSuccess = () => {
     setIsSubscriptionOpen(false);
     localStorage.removeItem("signup_in_progress"); 
-    setCouponPopup(true); // Abre o modal em vez de redirecionar direto
+    setCouponPopup(true); 
   };
 
   const doSignup = async (pData: any, planId: string) => {
@@ -256,7 +263,6 @@ const Signup = () => {
       } else {
         setLoading(false);
         localStorage.removeItem("signup_in_progress");
-        // ✅ CORREÇÃO: Mostra o cupom após o cadastro grátis/cliente
         setCouponPopup(true); 
       }
     } catch (err: any) {
@@ -278,7 +284,6 @@ const Signup = () => {
     setResending(false);
   };
 
-  // ✅ CORREÇÃO: Faz o redirecionamento SÓ DEPOIS que o usuário clica em "Entendi"
   const handleCouponClose = () => {
     setCouponPopup(false);
     if (createdUserId) {

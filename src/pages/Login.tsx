@@ -4,6 +4,7 @@ import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
+import { Capacitor } from "@capacitor/core"; // ✅ Adicionado para detecção perfeita do celular
 
 // 💥 Limpeza Nuclear disparada antes do carregamento
 if (localStorage.getItem("manual_login_intent") === "true") {
@@ -252,20 +253,20 @@ const Login = () => {
     await checkDeviceLimitAndRedirect(data.user.id);
   };
 
-  // 🚀 FUNÇÃO ATUALIZADA PARA REDIRECIONAMENTO DE APK/IPHONE
+  // 🚀 FUNÇÃO CORRIGIDA COM CAPACITOR CORE
   const handleSocialLogin = async (provider: "google" | "apple") => {
     localStorage.removeItem("signup_in_progress");
     localStorage.removeItem("manual_login_intent");
     await supabase.auth.signOut();
 
-    // Detecta se está rodando no App (Capacitor) ou Web
-    const isApp = window.location.protocol === 'capacitor:' || 
-                  window.location.hostname === 'localhost' ||
-                  /iPhone|Android/i.test(navigator.userAgent);
+    // O Capacitor Core diz exatamente se é um App Nativo ou não
+    const isNative = Capacitor.isNativePlatform();
 
-    const redirectTo = isApp 
+    const redirectTo = isNative 
       ? 'com.chamo.app://google-auth' 
-      : `${window.location.origin}/login`;
+      : `${window.location.origin}/home`;
+
+    console.log(`Iniciando login ${provider}. Redirecionando para:`, redirectTo);
 
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,

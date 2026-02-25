@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.chamo.app",
+      "sha256_cert_fingerprints": [
+        "A0:3D:FF:38:88:7D:42:72:C0:9A:B4:7B:78:C5:8D:16:98:5B:3D:72:90:49:A2:56:46:52:86:AD:04:9F:8F:E3"
+      ]
+    }
+  }
+]

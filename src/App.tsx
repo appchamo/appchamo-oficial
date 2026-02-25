@@ -10,8 +10,11 @@ import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
 
-// 👇 ADICIONADO: Importação do Capacitor Core para detectar a plataforma
+// Importação do Capacitor Core para detectar a plataforma
 import { Capacitor } from "@capacitor/core";
+
+// 👇 ADICIONADO: Ícones para a Landing Page
+import { Smartphone, CheckCircle2, ShieldCheck, Trophy } from "lucide-react";
 
 // Pages
 import Index from "./pages/Index";
@@ -194,7 +197,7 @@ const App = () => {
   }, []);
 
   // =========================================================================
-  // 🛡️ TRAVA DE SEGURANÇA WEB (LANDING PAGE)
+  // 🛡️ TRAVA DE SEGURANÇA WEB (LANDING PAGE ESTILO HOTMART)
   // =========================================================================
   const isWeb = Capacitor.getPlatform() === 'web';
   const currentPath = window.location.pathname;
@@ -207,25 +210,89 @@ const App = () => {
 
   if (isWeb && !isAdminRoute && !isPasswordRecovery) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
-        {/* Mostra a logo se existir, senão só exibe o texto */}
-        <div className="w-24 h-24 bg-primary rounded-2xl flex items-center justify-center mb-8 shadow-lg">
-           <span className="text-4xl text-primary-foreground font-bold">C</span>
-        </div>
-        
-        <h1 className="text-3xl font-bold text-foreground mb-4">O Chamô é 100% App! 🚀</h1>
-        <p className="text-muted-foreground mb-10 text-lg max-w-sm">
-          Para garantir a melhor experiência e segurança, nosso serviço funciona exclusivamente pelo aplicativo.
-        </p>
-        
-        <div className="flex flex-col w-full max-w-xs gap-4">
-          <a href="#" className="bg-primary text-primary-foreground py-4 rounded-xl font-bold text-lg shadow-md transition-transform hover:scale-105">
-            Baixar para Android
-          </a>
-          <a href="#" className="bg-foreground text-background py-4 rounded-xl font-bold text-lg shadow-md transition-transform hover:scale-105">
-            Baixar para iOS
-          </a>
-        </div>
+      <div className="min-h-screen bg-gradient-to-b from-background to-secondary/20 overflow-hidden font-sans">
+        {/* 1. Navbar Simples */}
+        <header className="container mx-auto p-6 flex justify-between items-center">
+          <div className="flex items-center gap-2">
+             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-sm">
+                <span className="text-xl text-primary-foreground font-extrabold">C</span>
+             </div>
+             <span className="text-2xl font-extrabold text-foreground tracking-tight">Chamô</span>
+          </div>
+        </header>
+
+        {/* 2. Hero Section */}
+        <main className="container mx-auto px-6 pt-10 md:pt-20 flex flex-col-reverse md:flex-row items-center gap-12">
+          
+          {/* Coluna da Esquerda */}
+          <div className="flex-1 text-center md:text-left space-y-8">
+            <h1 className="text-4xl md:text-6xl font-extrabold text-foreground leading-tight">
+              O profissional ideal, <br className="hidden md:block" />
+              <span className="text-primary bg-primary/10 px-2 rounded-lg inline-block mt-2 md:mt-0">na palma da sua mão.</span>
+            </h1>
+            
+            <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto md:mx-0 leading-relaxed">
+              Segurança, rapidez e os melhores profissionais da sua região. 
+              Baixe o Chamô e resolva seu problema hoje mesmo.
+            </p>
+
+            {/* Botões de Download */}
+            <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start pt-4">
+              <a 
+                href="#" // ⚠️ COLOQUE O LINK DA PLAY STORE AQUI NO FUTURO
+                className="flex items-center gap-3 bg-foreground text-background px-6 py-4 rounded-2xl hover:bg-foreground/90 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
+              >
+                <Smartphone className="w-8 h-8" />
+                <div className="text-left">
+                  <p className="text-xs font-medium opacity-80">Disponível no</p>
+                  <p className="text-lg font-bold">Google Play</p>
+                </div>
+              </a>
+               <a 
+                href="#" // ⚠️ COLOQUE O LINK DA APP STORE AQUI NO FUTURO
+                className="flex items-center gap-3 bg-white/50 text-foreground border-2 border-foreground/10 px-6 py-4 rounded-2xl hover:bg-white transition-all shadow-md hover:shadow-lg hover:-translate-y-1 backdrop-blur-sm"
+              >
+                <Smartphone className="w-8 h-8" />
+                <div className="text-left">
+                  <p className="text-xs font-medium opacity-80">Baixar na</p>
+                  <p className="text-lg font-bold">App Store</p>
+                </div>
+              </a>
+            </div>
+
+             {/* Features (Prova Social) */}
+             <div className="flex items-center justify-center md:justify-start gap-6 pt-6 text-sm font-medium text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-primary" />
+                  <span>Pagamento Seguro</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-primary" />
+                  <span>Profissionais Verificados</span>
+                </div>
+             </div>
+          </div>
+
+          {/* Coluna da Direita (Mockup de Celular CSS) */}
+          <div className="flex-1 relative w-full max-w-md md:max-w-lg lg:max-w-xl">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-primary/20 blur-3xl rounded-full -z-10 opacity-70"></div>
+            
+            <div className="relative mx-auto border-gray-800 bg-gray-800 border-[14px] rounded-[2.5rem] h-[600px] w-[300px] shadow-2xl ring-1 ring-gray-900/5">
+                <div className="h-[32px] w-[3px] bg-gray-800 absolute -start-[17px] top-[72px] rounded-s-lg"></div>
+                <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[17px] top-[124px] rounded-s-lg"></div>
+                <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[17px] top-[176px] rounded-s-lg"></div>
+                <div className="h-[64px] w-[3px] bg-gray-800 absolute -end-[17px] top-[142px] rounded-e-lg"></div>
+                <div className="rounded-[2rem] overflow-hidden w-full h-full bg-background flex flex-col items-center justify-center relative">
+                  <div className="absolute top-0 inset-x-0 h-6 bg-black w-40 mx-auto rounded-b-xl z-20"></div>
+                  
+                  {/* Conteúdo dentro da tela de mentira */}
+                  <Trophy className="w-24 h-24 text-primary mb-4 animate-pulse" />
+                  <h3 className="text-xl font-bold">Chamô App</h3>
+                  <p className="text-sm text-muted-foreground mt-2 px-6 text-center">Sua melhor experiência no app.</p>
+                </div>
+            </div>
+          </div>
+        </main>
       </div>
     );
   }

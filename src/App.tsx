@@ -70,68 +70,113 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
-// Componente auxiliar para lidar com o botão de voltar (precisa estar dentro do BrowserRouter)
+// 🍎 PONTE DIRETA DO IPHONE (Bypass do Capacitor)
+window.addEventListener('iosDeepLink', async (event: any) => {
+  const url = event.detail;
+  console.log('🍎 [PONTE DIRETA IOS] O iPhone injetou a URL no React:', url);
+  
+  if (url.includes('com.chamo.app://')) {
+    try {
+      const urlObj = new URL(url);
+      const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
+      const params = new URLSearchParams(paramsStr);
+      
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (accessToken && refreshToken) {
+        console.log('🔥 [PONTE DIRETA IOS] Tokens na mão! Forçando sessão...');
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+
+        if (!error) {
+          console.log('✅ [PONTE DIRETA IOS] Sucesso absoluto! Chutando a porta da Home...');
+          window.location.replace("/home");
+        } else {
+          console.error('❌ Erro na sessão (Ponte iOS):', error.message);
+        }
+      } else {
+        console.log('⚠️ Nenhum token encontrado na injeção do iOS.');
+      }
+    } catch (err) {
+      console.error('Erro na Ponte Direta IOS:', err);
+    }
+  }
+});
+
+// 🚀 OUVINTE GLOBAL IMORTAL (Para Android e fallback do Capacitor)
+CapacitorApp.addListener('appUrlOpen', async (event: any) => {
+  console.log('🚨 [VIGIA GLOBAL] O app capturou a URL:', event.url);
+  
+  if (event.url.includes('com.chamo.app://')) {
+    try {
+      const urlObj = new URL(event.url);
+      const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
+      const params = new URLSearchParams(paramsStr);
+      
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (accessToken && refreshToken) {
+        console.log('🔥 [VIGIA GLOBAL] Tokens na mão! Forçando sessão...');
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+
+        if (!error) {
+          console.log('✅ [VIGIA GLOBAL] Sucesso! Chutando a porta da Home...');
+          window.location.replace("/home");
+        } else {
+          console.error('❌ Erro na sessão:', error.message);
+        }
+      } else {
+        console.log('⚠️ Nenhum token encontrado na URL.');
+      }
+    } catch (err) {
+      console.error('Erro no Vigia Global:', err);
+    }
+  }
+});
+
 const BackButtonHandler = () => {
   const navigate = useNavigate();
-
   useEffect(() => {
     const handler = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-      if (canGoBack) {
-        window.history.back();
-      } else {
-        CapacitorApp.minimizeApp();
-      }
+      if (canGoBack) window.history.back();
+      else CapacitorApp.minimizeApp();
     });
-
-    return () => {
-      handler.then(h => h.remove());
-    };
+    return () => { handler.then(h => h.remove()); };
   }, [navigate]);
-
   return null;
 };
 
 const App = () => {
-  // 1. EFEITO PARA NOTIFICAÇÕES PUSH
+  // EFEITO PARA NOTIFICAÇÕES PUSH
   useEffect(() => {
     const initPush = async () => {
       try {
         const permStatus = await PushNotifications.requestPermissions();
-        if (permStatus.receive === 'granted') {
-          await PushNotifications.register();
-        }
-        PushNotifications.addListener('registration', (token) => {
-          console.log('Notificações ativadas! Token:', token.value);
-        });
-        PushNotifications.addListener('registrationError', (error) => {
-          console.log('Erro ao registrar notificações:', JSON.stringify(error));
-        });
+        if (permStatus.receive === 'granted') await PushNotifications.register();
       } catch (e) {
-        console.log("Notificações só funcionam no celular nativo.", e);
+        console.log("Notificações só funcionam no celular nativo.");
       }
     };
     initPush();
   }, []);
 
-  // ✅ 2. VIGIA DEFINITIVO: DESLOGA SE O DISPOSITIVO FOR EXPULSO
+  // VIGIA DEFINITIVO: DESLOGA SE O DISPOSITIVO FOR EXPULSO
   useEffect(() => {
     const deviceId = localStorage.getItem("chamo_device_id");
     if (!deviceId) return;
 
     const channel = supabase
       .channel('device_expulsion')
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'user_devices'
-        },
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'user_devices' },
         async (payload) => {
-          const expelledId = payload.old?.device_id;
-          
-          if (expelledId === deviceId) {
-            console.log("🚫 Dispositivo expulso detectado pelo Vigia.");
+          if (payload.old?.device_id === deviceId) {
             await supabase.auth.signOut();
             localStorage.clear();
             sessionStorage.clear();
@@ -139,58 +184,20 @@ const App = () => {
             window.location.href = "/login?expelled=true";
           }
         }
-      )
-      .subscribe();
+      ).subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // 🚀 3. O GOLPE FINAL: FORÇA BRUTA NO SUPABASE
+  // CASO EXTREMO: App acordou do nada com URL
   useEffect(() => {
-    const linkHandler = CapacitorApp.addListener('appUrlOpen', async (event: any) => {
-      console.log('🔗 URL interceptada pelo Android:', event.url);
-      
-      if (event.url.includes('com.chamo.app://')) {
-        try {
-          const urlObj = new URL(event.url);
-          // O Supabase pode mandar os dados no "hash" (#) ou no "search" (?)
-          const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
-          const params = new URLSearchParams(paramsStr);
-          
-          const accessToken = params.get('access_token');
-          const refreshToken = params.get('refresh_token');
-
-          if (accessToken && refreshToken) {
-            console.log('🔥 Tokens encontrados! Forçando a sessão...');
-            
-            // FORÇA BRUTA: Criamos a sessão manualmente, sem depender do React Router!
-            const { error } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-
-            if (!error) {
-              console.log('✅ Sessão criada com sucesso! Chutando a porta da Home...');
-              window.location.href = "/home";
-            } else {
-              console.error('❌ Erro ao forçar sessão:', error.message);
-              window.location.href = "/login";
-            }
-          } else {
-            console.log('⚠️ Nenhum token na URL. Voltando pro login.');
-            window.location.href = "/login";
-          }
-        } catch (err) {
-          console.error('Erro ao processar a URL do Android:', err);
-        }
+    const checkColdStart = async () => {
+      const launchUrl = await CapacitorApp.getLaunchUrl();
+      if (launchUrl && launchUrl.url && launchUrl.url.includes('com.chamo.app://')) {
+        console.log('🧊 [COLD START] App acordou com a URL:', launchUrl.url);
       }
-    });
-
-    return () => {
-      linkHandler.then(h => h.remove());
     };
+    checkColdStart();
   }, []);
 
   return (
@@ -211,7 +218,7 @@ const App = () => {
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/signup-pro" element={<BecomeProfessional />} />
 
-              {/* ===== PROTECTED (LOGGED-IN) ===== */}
+              {/* ===== PROTECTED ===== */}
               <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
               <Route path="/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
@@ -265,7 +272,6 @@ const App = () => {
               <Route path="/admin/tutorials" element={<ProtectedRoute><AdminTutorials /></ProtectedRoute>} />
               <Route path="/admin/profiles" element={<ProtectedRoute><AdminProfiles /></ProtectedRoute>} />
 
-              {/* ===== CATCH ALL ===== */}
               <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
             </Routes>
           </AuthProvider>

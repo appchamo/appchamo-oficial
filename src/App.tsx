@@ -10,7 +10,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
 
-// Pages
+// Pages (Mantendo todas as suas importações)
 import Index from "./pages/Index";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
@@ -47,7 +47,7 @@ import NotFound from "./pages/NotFound";
 import JobApply from "./pages/JobApply";
 import BusinessCheckout from "./pages/BusinessCheckout";
 
-// Admin
+// Admin (Mantendo todas as suas importações)
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminUsers from "./pages/admin/AdminUsers";
@@ -70,74 +70,49 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
-// 🍎 PONTE DIRETA DO IPHONE (Bypass do Capacitor)
-window.addEventListener('iosDeepLink', async (event: any) => {
-  const url = event.detail;
-  console.log('🍎 [PONTE DIRETA IOS] O iPhone injetou a URL no React:', url);
-  
-  if (url.includes('com.chamo.app://')) {
-    try {
-      const urlObj = new URL(url);
-      const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
-      const params = new URLSearchParams(paramsStr);
-      
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
+// 🛠️ FUNÇÃO AUXILIAR PARA PROCESSAR TOKENS
+const handleAuthRedirect = async (urlStr: string) => {
+  try {
+    const urlObj = new URL(urlStr);
+    // Captura parâmetros tanto do hash (#) quanto da query (?)
+    const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
+    const params = new URLSearchParams(paramsStr);
+    
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
 
-      if (accessToken && refreshToken) {
-        console.log('🔥 [PONTE DIRETA IOS] Tokens na mão! Forçando sessão...');
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
+    if (accessToken && refreshToken) {
+      console.log('🔥 [AUTH] Tokens encontrados! Validando sessão...');
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
 
-        if (!error) {
-          console.log('✅ [PONTE DIRETA IOS] Sucesso absoluto! Chutando a porta da Home...');
-          window.location.replace("/home");
-        } else {
-          console.error('❌ Erro na sessão (Ponte iOS):', error.message);
-        }
+      if (!error) {
+        console.log('✅ [AUTH] Sessão ativa. Redirecionando para Home...');
+        window.location.replace("/home");
       } else {
-        console.log('⚠️ Nenhum token encontrado na injeção do iOS.');
+        console.error('❌ [AUTH] Erro ao setar sessão:', error.message);
       }
-    } catch (err) {
-      console.error('Erro na Ponte Direta IOS:', err);
     }
+  } catch (err) {
+    console.error('Erro ao processar URL de autenticação:', err);
   }
+};
+
+// 🍎 PONTE DIRETA DO IPHONE
+window.addEventListener('iosDeepLink', (event: any) => {
+  const url = event.detail;
+  console.log('🍎 [IOS] URL Injetada:', url);
+  handleAuthRedirect(url);
 });
 
-// 🚀 OUVINTE GLOBAL IMORTAL (Para Android e fallback do Capacitor)
-CapacitorApp.addListener('appUrlOpen', async (event: any) => {
-  console.log('🚨 [VIGIA GLOBAL] O app capturou a URL:', event.url);
-  
-  if (event.url.includes('com.chamo.app://')) {
-    try {
-      const urlObj = new URL(event.url);
-      const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
-      const params = new URLSearchParams(paramsStr);
-      
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-
-      if (accessToken && refreshToken) {
-        console.log('🔥 [VIGIA GLOBAL] Tokens na mão! Forçando sessão...');
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-
-        if (!error) {
-          console.log('✅ [VIGIA GLOBAL] Sucesso! Chutando a porta da Home...');
-          window.location.replace("/home");
-        } else {
-          console.error('❌ Erro na sessão:', error.message);
-        }
-      } else {
-        console.log('⚠️ Nenhum token encontrado na URL.');
-      }
-    } catch (err) {
-      console.error('Erro no Vigia Global:', err);
-    }
+// 🚀 OUVINTE GLOBAL (Android e Capacitor Fallback)
+CapacitorApp.addListener('appUrlOpen', (event: any) => {
+  console.log('🚨 [VIGIA] Link capturado:', event.url);
+  // Agora aceita tanto o esquema antigo quanto o novo link do site
+  if (event.url.includes('com.chamo.app://') || event.url.includes('appchamo.com')) {
+    handleAuthRedirect(event.url);
   }
 });
 
@@ -167,7 +142,7 @@ const App = () => {
     initPush();
   }, []);
 
-  // VIGIA DEFINITIVO: DESLOGA SE O DISPOSITIVO FOR EXPULSO
+  // VIGIA DE EXPULSÃO
   useEffect(() => {
     const deviceId = localStorage.getItem("chamo_device_id");
     if (!deviceId) return;
@@ -189,12 +164,15 @@ const App = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // CASO EXTREMO: App acordou do nada com URL
+  // COLD START (App abrindo do zero com link)
   useEffect(() => {
     const checkColdStart = async () => {
       const launchUrl = await CapacitorApp.getLaunchUrl();
-      if (launchUrl && launchUrl.url && launchUrl.url.includes('com.chamo.app://')) {
-        console.log('🧊 [COLD START] App acordou com a URL:', launchUrl.url);
+      if (launchUrl?.url) {
+        if (launchUrl.url.includes('com.chamo.app://') || launchUrl.url.includes('appchamo.com')) {
+          console.log('🧊 [COLD START] Processando link de inicialização...');
+          handleAuthRedirect(launchUrl.url);
+        }
       }
     };
     checkColdStart();
@@ -209,7 +187,7 @@ const App = () => {
           <BackButtonHandler />
           <AuthProvider>
             <Routes>
-              {/* ===== PUBLIC ===== */}
+              {/* Rotas Públicas */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
@@ -218,7 +196,7 @@ const App = () => {
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/signup-pro" element={<BecomeProfessional />} />
 
-              {/* ===== PROTECTED ===== */}
+              {/* Rotas Protegidas */}
               <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
               <Route path="/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
@@ -252,7 +230,7 @@ const App = () => {
               <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
               <Route path="/checkout/business" element={<BusinessCheckout />} />
 
-              {/* ===== ADMIN PROTECTED ===== */}
+              {/* Rotas Admin */}
               <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
               <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
               <Route path="/admin/pros" element={<ProtectedRoute><AdminPros /></ProtectedRoute>} />

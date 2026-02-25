@@ -147,25 +147,44 @@ const App = () => {
     };
   }, []);
 
-  // 🚀 3. CAPTURAR RETORNO DO LOGIN SOCIAL (DEEP LINK CORRIGIDO)
+  // 🚀 3. O GOLPE FINAL: FORÇA BRUTA NO SUPABASE
   useEffect(() => {
     const linkHandler = CapacitorApp.addListener('appUrlOpen', async (event: any) => {
-      console.log('🔗 URL de retorno detectada:', event.url);
+      console.log('🔗 URL interceptada pelo Android:', event.url);
       
-      // Se a URL contém o esquema do app ou indicadores de auth do Supabase
-      if (event.url.includes('com.chamo.app://') || event.url.includes('access_token') || event.url.includes('refresh_token')) {
-        
-        // Pequeno delay para garantir que o Supabase processou o fragmento da URL
-        setTimeout(async () => {
-          const { data, error } = await supabase.auth.getSession();
+      if (event.url.includes('com.chamo.app://')) {
+        try {
+          const urlObj = new URL(event.url);
+          // O Supabase pode mandar os dados no "hash" (#) ou no "search" (?)
+          const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
+          const params = new URLSearchParams(paramsStr);
           
-          if (data.session) {
-            console.log('✅ Sessão firmada! Redirecionando para Home...');
-            window.location.href = "/home";
-          } else if (error) {
-            console.error('❌ Erro ao capturar sessão:', error.message);
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+
+          if (accessToken && refreshToken) {
+            console.log('🔥 Tokens encontrados! Forçando a sessão...');
+            
+            // FORÇA BRUTA: Criamos a sessão manualmente, sem depender do React Router!
+            const { error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (!error) {
+              console.log('✅ Sessão criada com sucesso! Chutando a porta da Home...');
+              window.location.href = "/home";
+            } else {
+              console.error('❌ Erro ao forçar sessão:', error.message);
+              window.location.href = "/login";
+            }
+          } else {
+            console.log('⚠️ Nenhum token na URL. Voltando pro login.');
+            window.location.href = "/login";
           }
-        }, 500);
+        } catch (err) {
+          console.error('Erro ao processar a URL do Android:', err);
+        }
       }
     });
 

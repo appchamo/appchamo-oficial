@@ -10,7 +10,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
 
-// Pages (Mantendo todas as suas importações)
+// Pages
 import Index from "./pages/Index";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
@@ -47,7 +47,7 @@ import NotFound from "./pages/NotFound";
 import JobApply from "./pages/JobApply";
 import BusinessCheckout from "./pages/BusinessCheckout";
 
-// Admin (Mantendo todas as suas importações)
+// Admin
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminUsers from "./pages/admin/AdminUsers";
@@ -70,10 +70,12 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
-// 🛠️ FUNÇÃO AUXILIAR PARA PROCESSAR TOKENS
+// 🛠️ FUNÇÃO AUXILIAR PARA PROCESSAR TOKENS E LIMPAR ROTA
 const handleAuthRedirect = async (urlStr: string) => {
+  console.log('🔍 [AUTH] Analisando URL:', urlStr);
   try {
     const urlObj = new URL(urlStr);
+    
     // Captura parâmetros tanto do hash (#) quanto da query (?)
     const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
     const params = new URLSearchParams(paramsStr);
@@ -83,37 +85,48 @@ const handleAuthRedirect = async (urlStr: string) => {
 
     if (accessToken && refreshToken) {
       console.log('🔥 [AUTH] Tokens encontrados! Validando sessão...');
+      
+      // Limpa o hash da URL do navegador IMEDIATAMENTE para evitar loop no React Router
+      if (window.location.hash) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+
       const { error } = await supabase.auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
       });
 
       if (!error) {
-        console.log('✅ [AUTH] Sessão ativa. Redirecionando para Home...');
-        window.location.replace("/home");
+        console.log('✅ [AUTH] Sessão ativa. Chutando para Home...');
+        // Redirecionamento forçado para garantir a saída do estado de congelamento
+        window.location.assign("/home");
       } else {
         console.error('❌ [AUTH] Erro ao setar sessão:', error.message);
       }
     }
   } catch (err) {
-    console.error('Erro ao processar URL de autenticação:', err);
+    console.error('Erro crítico ao processar URL de autenticação:', err);
   }
 };
 
-// 🍎 PONTE DIRETA DO IPHONE
+// Domínios autorizados para despertar o app
+const isAuthUrl = (url: string) => {
+  return url.includes('com.chamo.app://') || 
+         url.includes('appchamo.com') || 
+         url.includes('supabase.co');
+};
+
+// 🍎 PONTE DIRETA DO IPHONE (Bypass do Capacitor)
 window.addEventListener('iosDeepLink', (event: any) => {
   const url = event.detail;
   console.log('🍎 [IOS] URL Injetada:', url);
-  handleAuthRedirect(url);
+  if (isAuthUrl(url)) handleAuthRedirect(url);
 });
 
 // 🚀 OUVINTE GLOBAL (Android e Capacitor Fallback)
 CapacitorApp.addListener('appUrlOpen', (event: any) => {
   console.log('🚨 [VIGIA] Link capturado:', event.url);
-  // Agora aceita tanto o esquema antigo quanto o novo link do site
-  if (event.url.includes('com.chamo.app://') || event.url.includes('appchamo.com')) {
-    handleAuthRedirect(event.url);
-  }
+  if (isAuthUrl(event.url)) handleAuthRedirect(event.url);
 });
 
 const BackButtonHandler = () => {
@@ -142,7 +155,7 @@ const App = () => {
     initPush();
   }, []);
 
-  // VIGIA DE EXPULSÃO
+  // VIGIA DE EXPULSÃO (Multi-dispositivo)
   useEffect(() => {
     const deviceId = localStorage.getItem("chamo_device_id");
     if (!deviceId) return;
@@ -164,15 +177,13 @@ const App = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // COLD START (App abrindo do zero com link)
+  // COLD START (App abrindo do zero com link de Auth)
   useEffect(() => {
     const checkColdStart = async () => {
       const launchUrl = await CapacitorApp.getLaunchUrl();
-      if (launchUrl?.url) {
-        if (launchUrl.url.includes('com.chamo.app://') || launchUrl.url.includes('appchamo.com')) {
-          console.log('🧊 [COLD START] Processando link de inicialização...');
-          handleAuthRedirect(launchUrl.url);
-        }
+      if (launchUrl?.url && isAuthUrl(launchUrl.url)) {
+        console.log('🧊 [COLD START] Acordando com link de autenticação...');
+        handleAuthRedirect(launchUrl.url);
       }
     };
     checkColdStart();
@@ -187,7 +198,7 @@ const App = () => {
           <BackButtonHandler />
           <AuthProvider>
             <Routes>
-              {/* Rotas Públicas */}
+              {/* ===== PUBLIC ===== */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
@@ -196,7 +207,7 @@ const App = () => {
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/signup-pro" element={<BecomeProfessional />} />
 
-              {/* Rotas Protegidas */}
+              {/* ===== PROTECTED ===== */}
               <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
               <Route path="/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
@@ -230,7 +241,7 @@ const App = () => {
               <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
               <Route path="/checkout/business" element={<BusinessCheckout />} />
 
-              {/* Rotas Admin */}
+              {/* ===== ADMIN PROTECTED ===== */}
               <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
               <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
               <Route path="/admin/pros" element={<ProtectedRoute><AdminPros /></ProtectedRoute>} />

@@ -70,9 +70,9 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
-// 🛠️ FUNÇÃO AUXILIAR PARA PROCESSAR TOKENS E DESTRAVAR TELA
+// 🛠️ FUNÇÃO DE REDIRECIONAMENTO "ANTI-CONGELAMENTO"
 const handleAuthRedirect = async (urlStr: string) => {
-  console.log('🔍 [AUTH] Analisando URL recebida:', urlStr);
+  console.log('🚨 [VIGIA] Iniciando processamento de URL:', urlStr);
   try {
     const urlObj = new URL(urlStr);
     
@@ -84,49 +84,51 @@ const handleAuthRedirect = async (urlStr: string) => {
     const refreshToken = params.get('refresh_token');
 
     if (accessToken && refreshToken) {
-      console.log('🔥 [AUTH] Tokens detectados. Iniciando limpeza e login...');
+      console.log('🔥 [VIGIA] Tokens identificados. Limpando rota...');
       
-      // 🔨 O MARTELO: Limpa a URL do navegador antes do Supabase agir
-      // Isso impede que o React Router tente carregar os tokens como uma rota inexistente
+      // 1. Limpa a URL visível para não confundir o React Router
       window.history.replaceState(null, "", "/");
 
+      // 2. Injeta a sessão no Supabase
       const { error } = await supabase.auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
       });
 
       if (!error) {
-        console.log('✅ [AUTH] Sessão validada! Forçando redirecionamento para Home...');
-        // Redirecionamento nativo forçado para "matar" o estado de congelamento visual
-        window.location.href = "/home";
+        console.log('✅ [VIGIA] Sessão injetada. Aguardando persistência...');
+        
+        // 3. O "PULO DO GATO": Delay de 500ms para o Android salvar o token no banco interno
+        // Isso evita que o app carregue a Home achando que ainda está deslogado
+        setTimeout(() => {
+          window.location.assign("/home");
+        }, 500);
+        
       } else {
-        console.error('❌ [AUTH] Erro ao injetar sessão:', error.message);
+        console.error('❌ [VIGIA] Erro ao validar sessão:', error.message);
       }
-    } else {
-      console.log('⚠️ [AUTH] URL capturada, mas sem tokens válidos.');
     }
   } catch (err) {
-    console.error('Erro crítico no redirecionamento de autenticação:', err);
+    console.error('Erro fatal no processamento do Deep Link:', err);
   }
 };
 
-// Domínios autorizados para despertar o app
+// Domínios autorizados (incluindo o seu site e o Supabase)
 const isAuthUrl = (url: string) => {
   return url.includes('com.chamo.app://') || 
          url.includes('appchamo.com') || 
          url.includes('supabase.co');
 };
 
-// 🍎 PONTE DIRETA DO IPHONE (Bypass do Capacitor)
+// 🍎 PONTE DIRETA DO IPHONE
 window.addEventListener('iosDeepLink', (event: any) => {
   const url = event.detail;
-  console.log('🍎 [IOS] URL Injetada:', url);
   if (isAuthUrl(url)) handleAuthRedirect(url);
 });
 
-// 🚀 OUVINTE GLOBAL (Android e Capacitor Fallback)
+// 🚀 OUVINTE GLOBAL CAPACITOR (Android)
 CapacitorApp.addListener('appUrlOpen', (event: any) => {
-  console.log('🚨 [VIGIA] Link capturado:', event.url);
+  console.log('🚨 [VIGIA] Link capturado via App:', event.url);
   if (isAuthUrl(event.url)) handleAuthRedirect(event.url);
 });
 
@@ -178,12 +180,12 @@ const App = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // COLD START (App abrindo do zero com link de Auth)
+  // COLD START (App fechado que abre com link)
   useEffect(() => {
     const checkColdStart = async () => {
       const launchUrl = await CapacitorApp.getLaunchUrl();
       if (launchUrl?.url && isAuthUrl(launchUrl.url)) {
-        console.log('🧊 [COLD START] Acordando com link de autenticação...');
+        console.log('🧊 [COLD START] Processando link de abertura...');
         handleAuthRedirect(launchUrl.url);
       }
     };

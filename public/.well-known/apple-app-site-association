@@ -4,7 +4,7 @@
     "details": [
       {
         "appID": "BXRV75LQRW.com.chamo.app",
-        "paths": [ "*" ]
+        "paths": [ "*", "/*", "/auth" ]
       }
     ]
   }

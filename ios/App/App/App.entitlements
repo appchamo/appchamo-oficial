@@ -5,6 +5,8 @@
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:appchamo.com</string>
+		<string>applinks:mrfippvowbudtctahgag.supabase.co</string>
+		<string>webcredentials:example.com</string>
 	</array>
 </dict>
 </plist>

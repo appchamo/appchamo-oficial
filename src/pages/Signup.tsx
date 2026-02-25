@@ -129,23 +129,25 @@ const Signup = () => {
   }, [navigate]);
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
-    localStorage.setItem("signup_in_progress", "true");
-    localStorage.removeItem("manual_login_intent");
-    
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: window.location.href,
-        queryParams: {
-          prompt: 'select_account',
-        },
-      }
-    });
-    if (error) {
-      localStorage.removeItem("signup_in_progress");
-      toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
+  localStorage.setItem("signup_in_progress", "true");
+  localStorage.removeItem("manual_login_intent");
+  
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      // 🟢 ALTERAÇÃO AQUI: Forçamos o redirecionamento para o domínio limpo
+      redirectTo: "https://appchamo.com/auth", 
+      queryParams: {
+        prompt: 'select_account',
+      },
     }
-  };
+  });
+
+  if (error) {
+    localStorage.removeItem("signup_in_progress");
+    toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
+  }
+};
 
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);

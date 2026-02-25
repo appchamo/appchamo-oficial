@@ -70,9 +70,9 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
-// 🛠️ FUNÇÃO AUXILIAR PARA PROCESSAR TOKENS E LIMPAR ROTA
+// 🛠️ FUNÇÃO AUXILIAR PARA PROCESSAR TOKENS E DESTRAVAR TELA
 const handleAuthRedirect = async (urlStr: string) => {
-  console.log('🔍 [AUTH] Analisando URL:', urlStr);
+  console.log('🔍 [AUTH] Analisando URL recebida:', urlStr);
   try {
     const urlObj = new URL(urlStr);
     
@@ -84,12 +84,11 @@ const handleAuthRedirect = async (urlStr: string) => {
     const refreshToken = params.get('refresh_token');
 
     if (accessToken && refreshToken) {
-      console.log('🔥 [AUTH] Tokens encontrados! Validando sessão...');
+      console.log('🔥 [AUTH] Tokens detectados. Iniciando limpeza e login...');
       
-      // Limpa o hash da URL do navegador IMEDIATAMENTE para evitar loop no React Router
-      if (window.location.hash) {
-        window.history.replaceState(null, "", window.location.pathname);
-      }
+      // 🔨 O MARTELO: Limpa a URL do navegador antes do Supabase agir
+      // Isso impede que o React Router tente carregar os tokens como uma rota inexistente
+      window.history.replaceState(null, "", "/");
 
       const { error } = await supabase.auth.setSession({
         access_token: accessToken,
@@ -97,15 +96,17 @@ const handleAuthRedirect = async (urlStr: string) => {
       });
 
       if (!error) {
-        console.log('✅ [AUTH] Sessão ativa. Chutando para Home...');
-        // Redirecionamento forçado para garantir a saída do estado de congelamento
-        window.location.assign("/home");
+        console.log('✅ [AUTH] Sessão validada! Forçando redirecionamento para Home...');
+        // Redirecionamento nativo forçado para "matar" o estado de congelamento visual
+        window.location.href = "/home";
       } else {
-        console.error('❌ [AUTH] Erro ao setar sessão:', error.message);
+        console.error('❌ [AUTH] Erro ao injetar sessão:', error.message);
       }
+    } else {
+      console.log('⚠️ [AUTH] URL capturada, mas sem tokens válidos.');
     }
   } catch (err) {
-    console.error('Erro crítico ao processar URL de autenticação:', err);
+    console.error('Erro crítico no redirecionamento de autenticação:', err);
   }
 };
 

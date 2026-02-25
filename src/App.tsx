@@ -13,8 +13,8 @@ import { supabase } from "@/integrations/supabase/client";
 // Importação do Capacitor Core para detectar a plataforma
 import { Capacitor } from "@capacitor/core";
 
-// 👇 ADICIONADO: Ícones para a Landing Page
-import { Smartphone, CheckCircle2, ShieldCheck, Trophy } from "lucide-react";
+// Ícones para a Landing Page Profissional
+import { CheckCircle2, Star } from "lucide-react";
 
 // Pages
 import Index from "./pages/Index";
@@ -76,41 +76,26 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
-// 🛠️ FUNÇÃO DE REDIRECIONAMENTO "ANTI-CONGELAMENTO"
 const handleAuthRedirect = async (urlStr: string) => {
   console.log('🚨 [VIGIA] Iniciando processamento de URL:', urlStr);
   try {
     const urlObj = new URL(urlStr);
-    
-    // Captura parâmetros tanto do hash (#) quanto da query (?)
     const paramsStr = urlObj.hash ? urlObj.hash.substring(1) : urlObj.search.substring(1);
     const params = new URLSearchParams(paramsStr);
-    
     const accessToken = params.get('access_token');
     const refreshToken = params.get('refresh_token');
 
     if (accessToken && refreshToken) {
-      console.log('🔥 [VIGIA] Tokens identificados. Limpando rota...');
-      
-      // 1. Limpa a URL visível para não confundir o React Router
       window.history.replaceState(null, "", "/");
-
-      // 2. Injeta a sessão no Supabase
       const { error } = await supabase.auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
       });
 
       if (!error) {
-        console.log('✅ [VIGIA] Sessão injetada. Aguardando persistência...');
-        
-        // 3. O "PULO DO GATO": Delay de 500ms para o Android salvar o token no banco interno
         setTimeout(() => {
           window.location.assign("/home");
         }, 500);
-        
-      } else {
-        console.error('❌ [VIGIA] Erro ao validar sessão:', error.message);
       }
     }
   } catch (err) {
@@ -124,15 +109,12 @@ const isAuthUrl = (url: string) => {
          url.includes('supabase.co');
 };
 
-// 🍎 PONTE DIRETA DO IPHONE
 window.addEventListener('iosDeepLink', (event: any) => {
   const url = event.detail;
   if (isAuthUrl(url)) handleAuthRedirect(url);
 });
 
-// 🚀 OUVINTE GLOBAL CAPACITOR (Android)
 CapacitorApp.addListener('appUrlOpen', (event: any) => {
-  console.log('🚨 [VIGIA] Link capturado via App:', event.url);
   if (isAuthUrl(event.url)) handleAuthRedirect(event.url);
 });
 
@@ -149,7 +131,6 @@ const BackButtonHandler = () => {
 };
 
 const App = () => {
-  // EFEITO PARA NOTIFICAÇÕES PUSH
   useEffect(() => {
     const initPush = async () => {
       try {
@@ -162,7 +143,6 @@ const App = () => {
     initPush();
   }, []);
 
-  // VIGIA DE EXPULSÃO
   useEffect(() => {
     const deviceId = localStorage.getItem("chamo_device_id");
     if (!deviceId) return;
@@ -184,12 +164,10 @@ const App = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // COLD START
   useEffect(() => {
     const checkColdStart = async () => {
       const launchUrl = await CapacitorApp.getLaunchUrl();
       if (launchUrl?.url && isAuthUrl(launchUrl.url)) {
-        console.log('🧊 [COLD START] Processando link de abertura...');
         handleAuthRedirect(launchUrl.url);
       }
     };
@@ -197,100 +175,98 @@ const App = () => {
   }, []);
 
   // =========================================================================
-  // 🛡️ TRAVA DE SEGURANÇA WEB (LANDING PAGE ESTILO HOTMART)
+  // 🔥 LANDING PAGE: ESTILO HOTMART
   // =========================================================================
   const isWeb = Capacitor.getPlatform() === 'web';
   const currentPath = window.location.pathname;
   const currentHash = window.location.hash;
   const currentSearch = window.location.search;
   
-  // Exceções: Libera o Painel Admin e os Links de Recuperação de Senha do Supabase
   const isAdminRoute = currentPath.startsWith('/admin');
   const isPasswordRecovery = currentHash.includes("type=recovery") || currentSearch.includes("type=recovery");
 
   if (isWeb && !isAdminRoute && !isPasswordRecovery) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-background to-secondary/20 overflow-hidden font-sans">
-        {/* 1. Navbar Simples */}
-        <header className="container mx-auto p-6 flex justify-between items-center">
+      <div 
+        className="relative min-h-screen flex flex-col justify-center overflow-hidden font-sans bg-[#1A0B00]"
+        style={{
+          // ⚠️ TROQUE ESSA URL PELA FOTO QUE VOCÊ SUBIR NO SUPABASE
+          backgroundImage: 'url("https://images.unsplash.com/photo-1573164713988-8665fc963095?q=80&w=2069&auto=format&fit=crop")',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+      >
+        {/* Overlay Escuro com Degradê para dar leitura (Exatamente como a Hotmart) */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/95 via-black/70 to-transparent"></div>
+        <div className="absolute inset-0 bg-black/20 md:hidden"></div> {/* Escurece mais no mobile */}
+
+        {/* Header Fixo */}
+        <header className="absolute top-0 left-0 right-0 z-20 container mx-auto p-6 md:px-12 flex justify-between items-center">
           <div className="flex items-center gap-2">
-             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-sm">
+             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg">
                 <span className="text-xl text-primary-foreground font-extrabold">C</span>
              </div>
-             <span className="text-2xl font-extrabold text-foreground tracking-tight">Chamô</span>
+             <span className="text-3xl font-extrabold text-white tracking-tight">Chamô</span>
           </div>
+          <a href="/admin/login" className="text-sm font-semibold text-white/80 hover:text-white transition-colors">
+            Acesso Restrito
+          </a>
         </header>
 
-        {/* 2. Hero Section */}
-        <main className="container mx-auto px-6 pt-10 md:pt-20 flex flex-col-reverse md:flex-row items-center gap-12">
+        {/* Conteúdo Principal (Alinhado à esquerda) */}
+        <main className="relative z-10 container mx-auto px-6 md:px-12 flex-1 flex flex-col justify-center mt-16 md:mt-0 max-w-7xl">
           
-          {/* Coluna da Esquerda */}
-          <div className="flex-1 text-center md:text-left space-y-8">
-            <h1 className="text-4xl md:text-6xl font-extrabold text-foreground leading-tight">
-              O profissional ideal, <br className="hidden md:block" />
-              <span className="text-primary bg-primary/10 px-2 rounded-lg inline-block mt-2 md:mt-0">na palma da sua mão.</span>
+          <div className="max-w-2xl space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            
+            {/* Título Gigante */}
+            <h1 className="text-5xl md:text-7xl font-bold text-white leading-[1.1] tracking-tight">
+              O profissional ideal,<br className="hidden md:block" />
+              <span className="text-primary"> na palma da sua mão.</span>
             </h1>
-            
-            <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto md:mx-0 leading-relaxed">
-              Segurança, rapidez e os melhores profissionais da sua região. 
-              Baixe o Chamô e resolva seu problema hoje mesmo.
-            </p>
 
-            {/* Botões de Download */}
-            <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start pt-4">
-              <a 
-                href="#" // ⚠️ COLOQUE O LINK DA PLAY STORE AQUI NO FUTURO
-                className="flex items-center gap-3 bg-foreground text-background px-6 py-4 rounded-2xl hover:bg-foreground/90 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
-              >
-                <Smartphone className="w-8 h-8" />
-                <div className="text-left">
-                  <p className="text-xs font-medium opacity-80">Disponível no</p>
-                  <p className="text-lg font-bold">Google Play</p>
+            {/* Lista de Benefícios com Ícones Verdes */}
+            <div className="space-y-4 pt-2">
+               <div className="flex items-center gap-3">
+                 <CheckCircle2 className="w-7 h-7 text-[#00E676] fill-[#00E676]/20" />
+                 <span className="text-white text-lg md:text-xl font-medium">Contrate, gerencie e pague com segurança</span>
+               </div>
+               <div className="flex items-center gap-3">
+                 <CheckCircle2 className="w-7 h-7 text-[#00E676] fill-[#00E676]/20" />
+                 <span className="text-white text-lg md:text-xl font-medium">O ecossistema mais completo do mercado</span>
+               </div>
+            </div>
+
+            {/* Selo de Confiança Estilo Hotmart */}
+            <div className="border border-white/20 bg-black/40 backdrop-blur-md rounded-2xl p-5 w-fit shadow-2xl mt-4">
+              <p className="text-white text-sm font-medium mb-2">Seguro e confiável</p>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="flex text-yellow-400">
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
                 </div>
+                <span className="text-white font-bold ml-1 text-lg">4.9</span>
+              </div>
+              <p className="text-white/70 text-sm mt-1">Baseado em +200.000 avaliações</p>
+            </div>
+
+            {/* Botões Idênticos ao seu Print */}
+            <div className="flex flex-col sm:flex-row gap-4 pt-6">
+              <a href="#" className="flex items-center justify-center gap-3 bg-[#1A1A1A] hover:bg-black text-white px-8 py-4 rounded-2xl transition-all shadow-xl border border-white/5 group">
+                {/* Ícone Android Oficial SVG */}
+                <svg viewBox="0 0 512 512" fill="currentColor" className="w-7 h-7 group-hover:-translate-y-1 transition-transform"><path d="M325.3 234.3c-13.6 0-24.7-11.1-24.7-24.7 0-13.6 11.1-24.7 24.7-24.7 13.6 0 24.7 11.1 24.7 24.7 0 13.6-11.1 24.7-24.7 24.7zm-138.6 0c-13.6 0-24.7-11.1-24.7-24.7 0-13.6 11.1-24.7 24.7-24.7 13.6 0 24.7 11.1 24.7 24.7 0 13.6-11.1 24.7-24.7 24.7zm156.4-106.3l35.8-61.9c1.9-3.3.6-7.5-2.8-9.4-3.3-1.9-7.5-.6-9.4 2.8L330.4 122c-21.5-9.9-45.5-15.5-70.9-15.5s-49.4 5.6-70.9 15.5l-36.4-63c-1.9-3.3-6.1-4.7-9.4-2.8-3.3 1.9-4.7 6.1-2.8 9.4l35.8 61.9c-45.5 25.2-76.4 71.9-80.1 126.7h322.9c-3.6-54.8-34.6-101.5-80.1-126.7zM259.5 405.5h-7V297.8h-63.5v107.7h-7v66.3c0 9.1 7.2 16.3 16.3 16.3h37.8c9.1 0 16.3-7.2 16.3-16.3v-66.3h7v-107.7z"/></svg>
+                <span className="text-[1.35rem] font-bold tracking-tight">Google Play</span>
               </a>
-               <a 
-                href="#" // ⚠️ COLOQUE O LINK DA APP STORE AQUI NO FUTURO
-                className="flex items-center gap-3 bg-white/50 text-foreground border-2 border-foreground/10 px-6 py-4 rounded-2xl hover:bg-white transition-all shadow-md hover:shadow-lg hover:-translate-y-1 backdrop-blur-sm"
-              >
-                <Smartphone className="w-8 h-8" />
-                <div className="text-left">
-                  <p className="text-xs font-medium opacity-80">Baixar na</p>
-                  <p className="text-lg font-bold">App Store</p>
-                </div>
+               
+              <a href="#" className="flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-black px-8 py-4 rounded-2xl transition-all shadow-xl group">
+                {/* Ícone Apple Oficial SVG */}
+                <svg viewBox="0 0 384 512" fill="currentColor" className="w-7 h-7 group-hover:-translate-y-1 transition-transform"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+                <span className="text-[1.35rem] font-bold tracking-tight">App Store</span>
               </a>
             </div>
 
-             {/* Features (Prova Social) */}
-             <div className="flex items-center justify-center md:justify-start gap-6 pt-6 text-sm font-medium text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-primary" />
-                  <span>Pagamento Seguro</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-primary" />
-                  <span>Profissionais Verificados</span>
-                </div>
-             </div>
-          </div>
-
-          {/* Coluna da Direita (Mockup de Celular CSS) */}
-          <div className="flex-1 relative w-full max-w-md md:max-w-lg lg:max-w-xl">
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-primary/20 blur-3xl rounded-full -z-10 opacity-70"></div>
-            
-            <div className="relative mx-auto border-gray-800 bg-gray-800 border-[14px] rounded-[2.5rem] h-[600px] w-[300px] shadow-2xl ring-1 ring-gray-900/5">
-                <div className="h-[32px] w-[3px] bg-gray-800 absolute -start-[17px] top-[72px] rounded-s-lg"></div>
-                <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[17px] top-[124px] rounded-s-lg"></div>
-                <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[17px] top-[176px] rounded-s-lg"></div>
-                <div className="h-[64px] w-[3px] bg-gray-800 absolute -end-[17px] top-[142px] rounded-e-lg"></div>
-                <div className="rounded-[2rem] overflow-hidden w-full h-full bg-background flex flex-col items-center justify-center relative">
-                  <div className="absolute top-0 inset-x-0 h-6 bg-black w-40 mx-auto rounded-b-xl z-20"></div>
-                  
-                  {/* Conteúdo dentro da tela de mentira */}
-                  <Trophy className="w-24 h-24 text-primary mb-4 animate-pulse" />
-                  <h3 className="text-xl font-bold">Chamô App</h3>
-                  <p className="text-sm text-muted-foreground mt-2 px-6 text-center">Sua melhor experiência no app.</p>
-                </div>
-            </div>
           </div>
         </main>
       </div>
@@ -307,7 +283,6 @@ const App = () => {
           <BackButtonHandler />
           <AuthProvider>
             <Routes>
-              {/* ===== PUBLIC ===== */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
@@ -316,7 +291,6 @@ const App = () => {
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/signup-pro" element={<BecomeProfessional />} />
 
-              {/* ===== PROTECTED ===== */}
               <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
               <Route path="/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
@@ -350,7 +324,6 @@ const App = () => {
               <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
               <Route path="/checkout/business" element={<BusinessCheckout />} />
 
-              {/* ===== ADMIN PROTECTED ===== */}
               <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
               <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
               <Route path="/admin/pros" element={<ProtectedRoute><AdminPros /></ProtectedRoute>} />

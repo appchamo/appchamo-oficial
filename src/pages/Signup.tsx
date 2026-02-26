@@ -11,7 +11,7 @@ import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
 import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
-import { Capacitor } from "@capacitor/core"; // ✅ Adicionado para detectar o celular
+import { Capacitor } from "@capacitor/core"; 
 
 type AccountType = "client" | "professional";
 type Step = "method-choice" | "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email";
@@ -55,10 +55,8 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  // ✅ FUNÇÃO LIMPEZA TOTAL (NUCLEAR)
   const forceExitToLogin = async () => {
     setLoading(true);
-    
     try {
       await supabase.auth.signOut();
     } catch (error) {
@@ -66,13 +64,11 @@ const Signup = () => {
     } finally {
       localStorage.clear();
       sessionStorage.clear();
-
       document.cookie.split(";").forEach((c) => {
         document.cookie = c
           .replace(/^ +/, "")
           .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
       });
-
       localStorage.setItem("manual_login_intent", "true");
       window.location.href = "/login";
     }
@@ -129,7 +125,6 @@ const Signup = () => {
     checkSocialUser();
   }, [navigate]);
 
-  // 🚀 FUNÇÃO CORRIGIDA PARA DEVOLVER PRO APP NATIVO
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
     localStorage.removeItem("manual_login_intent");
@@ -137,9 +132,7 @@ const Signup = () => {
     const isNative = Capacitor.isNativePlatform();
     const redirectTo = isNative 
       ? 'com.chamo.app://google-auth' 
-      : `${window.location.origin}/home`;
-
-    console.log(`Iniciando cadastro ${provider}. Redirecionando para:`, redirectTo);
+      : `${window.location.origin}/signup`; // ✅ Redireciona de volta para signup para processar os dados
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
@@ -165,6 +158,8 @@ const Signup = () => {
   const handleBasicNext = async (data: BasicData) => {
     setLoading(true);
     try {
+      // ✅ SÓ BLOQUEIA POR E-MAIL SE NÃO ESTIVER LOGADO (OU SEJA, CADASTRO MANUAL)
+      // Se tiver createdUserId, o e-mail já é dele no Auth, então ignoramos a verificação de duplicidade.
       if (data.email && !createdUserId) {
         const { data: emailExists } = await supabase.rpc('check_email_exists', { 
           user_email: data.email 
@@ -293,21 +288,22 @@ const Signup = () => {
     }
   };
 
-  if (loading && step !== "basic") { 
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Processando...</p>
-        </div>
-      </div>
-    );
-  }
-
+  // ✅ RENDERIZAÇÃO CORRIGIDA: PRIORIDADE PARA LOADING E STEPS DE CADASTRO
   return (
     <>
-      {step === "method-choice" && (
+      {/* 1. SE ESTIVER CARREGANDO (BLITZ SOCIAL OU SIGNUP) */}
+      {loading && step !== "basic" && (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
+          <div className="text-center">
+            <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">Processando...</p>
+          </div>
+        </div>
+      )}
+
+      {/* 2. TELA DE ESCOLHA DE MÉTODO (SÓ MOSTRA SE NÃO ESTIVER EM OUTRO PASSO E NÃO ESTIVER CARREGANDO) */}
+      {!loading && step === "method-choice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 animate-in fade-in duration-500">
           <div className="w-full max-w-sm space-y-8">
             <div className="text-center">
@@ -357,15 +353,16 @@ const Signup = () => {
         </div>
       )}
 
-      {step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
-      {step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep(createdUserId ? "method-choice" : "type")} initialData={basicData || undefined} />}
-      {step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
-      {step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
-      {step === "plan" && <StepPlanSelect onSelect={handlePlanSelect} onBack={() => setStep("profile")} />}
+      {/* 3. STEPS DE CADASTRO (APARECEM CONFORME O ESTADO MUDAR) */}
+      {!loading && step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
+      {!loading && step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep(createdUserId ? "method-choice" : "type")} initialData={basicData || undefined} />}
+      {!loading && step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
+      {!loading && step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
+      {!loading && step === "plan" && <StepPlanSelect onSelect={handlePlanSelect} onBack={() => setStep("profile")} />}
 
       <SubscriptionDialog isOpen={isSubscriptionOpen} onClose={() => setIsSubscriptionOpen(false)} planId={selectedPlanId} onSuccess={handleSubscriptionSuccess} />
 
-      {(step !== "method-choice" && step !== "awaiting-email") && (
+      {(!loading && step !== "method-choice" && step !== "awaiting-email") && (
         <p className="text-center text-xs text-muted-foreground mt-8">
           Já tem uma conta?{" "}
           <button 
@@ -377,7 +374,7 @@ const Signup = () => {
         </p>
       )}
 
-      {/* MODAL DO CUPOM ATUALIZADO */}
+      {/* MODAL DO CUPOM */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>

@@ -4,12 +4,5 @@
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
-	<key>com.apple.developer.associated-domains</key>
-	<array>
-		<string>applinks:appchamo.com</string>
-		<string>applinks:wfxeiuqxzrlnvlopcrwd.supabase.co</string>
-	</array>
-	<key>com.apple.developer.background-tasks.continued-processing.gpu</key>
-	<true/>
 </dict>
 </plist>

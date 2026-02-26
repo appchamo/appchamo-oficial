@@ -1,8 +1,0 @@
-platform :ios, '13.0'
-
-target 'App' do
-  use_frameworks!
-  
-  # Dependência do OneSignal
-  pod 'OneSignalXCFramework', '>= 5.0.0', '< 6.0.0'
-end

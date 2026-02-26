@@ -130,29 +130,43 @@ const App = () => {
   const [session, setSession] = useState<any>(null);
   const [initializing, setInitializing] = useState(true);
 
-  // ✅ INICIALIZAÇÃO ONESIGNAL (CORRIGIDA PARA VERSÃO 5.x)
+ // ✅ INICIALIZAÇÃO FORÇADA ONESIGNAL
   useEffect(() => {
     const initOneSignal = async () => {
+      // Verifica se é nativo e se o objeto OneSignal existe no window
       if (Capacitor.isNativePlatform()) {
-        try {
-          // O initialize deve ser chamado assim na versão cordova-plugin
-          OneSignal.setAppId("f27cc462-b38d-4dd1-b96d-a6f1c4ed9d48");
+        const OS = (window as any).plugins?.OneSignal || (window as any).OneSignal;
+        
+        if (OS) {
+          try {
+            // Configurações iniciais
+            OS.setAppId("f27cc462-b38d-4dd1-b96d-a6f1c4ed9d48");
 
-          // Pedir permissão explicitamente
-          OneSignal.promptForPushNotificationsWithUserResponse((accepted) => {
-            console.log("Usuário aceitou notificações:", accepted);
-          });
+            // No iOS, precisamos garantir que o prompt apareça
+            OS.promptForPushNotificationsWithUserResponse((accepted: boolean) => {
+              console.log("Status da permissão Push:", accepted);
+            });
 
-          // Escutar cliques em notificações
-          OneSignal.setNotificationOpenedHandler((notification) => {
-            console.log("Notificação aberta:", notification);
-          });
-        } catch (e) {
-          console.error("Erro OneSignal:", e);
+            // Vincula o usuário do Supabase ao OneSignal
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              OS.setExternalUserId(user.id);
+            }
+          } catch (e) {
+            console.error("Erro ao configurar OneSignal:", e);
+          }
+        } else {
+          console.error("OneSignal Plugin não encontrado no objeto window.");
         }
       }
     };
-    initOneSignal();
+
+    // Pequeno delay para garantir que o Capacitor carregou todos os plugins nativos
+    const timer = setTimeout(() => {
+      initOneSignal();
+    }, 1000);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // ✅ GERENCIAMENTO DE SESSÃO E VÍNCULO COM ONESIGNAL

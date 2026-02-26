@@ -7,43 +7,40 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
+  // ✅ 1. Resposta para o Preflight do navegador (CORS)
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get("PROJECT_URL")!,
-      Deno.env.get("SERVICE_ROLE_KEY")!
-    );
+    // ✅ 2. Uso das variáveis de ambiente padrão do Supabase
+    // Em São Paulo, o Supabase usa SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY por padrão
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("PROJECT_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY")!;
+    
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const body = await req.json();
-    const { userId, accountType, profileData, basicData, docFiles, planId } =
-      body;
+    const { userId, accountType, profileData, basicData, docFiles, planId } = body;
 
     if (!userId || !accountType || !basicData) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const { data: authUser, error: authError } =
-      await supabase.auth.admin.getUserById(userId);
+    // ✅ 3. Verificação do usuário no Auth (Admin bypass para garantir que funcione)
+    const { data: authUser, error: authError } = await supabase.auth.admin.getUserById(userId);
 
     if (authError || !authUser?.user) {
       return new Response(
         JSON.stringify({ error: "Usuário não encontrado." }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    // ✅ 4. Preparação dos dados do Perfil
     const profileUpdates: Record<string, any> = {
       user_type: accountType,
       full_name: basicData.name,
@@ -62,19 +59,18 @@ Deno.serve(async (req) => {
     };
 
     if (basicData.document) {
-      if (basicData.documentType === "cpf")
-        profileUpdates.cpf = basicData.document;
+      if (basicData.documentType === "cpf") profileUpdates.cpf = basicData.document;
       else profileUpdates.cnpj = basicData.document;
     }
 
-    if (profileData?.avatarUrl)
-      profileUpdates.avatar_url = profileData.avatarUrl;
+    if (profileData?.avatarUrl) profileUpdates.avatar_url = profileData.avatarUrl;
 
-    // 🔥 UPSERT (resolve corrida de trigger)
+    // 🔥 UPSERT (resolve conflito com o Trigger SQL que criamos antes)
     const { error: profileError } = await supabase
       .from("profiles")
       .upsert(
         {
+          id: userId, // Garante que o ID primário seja preenchido
           user_id: userId,
           email: authUser.user.email,
           ...profileUpdates,
@@ -85,36 +81,32 @@ Deno.serve(async (req) => {
     if (profileError) {
       return new Response(
         JSON.stringify({ error: profileError.message }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // 🔥 Fluxo profissional
+    // 🔥 5. Fluxo de Profissional
     if (accountType === "professional") {
       const needsAnalysis = planId === "vip" || planId === "business";
       const profileStatus = needsAnalysis ? "pending" : "approved";
 
-      const { error: proError } = await supabase.from("professionals").insert({
+      // Usando insert ou upsert para profissionais para evitar erro de duplicidade se ele recomeçar o cadastro
+      const { error: proError } = await supabase.from("professionals").upsert({
         user_id: userId,
         profile_status: profileStatus,
         category_id: profileData?.categoryId || null,
         profession_id: profileData?.professionId || null,
         bio: profileData?.bio || null,
-      });
+      }, { onConflict: 'user_id' });
 
       if (proError) {
         return new Response(
           JSON.stringify({ error: proError.message }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
+      // ✅ 6. Upload de Documentos
       if (docFiles && docFiles.length > 0) {
         const { data: proData } = await supabase
           .from("professionals")
@@ -124,10 +116,7 @@ Deno.serve(async (req) => {
 
         if (proData) {
           for (const doc of docFiles) {
-            const filePath = `documents/${userId}/${Date.now()}_${Math.random()
-              .toString(36)
-              .slice(2)}.${doc.ext || "jpg"}`;
-
+            const filePath = `documents/${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${doc.ext || "jpg"}`;
             const binaryStr = atob(doc.base64);
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) {
@@ -136,17 +125,15 @@ Deno.serve(async (req) => {
 
             const { error: uploadError } = await supabase.storage
               .from("uploads")
-              .upload(filePath, bytes, {
-                contentType: doc.contentType,
-              });
+              .upload(filePath, bytes, { contentType: doc.contentType });
 
             if (uploadError) {
               console.error("Upload error:", uploadError);
               continue;
             }
 
-            const projectUrl = Deno.env.get("PROJECT_URL")!;
-            const publicUrl = `${projectUrl}/storage/v1/object/public/uploads/${filePath}`;
+            // Usamos o getPublicUrl oficial para garantir que funcione em qualquer região
+            const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(filePath);
 
             await supabase.from("professional_documents").insert({
               professional_id: proData.id,
@@ -158,25 +145,27 @@ Deno.serve(async (req) => {
         }
       }
 
+      // ✅ 7. Atualização da Assinatura
       if (planId && planId !== "free") {
         await supabase
           .from("subscriptions")
-          .update({ plan_id: planId })
-          .eq("user_id", userId);
+          .upsert({ 
+            user_id: userId, 
+            plan_id: planId,
+            status: 'PENDING'
+          }, { onConflict: 'user_id' });
       }
     }
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (err: any) {
     console.error("complete-signup error:", err);
     return new Response(
       JSON.stringify({ error: err?.message ?? String(err) }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

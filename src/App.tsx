@@ -130,22 +130,26 @@ const App = () => {
   const [session, setSession] = useState<any>(null);
   const [initializing, setInitializing] = useState(true);
 
-  // ✅ INICIALIZAÇÃO ONESIGNAL (PUSH NOTIFICATIONS)
+  // ✅ INICIALIZAÇÃO ONESIGNAL (CORRIGIDA PARA VERSÃO 5.x)
   useEffect(() => {
     const initOneSignal = async () => {
       if (Capacitor.isNativePlatform()) {
-        // ATENÇÃO: Substitua pelo seu APP ID do painel do OneSignal
-        OneSignal.initialize("f27cc462-b38d-4dd1-b96d-a6f1c4ed9d48");
+        try {
+          // O initialize deve ser chamado assim na versão cordova-plugin
+          OneSignal.setAppId("f27cc462-b38d-4dd1-b96d-a6f1c4ed9d48");
 
-        // Solicita permissão nativa no iOS/Android
-        OneSignal.Notifications.requestPermission(true).then((success) => {
-          console.log("Permissão de Push concedida:", success);
-        });
+          // Pedir permissão explicitamente
+          OneSignal.promptForPushNotificationsWithUserResponse((accepted) => {
+            console.log("Usuário aceitou notificações:", accepted);
+          });
 
-        // Handler para quando uma notificação é clicada
-        OneSignal.Notifications.addEventListener('click', (event) => {
-          console.log('Notificação clicada:', event);
-        });
+          // Escutar cliques em notificações
+          OneSignal.setNotificationOpenedHandler((notification) => {
+            console.log("Notificação aberta:", notification);
+          });
+        } catch (e) {
+          console.error("Erro OneSignal:", e);
+        }
       }
     };
     initOneSignal();

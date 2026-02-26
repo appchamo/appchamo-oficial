@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
-import { PushNotifications } from "@capacitor/push-notifications";
-import { SplashScreen } from '@capacitor/splash-screen'; // ✅ Adicionado
+import OneSignal from 'onesignal-cordova-plugin'; // ✅ Adicionado OneSignal
+import { SplashScreen } from '@capacitor/splash-screen'; 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -127,29 +127,43 @@ const BackButtonHandler = () => {
 };
 
 const App = () => {
-  const [session, setSession] = useState<any>(null); // ✅ Novo Estado
-  const [initializing, setInitializing] = useState(true); // ✅ Novo Estado
+  const [session, setSession] = useState<any>(null);
+  const [initializing, setInitializing] = useState(true);
 
+  // ✅ INICIALIZAÇÃO ONESIGNAL (PUSH NOTIFICATIONS)
   useEffect(() => {
-    const initPush = async () => {
-      try {
-        const permStatus = await PushNotifications.requestPermissions();
-        if (permStatus.receive === 'granted') await PushNotifications.register();
-      } catch (e) {
-        console.log("Notificações só funcionam no celular nativo.");
+    const initOneSignal = async () => {
+      if (Capacitor.isNativePlatform()) {
+        // ATENÇÃO: Substitua pelo seu APP ID do painel do OneSignal
+        OneSignal.initialize("f27cc462-b38d-4dd1-b96d-a6f1c4ed9d48");
+
+        // Solicita permissão nativa no iOS/Android
+        OneSignal.Notifications.requestPermission(true).then((success) => {
+          console.log("Permissão de Push concedida:", success);
+        });
+
+        // Handler para quando uma notificação é clicada
+        OneSignal.Notifications.addEventListener('click', (event) => {
+          console.log('Notificação clicada:', event);
+        });
       }
     };
-    initPush();
+    initOneSignal();
   }, []);
 
-  // ✅ GERENCIAMENTO DE SESSÃO ROBUSTO (MATA A PISCADEIRA)
+  // ✅ GERENCIAMENTO DE SESSÃO E VÍNCULO COM ONESIGNAL
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
+      
+      // Vincula o usuário ao OneSignal para envios segmentados
+      if (session?.user && Capacitor.isNativePlatform()) {
+        OneSignal.login(session.user.id);
+      }
+
       setInitializing(false);
       
-      // Somente esconde a splash quando o app decidiu para onde ir
       if (Capacitor.isNativePlatform()) {
         await SplashScreen.hide({ fadeOutDuration: 400 });
       }
@@ -159,6 +173,11 @@ const App = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      if (session?.user && Capacitor.isNativePlatform()) {
+        OneSignal.login(session.user.id);
+      } else if (!_event.includes('SIGNED_IN') && Capacitor.isNativePlatform()) {
+        OneSignal.logout();
+      }
       setInitializing(false);
     });
 
@@ -214,7 +233,6 @@ const isRootPath = currentPath === '/' || currentPath === '/index.html';
 const isPasswordRecovery = currentHash.includes("type=recovery") || currentSearch.includes("type=recovery");
 const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
 
-// Enquanto inicializa, não renderiza a landing page se for nativo (segura a splash)
 if (initializing && !isWeb) return null;
 
 if (isWeb && isRootPath && !isPasswordRecovery && !isWebBypassed) {
@@ -293,7 +311,7 @@ if (isWeb && isRootPath && !isPasswordRecovery && !isWebBypassed) {
 }
   // =========================================================================
 
-  if (initializing) return null; // ✅ Segura o render nativo até ter a sessão
+  if (initializing) return null; 
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -304,7 +322,6 @@ if (isWeb && isRootPath && !isPasswordRecovery && !isWebBypassed) {
           <BackButtonHandler />
           <AuthProvider>
             <Routes>
-              {/* ✅ Lógica de Rota Raiz Ajustada */}
               <Route path="/" element={session ? <Navigate to="/home" /> : <Index />} />
               <Route path="/login" element={!session ? <Login /> : <Navigate to="/home" />} />
               <Route path="/signup" element={<Signup />} />

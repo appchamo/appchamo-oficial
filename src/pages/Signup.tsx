@@ -132,7 +132,7 @@ const Signup = () => {
     const isNative = Capacitor.isNativePlatform();
     const redirectTo = isNative 
       ? 'com.chamo.app://google-auth' 
-      : `${window.location.origin}/signup`; // ✅ Redireciona de volta para signup para processar os dados
+      : `${window.location.origin}/signup`; 
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
@@ -158,8 +158,6 @@ const Signup = () => {
   const handleBasicNext = async (data: BasicData) => {
     setLoading(true);
     try {
-      // ✅ SÓ BLOQUEIA POR E-MAIL SE NÃO ESTIVER LOGADO (OU SEJA, CADASTRO MANUAL)
-      // Se tiver createdUserId, o e-mail já é dele no Auth, então ignoramos a verificação de duplicidade.
       if (data.email && !createdUserId) {
         const { data: emailExists } = await supabase.rpc('check_email_exists', { 
           user_email: data.email 
@@ -213,6 +211,8 @@ const Signup = () => {
     setLoading(true);
     try {
       let userId = createdUserId;
+
+      // Se não logou via Social, faz o cadastro manual por e-mail/senha
       if (!userId) {
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: basicData.email,
@@ -229,7 +229,11 @@ const Signup = () => {
         }
         userId = authData.user?.id || null;
       }
+      
       if (!userId) { setLoading(false); return; }
+
+      // Pegamos a sessão atual para garantir o JWT mais fresco
+      const { data: { session } } = await supabase.auth.getSession();
 
       const docFilesPayload = await Promise.all(
         docFiles.map(async (file) => ({
@@ -239,14 +243,19 @@ const Signup = () => {
         }))
       );
 
+      // Chamada da função com tratamento de JWT
       const { data: result, error: fnError } = await supabase.functions.invoke(
         "complete-signup",
         {
           body: { userId, accountType, profileData: pData, basicData, docFiles: docFilesPayload, planId },
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`, // ✅ Força o envio do JWT correto
+          }
         }
       );
 
       if (fnError || result?.error) {
+        console.error("Erro na função complete-signup:", fnError || result?.error);
         toast({ title: "Erro ao completar cadastro.", variant: "destructive" });
         setLoading(false);
         return;
@@ -288,10 +297,8 @@ const Signup = () => {
     }
   };
 
-  // ✅ RENDERIZAÇÃO CORRIGIDA: PRIORIDADE PARA LOADING E STEPS DE CADASTRO
   return (
     <>
-      {/* 1. SE ESTIVER CARREGANDO (BLITZ SOCIAL OU SIGNUP) */}
       {loading && step !== "basic" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
           <div className="text-center">
@@ -302,7 +309,6 @@ const Signup = () => {
         </div>
       )}
 
-      {/* 2. TELA DE ESCOLHA DE MÉTODO (SÓ MOSTRA SE NÃO ESTIVER EM OUTRO PASSO E NÃO ESTIVER CARREGANDO) */}
       {!loading && step === "method-choice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 animate-in fade-in duration-500">
           <div className="w-full max-w-sm space-y-8">
@@ -353,7 +359,6 @@ const Signup = () => {
         </div>
       )}
 
-      {/* 3. STEPS DE CADASTRO (APARECEM CONFORME O ESTADO MUDAR) */}
       {!loading && step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
       {!loading && step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep(createdUserId ? "method-choice" : "type")} initialData={basicData || undefined} />}
       {!loading && step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
@@ -374,7 +379,6 @@ const Signup = () => {
         </p>
       )}
 
-      {/* MODAL DO CUPOM */}
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>

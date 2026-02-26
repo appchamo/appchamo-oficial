@@ -1,11 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
+import { SplashScreen } from '@capacitor/splash-screen'; // ✅ Adicionado
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom"; 
+import { BrowserRouter, Routes, Route, useNavigate, Navigate } from "react-router-dom"; 
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
@@ -126,6 +127,9 @@ const BackButtonHandler = () => {
 };
 
 const App = () => {
+  const [session, setSession] = useState<any>(null); // ✅ Novo Estado
+  const [initializing, setInitializing] = useState(true); // ✅ Novo Estado
+
   useEffect(() => {
     const initPush = async () => {
       try {
@@ -136,6 +140,29 @@ const App = () => {
       }
     };
     initPush();
+  }, []);
+
+  // ✅ GERENCIAMENTO DE SESSÃO ROBUSTO (MATA A PISCADEIRA)
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+      setInitializing(false);
+      
+      // Somente esconde a splash quando o app decidiu para onde ir
+      if (Capacitor.isNativePlatform()) {
+        await SplashScreen.hide({ fadeOutDuration: 400 });
+      }
+    };
+
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setInitializing(false);
+    });
+
+    return () => { subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
@@ -187,12 +214,14 @@ const isRootPath = currentPath === '/' || currentPath === '/index.html';
 const isPasswordRecovery = currentHash.includes("type=recovery") || currentSearch.includes("type=recovery");
 const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
 
+// Enquanto inicializa, não renderiza a landing page se for nativo (segura a splash)
+if (initializing && !isWeb) return null;
+
 if (isWeb && isRootPath && !isPasswordRecovery && !isWebBypassed) {
   return (
     <div 
       className="relative min-h-screen flex flex-col justify-center overflow-hidden font-sans bg-[#1A0B00]"
       style={{
-        // ✅ ATUALIZADO: Agora apontando para o bucket de São Paulo (wfxeiuqxzrlnvlopcrwd)
         backgroundImage: 'url("https://wfxeiuqxzrlnvlopcrwd.supabase.co/storage/v1/object/public/uploads/tutorials/135419.png")',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
@@ -264,6 +293,8 @@ if (isWeb && isRootPath && !isPasswordRecovery && !isWebBypassed) {
 }
   // =========================================================================
 
+  if (initializing) return null; // ✅ Segura o render nativo até ter a sessão
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -273,8 +304,9 @@ if (isWeb && isRootPath && !isPasswordRecovery && !isWebBypassed) {
           <BackButtonHandler />
           <AuthProvider>
             <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="/login" element={<Login />} />
+              {/* ✅ Lógica de Rota Raiz Ajustada */}
+              <Route path="/" element={session ? <Navigate to="/home" /> : <Index />} />
+              <Route path="/login" element={!session ? <Login /> : <Navigate to="/home" />} />
               <Route path="/signup" element={<Signup />} />
               <Route path="/complete-signup" element={<Signup />} />
               <Route path="/reset-password" element={<ResetPassword />} />

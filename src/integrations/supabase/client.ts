@@ -26,19 +26,13 @@ const capacitorStorage = {
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    // ✅ Se for celular nativo, usa o armazenamento blindado do Preferences. 
-    // Se for Web, usa o localStorage padrão.
     storage: Capacitor.isNativePlatform() ? (capacitorStorage as any) : localStorage,
     persistSession: true,
     autoRefreshToken: true,
-    
-    // ✅ ALTERAÇÃO CRUCIAL: 
-    // Desativamos a detecção automática na URL para o Supabase não "brigar" 
-    // com o listener de Deep Link que criamos no App.tsx. 
-    // Isso evita o erro "Carregamento do quadro interrompido".
     detectSessionInUrl: false, 
-
-    // ✅ Adicionado para garantir que o fluxo de login não dependa de "locks" do navegador
     flowType: 'pkce',
+    // ⬇️ ADICIONE ESTA LINHA ABAIXO
+    // Isso impede que o Supabase tente usar recursos de aba do navegador que não existem no app nativo
+    storageKey: 'sb-chamo-auth', 
   }
 });

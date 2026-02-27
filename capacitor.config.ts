@@ -5,17 +5,21 @@ const config: CapacitorConfig = {
   appName: 'Chamô',
   webDir: 'dist',
   server: {
-    // ✅ Alterado para 'https' para permitir que o Supabase salve cookies/sessão com segurança
+    // Mantemos HTTPS para segurança e compatibilidade com Supabase
     iosScheme: 'https', 
     hostname: 'app.chamo.com',
     androidScheme: 'https',
-    // ✅ Adicionado o domínio do Supabase para garantir que o app tenha permissão de rede
+    // Liberamos a navegação para o Supabase e Google para evitar o erro 102
     allowNavigation: [
       'wfxeiuqxzrlnvlopcrwd.supabase.co',
-      '*.supabase.co'
+      '*.supabase.co',
+      'accounts.google.com'
     ]
   },
   plugins: {
+    PushNotifications: {
+      presentationOptions: ["badge", "sound", "alert"],
+    },
     StatusBar: {
       overlaysWebView: false,
       style: 'LIGHT',
@@ -30,7 +34,6 @@ const config: CapacitorConfig = {
       splashFullScreen: true,
       splashImmersive: true
     },
-    // ✅ Adicionado para garantir que o teclado não quebre o layout no login
     Keyboard: {
       resize: 'native',
       style: 'LIGHT',

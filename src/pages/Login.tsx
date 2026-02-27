@@ -5,18 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Capacitor } from "@capacitor/core"; 
-
-// 💥 Limpeza Nuclear disparada antes do carregamento
-if (localStorage.getItem("manual_login_intent") === "true") {
-  console.log("💥 Limpeza Nuclear disparada antes do carregamento!");
-  localStorage.clear();
-  sessionStorage.clear();
-  for (let key in localStorage) {
-    if (key.startsWith("sb-")) {
-      localStorage.removeItem(key);
-    }
-  }
-}
+import { Browser } from "@capacitor/browser"; 
 
 type LoginError = "email_not_confirmed" | "invalid_login" | "rate_limit" | "generic";
 
@@ -183,22 +172,18 @@ const Login = () => {
 
     const checkExistingSession = async () => {
       const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
+      if (isManualIntent) return;
+
       const { data: { session } } = await supabase.auth.getSession();
-      
       if (session?.user) {
-        if (isManualIntent) {
-          setLoading(false);
-        } else {
-          await checkDeviceLimitAndRedirect(session.user.id);
-        }
+        await checkDeviceLimitAndRedirect(session.user.id);
       }
     };
     
     checkExistingSession();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-      if (event === "SIGNED_IN" && session?.user && !isManualIntent) {
+      if (event === "SIGNED_IN" && session?.user) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
@@ -223,10 +208,13 @@ const Login = () => {
     if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
     
-    localStorage.setItem("manual_login_intent", "true"); // Indica que o usuário clicou no botão
+    localStorage.setItem("manual_login_intent", "true"); 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     
     if (error) {
+      console.log("💥 Erro no login, limpando dados residuais...");
+      localStorage.removeItem("sb-wfxeiuqxzrlnvlopcrwd-auth-token");
+      
       const type = getErrorType(error.message);
       setErrorType(type);
       toast({ title: friendlyError(type), variant: "destructive" });
@@ -238,30 +226,60 @@ const Login = () => {
     await checkDeviceLimitAndRedirect(data.user.id);
   };
 
-  // ✅ FUNÇÃO AJUSTADA PARA EVITAR O ERRO DE "ENDEREÇO INVÁLIDO"
+  // ✅ FUNÇÃO SUPER BLINDADA COM LOGS DE RASTREAMENTO
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    localStorage.removeItem("signup_in_progress");
-    localStorage.removeItem("manual_login_intent");
+    console.log(`🚀 [LOGIN] 1. Botão clicado: ${provider}`);
+    setLoading(true);
 
-    const isNative = Capacitor.isNativePlatform();
+    try {
+      localStorage.removeItem("signup_in_progress");
+      localStorage.setItem("manual_login_intent", "true");
 
-    // No Nativo, usamos o esquema registrado no Xcode. 
-    // Removi o "-auth" para bater exatamente com o que o iPhone reconhece mais fácil.
-    const redirectTo = isNative 
-      ? 'com.chamo.app://' 
-      : `${window.location.origin}/home`;
+      const isNative = Capacitor.isNativePlatform();
+      const redirectTo = isNative ? 'com.chamo.app://' : `${window.location.origin}/home`;
 
-    const { error } = await supabase.auth.signInWithOAuth({ 
-      provider,
-      options: {
-        redirectTo: redirectTo,
-        skipBrowserRedirect: false,
-        queryParams: {
-          prompt: 'select_account',
-        },
+      console.log(`🚀 [LOGIN] 2. Solicitando URL ao Supabase para redirect: ${redirectTo}`);
+
+      const { data, error } = await supabase.auth.signInWithOAuth({ 
+        provider,
+        options: {
+          redirectTo: redirectTo,
+          skipBrowserRedirect: true, 
+          queryParams: { prompt: 'select_account' },
+        }
+      });
+      
+      console.log(`🚀 [LOGIN] 3. Resposta do Supabase:`, data, error);
+
+      if (error) {
+        throw error;
       }
-    });
-    if (error) toast({ title: `Erro ao conectar com ${provider}`, variant: "destructive" });
+
+      if (data?.url) {
+        console.log(`🚀 [LOGIN] 4. Abrindo navegador nativo com a URL:`, data.url);
+        if (isNative) {
+          await Browser.open({ url: data.url });
+          console.log(`🚀 [LOGIN] 5. Navegador aberto com sucesso!`);
+        } else {
+          window.location.href = data.url; 
+        }
+      } else {
+        throw new Error("O Supabase não retornou nenhuma URL de login.");
+      }
+
+    } catch (err: any) {
+      // SE DER QUALQUER ERRO, ELE CAI AQUI E AVISA NA TELA E NO LOG
+      console.error("💥 [LOGIN] ERRO FATAL CAPTURADO:", err);
+      localStorage.removeItem("manual_login_intent");
+      toast({ 
+        title: "Erro interno", 
+        description: err.message || "Falha ao iniciar o login.", 
+        variant: "destructive" 
+      });
+    } finally {
+      // Libera o botão independente de dar certo ou errado
+      setLoading(false);
+    }
   };
 
   return (
@@ -325,7 +343,7 @@ const Login = () => {
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha</label>
                 <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
                   <Lock className="w-4 h-4 text-muted-foreground" />
-                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+                  <input type="password" value={password} placeholder="••••••••" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" onChange={(e) => setPassword(e.target.value)} />
                 </div>
               </div>
 

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { Browser } from "@capacitor/browser";
 import { App as CapacitorApp } from "@capacitor/app";
-import OneSignal from 'onesignal-cordova-plugin'; 
 import { SplashScreen } from '@capacitor/splash-screen'; 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -74,7 +74,7 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 const queryClient = new QueryClient();
 
 const isAuthUrl = (url: string) => {
-  return url.includes('com.chamo.app://') || 
+  return url.includes('com.chamo.app') || 
          url.includes('app.chamo.com') || 
          url.includes('supabase.co');
 };
@@ -91,92 +91,109 @@ const BackButtonHandler = () => {
   return null;
 };
 
-// Componente Interno para acessar o hook useNavigate
+// ✅ VARIÁVEL GLOBAL: Fica fora do ciclo de vida do React para nunca perder o valor e bloquear o loop
+let globalLastUrl = "";
+
 const AppContent = () => {
   const [session, setSession] = useState<any>(null);
   const [initializing, setInitializing] = useState(true);
-  const navigate = useNavigate(); // ✅ Hook agora dentro do contexto correto
+  const navigate = useNavigate();
 
-  // ✅ FUNÇÃO DE REDIRECIONAMENTO COM NAVEGAÇÃO INTERNA REACT
-  const handleAuthRedirect = async (urlStr: string) => {
+  const handleAuthRedirect = useCallback(async (urlStr: string) => {
+    if (!urlStr || !isAuthUrl(urlStr)) return;
+    
+    // ✅ TRAVA DE SEGURANÇA: Se já processamos essa URL exata, ignora na hora e aborta o loop!
+    if (globalLastUrl === urlStr) return;
+    globalLastUrl = urlStr; 
+
     try {
-      console.log("Recebendo Deep Link:", urlStr);
-      const urlFixed = urlStr.replace("#", "?");
-      const urlObj = new URL(urlFixed);
+      console.log("🚀 Processando Deep Link:", urlStr);
+
+      if (Capacitor.isNativePlatform()) {
+        Browser.close().catch(() => {});
+      }
+
+      let fixedUrl = urlStr;
+      if (fixedUrl.startsWith('com.chamo.app:?')) {
+        fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
+      }
+      
+      fixedUrl = fixedUrl.replace(/#/g, "?");
+      const urlObj = new URL(fixedUrl);
       const params = new URLSearchParams(urlObj.search);
       
+      let code = params.get('code');
       const accessToken = params.get('access_token');
       const refreshToken = params.get('refresh_token');
 
-      if (accessToken && refreshToken) {
+      if (code) {
+        code = code.replace(/[^a-zA-Z0-9-]/g, '');
+        console.log("🔑 Trocando Auth Code por sessão...");
+        
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        
+        if (error) {
+          if (error.message.includes("PKCE") || error.message.includes("verifier")) {
+             console.log("⚠️ Código já foi utilizado, ignorando sem travar o app.");
+             return;
+          }
+          throw error;
+        }
+        
+        if (data.session) {
+          console.log("✅ Sessão gerada com sucesso via Google!");
+          setSession(data.session);
+          localStorage.removeItem("manual_login_intent");
+          setTimeout(() => navigate("/home", { replace: true }), 150);
+        }
+      } else if (accessToken && refreshToken) {
         const { data, error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
 
         if (!error && data.session) {
-          console.log("Sessão definida com sucesso!");
+          console.log("✅ Sessão validada (Token Antigo)!");
           setSession(data.session);
-          window.history.replaceState(null, "", "/");
-          
-          // ✅ Mudança crucial: usa o router interno em vez de window.location
-          // Isso evita o erro de "Carregamento interrompido" do iOS
-          navigate("/home", { replace: true });
+          localStorage.removeItem("manual_login_intent");
+          setTimeout(() => navigate("/home", { replace: true }), 150);
         }
       }
     } catch (err) {
-      console.error('Erro no Deep Link:', err);
+      console.error('💥 Erro fatal no Deep Link:', err);
     }
-  };
+  }, [navigate]);
 
-  // Listeners de URL
   useEffect(() => {
-    const urlListener = CapacitorApp.addListener('appUrlOpen', (event: any) => {
-      if (isAuthUrl(event.url)) handleAuthRedirect(event.url);
-    });
+    let urlListener: any = null;
 
-    window.addEventListener('iosDeepLink', (event: any) => {
-      const url = event.detail;
-      if (isAuthUrl(url)) handleAuthRedirect(url);
-    });
+    const setupListeners = async () => {
+      urlListener = await CapacitorApp.addListener('appUrlOpen', (event: any) => {
+        handleAuthRedirect(event.url);
+      });
+
+      const launchUrl = await CapacitorApp.getLaunchUrl();
+      if (launchUrl?.url) {
+        handleAuthRedirect(launchUrl.url);
+      }
+    };
+
+    setupListeners();
+
+    const iosHandler = (event: any) => handleAuthRedirect(event.detail);
+    window.addEventListener('iosDeepLink', iosHandler);
 
     return () => {
-      urlListener.then(h => h.remove());
+      if (urlListener) urlListener.remove();
+      window.removeEventListener('iosDeepLink', iosHandler);
     };
-  }, []);
+  }, [handleAuthRedirect]);
 
-  // ✅ INICIALIZAÇÃO SEGURA ONESIGNAL
-  useEffect(() => {
-    const initOneSignal = async () => {
-      if (Capacitor.isNativePlatform()) {
-        const OS = (window as any).plugins?.OneSignal || (window as any).OneSignal || OneSignal;
-        if (OS && typeof OS.setAppId === 'function') {
-          try {
-            OS.setAppId("f27cc462-b38d-4dd1-b96d-a6f1c4ed9d48");
-            OS.promptForPushNotificationsWithUserResponse((accepted: boolean) => {
-              console.log("Status da permissão Push:", accepted);
-            });
-          } catch (e) {
-            console.error("Erro ao configurar OneSignal:", e);
-          }
-        }
-      }
-    };
-    const timer = setTimeout(initOneSignal, 2000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // ✅ GERENCIAMENTO DE SESSÃO
   useEffect(() => {
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      setSession(currentSession);
       
-      if (session?.user && Capacitor.isNativePlatform()) {
-        const OS = (window as any).plugins?.OneSignal || (window as any).OneSignal || OneSignal;
-        if (OS && typeof OS.login === 'function') OS.login(session.user.id);
-      }
-
       setInitializing(false);
       if (Capacitor.isNativePlatform()) {
         await SplashScreen.hide({ fadeOutDuration: 400 });
@@ -187,14 +204,6 @@ const AppContent = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (Capacitor.isNativePlatform()) {
-        const OS = (window as any).plugins?.OneSignal || (window as any).OneSignal || OneSignal;
-        if (session?.user && OS && typeof OS.login === 'function') {
-          OS.login(session.user.id);
-        } else if (_event.includes('SIGNED_OUT') && OS && typeof OS.logout === 'function') {
-          OS.logout();
-        }
-      }
       setInitializing(false);
     });
 
@@ -221,16 +230,6 @@ const AppContent = () => {
 
     return () => { supabase.removeChannel(channel); };
   }, [navigate]);
-
-  useEffect(() => {
-    const checkColdStart = async () => {
-      const launchUrl = await CapacitorApp.getLaunchUrl();
-      if (launchUrl?.url && isAuthUrl(launchUrl.url)) {
-        handleAuthRedirect(launchUrl.url);
-      }
-    };
-    checkColdStart();
-  }, []);
 
   // Landing Page Logic
   const isWeb = Capacitor.getPlatform() === 'web';
@@ -384,7 +383,6 @@ const AppContent = () => {
   );
 };
 
-// Componente Raiz para prover o Router
 const App = () => {
   return (
     <QueryClientProvider client={queryClient}>

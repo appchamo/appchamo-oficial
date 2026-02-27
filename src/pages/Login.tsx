@@ -81,7 +81,7 @@ const Login = () => {
         .from("profiles")
         .select("*")
         .eq("user_id", userId)
-        .single();
+        .maybeSingle(); // ✅ Alterado para maybeSingle para não travar em novos usuários
 
       const { data: roles } = await supabase
         .from("user_roles")
@@ -171,9 +171,7 @@ const Login = () => {
     });
 
     const checkExistingSession = async () => {
-      const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-      if (isManualIntent) return;
-
+      // ✅ Removida a trava do manual_login_intent que impedia a leitura do token do Google
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         await checkDeviceLimitAndRedirect(session.user.id);
@@ -183,7 +181,8 @@ const Login = () => {
     checkExistingSession();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
+      // ✅ Adicionado INITIAL_SESSION para capturar o exato momento que o Supabase lê a URL
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
@@ -226,7 +225,6 @@ const Login = () => {
     await checkDeviceLimitAndRedirect(data.user.id);
   };
 
-  // ✅ FUNÇÃO SUPER BLINDADA COM LOGS DE RASTREAMENTO
   const handleSocialLogin = async (provider: "google" | "apple") => {
     console.log(`🚀 [LOGIN] 1. Botão clicado: ${provider}`);
     setLoading(true);
@@ -236,6 +234,7 @@ const Login = () => {
       localStorage.setItem("manual_login_intent", "true");
 
       const isNative = Capacitor.isNativePlatform();
+      // ✅ Alterado o destino final para /login para o arquivo poder ler o código da URL
       const redirectTo = isNative ? 'com.chamo.app://' : `${window.location.origin}/login`;
 
       console.log(`🚀 [LOGIN] 2. Solicitando URL ao Supabase para redirect: ${redirectTo}`);
@@ -268,7 +267,6 @@ const Login = () => {
       }
 
     } catch (err: any) {
-      // SE DER QUALQUER ERRO, ELE CAI AQUI E AVISA NA TELA E NO LOG
       console.error("💥 [LOGIN] ERRO FATAL CAPTURADO:", err);
       localStorage.removeItem("manual_login_intent");
       toast({ 
@@ -277,7 +275,6 @@ const Login = () => {
         variant: "destructive" 
       });
     } finally {
-      // Libera o botão independente de dar certo ou errado
       setLoading(false);
     }
   };
@@ -407,4 +404,4 @@ const Login = () => {
   );
 };
 
-export default Login; 
+export default Login;

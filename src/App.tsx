@@ -99,23 +99,22 @@ const AppContent = () => {
   const navigate = useNavigate();
 
   const handleAuthRedirect = useCallback(async (urlStr: string) => {
+    // ✅ REGRA DE OURO: Na Web, o Supabase já faz a leitura da URL sozinho.
+    // Executar isso na Web causa loop infinito. Limitamos apenas para Mobile.
+    if (!Capacitor.isNativePlatform()) return;
+
     if (!urlStr || !isAuthUrl(urlStr)) return;
     
-    // ✅ AJUSTE PARA ANDROID/WEB: Converte fragmentos # em query ? para garantir a leitura dos tokens
     let fixedUrl = urlStr.replace('#', '?');
-    
     if (globalLastUrl === fixedUrl) return;
     globalLastUrl = fixedUrl; 
 
     try {
-      console.log("🚀 Processando Deep Link / Auth Redirect:", fixedUrl);
+      console.log("🚀 Processando Deep Link Mobile:", fixedUrl);
 
-      // ✅ FECHA O NAVEGADOR: Essencial no Android para tirar a tela branca da frente
-      if (Capacitor.isNativePlatform()) {
-        setTimeout(async () => {
-          await Browser.close().catch(() => {});
-        }, 500);
-      }
+      setTimeout(async () => {
+        await Browser.close().catch(() => {});
+      }, 500);
 
       if (fixedUrl.startsWith('com.chamo.app:?')) {
         fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
@@ -130,28 +129,12 @@ const AppContent = () => {
 
       if (code) {
         code = code.replace(/[^a-zA-Z0-9-]/g, '');
-        console.log("🔑 Trocando Auth Code por sessão...");
-        
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-        
-        if (error) {
-          if (error.message.includes("PKCE") || error.message.includes("verifier")) {
-             console.log("⚠️ Código já foi utilizado, ignorando sem travar o app.");
-             return;
-          }
-          throw error;
-        }
+        if (error) throw error;
         
         if (data.session) {
-          console.log("✅ Sessão gerada com sucesso via Google!");
           setSession(data.session);
           localStorage.removeItem("manual_login_intent");
-          
-          // ✅ LIMPA A URL NA WEB PARA EVITAR BUGS SE O USUÁRIO RECARREGAR A PÁGINA
-          if (!Capacitor.isNativePlatform()) {
-             window.history.replaceState({}, document.title, "/home");
-          }
-          
           setTimeout(() => navigate("/home", { replace: true }), 200);
         }
       } else if (accessToken && refreshToken) {
@@ -161,56 +144,40 @@ const AppContent = () => {
         });
 
         if (!error && data.session) {
-          console.log("✅ Sessão validada!");
           setSession(data.session);
           localStorage.removeItem("manual_login_intent");
-          
-          if (!Capacitor.isNativePlatform()) {
-             window.history.replaceState({}, document.title, "/home");
-          }
-
           setTimeout(() => navigate("/home", { replace: true }), 200);
         }
       }
     } catch (err) {
       console.error('💥 Erro fatal no Deep Link:', err);
-      // ✅ EVITA TELA BRANCA: Se algo der errado, volta pro login
       navigate("/login", { replace: true });
     }
   }, [navigate]);
-
-  // ✅ NOVO LISTENER: Captura o redirecionamento do Google na versão WEB
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) {
-      const hash = window.location.hash;
-      const search = window.location.search;
-      
-      // Se a URL contiver um token de acesso ou código, chama a função de auth
-      if (hash.includes('access_token') || search.includes('code=')) {
-        console.log("🌐 Redirecionamento Auth Web detectado!");
-        handleAuthRedirect(window.location.href);
-      }
-    }
-  }, [handleAuthRedirect]);
 
   useEffect(() => {
     let urlListener: any = null;
 
     const setupListeners = async () => {
-      urlListener = await CapacitorApp.addListener('appUrlOpen', (event: any) => {
-        handleAuthRedirect(event.url);
-      });
+      // Só escutamos links externos no celular
+      if (Capacitor.isNativePlatform()) {
+        urlListener = await CapacitorApp.addListener('appUrlOpen', (event: any) => {
+          handleAuthRedirect(event.url);
+        });
 
-      const launchUrl = await CapacitorApp.getLaunchUrl();
-      if (launchUrl?.url) {
-        handleAuthRedirect(launchUrl.url);
+        const launchUrl = await CapacitorApp.getLaunchUrl();
+        if (launchUrl?.url) {
+          handleAuthRedirect(launchUrl.url);
+        }
       }
     };
 
     setupListeners();
 
     const iosHandler = (event: any) => handleAuthRedirect(event.detail);
-    window.addEventListener('iosDeepLink', iosHandler);
+    if (Capacitor.isNativePlatform()) {
+       window.addEventListener('iosDeepLink', iosHandler);
+    }
 
     return () => {
       if (urlListener) urlListener.remove();
@@ -240,6 +207,14 @@ const AppContent = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("🔔 Auth Event:", event);
       setSession(session);
+      
+      // Se acabou de logar na Web e ainda está no /login, redireciona suavemente
+      if (event === 'SIGNED_IN' && !Capacitor.isNativePlatform()) {
+         if (window.location.pathname === '/login' || window.location.pathname === '/') {
+            navigate("/home", { replace: true });
+         }
+      }
+
       if (event === 'SIGNED_OUT') {
         setSession(null);
         navigate("/login", { replace: true });
@@ -275,7 +250,6 @@ const AppContent = () => {
   const isRootPath = currentPath === '/' || currentPath === '/index.html';
   const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
 
-  // ✅ LOADER DE INICIALIZAÇÃO: Evita telas pretas ou brancas vazias
   if (initializing) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#1A0B00]">

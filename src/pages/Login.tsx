@@ -236,7 +236,7 @@ const Login = () => {
       localStorage.setItem("manual_login_intent", "true");
 
       const isNative = Capacitor.isNativePlatform();
-      const redirectTo = isNative ? 'com.chamo.app://' : `${window.location.origin}`;
+      const redirectTo = isNative ? 'com.chamo.app://' : `${window.location.origin}/login`;
 
       console.log(`🚀 [LOGIN] 2. Solicitando URL ao Supabase para redirect: ${redirectTo}`);
 

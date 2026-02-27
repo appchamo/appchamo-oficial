@@ -99,19 +99,18 @@ const AppContent = () => {
   const navigate = useNavigate();
 
   const handleAuthRedirect = useCallback(async (urlStr: string) => {
-    // ✅ REGRA DE OURO: Na Web, o Supabase já faz a leitura da URL sozinho.
-    // Executar isso na Web causa loop infinito. Limitamos apenas para Mobile.
+    // 🛑 REGRA DE OURO: Interrompe a função se for Web. 
+    // Na Web o Supabase já processa a URL sozinho. Isso evita conflito.
     if (!Capacitor.isNativePlatform()) return;
 
     if (!urlStr || !isAuthUrl(urlStr)) return;
     
     let fixedUrl = urlStr.replace('#', '?');
+    
     if (globalLastUrl === fixedUrl) return;
     globalLastUrl = fixedUrl; 
 
     try {
-      console.log("🚀 Processando Deep Link Mobile:", fixedUrl);
-
       setTimeout(async () => {
         await Browser.close().catch(() => {});
       }, 500);
@@ -134,7 +133,6 @@ const AppContent = () => {
         
         if (data.session) {
           setSession(data.session);
-          localStorage.removeItem("manual_login_intent");
           setTimeout(() => navigate("/home", { replace: true }), 200);
         }
       } else if (accessToken && refreshToken) {
@@ -145,12 +143,11 @@ const AppContent = () => {
 
         if (!error && data.session) {
           setSession(data.session);
-          localStorage.removeItem("manual_login_intent");
           setTimeout(() => navigate("/home", { replace: true }), 200);
         }
       }
     } catch (err) {
-      console.error('💥 Erro fatal no Deep Link:', err);
+      console.error('💥 Erro no Deep Link Mobile:', err);
       navigate("/login", { replace: true });
     }
   }, [navigate]);
@@ -159,7 +156,7 @@ const AppContent = () => {
     let urlListener: any = null;
 
     const setupListeners = async () => {
-      // Só escutamos links externos no celular
+      // ✅ Deep Links nativos só escutam no celular
       if (Capacitor.isNativePlatform()) {
         urlListener = await CapacitorApp.addListener('appUrlOpen', (event: any) => {
           handleAuthRedirect(event.url);
@@ -190,6 +187,12 @@ const AppContent = () => {
       try {
         const { data: { session: currentSession } } = await supabase.auth.getSession();
         setSession(currentSession);
+        
+        // ✅ REDIRECIONAMENTO SEGURO: Atraso evita o loop infinito da tela branca
+        if (currentSession && (window.location.pathname === '/login' || window.location.pathname === '/')) {
+           setTimeout(() => navigate("/home", { replace: true }), 150);
+        }
+
       } catch (err) {
         console.error("Erro ao verificar sessão inicial:", err);
       } finally {
@@ -205,13 +208,12 @@ const AppContent = () => {
     checkSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("🔔 Auth Event:", event);
       setSession(session);
       
-      // Se acabou de logar na Web e ainda está no /login, redireciona suavemente
-      if (event === 'SIGNED_IN' && !Capacitor.isNativePlatform()) {
+      // ✅ Quando o Supabase terminar de logar na Web, ele vem para cá sem travar
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
          if (window.location.pathname === '/login' || window.location.pathname === '/') {
-            navigate("/home", { replace: true });
+            setTimeout(() => navigate("/home", { replace: true }), 150);
          }
       }
 
@@ -330,9 +332,10 @@ const AppContent = () => {
   return (
     <AuthProvider>
       <BackButtonHandler />
+      {/* ✅ As rotas voltaram ao normal. Sem o Navigate brigando com o ProtectedRoute */}
       <Routes>
-        <Route path="/" element={session ? <Navigate to="/home" replace /> : <Index />} />
-        <Route path="/login" element={session ? <Navigate to="/home" replace /> : <Login />} />
+        <Route path="/" element={<Index />} />
+        <Route path="/login" element={<Login />} />
         
         <Route path="/signup" element={<Signup />} />
         <Route path="/complete-signup" element={<Signup />} />

@@ -171,17 +171,46 @@ const Login = () => {
     });
 
     const checkExistingSession = async () => {
-      // ✅ Removida a trava do manual_login_intent que impedia a leitura do token do Google
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         await checkDeviceLimitAndRedirect(session.user.id);
       }
     };
     
-    checkExistingSession();
+    // ✅ NOVA MÁGICA: Força a leitura do "Ticket" do Google na URL
+    const processAuthCallback = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+
+      if (code) {
+        setLoading(true); // Trava a tela em "Entrando..." para dar feedback visual
+        try {
+          console.log("🚀 Código encontrado na URL! Trocando pela sessão...");
+          // Troca o código pela sessão real no Supabase
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          
+          if (error) throw error;
+
+          // Limpa a URL para sumir com o "?code=" e deixar a barra de endereços limpa
+          window.history.replaceState({}, document.title, window.location.pathname);
+
+          if (data.session?.user) {
+            await checkDeviceLimitAndRedirect(data.session.user.id);
+          }
+        } catch (err: any) {
+          console.error("💥 Erro ao processar retorno do Google:", err);
+          toast({ title: "Erro no login", description: "Falha ao validar o código.", variant: "destructive" });
+          setLoading(false);
+        }
+      } else {
+        // Se não tem código na URL, faz a verificação normal de sessão
+        checkExistingSession();
+      }
+    };
+
+    processAuthCallback();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      // ✅ Adicionado INITIAL_SESSION para capturar o exato momento que o Supabase lê a URL
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
         checkDeviceLimitAndRedirect(session.user.id);
       }

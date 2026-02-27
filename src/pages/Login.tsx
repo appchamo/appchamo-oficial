@@ -226,7 +226,6 @@ const Login = () => {
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
-    console.log(`🚀 [LOGIN] 1. Botão clicado: ${provider}`);
     setLoading(true);
 
     try {
@@ -234,47 +233,43 @@ const Login = () => {
       localStorage.setItem("manual_login_intent", "true");
 
       const isNative = Capacitor.isNativePlatform();
-      // ✅ Alterado o destino final para /login para o arquivo poder ler o código da URL
-      const redirectTo = isNative ? 'com.chamo.app://' : `${window.location.origin}/login`;
 
-      console.log(`🚀 [LOGIN] 2. Solicitando URL ao Supabase para redirect: ${redirectTo}`);
+      if (isNative) {
+        // 📱 REGRA DO CELULAR (APP NATIVO)
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo: 'com.chamo.app://',
+            skipBrowserRedirect: true, // O App precisa disso para abrir no Browser.open
+            queryParams: { prompt: 'select_account' },
+          }
+        });
+        
+        if (error) throw error;
+        if (data?.url) await Browser.open({ url: data.url });
+        setLoading(false); // Libera o botão no app
 
-      const { data, error } = await supabase.auth.signInWithOAuth({ 
-        provider,
-        options: {
-          redirectTo: redirectTo,
-          skipBrowserRedirect: true, 
-          queryParams: { prompt: 'select_account' },
-        }
-      });
-      
-      console.log(`🚀 [LOGIN] 3. Resposta do Supabase:`, data, error);
-
-      if (error) {
-        throw error;
-      }
-
-      if (data?.url) {
-        console.log(`🚀 [LOGIN] 4. Abrindo navegador nativo com a URL:`, data.url);
-        if (isNative) {
-          await Browser.open({ url: data.url });
-          console.log(`🚀 [LOGIN] 5. Navegador aberto com sucesso!`);
-        } else {
-          window.location.href = data.url; 
-        }
       } else {
-        throw new Error("O Supabase não retornou nenhuma URL de login.");
+        // 💻 REGRA DA WEB (NAVEGADOR)
+        const redirectTo = `${window.location.origin}/login`;
+        
+        // Na web, NÃO usamos skipBrowserRedirect. Deixamos o Supabase fazer a mágica automática para o PKCE funcionar.
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo,
+            queryParams: { prompt: 'select_account' },
+          }
+        });
+
+        if (error) throw error;
+        // Não removemos o setLoading(false) aqui porque a página vai redirecionar automaticamente
       }
 
     } catch (err: any) {
-      console.error("💥 [LOGIN] ERRO FATAL CAPTURADO:", err);
+      console.error("💥 [LOGIN] ERRO CAPTURADO:", err);
       localStorage.removeItem("manual_login_intent");
-      toast({ 
-        title: "Erro interno", 
-        description: err.message || "Falha ao iniciar o login.", 
-        variant: "destructive" 
-      });
-    } finally {
+      toast({ title: "Erro ao logar", description: err.message, variant: "destructive" });
       setLoading(false);
     }
   };

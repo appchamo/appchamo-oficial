@@ -91,7 +91,7 @@ const BackButtonHandler = () => {
   return null;
 };
 
-// ✅ VARIÁVEL GLOBAL: Fica fora do ciclo de vida do React para nunca perder o valor e bloquear o loop
+// ✅ VARIÁVEL GLOBAL
 let globalLastUrl = "";
 
 const AppContent = () => {
@@ -102,7 +102,6 @@ const AppContent = () => {
   const handleAuthRedirect = useCallback(async (urlStr: string) => {
     if (!urlStr || !isAuthUrl(urlStr)) return;
     
-    // ✅ TRAVA DE SEGURANÇA: Se já processamos essa URL exata, ignora na hora e aborta o loop!
     if (globalLastUrl === urlStr) return;
     globalLastUrl = urlStr; 
 
@@ -237,7 +236,8 @@ const AppContent = () => {
   const isRootPath = currentPath === '/' || currentPath === '/index.html';
   const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
 
-  // 1. REGRA DA LANDING PAGE: Se estiver na raiz da web, mostra a página promocional instantaneamente
+  if (initializing && !isWeb) return null;
+
   if (isWeb && isRootPath && !isWebBypassed) {
     return (
       <div 
@@ -312,21 +312,14 @@ const AppContent = () => {
     );
   }
 
-  // ✅ 2. TRAVA ANTI-LOOP: Bloqueia a renderização das rotas até o Supabase confirmar se o usuário tem ou não sessão
-  if (initializing) {
-    return (
-      <div className="min-h-[100dvh] flex items-center justify-center bg-background">
-         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
   return (
     <AuthProvider>
       <BackButtonHandler />
       <Routes>
-        <Route path="/" element={session ? <Navigate to="/home" /> : <Index />} />
-        <Route path="/login" element={!session ? <Login /> : <Navigate to="/home" />} />
+        {/* ✅ A MÁGICA FOI AQUI: Removemos os Navigates agressivos */}
+        <Route path="/" element={<Index />} />
+        <Route path="/login" element={<Login />} />
+        
         <Route path="/signup" element={<Signup />} />
         <Route path="/complete-signup" element={<Signup />} />
         <Route path="/reset-password" element={<ResetPassword />} />

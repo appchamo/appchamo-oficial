@@ -77,7 +77,6 @@ const Login = () => {
 
   const proceedToRedirect = async (userId: string) => {
     try {
-      // 1. Busca os papéis (roles) do usuário primeiro
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
@@ -87,16 +86,15 @@ const Login = () => {
         ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
       );
 
-      // ✅ REGRA DE OURO: Se for Admin, redireciona AGORA e ignora o resto
       if (isAdmin) {
         console.log("⚡ [LOGIN] Admin detectado, ignorando verificação de perfil.");
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        window.location.href = "/admin"; // Forçamos o reload para limpar o contexto
+        // ✅ CORREÇÃO: Usando navigate em vez de window.location.href para não dar reload brutal
+        navigate("/admin", { replace: true });
         return;
       }
 
-      // 2. Só se NÃO for admin, buscamos o perfil para ver se está completo
       const { data: profile } = await supabase
         .from("profiles")
         .select("*")
@@ -107,14 +105,15 @@ const Login = () => {
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
-        window.location.href = "/signup";
+        // ✅ CORREÇÃO
+        navigate("/signup", { replace: true });
         return;
       }
 
-      // Usuário comum com perfil completo
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
-      window.location.href = "/home";
+      // ✅ CORREÇÃO: Isso evita o loop da tela branca!
+      navigate("/home", { replace: true });
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
@@ -163,41 +162,35 @@ const Login = () => {
     setForgotLoading(false);
   };
 
+  // ✅ CORREÇÃO 1: Isolamos a busca do background com colchetes [] para rodar UMA ÚNICA VEZ
   useEffect(() => {
-    supabase.
-    from("platform_settings").
-    select("value").
-    eq("key", "login_bg_url").
-    maybeSingle().
-    then(({ data }) => {
-      if (data?.value) {
-        const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value).replace(/^"|"$/g, "");
-        if (val) setBgUrl(val);
-      }
-    });
+    supabase
+      .from("platform_settings")
+      .select("value")
+      .eq("key", "login_bg_url")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) {
+          const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value).replace(/^"|"$/g, "");
+          if (val) setBgUrl(val);
+        }
+      });
+  }, []); // <-- O segredo contra o loop estava aqui
 
-    const checkExistingSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        await checkDeviceLimitAndRedirect(session.user.id);
-      }
-    };
-    
-    // ✅ NOVA MÁGICA: Força a leitura do "Ticket" do Google na URL
+  // ✅ CORREÇÃO 2: Verificação de sessão separada
+  useEffect(() => {
     const processAuthCallback = async () => {
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
 
       if (code) {
-        setLoading(true); // Trava a tela em "Entrando..." para dar feedback visual
+        setLoading(true); 
         try {
           console.log("🚀 Código encontrado na URL! Trocando pela sessão...");
-          // Troca o código pela sessão real no Supabase
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           
           if (error) throw error;
 
-          // Limpa a URL para sumir com o "?code=" e deixar a barra de endereços limpa
           window.history.replaceState({}, document.title, window.location.pathname);
 
           if (data.session?.user) {
@@ -208,15 +201,13 @@ const Login = () => {
           toast({ title: "Erro no login", description: "Falha ao validar o código.", variant: "destructive" });
           setLoading(false);
         }
-      } else {
-        // Se não tem código na URL, faz a verificação normal de sessão
-        checkExistingSession();
       }
     };
 
     processAuthCallback();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      // INITIAL_SESSION já cuida de pegar a sessão que estava salva no navegador
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
@@ -270,25 +261,22 @@ const Login = () => {
       const isNative = Capacitor.isNativePlatform();
 
       if (isNative) {
-        // 📱 REGRA DO CELULAR (APP NATIVO)
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {
             redirectTo: 'com.chamo.app://',
-            skipBrowserRedirect: true, // O App precisa disso para abrir no Browser.open
+            skipBrowserRedirect: true, 
             queryParams: { prompt: 'select_account' },
           }
         });
         
         if (error) throw error;
         if (data?.url) await Browser.open({ url: data.url });
-        setLoading(false); // Libera o botão no app
+        setLoading(false); 
 
       } else {
-        // 💻 REGRA DA WEB (NAVEGADOR)
         const redirectTo = `${window.location.origin}/login`;
         
-        // Na web, NÃO usamos skipBrowserRedirect. Deixamos o Supabase fazer a mágica automática para o PKCE funcionar.
         const { error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {
@@ -298,7 +286,6 @@ const Login = () => {
         });
 
         if (error) throw error;
-        // Não removemos o setLoading(false) aqui porque a página vai redirecionar automaticamente
       }
 
     } catch (err: any) {

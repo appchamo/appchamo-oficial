@@ -237,8 +237,7 @@ const AppContent = () => {
   const isRootPath = currentPath === '/' || currentPath === '/index.html';
   const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
 
-  if (initializing && !isWeb) return null;
-
+  // 1. REGRA DA LANDING PAGE: Se estiver na raiz da web, mostra a página promocional instantaneamente
   if (isWeb && isRootPath && !isWebBypassed) {
     return (
       <div 
@@ -309,6 +308,15 @@ const AppContent = () => {
             </div>
           </div>
         </main>
+      </div>
+    );
+  }
+
+  // ✅ 2. TRAVA ANTI-LOOP: Bloqueia a renderização das rotas até o Supabase confirmar se o usuário tem ou não sessão
+  if (initializing) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center bg-background">
+         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }

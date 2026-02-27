@@ -33,7 +33,6 @@ const getDeviceId = () => {
 };
 
 const Login = () => {
-  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -90,8 +89,8 @@ const Login = () => {
         console.log("⚡ [LOGIN] Admin detectado, ignorando verificação de perfil.");
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        // ✅ CORREÇÃO: Usando navigate em vez de window.location.href para não dar reload brutal
-        navigate("/admin", { replace: true });
+        // ✅ BALA DE PRATA: replace mata o loop de ProtectedRoute imediatamente
+        window.location.replace("/admin"); 
         return;
       }
 
@@ -105,15 +104,14 @@ const Login = () => {
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
-        // ✅ CORREÇÃO
-        navigate("/signup", { replace: true });
+        window.location.replace("/signup");
         return;
       }
 
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
-      // ✅ CORREÇÃO: Isso evita o loop da tela branca!
-      navigate("/home", { replace: true });
+      // ✅ BALA DE PRATA 2: O App acorda logado de verdade.
+      window.location.replace("/home");
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
@@ -162,8 +160,8 @@ const Login = () => {
     setForgotLoading(false);
   };
 
-  // ✅ CORREÇÃO 1: Isolamos a busca do background com colchetes [] para rodar UMA ÚNICA VEZ
   useEffect(() => {
+    // 1. Busca a imagem UMA VEZ
     supabase
       .from("platform_settings")
       .select("value")
@@ -175,40 +173,17 @@ const Login = () => {
           if (val) setBgUrl(val);
         }
       });
-  }, []); // <-- O segredo contra o loop estava aqui
 
-  // ✅ CORREÇÃO 2: Verificação de sessão separada
-  useEffect(() => {
-    const processAuthCallback = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get("code");
-
-      if (code) {
-        setLoading(true); 
-        try {
-          console.log("🚀 Código encontrado na URL! Trocando pela sessão...");
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-          
-          if (error) throw error;
-
-          window.history.replaceState({}, document.title, window.location.pathname);
-
-          if (data.session?.user) {
-            await checkDeviceLimitAndRedirect(data.session.user.id);
-          }
-        } catch (err: any) {
-          console.error("💥 Erro ao processar retorno do Google:", err);
-          toast({ title: "Erro no login", description: "Falha ao validar o código.", variant: "destructive" });
-          setLoading(false);
-        }
+    // 2. Verifica se a sessão já existe na memória
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        checkDeviceLimitAndRedirect(session.user.id);
       }
-    };
+    });
 
-    processAuthCallback();
-
+    // 3. Fica ouvindo mudanças de Auth (Ideal para a volta do Google na Web)
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      // INITIAL_SESSION já cuida de pegar a sessão que estava salva no navegador
-      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
+      if (event === "SIGNED_IN" && session?.user) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
@@ -216,7 +191,7 @@ const Login = () => {
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, []); // ✅ Colchetes vazios GARANTEM que isso só roda 1 vez, nunca em loop!
 
   const handleResendEmail = async () => {
     if (!email) { toast({ title: "Digite seu e-mail acima." }); return; }

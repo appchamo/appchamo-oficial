@@ -81,7 +81,7 @@ const Login = () => {
         .from("profiles")
         .select("*")
         .eq("user_id", userId)
-        .maybeSingle(); // ✅ Alterado para maybeSingle para não travar em novos usuários
+        .maybeSingle();
 
       const { data: roles } = await supabase
         .from("user_roles")
@@ -95,7 +95,8 @@ const Login = () => {
       if (isAdmin) {
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        navigate("/admin");
+        // ✅ Força o recarregamento da página para sincronizar o contexto do App
+        window.location.href = "/admin";
         return;
       }
 
@@ -103,13 +104,16 @@ const Login = () => {
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
-        navigate("/signup");
+        // ✅ Força o recarregamento
+        window.location.href = "/signup";
         return;
       }
 
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
-      navigate("/home");
+      // ✅ A MÁGICA FINAL: Força a página a recarregar no /home com a sessão montada
+      window.location.href = "/home";
+      
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);

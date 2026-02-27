@@ -6,33 +6,27 @@ import { Capacitor } from '@capacitor/core';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// 🧠 ADAPTADOR NATIVO: Salva a sessão no "HD" do celular para não deslogar
-const capacitorStorage = {
-  getItem: async (key: string) => {
-    // No Capacitor, o retorno é um objeto { value: string | null }
-    const { value } = await Preferences.get({ key });
-    return value;
+// ✅ ADAPTADOR NATIVO CORRIGIDO: O Supabase exige que as funções retornem Promises
+const capacitorAuthStorage = {
+  getItem: (key: string) => {
+    return Preferences.get({ key }).then(result => result.value);
   },
-  setItem: async (key: string, value: string) => {
-    await Preferences.set({ key, value });
+  setItem: (key: string, value: string) => {
+    return Preferences.set({ key, value });
   },
-  removeItem: async (key: string) => {
-    await Preferences.remove({ key });
+  removeItem: (key: string) => {
+    return Preferences.remove({ key });
   },
 };
 
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
-
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    storage: Capacitor.isNativePlatform() ? (capacitorStorage as any) : localStorage,
+    // Se for iPhone/Android, usa o Preferences (HD do celular). Se for Web, usa LocalStorage.
+    storage: Capacitor.isNativePlatform() ? capacitorAuthStorage : localStorage,
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false, 
+    detectSessionInUrl: true, // ✅ Deixe true para capturar o login do Google
     flowType: 'pkce',
-    // ⬇️ ADICIONE ESTA LINHA ABAIXO
-    // Isso impede que o Supabase tente usar recursos de aba do navegador que não existem no app nativo
-    storageKey: 'sb-chamo-auth', 
+    storageKey: 'chamo-auth-token', // Nome estável para o arquivo de sessão
   }
 });

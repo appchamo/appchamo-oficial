@@ -5,11 +5,9 @@ const config: CapacitorConfig = {
   appName: 'Chamô',
   webDir: 'dist',
   server: {
-    // Mantemos HTTPS para segurança e compatibilidade com Supabase
     iosScheme: 'https', 
     hostname: 'app.chamo.com',
     androidScheme: 'https',
-    // Liberamos a navegação para o Supabase e Google para evitar o erro 102
     allowNavigation: [
       'wfxeiuqxzrlnvlopcrwd.supabase.co',
       '*.supabase.co',
@@ -21,22 +19,26 @@ const config: CapacitorConfig = {
       presentationOptions: ["badge", "sound", "alert"],
     },
     StatusBar: {
-      overlaysWebView: false,
-      style: 'LIGHT',
-      backgroundColor: '#ffffff'
+      // ✅ Deixamos o WebView gerenciar a cor para evitar barras estranhas no topo
+      overlaysWebView: true,
+      style: 'DEFAULT' 
     },
     SplashScreen: {
-      launchShowDuration: 3000,
-      launchAutoHide: false, 
-      backgroundColor: "#ffffff",
+      launchShowDuration: 2000,
+      launchAutoHide: true, 
+      // 🚨 IMPORTANTE: Removendo o backgroundColor fixo aqui para ele 
+      // não "atropelar" a configuração de Light/Dark nativa.
       androidScaleType: "CENTER_CROP",
       showSpinner: false,
+      androidSplashResourceName: "splash",
       splashFullScreen: true,
-      splashImmersive: true
+      splashImmersive: true,
+      // ✅ Permite que o fundo da splash acompanhe o tema do sistema
+      useDialog: false 
     },
     Keyboard: {
       resize: 'native',
-      style: 'LIGHT',
+      style: 'DEFAULT',
       resizeOnFullScreen: true
     }
   }

@@ -4,28 +4,37 @@ const config: CapacitorConfig = {
   appId: 'com.chamo.app',
   appName: 'Chamô',
   webDir: 'dist',
-  // ✅ Adicionado para estabilizar a origem e evitar o "flicker" (pisca-pisca)
   server: {
-    iosScheme: 'chamoapp',
+    // ✅ Alterado para 'https' para permitir que o Supabase salve cookies/sessão com segurança
+    iosScheme: 'https', 
     hostname: 'app.chamo.com',
     androidScheme: 'https',
-    allowNavigation: ['wfxeiuqxzrlnvlopcrwd.supabase.co']
+    // ✅ Adicionado o domínio do Supabase para garantir que o app tenha permissão de rede
+    allowNavigation: [
+      'wfxeiuqxzrlnvlopcrwd.supabase.co',
+      '*.supabase.co'
+    ]
   },
   plugins: {
     StatusBar: {
-      overlaysWebView: false, // ✅ OBRIGA a WebView a ficar abaixo da barra
+      overlaysWebView: false,
       style: 'LIGHT',
       backgroundColor: '#ffffff'
     },
-    // ✅ Adicionado para controlar a tela de abertura e evitar o fundo branco
     SplashScreen: {
       launchShowDuration: 3000,
-      launchAutoHide: false, // ✅ Deixa o React esconder quando estiver pronto
+      launchAutoHide: false, 
       backgroundColor: "#ffffff",
       androidScaleType: "CENTER_CROP",
       showSpinner: false,
       splashFullScreen: true,
       splashImmersive: true
+    },
+    // ✅ Adicionado para garantir que o teclado não quebre o layout no login
+    Keyboard: {
+      resize: 'native',
+      style: 'LIGHT',
+      resizeOnFullScreen: true
     }
   }
 };

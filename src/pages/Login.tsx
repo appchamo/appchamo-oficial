@@ -4,7 +4,7 @@ import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
-import { Capacitor } from "@capacitor/core"; // ✅ Adicionado para detecção perfeita do celular
+import { Capacitor } from "@capacitor/core"; 
 
 // 💥 Limpeza Nuclear disparada antes do carregamento
 if (localStorage.getItem("manual_login_intent") === "true") {
@@ -34,7 +34,6 @@ const friendlyError = (type: LoginError) => {
   return "Erro ao entrar. Tente novamente.";
 };
 
-// Gera ou recupera um ID único para este dispositivo/navegador
 const getDeviceId = () => {
   let deviceId = localStorage.getItem("chamo_device_id");
   if (!deviceId) {
@@ -55,16 +54,14 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   
-  // Estado para controlo do limite de aparelhos
   const [deviceLimitHit, setDeviceLimitHit] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
 
   const checkDeviceLimitAndRedirect = async (userId: string) => {
     try {
       const deviceId = getDeviceId();
-      const deviceName = navigator.userAgent.substring(0, 50); // Nome básico baseado no navegador
+      const deviceName = Capacitor.isNativePlatform() ? "iPhone App" : "Web Browser";
 
-      // 1. Chama a função do banco de dados para verificar e registar o aparelho
       const { data: canLogin, error: deviceError } = await supabase.rpc('check_device_limit', {
         p_user_id: userId,
         p_device_id: deviceId,
@@ -73,16 +70,13 @@ const Login = () => {
 
       if (deviceError) {
         console.error("Erro ao verificar aparelhos:", deviceError);
-        // Em caso de erro técnico na verificação, deixamos passar por segurança
         await proceedToRedirect(userId);
       } else if (canLogin === false) {
-        // Limite atingido! Parar fluxo de login.
         setDeviceLimitHit(true);
         setPendingUserId(userId);
         setLoading(false);
         return;
       } else {
-        // Se passou na verificação de aparelhos, prossegue com o login normal
         await proceedToRedirect(userId);
       }
 
@@ -137,7 +131,6 @@ const Login = () => {
     if (!pendingUserId) return;
     setLoading(true);
     
-    // Apaga os aparelhos registados (exceto o atual) para este utilizador
     const deviceId = getDeviceId();
     const { error } = await supabase
       .from("user_devices")
@@ -153,15 +146,13 @@ const Login = () => {
 
     toast({ title: "Aparelhos desligados com sucesso!" });
     setDeviceLimitHit(false);
-    
-    // Agora tenta logar novamente e regista este novo aparelho
     await checkDeviceLimitAndRedirect(pendingUserId);
   };
 
   const cancelDeviceLimit = async () => {
     setDeviceLimitHit(false);
     setPendingUserId(null);
-    await supabase.auth.signOut(); // Desloga do supabase
+    await supabase.auth.signOut();
     setLoading(false);
   };
 
@@ -196,10 +187,8 @@ const Login = () => {
       
       if (session?.user) {
         if (isManualIntent) {
-          console.log("Bloqueando redirecionamento porque o usuário veio do botão Entrar.");
           setLoading(false);
         } else {
-          // ✅ VERIFICA O LIMITE MESMO SE JÁ TIVER SESSÃO
           await checkDeviceLimitAndRedirect(session.user.id);
         }
       }
@@ -209,7 +198,6 @@ const Login = () => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-      // ✅ VERIFICA O LIMITE NO LOGIN AUTOMÁTICO (ex: após login social)
       if (event === "SIGNED_IN" && session?.user && !isManualIntent) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
@@ -235,12 +223,9 @@ const Login = () => {
     if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
     
-    localStorage.removeItem("manual_login_intent");
-    localStorage.removeItem("signup_in_progress");
-
-    await supabase.auth.signOut();
-
+    localStorage.setItem("manual_login_intent", "true"); // Indica que o usuário clicou no botão
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    
     if (error) {
       const type = getErrorType(error.message);
       setErrorType(type);
@@ -249,32 +234,30 @@ const Login = () => {
       return;
     }
     
-    // Inicia a verificação de limites
+    localStorage.removeItem("manual_login_intent");
     await checkDeviceLimitAndRedirect(data.user.id);
   };
 
-  // 🚀 FUNÇÃO CORRIGIDA COM CAPACITOR CORE
+  // ✅ FUNÇÃO AJUSTADA PARA EVITAR O ERRO DE "ENDEREÇO INVÁLIDO"
   const handleSocialLogin = async (provider: "google" | "apple") => {
     localStorage.removeItem("signup_in_progress");
     localStorage.removeItem("manual_login_intent");
-    await supabase.auth.signOut();
 
-    // O Capacitor Core diz exatamente se é um App Nativo ou não
     const isNative = Capacitor.isNativePlatform();
 
+    // No Nativo, usamos o esquema registrado no Xcode. 
+    // Removi o "-auth" para bater exatamente com o que o iPhone reconhece mais fácil.
     const redirectTo = isNative 
-      ? 'com.chamo.app://google-auth' 
+      ? 'com.chamo.app://' 
       : `${window.location.origin}/home`;
-
-    console.log(`Iniciando login ${provider}. Redirecionando para:`, redirectTo);
 
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider,
       options: {
         redirectTo: redirectTo,
+        skipBrowserRedirect: false,
         queryParams: {
           prompt: 'select_account',
-          access_type: 'offline',
         },
       }
     });
@@ -295,7 +278,6 @@ const Login = () => {
           </p>
         </div>
 
-        {/* MENSAGEM DE LIMITE ATINGIDO */}
         {deviceLimitHit ? (
           <div className="bg-card border border-destructive/20 rounded-2xl p-6 shadow-card space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex justify-center mb-2">
@@ -305,25 +287,13 @@ const Login = () => {
             </div>
             <h3 className="text-center font-bold text-foreground">Aparelhos a mais!</h3>
             <p className="text-sm text-center text-muted-foreground">
-              Você atingiu o limite de aparelhos conectados simultaneamente para o seu plano atual.
+              Limite atingido para o seu plano atual.
             </p>
-            <p className="text-xs text-center text-muted-foreground bg-muted p-2 rounded-lg">
-              Deseja desconectar todos os outros aparelhos e entrar apenas com este?
-            </p>
-            
             <div className="space-y-2 pt-2">
-              <button 
-                onClick={forceDisconnectOtherDevices} 
-                disabled={loading}
-                className="w-full py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 transition-colors"
-              >
-                {loading ? "Desconectando..." : "Desconectar outros aparelhos"}
+              <button onClick={forceDisconnectOtherDevices} disabled={loading} className="w-full py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 transition-colors">
+                {loading ? "Desconectando..." : "Desconectar outros e entrar"}
               </button>
-              <button 
-                onClick={cancelDeviceLimit}
-                disabled={loading}
-                className="w-full py-2.5 rounded-xl border border-border text-foreground font-semibold text-sm hover:bg-muted transition-colors"
-              >
+              <button onClick={cancelDeviceLimit} disabled={loading} className="w-full py-2.5 rounded-xl border border-border text-foreground font-semibold text-sm hover:bg-muted transition-colors">
                 Cancelar
               </button>
             </div>
@@ -365,7 +335,7 @@ const Login = () => {
                   <button type="button" onClick={handleResendEmail} disabled={resending}
                     className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
                     <RefreshCw className={`w-3.5 h-3.5 ${resending ? "animate-spin" : ""}`} />
-                    {resending ? "Reenviando..." : "Reenviar e-mail de verificação"}
+                    {resending ? "Reenviando..." : "Reenviar e-mail"}
                   </button>
                 </div>
               )}
@@ -385,11 +355,7 @@ const Login = () => {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => handleSocialLogin("google")}
-                className="flex items-center justify-center gap-2 border rounded-xl py-2.5 text-sm font-medium hover:bg-muted transition-colors"
-              >
+              <button type="button" onClick={() => handleSocialLogin("google")} className="flex items-center justify-center gap-2 border rounded-xl py-2.5 text-sm font-medium hover:bg-muted transition-colors">
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                   <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -398,11 +364,7 @@ const Login = () => {
                 </svg>
                 Google
               </button>
-              <button
-                type="button"
-                onClick={() => handleSocialLogin("apple")}
-                className="flex items-center justify-center gap-2 border rounded-xl py-2.5 text-sm font-medium hover:bg-muted transition-colors"
-              >
+              <button type="button" onClick={() => handleSocialLogin("apple")} className="flex items-center justify-center gap-2 border rounded-xl py-2.5 text-sm font-medium hover:bg-muted transition-colors">
                 <svg className="w-4 h-4 text-foreground" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.248-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.67.91-1.377 0-2.332-1.26-3.428-2.8-1.287-1.82-2.323-4.63-2.323-7.28 0-4.28 2.797-6.55 5.552-6.55 1.448 0 2.67.95 3.6.95.865 0 2.222-1.01 3.902-1.01.61 0 2.886.06 4.012 1.81-2.277 1.39-2.56 4.22-1.48 5.81 1.08 1.59 2.51 2.05 2.414 2.12z" />
                 </svg>
@@ -415,11 +377,9 @@ const Login = () => {
         {!deviceLimitHit && (
           <>
             <p className="text-center text-xs text-muted-foreground mt-4">
-              Não tem conta?{" "}
-              <Link to="/signup" className="text-primary font-medium hover:underline">Criar conta</Link>
+              Não tem conta? <Link to="/signup" className="text-primary font-medium hover:underline">Criar conta</Link>
             </p>
-            <button type="button" onClick={() => setForgotMode(!forgotMode)}
-              className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
+            <button type="button" onClick={() => setForgotMode(!forgotMode)} className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
               {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}
             </button>
           </>

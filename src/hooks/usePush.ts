@@ -27,15 +27,29 @@ export const usePush = (userId?: string) => {
 
           // Salva no Supabase atrelado ao usuário
           if (token) {
-            const { error } = await supabase.from('user_devices').upsert({
-              user_id: userId,
-              device_id: localStorage.getItem("chamo_device_id") || await Capacitor.getId(),
-              push_token: token,
-              device_name: Capacitor.getPlatform()
-            }, { onConflict: 'device_id' });
+            // Pegamos o Device ID consistente com o resto do app
+            const deviceId = localStorage.getItem("chamo_device_id");
+            const deviceName = Capacitor.getPlatform() === 'ios' ? 'iPhone' : 'Android';
+
+            console.log('☁️ [Push] Tentando salvar token para o dispositivo:', deviceId);
+
+            const { error } = await supabase.from('user_devices').upsert(
+              {
+                user_id: userId,
+                device_id: deviceId,
+                push_token: token,
+                device_name: deviceName,
+                last_active: new Date().toISOString()
+              }, 
+              { 
+                // 🚨 CORREÇÃO VITAL: O conflito deve ser baseado nas duas colunas
+                // para bater com a regra de unicidade do banco de dados
+                onConflict: 'user_id,device_id' 
+              }
+            );
 
             if (error) {
-              console.error('💥 [Push] Erro ao salvar token no banco:', error);
+              console.error('💥 [Push] Erro ao salvar token no banco:', error.message);
             } else {
               console.log('☁️ [Push] Token salvo com sucesso no banco de dados!');
             }
@@ -50,8 +64,7 @@ export const usePush = (userId?: string) => {
       }
     };
 
-    // Atraso intencional de 2 segundos para dar tempo do app carregar a tela Home
-    // e o iOS não bugar a caixa de permissão.
+    // Atraso de 2 segundos para estabilidade
     const timer = setTimeout(() => {
       setupPush();
     }, 2000);

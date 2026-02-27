@@ -77,12 +77,7 @@ const Login = () => {
 
   const proceedToRedirect = async (userId: string) => {
     try {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
-
+      // 1. Busca os papéis (roles) do usuário primeiro
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
@@ -92,26 +87,33 @@ const Login = () => {
         ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
       );
 
+      // ✅ REGRA DE OURO: Se for Admin, redireciona AGORA e ignora o resto
       if (isAdmin) {
+        console.log("⚡ [LOGIN] Admin detectado, ignorando verificação de perfil.");
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        // ✅ Força o recarregamento da página para sincronizar o contexto do App
-        window.location.href = "/admin";
+        window.location.href = "/admin"; // Forçamos o reload para limpar o contexto
         return;
       }
+
+      // 2. Só se NÃO for admin, buscamos o perfil para ver se está completo
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
 
       const isProfileIncomplete = !profile || (!profile.cpf && !profile.phone);
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
-        // ✅ Força o recarregamento
         window.location.href = "/signup";
         return;
       }
 
+      // Usuário comum com perfil completo
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
-      // ✅ A MÁGICA FINAL: Força a página a recarregar no /home com a sessão montada
       window.location.href = "/home";
       
     } catch (err) {

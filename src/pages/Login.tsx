@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -86,11 +86,9 @@ const Login = () => {
       );
 
       if (isAdmin) {
-        console.log("⚡ [LOGIN] Admin detectado, ignorando verificação de perfil.");
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        // ✅ BALA DE PRATA: replace mata o loop de ProtectedRoute imediatamente
-        window.location.replace("/admin"); 
+        window.location.href = "/admin"; 
         return;
       }
 
@@ -104,14 +102,16 @@ const Login = () => {
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
-        window.location.replace("/signup");
+        window.location.href = "/signup";
         return;
       }
 
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
-      // ✅ BALA DE PRATA 2: O App acorda logado de verdade.
-      window.location.replace("/home");
+      
+      // ✅ A MÁGICA FINAL: O Redirecionamento Bruto
+      // Isso força o navegador a dar um F5 na /home, destruindo o loop do React Router
+      window.location.href = "/home";
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
@@ -161,7 +161,7 @@ const Login = () => {
   };
 
   useEffect(() => {
-    // 1. Busca a imagem UMA VEZ
+    // 1. Apenas pega o fundo da tela (uma vez)
     supabase
       .from("platform_settings")
       .select("value")
@@ -174,16 +174,16 @@ const Login = () => {
         }
       });
 
-    // 2. Verifica se a sessão já existe na memória
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
+    // 2. Escuta mudanças na Web (O Supabase faz a leitura do Google nativamente)
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
-    // 3. Fica ouvindo mudanças de Auth (Ideal para a volta do Google na Web)
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
+    // 3. Checagem direta 
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
@@ -191,7 +191,7 @@ const Login = () => {
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, []); // ✅ Colchetes vazios GARANTEM que isso só roda 1 vez, nunca em loop!
+  }, []); // 🔒 Fechado à sete chaves para não repetir execução
 
   const handleResendEmail = async () => {
     if (!email) { toast({ title: "Digite seu e-mail acima." }); return; }
@@ -233,9 +233,7 @@ const Login = () => {
       localStorage.removeItem("signup_in_progress");
       localStorage.setItem("manual_login_intent", "true");
 
-      const isNative = Capacitor.isNativePlatform();
-
-      if (isNative) {
+      if (Capacitor.isNativePlatform()) {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {

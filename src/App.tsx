@@ -100,20 +100,27 @@ const AppContent = () => {
 
   const handleAuthRedirect = useCallback(async (urlStr: string) => {
     if (!urlStr || !isAuthUrl(urlStr)) return;
-    if (globalLastUrl === urlStr) return;
-    globalLastUrl = urlStr; 
+    
+    // ✅ AJUSTE PARA ANDROID/WEB: Converte fragmentos # em query ? para garantir a leitura dos tokens
+    let fixedUrl = urlStr.replace('#', '?');
+    
+    if (globalLastUrl === fixedUrl) return;
+    globalLastUrl = fixedUrl; 
 
     try {
+      console.log("🚀 Processando Deep Link / Auth Redirect:", fixedUrl);
+
+      // ✅ FECHA O NAVEGADOR: Essencial no Android para tirar a tela branca da frente
       if (Capacitor.isNativePlatform()) {
-        Browser.close().catch(() => {});
+        setTimeout(async () => {
+          await Browser.close().catch(() => {});
+        }, 500);
       }
 
-      let fixedUrl = urlStr;
       if (fixedUrl.startsWith('com.chamo.app:?')) {
         fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
       }
       
-      fixedUrl = fixedUrl.replace(/#/g, "?");
       const urlObj = new URL(fixedUrl);
       const params = new URLSearchParams(urlObj.search);
       
@@ -123,42 +130,88 @@ const AppContent = () => {
 
       if (code) {
         code = code.replace(/[^a-zA-Z0-9-]/g, '');
+        console.log("🔑 Trocando Auth Code por sessão...");
+        
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        
+        if (error) {
+          if (error.message.includes("PKCE") || error.message.includes("verifier")) {
+             console.log("⚠️ Código já foi utilizado, ignorando sem travar o app.");
+             return;
+          }
+          throw error;
+        }
+        
         if (data.session) {
+          console.log("✅ Sessão gerada com sucesso via Google!");
           setSession(data.session);
           localStorage.removeItem("manual_login_intent");
-          setTimeout(() => navigate("/home", { replace: true }), 150);
+          
+          // ✅ LIMPA A URL NA WEB PARA EVITAR BUGS SE O USUÁRIO RECARREGAR A PÁGINA
+          if (!Capacitor.isNativePlatform()) {
+             window.history.replaceState({}, document.title, "/home");
+          }
+          
+          setTimeout(() => navigate("/home", { replace: true }), 200);
         }
       } else if (accessToken && refreshToken) {
         const { data, error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
+
         if (!error && data.session) {
+          console.log("✅ Sessão validada!");
           setSession(data.session);
           localStorage.removeItem("manual_login_intent");
-          setTimeout(() => navigate("/home", { replace: true }), 150);
+          
+          if (!Capacitor.isNativePlatform()) {
+             window.history.replaceState({}, document.title, "/home");
+          }
+
+          setTimeout(() => navigate("/home", { replace: true }), 200);
         }
       }
     } catch (err) {
       console.error('💥 Erro fatal no Deep Link:', err);
+      // ✅ EVITA TELA BRANCA: Se algo der errado, volta pro login
+      navigate("/login", { replace: true });
     }
   }, [navigate]);
 
+  // ✅ NOVO LISTENER: Captura o redirecionamento do Google na versão WEB
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      const hash = window.location.hash;
+      const search = window.location.search;
+      
+      // Se a URL contiver um token de acesso ou código, chama a função de auth
+      if (hash.includes('access_token') || search.includes('code=')) {
+        console.log("🌐 Redirecionamento Auth Web detectado!");
+        handleAuthRedirect(window.location.href);
+      }
+    }
+  }, [handleAuthRedirect]);
+
   useEffect(() => {
     let urlListener: any = null;
+
     const setupListeners = async () => {
       urlListener = await CapacitorApp.addListener('appUrlOpen', (event: any) => {
         handleAuthRedirect(event.url);
       });
+
       const launchUrl = await CapacitorApp.getLaunchUrl();
       if (launchUrl?.url) {
         handleAuthRedirect(launchUrl.url);
       }
     };
+
     setupListeners();
+
     const iosHandler = (event: any) => handleAuthRedirect(event.detail);
     window.addEventListener('iosDeepLink', iosHandler);
+
     return () => {
       if (urlListener) urlListener.remove();
       window.removeEventListener('iosDeepLink', iosHandler);
@@ -168,15 +221,16 @@ const AppContent = () => {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        // Tenta pegar a sessão persistida no Preferences/HD
         const { data: { session: currentSession } } = await supabase.auth.getSession();
         setSession(currentSession);
       } catch (err) {
-        console.error("Erro ao recuperar sessão:", err);
+        console.error("Erro ao verificar sessão inicial:", err);
       } finally {
         setInitializing(false);
         if (Capacitor.isNativePlatform()) {
-          await SplashScreen.hide({ fadeOutDuration: 400 });
+          setTimeout(async () => {
+            await SplashScreen.hide({ fadeOutDuration: 400 });
+          }, 500);
         }
       }
     };
@@ -184,33 +238,52 @@ const AppContent = () => {
     checkSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("🔔 Auth Change:", event);
+      console.log("🔔 Auth Event:", event);
       setSession(session);
       if (event === 'SIGNED_OUT') {
         setSession(null);
+        navigate("/login", { replace: true });
       }
     });
 
     return () => { subscription.unsubscribe(); };
-  }, []);
+  }, [navigate]);
 
-  // Landing Page Logic
+  useEffect(() => {
+    const deviceId = localStorage.getItem("chamo_device_id");
+    if (!deviceId) return;
+
+    const channel = supabase
+      .channel('device_expulsion')
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'user_devices' },
+        async (payload) => {
+          if (payload.old?.device_id === deviceId) {
+            await supabase.auth.signOut();
+            localStorage.clear();
+            sessionStorage.clear();
+            alert("Sua sessão foi encerrada por conexão em outro dispositivo.");
+            navigate("/login?expelled=true");
+          }
+        }
+      ).subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [navigate]);
+
   const isWeb = Capacitor.getPlatform() === 'web';
   const currentPath = window.location.pathname;
   const isRootPath = currentPath === '/' || currentPath === '/index.html';
   const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
 
-  // 1. Prioridade: Se estiver carregando a sessão, mostra um loader elegante em vez de tela branca
+  // ✅ LOADER DE INICIALIZAÇÃO: Evita telas pretas ou brancas vazias
   if (initializing) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#1A0B00]">
         <Loader2 className="w-10 h-10 text-primary animate-spin" />
-        <p className="text-white/60 mt-4 text-sm font-medium">Carregando Chamô...</p>
       </div>
     );
   }
 
-  // 2. Landing Page para Web
   if (isWeb && isRootPath && !isWebBypassed && !session) {
     return (
       <div 
@@ -222,7 +295,9 @@ const AppContent = () => {
         }}
       >
         <div className="absolute inset-0 bg-gradient-to-r from-black/95 via-black/70 to-transparent"></div>
-        <header className="absolute top-0 left-0 right-0 z-20 container mx-auto p-6 flex justify-between items-center">
+        <div className="absolute inset-0 bg-black/20 md:hidden"></div>
+
+        <header className="absolute top-0 left-0 right-0 z-20 container mx-auto p-6 md:px-12 flex justify-between items-center">
           <div className="flex items-center gap-2">
              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg">
                 <span className="text-xl text-primary-foreground font-extrabold">C</span>
@@ -234,14 +309,41 @@ const AppContent = () => {
           </a>
         </header>
 
-        <main className="relative z-10 container mx-auto px-6 flex-1 flex flex-col justify-center max-w-7xl">
+        <main className="relative z-10 container mx-auto px-6 md:px-12 flex-1 flex flex-col justify-center mt-16 md:mt-0 max-w-7xl">
           <div className="max-w-2xl space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
             <h1 className="text-5xl md:text-7xl font-bold text-white leading-[1.1] tracking-tight">
               O profissional ideal,<br className="hidden md:block" />
               <span className="text-primary"> na palma da sua mão.</span>
             </h1>
+
+            <div className="space-y-4 pt-2">
+               <div className="flex items-center gap-3">
+                 <CheckCircle2 className="w-7 h-7 text-[#00E676] fill-[#00E676]/20" />
+                 <span className="text-white text-lg md:text-xl font-medium">Contrate, gerencie e pague com segurança</span>
+               </div>
+               <div className="flex items-center gap-3">
+                 <CheckCircle2 className="w-7 h-7 text-[#00E676] fill-[#00E676]/20" />
+                 <span className="text-white text-lg md:text-xl font-medium">O ecossistema mais completo do mercado</span>
+               </div>
+            </div>
+
+            <div className="border border-white/20 bg-black/40 backdrop-blur-md rounded-2xl p-5 w-fit shadow-2xl mt-4">
+              <p className="text-white text-sm font-medium mb-2">Seguro e confiável</p>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="flex text-yellow-400">
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
+                   <Star className="w-5 h-5 fill-current" />
+                </div>
+                <span className="text-white font-bold ml-1 text-lg">4.9</span>
+              </div>
+              <p className="text-white/70 text-sm mt-1">Baseado em +200.000 avaliações</p>
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-4 pt-6">
-              <a href="/login" className="flex items-center justify-center bg-white text-black px-8 py-4 rounded-2xl font-bold text-lg shadow-xl hover:bg-gray-100 transition-all">
+              <a href="/login" className="flex items-center justify-center gap-3 bg-white text-black px-10 py-4 rounded-2xl font-bold text-lg shadow-xl hover:bg-gray-100 transition-all">
                 Começar Agora
               </a>
             </div>
@@ -257,6 +359,7 @@ const AppContent = () => {
       <Routes>
         <Route path="/" element={session ? <Navigate to="/home" replace /> : <Index />} />
         <Route path="/login" element={session ? <Navigate to="/home" replace /> : <Login />} />
+        
         <Route path="/signup" element={<Signup />} />
         <Route path="/complete-signup" element={<Signup />} />
         <Route path="/reset-password" element={<ResetPassword />} />

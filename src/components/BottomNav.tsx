@@ -1,6 +1,6 @@
 import { Home, Search, MessageSquare, Bell, User } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 const tabs = [
@@ -15,100 +15,126 @@ const BottomNav = () => {
   const location = useLocation();
   const [badges, setBadges] = useState<{ chat: number; notifications: number }>({ chat: 0, notifications: 0 });
 
-  // Transformado em useCallback para ser chamado pelo Polling
+  // 🛡️ TRAVA DE DEBOUNCE: Impede que o Realtime crie loops de requisição
+  const isFetchingRef = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const fetchBadges = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    // Se já estiver buscando ou se estiver no cooldown de debounce, ignora
+    if (isFetchingRef.current) return;
 
-    // Unread notifications count
-    const { count: notifCount } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .eq("read", false);
+    try {
+      isFetchingRef.current = true;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    // Unread chat messages count
-    const { data: clientReqs } = await supabase
-      .from("service_requests")
-      .select("id")
-      .eq("client_id", user.id);
+      // 1. Unread notifications count
+      const { count: notifCount } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("read", false);
 
-    const { data: proData } = await supabase
-      .from("professionals")
-      .select("id")
-      .eq("user_id", user.id);
-
-    let proReqIds: string[] = [];
-    if (proData && proData.length > 0) {
-      const { data: proReqs } = await supabase
+      // 2. Unread chat messages count
+      const { data: clientReqs } = await supabase
         .from("service_requests")
         .select("id")
-        .in("professional_id", proData.map(p => p.id));
-      proReqIds = (proReqs || []).map(r => r.id);
-    }
+        .eq("client_id", user.id);
 
-    const allReqIds = [
-      ...new Set([
-        ...(clientReqs || []).map(r => r.id),
-        ...proReqIds,
-      ]),
-    ];
+      const { data: proData } = await supabase
+        .from("professionals")
+        .select("id")
+        .eq("user_id", user.id);
 
-    let totalUnread = 0;
-    if (allReqIds.length > 0) {
-      const { data: readStatuses } = await supabase
-        .from("chat_read_status")
-        .select("request_id, last_read_at, manual_unread")
-        .eq("user_id", user.id)
-        .in("request_id", allReqIds);
-
-      const readMap = new Map((readStatuses || []).map(rs => [rs.request_id, rs]));
-
-      for (const reqId of allReqIds) {
-        const statusData = readMap.get(reqId) || { last_read_at: null, manual_unread: false };
-        
-        // Se o usuário marcou manualmente como não lido na lista de chats, soma 1
-        if (statusData.manual_unread) {
-           totalUnread += 1;
-           continue;
-        }
-
-        let query = supabase
-          .from("chat_messages")
-          .select("*", { count: "exact", head: true })
-          .eq("request_id", reqId)
-          .neq("sender_id", user.id);
-
-        if (statusData.last_read_at) {
-          query = query.gt("created_at", statusData.last_read_at);
-        }
-
-        const { count } = await query;
-        totalUnread += count || 0;
+      let proReqIds: string[] = [];
+      if (proData && proData.length > 0) {
+        const { data: proReqs } = await supabase
+          .from("service_requests")
+          .select("id")
+          .in("professional_id", proData.map(p => p.id));
+        proReqIds = (proReqs || []).map(r => r.id);
       }
-    }
 
-    setBadges({ chat: totalUnread, notifications: notifCount || 0 });
+      const allReqIds = [
+        ...new Set([
+          ...(clientReqs || []).map(r => r.id),
+          ...proReqIds,
+        ]),
+      ];
+
+      let totalUnread = 0;
+      if (allReqIds.length > 0) {
+        const { data: readStatuses } = await supabase
+          .from("chat_read_status")
+          .select("request_id, last_read_at, manual_unread")
+          .eq("user_id", user.id)
+          .in("request_id", allReqIds);
+
+        const readMap = new Map((readStatuses || []).map(rs => [rs.request_id, rs]));
+
+        // Para evitar N+1 gigantesco se houver muitos chats, vamos rodar em paralelo os counts limitados
+        const promises = allReqIds.map(async (reqId) => {
+          const statusData = readMap.get(reqId) || { last_read_at: null, manual_unread: false };
+          
+          if (statusData.manual_unread) {
+             return 1;
+          }
+
+          let query = supabase
+            .from("chat_messages")
+            .select("*", { count: "exact", head: true })
+            .eq("request_id", reqId)
+            .neq("sender_id", user.id);
+
+          if (statusData.last_read_at) {
+            query = query.gt("created_at", statusData.last_read_at);
+          }
+
+          const { count } = await query;
+          return count || 0;
+        });
+
+        const counts = await Promise.all(promises);
+        totalUnread = counts.reduce((a, b) => a + b, 0);
+      }
+
+      setBadges({ chat: totalUnread, notifications: notifCount || 0 });
+    } catch (err) {
+      console.error("Erro no fetchBadges:", err);
+    } finally {
+      // Libera a trava base após 1 segundo para evitar re-render imediato
+      setTimeout(() => {
+        isFetchingRef.current = false;
+      }, 1000);
+    }
   }, []);
+
+  // 🛡️ Função wrapper para o Realtime (Debounce de 3 segundos)
+  const debouncedFetchBadges = useCallback(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      fetchBadges();
+    }, 3000); // Aguarda 3 segundos de "silêncio" no canal para buscar
+  }, [fetchBadges]);
 
   useEffect(() => {
     fetchBadges();
 
-    // 1. Realtime Subscriptions
+    // 1. Realtime Subscriptions usando o Debounce Wrapper
     const channel = supabase
       .channel("bottom-nav-badges")
-      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, () => { fetchBadges(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => { fetchBadges(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_read_status" }, () => { fetchBadges(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "service_requests" }, () => { fetchBadges(); }) // ✅ ADICIONADO: Ouve novas solicitações
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, debouncedFetchBadges)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, debouncedFetchBadges)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_read_status" }, debouncedFetchBadges)
+      .on("postgres_changes", { event: "*", schema: "public", table: "service_requests" }, debouncedFetchBadges)
       .subscribe();
 
-    // 2. BLINDAGEM: Polling Invisível a cada 8 segundos (Garante que nunca fique defasado)
+    // 2. BLINDAGEM: Polling Invisível a cada 15 segundos (Reduzido para salvar recursos)
     const pollingInterval = setInterval(() => {
       fetchBadges();
-    }, 8000);
+    }, 15000);
 
-    // 3. Sensor de Foco (Atualiza na hora que o usuário voltar de outro App/Aba)
+    // 3. Sensor de Foco
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         fetchBadges();
@@ -119,9 +145,10 @@ const BottomNav = () => {
     return () => {
       supabase.removeChannel(channel);
       clearInterval(pollingInterval);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [fetchBadges]);
+  }, [fetchBadges, debouncedFetchBadges]);
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t safe-area-bottom">

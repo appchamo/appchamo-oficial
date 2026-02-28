@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -33,6 +33,7 @@ const getDeviceId = () => {
 };
 
 const Login = () => {
+  const navigate = useNavigate(); // ✅ Restauramos o hook do React Router
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -88,7 +89,8 @@ const Login = () => {
       if (isAdmin) {
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        window.location.href = "/admin"; 
+        // ✅ Trocado de window.location.href para navigate (Mantém a ponte do iOS viva!)
+        navigate("/admin", { replace: true }); 
         return;
       }
 
@@ -102,16 +104,16 @@ const Login = () => {
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
-        window.location.href = "/signup";
+        // ✅ Trocado para navigate
+        navigate("/signup", { replace: true });
         return;
       }
 
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
       
-      // ✅ A MÁGICA FINAL: O Redirecionamento Bruto
-      // Isso força o navegador a dar um F5 na /home, destruindo o loop do React Router
-      window.location.href = "/home";
+      // ✅ Trocado para navigate (O Push vai voltar a funcionar agora!)
+      navigate("/home", { replace: true });
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);

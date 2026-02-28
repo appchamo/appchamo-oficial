@@ -96,23 +96,27 @@ let globalLastUrl = "";
 const AppContent = () => {
   const [session, setSession] = useState<any>(null);
   const [initializing, setInitializing] = useState(true);
+  const navigate = useNavigate(); // ✅ Adicionado para permitir o redirecionamento nativo suave
 
-  // Apenas para o Mobile Deep Link
   // Apenas para o Mobile Deep Link
   const handleAuthRedirect = useCallback(async (urlStr: string) => {
     if (!Capacitor.isNativePlatform()) return;
     if (!urlStr || !isAuthUrl(urlStr)) return;
     
+    // Tratamento essencial para o hash do Google virar querystring
     let fixedUrl = urlStr.replace('#', '?');
     if (globalLastUrl === fixedUrl) return;
+    
+    // Armazena a última URL tratada para evitar chamadas duplas imediatas pelo Capacitor
     globalLastUrl = fixedUrl; 
 
     try {
+      // Fecha a aba do navegador Safari/Chrome que ficou por cima do app
       setTimeout(async () => {
         await Browser.close().catch(() => {});
       }, 500);
 
-      // Correção do prefixo
+      // Padroniza a sintaxe do custom protocol
       if (fixedUrl.startsWith('com.chamo.app:?')) {
         fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
       }
@@ -120,31 +124,52 @@ const AppContent = () => {
       const urlObj = new URL(fixedUrl);
       const params = new URLSearchParams(urlObj.search);
       
+      let code = params.get('code');
       const accessToken = params.get('access_token');
       const refreshToken = params.get('refresh_token');
 
-      // Se for apenas o Code (Google/Apple nativo), não fazemos a troca manual aqui!
-      // Deixamos o Supabase.auth.onAuthStateChange capturar isso naturalmente.
-      if (params.get('code')) {
-          console.log("🚀 Deep link com código recebido. Deixando o Supabase resolver o PKCE.");
-          // Apenas limpamos a URL visualmente se possível, mas não forçamos recarga.
-          return;
+      // ✅ SE FOR O FLUXO NATIVO OAUTH (Google/Apple) com PKCE
+      if (code) {
+        // Remove lixo da string do código (hashes que vêm pendurados)
+        code = code.replace(/[^a-zA-Z0-9-]/g, '');
+        console.log("🚀 Consumindo código PKCE:", code);
+        
+        // Passamos a bola para o SDK do Supabase processar o código com o verifier salvo
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        
+        if (error) {
+             console.error("💥 Erro ao trocar código por sessão:", error.message);
+             // Se falhar silenciosamente (ex: código já usado), não travamos o app, 
+             // deixamos cair no catch e voltar para o login limpo.
+             throw error; 
+        }
+        
+        if (data.session) {
+          console.log("✅ Sessão gerada! Navegando para Home.");
+          setSession(data.session);
+          navigate("/home", { replace: true });
+        }
       } 
-      // Fallback para Links Mágicos / Recuperação de Senha velhos (que usam access_token direto)
+      // ✅ SE FOR FLUXO IMPLÍCITO (Magic Link, Recovery antigo)
       else if (accessToken && refreshToken) {
+        console.log("🚀 Definindo sessão por tokens implícitos.");
         const { data, error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
+        
         if (!error && data.session) {
           setSession(data.session);
-          window.location.href = "/home";
+          navigate("/home", { replace: true });
         }
       }
     } catch (err) {
-      console.error('💥 Erro no Deep Link Mobile:', err);
+      console.error('💥 Fallback de erro no Deep Link:', err);
+      // Se deu erro (o código sumiu, foi duplicado, etc), limpa a intenção e joga no login
+      localStorage.removeItem("manual_login_intent");
+      navigate("/login", { replace: true });
     }
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     let urlListener: any = null;
@@ -180,7 +205,6 @@ const AppContent = () => {
       try {
         const { data: { session: currentSession } } = await supabase.auth.getSession();
         setSession(currentSession);
-        // Removemos todos os "navigate" automáticos daqui para evitar briga com o ProtectedRoute
       } finally {
         setInitializing(false);
         if (Capacitor.isNativePlatform()) {

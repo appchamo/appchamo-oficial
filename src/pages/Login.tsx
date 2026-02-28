@@ -32,8 +32,11 @@ const getDeviceId = () => {
   return deviceId;
 };
 
+// 🛡️ TRAVA GLOBAL: Impede múltiplos redirecionamentos simultâneos
+let isRedirecting = false;
+
 const Login = () => {
-  const navigate = useNavigate(); // ✅ Restauramos o hook do React Router
+  const navigate = useNavigate(); 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -76,6 +79,10 @@ const Login = () => {
   };
 
   const proceedToRedirect = async (userId: string) => {
+    // 🛡️ SE JÁ ESTIVER INDO, ABORTA NOVAS TENTATIVAS PARA EVITAR LOOP
+    if (isRedirecting) return;
+    isRedirecting = true; 
+
     try {
       const { data: roles } = await supabase
         .from("user_roles")
@@ -89,7 +96,6 @@ const Login = () => {
       if (isAdmin) {
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        // ✅ Trocado de window.location.href para navigate (Mantém a ponte do iOS viva!)
         navigate("/admin", { replace: true }); 
         return;
       }
@@ -104,7 +110,6 @@ const Login = () => {
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
-        // ✅ Trocado para navigate
         navigate("/signup", { replace: true });
         return;
       }
@@ -112,12 +117,14 @@ const Login = () => {
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
       
-      // ✅ Trocado para navigate (O Push vai voltar a funcionar agora!)
+      // ✅ Redireciona com segurança
       navigate("/home", { replace: true });
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);
+      // Libera a trava caso dê erro e precise tentar de novo
+      isRedirecting = false; 
     }
   };
 
@@ -176,24 +183,26 @@ const Login = () => {
         }
       });
 
-    // 2. Escuta mudanças na Web (O Supabase faz a leitura do Google nativamente)
+    // 2. Escuta mudanças na Web e reage apenas se NÃO estiver no meio de um redirecionamento
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirecting) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
     // 3. Checagem direta 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
+      if (session?.user && !isRedirecting) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
+    // Ao sair da tela de login, garantimos que a trava resetou
     return () => {
       authListener.subscription.unsubscribe();
+      isRedirecting = false; 
     };
-  }, []); // 🔒 Fechado à sete chaves para não repetir execução
+  }, []);
 
   const handleResendEmail = async () => {
     if (!email) { toast({ title: "Digite seu e-mail acima." }); return; }
@@ -247,7 +256,7 @@ const Login = () => {
         
         if (error) throw error;
         if (data?.url) await Browser.open({ url: data.url });
-        setLoading(false); 
+        // Mantém loading em true para o usuário ver que algo está acontecendo
 
       } else {
         const redirectTo = `${window.location.origin}/login`;

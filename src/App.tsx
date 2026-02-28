@@ -6,12 +6,11 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom"; 
-import { AuthProvider } from "@/hooks/useAuth";
+import { AuthProvider, useAuth } from "@/hooks/useAuth"; // ✅ Importando useAuth
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
 import { Capacitor } from "@capacitor/core";
 import { CheckCircle2, Star, Loader2 } from "lucide-react";
-import { useDeepLink } from "@/hooks/useDeepLink"; // ✅ NOSSO NOVO HOOK!
 
 // Pages
 import Index from "./pages/Index";
@@ -88,65 +87,18 @@ const BackButtonHandler = () => {
 };
 
 const AppContent = () => {
-  const [session, setSession] = useState<any>(null);
-  const [initializing, setInitializing] = useState(true);
-  const navigate = useNavigate();
-
-  // ✅ Ativando a proteção de Deep Links de forma isolada!
-  useDeepLink();
+  const { session, loading } = useAuth(); // ✅ Agora pegamos a sessão do Provider centralizado
 
   useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-        setSession(currentSession);
-      } finally {
-        setInitializing(false);
-        if (Capacitor.isNativePlatform()) {
-          setTimeout(async () => {
-            await SplashScreen.hide({ fadeOutDuration: 400 });
-          }, 500);
-        }
-      }
-    };
+    // Esconde a Splash Screen assim que o useAuth terminar de carregar
+    if (!loading && Capacitor.isNativePlatform()) {
+      setTimeout(async () => {
+        await SplashScreen.hide({ fadeOutDuration: 400 });
+      }, 500);
+    }
+  }, [loading]);
 
-    checkSession();
-
-    // Mantém o App atualizado caso a sessão caia (Logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, currentSession) => {
-      setSession(currentSession);
-    });
-
-    return () => { subscription.unsubscribe(); };
-  }, []);
-
-  useEffect(() => {
-    const deviceId = localStorage.getItem("chamo_device_id");
-    if (!deviceId) return;
-
-    const channel = supabase
-      .channel('device_expulsion')
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'user_devices' },
-        async (payload) => {
-          if (payload.old?.device_id === deviceId) {
-            await supabase.auth.signOut();
-            localStorage.clear();
-            sessionStorage.clear();
-            alert("Sua sessão foi encerrada por conexão em outro dispositivo.");
-            navigate("/login?expelled=true");
-          }
-        }
-      ).subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [navigate]);
-
-  const isWeb = Capacitor.getPlatform() === 'web';
-  const currentPath = window.location.pathname;
-  const isRootPath = currentPath === '/' || currentPath === '/index.html';
-  const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
-
-  if (initializing) {
+  if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#1A0B00]">
         <Loader2 className="w-10 h-10 text-primary animate-spin" />
@@ -154,6 +106,12 @@ const AppContent = () => {
     );
   }
 
+  const isWeb = Capacitor.getPlatform() === 'web';
+  const currentPath = window.location.pathname;
+  const isRootPath = currentPath === '/' || currentPath === '/index.html';
+  const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
+
+  // Landing Page (Apenas Web e deslogado)
   if (isWeb && isRootPath && !isWebBypassed && !session) {
     return (
       <div 
@@ -224,7 +182,7 @@ const AppContent = () => {
   }
 
   return (
-    <AuthProvider>
+    <>
       <BackButtonHandler />
       <Routes>
         <Route path="/" element={<Index />} />
@@ -290,7 +248,7 @@ const AppContent = () => {
 
         <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
       </Routes>
-    </AuthProvider>
+    </>
   );
 };
 
@@ -301,7 +259,10 @@ const App = () => {
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <AppContent />
+          <AuthProvider>
+            <BackButtonHandler />
+            <AppContent />
+          </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>

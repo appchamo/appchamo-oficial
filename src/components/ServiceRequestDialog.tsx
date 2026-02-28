@@ -139,7 +139,7 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
         await supabase.from("notifications").insert({
           user_id: proRecord.user_id,
           title: "Novo serviço solicitado! 💬",
-          message: `Um cliente chamou você.${protocol ? ` Protocolo: ${protocol}` : ""}`,
+          message: `Um cliente chamou você."}`,
           type: "service_request",
           link: `/messages/${requestId}`,
         });

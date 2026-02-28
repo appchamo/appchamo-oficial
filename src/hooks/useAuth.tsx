@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
+import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Browser } from "@capacitor/browser";
 
 interface Profile {
   id: string;
@@ -52,6 +55,9 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
+// 🛡️ Trava master fora do componente para evitar processamento duplicado em re-renders
+let lastProcessedUrl = "";
+
 // 🚀 OTIMIZAÇÃO: Seleciona apenas campos essenciais para navegação rápida
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
@@ -78,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   
-  // 🚀 OTIMIZAÇÃO: Tenta carregar o perfil do LocalStorage para exibição instantânea (Cache)
+  // 🚀 OTIMIZAÇÃO: Cache do perfil
   const [profile, setProfile] = useState<Profile | null>(() => {
     const cached = localStorage.getItem("chamo_cached_profile");
     return cached ? JSON.parse(cached) : null;
@@ -116,8 +122,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 🚀 OTIMIZAÇÃO: Só busca do banco se não tivermos o perfil no estado 
-    // ou faz um "refresh silencioso" se já tivermos
     try {
       const userId = sess.user.id;
       const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
@@ -125,7 +129,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!isSignOutInProgress && p) {
         setProfile(p);
         setRoles(r);
-        // Salva no cache para a próxima vez que o app abrir ser instantâneo
         localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
         localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
       }
@@ -169,7 +172,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    // 3) Gestão de Deep Links (Apenas para Mobile) - NOVO AJUSTE
+    let urlListener: any = null;
+    if (Capacitor.isNativePlatform()) {
+      const handleUrl = async (urlStr: string) => {
+        // Bloqueia se for a mesma URL enviada em loop pelo iOS
+        if (!urlStr || urlStr === lastProcessedUrl) return;
+        if (!urlStr.includes('code=') && !urlStr.includes('access_token=')) return;
+
+        lastProcessedUrl = urlStr;
+        console.log("🚀 Deep Link processado no useAuth:", urlStr);
+
+        let fixedUrl = urlStr.replace('#', '?');
+        if (fixedUrl.startsWith('com.chamo.app:?')) {
+          fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
+        }
+
+        try {
+          const urlObj = new URL(fixedUrl);
+          const code = urlObj.searchParams.get('code');
+
+          if (code) {
+            // Fecha o navegador nativo (Safari) para o usuário voltar ao app
+            await Browser.close().catch(() => {});
+            
+            const cleanCode = code.replace(/[^a-zA-Z0-9-]/g, '');
+            const { data, error } = await supabase.auth.exchangeCodeForSession(cleanCode);
+            
+            if (error) {
+              console.error("Erro na troca PKCE:", error.message);
+            } else if (data.session) {
+              // Se o login der certo, desativa o modo manual e carrega os dados
+              localStorage.removeItem("manual_login_intent");
+              loadUserData(data.session);
+            }
+          }
+        } catch (e) {
+          console.error("Falha ao processar URL nativa:", e);
+        }
+      };
+
+      // Escuta URLs recebidas enquanto o app está aberto
+      urlListener = CapacitorApp.addListener('appUrlOpen', (data) => handleUrl(data.url));
+      
+      // Verifica se o app foi aberto "frio" por um link
+      CapacitorApp.getLaunchUrl().then(val => val?.url && handleUrl(val.url));
+    }
+
+    return () => {
+      subscription.unsubscribe();
+      if (urlListener) {
+        urlListener.then((l: any) => l.remove());
+      }
+    };
   }, [isSignOutInProgress]);
 
   const signOut = async () => {

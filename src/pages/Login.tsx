@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -32,7 +32,8 @@ const getDeviceId = () => {
   return deviceId;
 };
 
-let isRedirecting = false;
+// Variável de controle fora do componente para evitar loops de renderização
+let isRedirectingGlobal = false;
 
 const Login = () => {
   const navigate = useNavigate(); 
@@ -48,7 +49,13 @@ const Login = () => {
   const [deviceLimitHit, setDeviceLimitHit] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
 
+  // Ref para evitar que o checkDeviceLimit rode múltiplas vezes no mesmo ciclo
+  const isCheckingLimit = useRef(false);
+
   const checkDeviceLimitAndRedirect = async (userId: string) => {
+    if (isCheckingLimit.current || isRedirectingGlobal) return;
+    isCheckingLimit.current = true;
+
     try {
       const deviceId = getDeviceId();
       const deviceName = Capacitor.isNativePlatform() ? "iPhone App" : "Web Browser";
@@ -66,19 +73,20 @@ const Login = () => {
         setDeviceLimitHit(true);
         setPendingUserId(userId);
         setLoading(false);
-        return;
       } else {
         await proceedToRedirect(userId);
       }
     } catch (err) {
       console.error("Erro na verificação do dispositivo:", err);
+    } finally {
+      isCheckingLimit.current = false;
       setLoading(false);
     }
   };
 
   const proceedToRedirect = async (userId: string) => {
-    if (isRedirecting) return;
-    isRedirecting = true; 
+    if (isRedirectingGlobal) return;
+    isRedirectingGlobal = true; 
 
     try {
       const { data: roles } = await supabase
@@ -90,9 +98,11 @@ const Login = () => {
         ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
       );
 
+      // Limpa as flags de intenção antes de navegar
+      localStorage.removeItem("signup_in_progress");
+      localStorage.removeItem("manual_login_intent");
+
       if (isAdmin) {
-        localStorage.removeItem("signup_in_progress");
-        localStorage.removeItem("manual_login_intent");
         navigate("/admin", { replace: true }); 
         return;
       }
@@ -108,18 +118,13 @@ const Login = () => {
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
         navigate("/signup", { replace: true });
-        return;
+      } else {
+        navigate("/home", { replace: true });
       }
-
-      localStorage.removeItem("signup_in_progress"); 
-      localStorage.removeItem("manual_login_intent");
-      
-      navigate("/home", { replace: true });
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
-      setLoading(false);
-      isRedirecting = false; 
+      isRedirectingGlobal = false; 
     }
   };
 
@@ -165,6 +170,7 @@ const Login = () => {
   };
 
   useEffect(() => {
+    // Carrega BG apenas uma vez
     supabase
       .from("platform_settings")
       .select("value")
@@ -173,25 +179,27 @@ const Login = () => {
       .then(({ data }) => {
         if (data?.value) {
           const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value).replace(/^"|"$/g, "");
-          if (val) setBgUrl(val);
+          setBgUrl(val);
         }
       });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirecting) {
+      // Ignora INITIAL_SESSION na Web para evitar o loop de carregamento automático
+      if (event === "SIGNED_IN" && session?.user && !isRedirectingGlobal) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
+    // Só faz o check automático se não estivermos no meio de um redirecionamento
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user && !isRedirecting) {
+      if (session?.user && !isRedirectingGlobal) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
     return () => {
       authListener.subscription.unsubscribe();
-      isRedirecting = false; 
+      isRedirectingGlobal = false; 
     };
   }, []);
 
@@ -210,13 +218,12 @@ const Login = () => {
     if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
     
+    // Flag de intenção manual para o AuthProvider saber que não deve interferir
     localStorage.setItem("manual_login_intent", "true"); 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     
     if (error) {
-      console.log("💥 Erro no login, limpando dados residuais...");
       localStorage.removeItem("sb-wfxeiuqxzrlnvlopcrwd-auth-token");
-      
       const type = getErrorType(error.message);
       setErrorType(type);
       toast({ title: friendlyError(type), variant: "destructive" });
@@ -224,13 +231,13 @@ const Login = () => {
       return;
     }
     
-    localStorage.removeItem("manual_login_intent");
-    await checkDeviceLimitAndRedirect(data.user.id);
+    if (data?.user) {
+      await checkDeviceLimitAndRedirect(data.user.id);
+    }
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
     setLoading(true);
-
     try {
       localStorage.removeItem("signup_in_progress");
       localStorage.setItem("manual_login_intent", "true");
@@ -244,26 +251,19 @@ const Login = () => {
             queryParams: { prompt: 'select_account' },
           }
         });
-        
         if (error) throw error;
         if (data?.url) await Browser.open({ url: data.url });
-
       } else {
-        const redirectTo = `${window.location.origin}/login`;
-        
         const { error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {
-            redirectTo,
+            redirectTo: `${window.location.origin}/login`,
             queryParams: { prompt: 'select_account' },
           }
         });
-
         if (error) throw error;
       }
-
     } catch (err: any) {
-      console.error("💥 [LOGIN] ERRO CAPTURADO:", err);
       localStorage.removeItem("manual_login_intent");
       toast({ title: "Erro ao logar", description: err.message, variant: "destructive" });
       setLoading(false);

@@ -6,27 +6,49 @@ import { Capacitor } from '@capacitor/core';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// ✅ ADAPTADOR NATIVO CORRIGIDO: O Supabase exige que as funções retornem Promises
+const isNative = Capacitor.isNativePlatform();
+
+// 🛡️ ADAPTADOR NATIVO BLINDADO: Padrão oficial exigido pelo Supabase para Capacitor
 const capacitorAuthStorage = {
-  getItem: (key: string) => {
-    return Preferences.get({ key }).then(result => result.value);
+  getItem: async (key: string): Promise<string | null> => {
+    try {
+      const { value } = await Preferences.get({ key });
+      return value ?? null; // Supabase exige estritamente null se não existir (nunca undefined)
+    } catch (error) {
+      console.error("Erro ao ler sessão do disco:", error);
+      return null;
+    }
   },
-  setItem: (key: string, value: string) => {
-    return Preferences.set({ key, value });
+  setItem: async (key: string, value: string): Promise<void> => {
+    try {
+      await Preferences.set({ key, value });
+    } catch (error) {
+      console.error("Erro ao salvar sessão no disco:", error);
+    }
   },
-  removeItem: (key: string) => {
-    return Preferences.remove({ key });
+  removeItem: async (key: string): Promise<void> => {
+    try {
+      await Preferences.remove({ key });
+    } catch (error) {
+      console.error("Erro ao deletar sessão do disco:", error);
+    }
   },
 };
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    // Se for iPhone/Android, usa o Preferences (HD do celular). Se for Web, usa LocalStorage.
-    storage: Capacitor.isNativePlatform() ? capacitorAuthStorage : localStorage,
+    // Usa o HD do celular no Mobile e o LocalStorage normal na Web
+    storage: isNative ? capacitorAuthStorage : window.localStorage,
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true, // ✅ Deixe true para capturar o login do Google
+    
+    // 🚨 A MÁGICA ESTÁ AQUI: No Mobile DEVE ser false. 
+    // Se for true, o app lê a URL interna (capacitor://) ao abrir, acha que o login falhou e apaga a sessão salva!
+    detectSessionInUrl: !isNative, 
+    
     flowType: 'pkce',
-    storageKey: 'chamo-auth-token', // Nome estável para o arquivo de sessão
+    
+    // NOTA: Removi o "storageKey" customizado, pois às vezes ele gera conflito com os 
+    // ciclos de atualização internos do Supabase. O padrão é muito mais seguro.
   }
 });

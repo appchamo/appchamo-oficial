@@ -98,6 +98,7 @@ const AppContent = () => {
   const [initializing, setInitializing] = useState(true);
 
   // Apenas para o Mobile Deep Link
+  // Apenas para o Mobile Deep Link
   const handleAuthRedirect = useCallback(async (urlStr: string) => {
     if (!Capacitor.isNativePlatform()) return;
     if (!urlStr || !isAuthUrl(urlStr)) return;
@@ -111,6 +112,7 @@ const AppContent = () => {
         await Browser.close().catch(() => {});
       }, 500);
 
+      // Correção do prefixo
       if (fixedUrl.startsWith('com.chamo.app:?')) {
         fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
       }
@@ -118,19 +120,18 @@ const AppContent = () => {
       const urlObj = new URL(fixedUrl);
       const params = new URLSearchParams(urlObj.search);
       
-      let code = params.get('code');
       const accessToken = params.get('access_token');
       const refreshToken = params.get('refresh_token');
 
-      if (code) {
-        code = code.replace(/[^a-zA-Z0-9-]/g, '');
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) throw error;
-        if (data.session) {
-          setSession(data.session);
-          window.location.href = "/home";
-        }
-      } else if (accessToken && refreshToken) {
+      // Se for apenas o Code (Google/Apple nativo), não fazemos a troca manual aqui!
+      // Deixamos o Supabase.auth.onAuthStateChange capturar isso naturalmente.
+      if (params.get('code')) {
+          console.log("🚀 Deep link com código recebido. Deixando o Supabase resolver o PKCE.");
+          // Apenas limpamos a URL visualmente se possível, mas não forçamos recarga.
+          return;
+      } 
+      // Fallback para Links Mágicos / Recuperação de Senha velhos (que usam access_token direto)
+      else if (accessToken && refreshToken) {
         const { data, error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
@@ -142,7 +143,6 @@ const AppContent = () => {
       }
     } catch (err) {
       console.error('💥 Erro no Deep Link Mobile:', err);
-      window.location.href = "/login";
     }
   }, []);
 

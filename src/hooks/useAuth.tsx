@@ -55,10 +55,9 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-// 🛡️ Trava master fora do componente para evitar processamento duplicado em re-renders
+// 🛡️ Trava master fora do componente para evitar processamento duplicado
 let lastProcessedUrl = "";
 
-// 🚀 OTIMIZAÇÃO: Seleciona apenas campos essenciais para navegação rápida
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
     .from("profiles")
@@ -83,18 +82,14 @@ async function fetchRoles(userId: string) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  
-  // 🚀 OTIMIZAÇÃO: Cache do perfil
   const [profile, setProfile] = useState<Profile | null>(() => {
     const cached = localStorage.getItem("chamo_cached_profile");
     return cached ? JSON.parse(cached) : null;
   });
-
   const [roles, setRoles] = useState<AppRole[]>(() => {
     const cached = localStorage.getItem("chamo_cached_roles");
     return cached ? JSON.parse(cached) : [];
   });
-
   const [loading, setLoading] = useState(true);
   const [isSignOutInProgress, setIsSignOutInProgress] = useState(false);
 
@@ -103,12 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [roles]);
 
   const loadUserData = async (sess: Session | null) => {
-    const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-    
-    if (isSignOutInProgress || isManualIntent) {
-      setLoading(false);
-      return;
-    }
+    if (isSignOutInProgress) return;
 
     setSession(sess);
     setUser(sess?.user ?? null);
@@ -140,19 +130,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const isManualIntent = localStorage.getItem("manual_login_intent") === "true";
-    
-    // 1) sessão inicial
-    if (!isManualIntent) {
-      supabase.auth.getSession().then(({ data: { session: s } }) => {
-        loadUserData(s);
-      });
-    } else {
-      setLoading(false);
-    }
+    // 1) Sessão inicial - Na web, o INITIAL_SESSION cuida disso, mas o getSession garante consistência
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      loadUserData(s);
+    });
 
-    // 2) mudanças de auth
+    // 2) Listener de mudanças (Google login, Logout, etc)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sess) => {
+      console.log("🔐 Auth Event:", event);
       if (event === 'SIGNED_OUT') {
         setUser(null);
         setSession(null);
@@ -161,28 +146,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("chamo_cached_profile");
         localStorage.removeItem("chamo_cached_roles");
         setLoading(false);
-        return;
-      }
-
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        const manualMode = localStorage.getItem("manual_login_intent") === "true";
-        if (!isSignOutInProgress && !manualMode) {
-          loadUserData(sess);
-        }
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // Na Web, deixamos o Login.tsx cuidar do redirecionamento se manual_login_intent for true
+        loadUserData(sess);
       }
     });
 
-    // 3) Gestão de Deep Links (Apenas para Mobile) - NOVO AJUSTE
+    // 3) Deep Link Listener (APENAS MOBILE)
     let urlListener: any = null;
     if (Capacitor.isNativePlatform()) {
       const handleUrl = async (urlStr: string) => {
-        // Bloqueia se for a mesma URL enviada em loop pelo iOS
         if (!urlStr || urlStr === lastProcessedUrl) return;
-        if (!urlStr.includes('code=') && !urlStr.includes('access_token=')) return;
+        if (!urlStr.includes('code=')) return;
 
         lastProcessedUrl = urlStr;
-        console.log("🚀 Deep Link processado no useAuth:", urlStr);
-
         let fixedUrl = urlStr.replace('#', '?');
         if (fixedUrl.startsWith('com.chamo.app:?')) {
           fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
@@ -191,59 +168,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const urlObj = new URL(fixedUrl);
           const code = urlObj.searchParams.get('code');
-
           if (code) {
-            // Fecha o navegador nativo (Safari) para o usuário voltar ao app
             await Browser.close().catch(() => {});
-            
             const cleanCode = code.replace(/[^a-zA-Z0-9-]/g, '');
-            const { data, error } = await supabase.auth.exchangeCodeForSession(cleanCode);
-            
-            if (error) {
-              console.error("Erro na troca PKCE:", error.message);
-            } else if (data.session) {
-              // Se o login der certo, desativa o modo manual e carrega os dados
-              localStorage.removeItem("manual_login_intent");
-              loadUserData(data.session);
-            }
+            await supabase.auth.exchangeCodeForSession(cleanCode);
           }
         } catch (e) {
-          console.error("Falha ao processar URL nativa:", e);
+          console.error("Deep link error:", e);
         }
       };
 
-      // Escuta URLs recebidas enquanto o app está aberto
       urlListener = CapacitorApp.addListener('appUrlOpen', (data) => handleUrl(data.url));
-      
-      // Verifica se o app foi aberto "frio" por um link
       CapacitorApp.getLaunchUrl().then(val => val?.url && handleUrl(val.url));
     }
 
     return () => {
       subscription.unsubscribe();
-      if (urlListener) {
-        urlListener.then((l: any) => l.remove());
-      }
+      if (urlListener) urlListener.then((l: any) => l.remove());
     };
   }, [isSignOutInProgress]);
 
   const signOut = async () => {
     setIsSignOutInProgress(true);
     try {
-      localStorage.removeItem("signup_in_progress");
-      localStorage.removeItem("chamo_cached_profile");
-      localStorage.removeItem("chamo_cached_roles");
-      
+      localStorage.clear();
       await supabase.auth.signOut();
-
       setUser(null);
       setSession(null);
       setProfile(null);
       setRoles([]);
-      
       setTimeout(() => setIsSignOutInProgress(false), 1000);
     } catch (error) {
-      console.error("Erro ao deslogar:", error);
       setIsSignOutInProgress(false);
     }
   };
@@ -265,19 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        session,
-        profile,
-        roles,
-        isAdmin,
-        loading,
-        signOut,
-        refreshProfile,
-        refreshRoles,
-      }}
-    >
+    <AuthContext.Provider value={{ user, session, profile, roles, isAdmin, loading, signOut, refreshProfile, refreshRoles }}>
       {children}
     </AuthContext.Provider>
   );

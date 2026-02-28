@@ -91,83 +91,76 @@ const BackButtonHandler = () => {
   return null;
 };
 
-let globalLastUrl = "";
+// 🛡️ O GUARDA-COSTAS ABSOLUTO (Imune a re-renders do React)
+let lastProcessedCode = "";
 
 const AppContent = () => {
   const [session, setSession] = useState<any>(null);
   const [initializing, setInitializing] = useState(true);
-  const navigate = useNavigate(); // ✅ Adicionado para permitir o redirecionamento nativo suave
+  const navigate = useNavigate();
 
-  // Apenas para o Mobile Deep Link
   const handleAuthRedirect = useCallback(async (urlStr: string) => {
     if (!Capacitor.isNativePlatform()) return;
     if (!urlStr || !isAuthUrl(urlStr)) return;
     
-    // Tratamento essencial para o hash do Google virar querystring
     let fixedUrl = urlStr.replace('#', '?');
-    if (globalLastUrl === fixedUrl) return;
+
+    if (fixedUrl.startsWith('com.chamo.app:?')) {
+      fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
+    }
     
-    // Armazena a última URL tratada para evitar chamadas duplas imediatas pelo Capacitor
-    globalLastUrl = fixedUrl; 
+    const urlObj = new URL(fixedUrl);
+    const params = new URLSearchParams(urlObj.search);
+    
+    let code = params.get('code');
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
 
-    try {
-      // Fecha a aba do navegador Safari/Chrome que ficou por cima do app
-      setTimeout(async () => {
-        await Browser.close().catch(() => {});
-      }, 500);
-
-      // Padroniza a sintaxe do custom protocol
-      if (fixedUrl.startsWith('com.chamo.app:?')) {
-        fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
+    // ✅ SE FOR LOGIN DO GOOGLE/APPLE
+    if (code) {
+      code = code.replace(/[^a-zA-Z0-9-]/g, '');
+      
+      // 🛑 O SEGREDO ESTÁ AQUI: Se o iOS mandar a mesma URL repetida, matamos a execução na hora.
+      if (code === lastProcessedCode) {
+        console.log("⚠️ URL Duplicada ignorada pelo sistema de segurança.");
+        return;
       }
-      
-      const urlObj = new URL(fixedUrl);
-      const params = new URLSearchParams(urlObj.search);
-      
-      let code = params.get('code');
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
+      lastProcessedCode = code; // Registra que já pegou esse código
 
-      // ✅ SE FOR O FLUXO NATIVO OAUTH (Google/Apple) com PKCE
-      if (code) {
-        // Remove lixo da string do código (hashes que vêm pendurados)
-        code = code.replace(/[^a-zA-Z0-9-]/g, '');
-        console.log("🚀 Consumindo código PKCE:", code);
+      try {
+        console.log("🚀 Consumindo código PKCE com sucesso!");
         
-        // Passamos a bola para o SDK do Supabase processar o código com o verifier salvo
+        setTimeout(async () => {
+          await Browser.close().catch(() => {});
+        }, 300);
+
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-        
-        if (error) {
-             console.error("💥 Erro ao trocar código por sessão:", error.message);
-             // Se falhar silenciosamente (ex: código já usado), não travamos o app, 
-             // deixamos cair no catch e voltar para o login limpo.
-             throw error; 
-        }
+        if (error) throw error;
         
         if (data.session) {
-          console.log("✅ Sessão gerada! Navegando para Home.");
           setSession(data.session);
           navigate("/home", { replace: true });
         }
-      } 
-      // ✅ SE FOR FLUXO IMPLÍCITO (Magic Link, Recovery antigo)
-      else if (accessToken && refreshToken) {
-        console.log("🚀 Definindo sessão por tokens implícitos.");
-        const { data, error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-        
+      } catch (err) {
+        console.error('💥 Erro no Deep Link:', err);
+        navigate("/login", { replace: true });
+      }
+    } 
+    // ✅ SE FOR LOGIN POR MAGIC LINK (Tokens implícitos)
+    else if (accessToken && refreshToken) {
+      if (accessToken === lastProcessedCode) return;
+      lastProcessedCode = accessToken;
+
+      try {
+        setTimeout(async () => { await Browser.close().catch(() => {}); }, 300);
+        const { data, error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
         if (!error && data.session) {
           setSession(data.session);
           navigate("/home", { replace: true });
         }
+      } catch (err) {
+        navigate("/login", { replace: true });
       }
-    } catch (err) {
-      console.error('💥 Fallback de erro no Deep Link:', err);
-      // Se deu erro (o código sumiu, foi duplicado, etc), limpa a intenção e joga no login
-      localStorage.removeItem("manual_login_intent");
-      navigate("/login", { replace: true });
     }
   }, [navigate]);
 
@@ -217,7 +210,6 @@ const AppContent = () => {
 
     checkSession();
 
-    // Listener 100% passivo: apenas atualiza o estado para a Landing Page
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
     });
@@ -238,13 +230,13 @@ const AppContent = () => {
             localStorage.clear();
             sessionStorage.clear();
             alert("Sua sessão foi encerrada por conexão em outro dispositivo.");
-            window.location.href = "/login?expelled=true";
+            navigate("/login?expelled=true");
           }
         }
       ).subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [navigate]);
 
   const isWeb = Capacitor.getPlatform() === 'web';
   const currentPath = window.location.pathname;

@@ -32,7 +32,6 @@ const getDeviceId = () => {
   return deviceId;
 };
 
-// 🛡️ TRAVA GLOBAL: Impede múltiplos redirecionamentos simultâneos
 let isRedirecting = false;
 
 const Login = () => {
@@ -71,7 +70,6 @@ const Login = () => {
       } else {
         await proceedToRedirect(userId);
       }
-
     } catch (err) {
       console.error("Erro na verificação do dispositivo:", err);
       setLoading(false);
@@ -79,7 +77,6 @@ const Login = () => {
   };
 
   const proceedToRedirect = async (userId: string) => {
-    // 🛡️ SE JÁ ESTIVER INDO, ABORTA NOVAS TENTATIVAS PARA EVITAR LOOP
     if (isRedirecting) return;
     isRedirecting = true; 
 
@@ -117,13 +114,11 @@ const Login = () => {
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
       
-      // ✅ Redireciona com segurança
       navigate("/home", { replace: true });
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);
-      // Libera a trava caso dê erro e precise tentar de novo
       isRedirecting = false; 
     }
   };
@@ -170,7 +165,6 @@ const Login = () => {
   };
 
   useEffect(() => {
-    // 1. Apenas pega o fundo da tela (uma vez)
     supabase
       .from("platform_settings")
       .select("value")
@@ -183,21 +177,18 @@ const Login = () => {
         }
       });
 
-    // 2. Escuta mudanças na Web e reage apenas se NÃO estiver no meio de um redirecionamento
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirecting) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
-    // 3. Checagem direta 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && !isRedirecting) {
         checkDeviceLimitAndRedirect(session.user.id);
       }
     });
 
-    // Ao sair da tela de login, garantimos que a trava resetou
     return () => {
       authListener.subscription.unsubscribe();
       isRedirecting = false; 
@@ -256,7 +247,6 @@ const Login = () => {
         
         if (error) throw error;
         if (data?.url) await Browser.open({ url: data.url });
-        // Mantém loading em true para o usuário ver que algo está acontecendo
 
       } else {
         const redirectTo = `${window.location.origin}/login`;

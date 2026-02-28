@@ -1,17 +1,17 @@
-import { useEffect, useState, useCallback } from "react";
-import { Browser } from "@capacitor/browser";
+import { useEffect, useState } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
 import { SplashScreen } from '@capacitor/splash-screen'; 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useNavigate, Navigate } from "react-router-dom"; 
+import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom"; 
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/integrations/supabase/client";
 import { Capacitor } from "@capacitor/core";
 import { CheckCircle2, Star, Loader2 } from "lucide-react";
+import { useDeepLink } from "@/hooks/useDeepLink"; // ✅ NOSSO NOVO HOOK!
 
 // Pages
 import Index from "./pages/Index";
@@ -73,125 +73,27 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
-const isAuthUrl = (url: string) => {
-  return url.includes('com.chamo.app') || 
-         url.includes('app.chamo.com') || 
-         url.includes('supabase.co');
-};
-
 const BackButtonHandler = () => {
   const navigate = useNavigate();
   useEffect(() => {
-    const handler = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+    const handlerPromise = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
       if (canGoBack) window.history.back();
       else CapacitorApp.minimizeApp();
     });
-    return () => { handler.then(h => h.remove()); };
+    return () => { 
+      handlerPromise.then(h => h.remove()); 
+    };
   }, [navigate]);
   return null;
 };
-
-// 🛡️ O GUARDA-COSTAS ABSOLUTO (Imune a re-renders do React)
-let lastProcessedCode = "";
 
 const AppContent = () => {
   const [session, setSession] = useState<any>(null);
   const [initializing, setInitializing] = useState(true);
   const navigate = useNavigate();
 
-  const handleAuthRedirect = useCallback(async (urlStr: string) => {
-    if (!Capacitor.isNativePlatform()) return;
-    if (!urlStr || !isAuthUrl(urlStr)) return;
-    
-    let fixedUrl = urlStr.replace('#', '?');
-
-    if (fixedUrl.startsWith('com.chamo.app:?')) {
-      fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
-    }
-    
-    const urlObj = new URL(fixedUrl);
-    const params = new URLSearchParams(urlObj.search);
-    
-    let code = params.get('code');
-    const accessToken = params.get('access_token');
-    const refreshToken = params.get('refresh_token');
-
-    // ✅ SE FOR LOGIN DO GOOGLE/APPLE
-    if (code) {
-      code = code.replace(/[^a-zA-Z0-9-]/g, '');
-      
-      // 🛑 O SEGREDO ESTÁ AQUI: Se o iOS mandar a mesma URL repetida, matamos a execução na hora.
-      if (code === lastProcessedCode) {
-        console.log("⚠️ URL Duplicada ignorada pelo sistema de segurança.");
-        return;
-      }
-      lastProcessedCode = code; // Registra que já pegou esse código
-
-      try {
-        console.log("🚀 Consumindo código PKCE com sucesso!");
-        
-        setTimeout(async () => {
-          await Browser.close().catch(() => {});
-        }, 300);
-
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) throw error;
-        
-        if (data.session) {
-          setSession(data.session);
-          navigate("/home", { replace: true });
-        }
-      } catch (err) {
-        console.error('💥 Erro no Deep Link:', err);
-        navigate("/login", { replace: true });
-      }
-    } 
-    // ✅ SE FOR LOGIN POR MAGIC LINK (Tokens implícitos)
-    else if (accessToken && refreshToken) {
-      if (accessToken === lastProcessedCode) return;
-      lastProcessedCode = accessToken;
-
-      try {
-        setTimeout(async () => { await Browser.close().catch(() => {}); }, 300);
-        const { data, error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-        if (!error && data.session) {
-          setSession(data.session);
-          navigate("/home", { replace: true });
-        }
-      } catch (err) {
-        navigate("/login", { replace: true });
-      }
-    }
-  }, [navigate]);
-
-  useEffect(() => {
-    let urlListener: any = null;
-
-    const setupListeners = async () => {
-      if (Capacitor.isNativePlatform()) {
-        urlListener = await CapacitorApp.addListener('appUrlOpen', (event: any) => {
-          handleAuthRedirect(event.url);
-        });
-
-        const launchUrl = await CapacitorApp.getLaunchUrl();
-        if (launchUrl?.url) {
-          handleAuthRedirect(launchUrl.url);
-        }
-      }
-    };
-
-    setupListeners();
-
-    const iosHandler = (event: any) => handleAuthRedirect(event.detail);
-    if (Capacitor.isNativePlatform()) {
-       window.addEventListener('iosDeepLink', iosHandler);
-    }
-
-    return () => {
-      if (urlListener) urlListener.remove();
-      window.removeEventListener('iosDeepLink', iosHandler);
-    };
-  }, [handleAuthRedirect]);
+  // ✅ Ativando a proteção de Deep Links de forma isolada!
+  useDeepLink();
 
   useEffect(() => {
     const checkSession = async () => {
@@ -210,8 +112,9 @@ const AppContent = () => {
 
     checkSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
+    // Mantém o App atualizado caso a sessão caia (Logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, currentSession) => {
+      setSession(currentSession);
     });
 
     return () => { subscription.unsubscribe(); };

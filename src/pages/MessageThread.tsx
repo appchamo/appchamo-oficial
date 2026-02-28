@@ -2,7 +2,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -45,6 +45,11 @@ const MessageThread = () => {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isFetchingMessages, setIsFetchingMessages] = useState(true); // NOVO: Controle visual de carregamento
+  
+  // 🛡️ TRAVA ANTI-LOOP MESTRA: Impede que o load rode centenas de vezes
+  const isInitialLoadDone = useRef(false);
+  const isCurrentlyLoading = useRef(false);
+
   const [text, setText] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -110,6 +115,18 @@ const MessageThread = () => {
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
 
+  const loadFeeSettings = useCallback(async () => {
+    const { data } = await supabase.from("platform_settings").select("key, value");
+    if (data) {
+      const map: Record<string, string> = {};
+      for (const s of data) {
+        const val = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
+        map[s.key] = val;
+      }
+      setFeeSettings(map);
+    }
+  }, []);
+
   const sendNotification = async (targetId: string | null, title: string, msg: string) => {
     if (!targetId) return;
     try {
@@ -126,7 +143,7 @@ const MessageThread = () => {
     }
   };
 
-  useEffect(() => { loadFeeSettings(); }, []);
+  useEffect(() => { loadFeeSettings(); }, [loadFeeSettings]);
 
   useEffect(() => {
     if (threadId && localStorage.getItem(`receipt_dismissed_${threadId}`) === "true") {
@@ -134,20 +151,25 @@ const MessageThread = () => {
     }
   }, [threadId]);
 
-  useEffect(() => {
-    const load = async () => {
-      setIsFetchingMessages(true);
+  // 🛡️ OTIMIZAÇÃO E TRAVA DO LOAD
+  const load = useCallback(async () => {
+    if (!threadId || isCurrentlyLoading.current) return;
+    
+    isCurrentlyLoading.current = true;
+    setIsFetchingMessages(true);
+
+    try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setUserId(user.id);
 
-      const { data: req } = await supabase.from("service_requests").select("*").eq("id", threadId!).maybeSingle();
+      const { data: req } = await supabase.from("service_requests").select("*").eq("id", threadId).maybeSingle();
       if (req && user) {
         setRequestStatus(req.status);
         setRequestProtocol((req as any).protocol || null);
         const isClient = req.client_id === user.id;
 
         if (isClient && (req.status === "completed" || req.status === "closed")) {
-          const { count } = await supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId!).eq("client_id", user.id);
+          const { count } = await supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId).eq("client_id", user.id);
           if ((count || 0) > 0) setHasRated(true);
         }
 
@@ -177,14 +199,26 @@ const MessageThread = () => {
       const { data } = await supabase.
       from("chat_messages").
       select("*").
-      eq("request_id", threadId!).
+      eq("request_id", threadId).
       order("created_at");
       
       setMessages(data as Message[] || []);
+      
+    } catch (err) {
+      console.error("Erro ao carregar chat:", err);
+    } finally {
       setIsFetchingMessages(false);
-    };
-    if (threadId) load();
+      isInitialLoadDone.current = true;
+      setTimeout(() => { isCurrentlyLoading.current = false; }, 1000);
+    }
   }, [threadId]);
+
+  // CHAMA O LOAD APENAS SE AINDA NÃO FOI FEITO
+  useEffect(() => {
+    if (threadId && !isInitialLoadDone.current) {
+      load();
+    }
+  }, [threadId, load]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -192,7 +226,11 @@ const MessageThread = () => {
     channel(`chat-${threadId}`).
     on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
     (payload) => {
-      setMessages((prev) => [...prev, payload.new as Message]);
+      // Impede duplicação de mensagens no state
+      setMessages((prev) => {
+        if (prev.some(m => m.id === payload.new.id)) return prev;
+        return [...prev, payload.new as Message];
+      });
     }).
     subscribe();
     return () => {supabase.removeChannel(channel);};
@@ -220,7 +258,7 @@ const MessageThread = () => {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    if (threadId && userId) {
+    if (threadId && userId && messages.length > 0) {
       supabase.from("chat_read_status" as any).upsert(
         { request_id: threadId, user_id: userId, last_read_at: new Date().toISOString() },
         { onConflict: "request_id,user_id" }
@@ -334,18 +372,6 @@ const MessageThread = () => {
   };
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-
-  const loadFeeSettings = async () => {
-    const { data } = await supabase.from("platform_settings").select("key, value");
-    if (data) {
-      const map: Record<string, string> = {};
-      for (const s of data) {
-        const val = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
-        map[s.key] = val;
-      }
-      setFeeSettings(map);
-    }
-  };
 
   const getBillingFeeLabel = () => {
     if (!billingMethod || !billingAmount) return null;
@@ -1240,7 +1266,7 @@ const MessageThread = () => {
                 <img src={getOptimizedAvatar(otherParty.avatar_url)} alt="" loading="lazy" className="w-7 h-7 rounded-full object-cover mt-1 flex-shrink-0" /> :
 
                 <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary mt-1 flex-shrink-0">
-                    {otherInitials}
+                  {otherInitials}
                   </div>)
 
                 }
@@ -1644,7 +1670,7 @@ const MessageThread = () => {
                       </div>
                       <button 
                         onClick={() => applyCoupon(c.id)} 
-                        className="px-3 py-1.5 bg-emerald-500 text-white text-[11px] font-bold rounded-lg hover:bg-emerald-600 transition-colors shadow-md"
+                        className="px-3 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 text-[11px] font-bold rounded-lg hover:bg-emerald-100 transition-colors shadow-sm"
                       >
                         Aplicar
                       </button>

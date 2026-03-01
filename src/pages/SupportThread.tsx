@@ -99,10 +99,30 @@ const SupportThread = () => {
     }
     setText("");
     setSending(false);
+
+    // Pequena pausa para a mensagem ser gravada antes da função ler o histórico
+    await new Promise((r) => setTimeout(r, 800));
     try {
-      await supabase.functions.invoke("support-ai-reply", { body: { ticket_id: ticketId } });
-    } catch (_) {
-      // IA opcional; falha silenciosa
+      const { data, error: fnError } = await supabase.functions.invoke("support-ai-reply", {
+        body: { ticket_id: ticketId },
+      });
+      if (fnError) {
+        console.error("[Suporte IA] Erro na função:", fnError);
+        toast({
+          title: "Resposta automática indisponível",
+          description: "Um atendente pode responder em breve.",
+          variant: "destructive",
+        });
+      } else if (data?.error) {
+        console.error("[Suporte IA] Resposta da função:", data.error);
+      }
+    } catch (e) {
+      console.error("[Suporte IA] Falha ao chamar função:", e);
+      toast({
+        title: "Resposta automática indisponível",
+        description: "Um atendente pode responder em breve.",
+        variant: "destructive",
+      });
     }
   };
 

@@ -66,12 +66,17 @@ serve(async (req) => {
     }
 
     const isBot = (id: string) => id === BOT_SENDER_ID;
-    const conversation = (messages || []).map((m) =>
+    const list = messages || [];
+    const conversation = list.map((m) =>
       isBot(m.sender_id) ? `Assistente: ${m.content}` : `Usuário: ${m.content}`
     );
-    const lastMessage = (messages || [])[(messages?.length ?? 0) - 1];
+    const lastMessage = list[list.length - 1];
     if (lastMessage && isBot(lastMessage.sender_id)) {
+      console.log("Pulando: última mensagem já é do bot (evita resposta duplicada)");
       return jsonResponse({ ok: true, skipped: "last was bot" }, 200);
+    }
+    if (list.length === 0) {
+      console.log("Nenhuma mensagem no ticket ainda; enviando boas-vindas.");
     }
 
     const systemPrompt = `Você é o assistente de suporte do app Chamô. Responda em português do Brasil, de forma clara, objetiva e prestativa.
@@ -122,6 +127,7 @@ Regras: seja breve (2-4 frases quando possível), não invente informações sob
       return jsonResponse({ error: "Erro ao salvar resposta" }, 500);
     }
 
+    console.log("Resposta da IA inserida no ticket", ticket_id);
     return jsonResponse({ ok: true }, 200);
   } catch (err) {
     console.error("support-ai-reply erro:", err);

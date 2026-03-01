@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { FirebaseMessaging } from '@capacitor-firebase/messaging';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { supabase } from '@/integrations/supabase/client';
+
+const isAndroid = () => Capacitor.getPlatform() === 'android';
 
 export const usePush = (userId?: string) => {
   useEffect(() => {
@@ -14,20 +17,33 @@ export const usePush = (userId?: string) => {
     const setupPush = async () => {
       try {
         console.log('🔔 [Push] Solicitando permissão para o usuário...');
-        
+
+        // Android: canal "default" e permissão para notificações locais (exibir push em primeiro plano)
+        if (isAndroid()) {
+          const { display } = await LocalNotifications.checkPermissions();
+          if (display !== 'granted') {
+            await LocalNotifications.requestPermissions();
+          }
+          await LocalNotifications.createChannel({
+            id: 'default',
+            name: 'Notificações',
+            importance: 5,
+            visibility: 1,
+          });
+        }
+
         // Pede a permissão pro usuário
         const { receive } = await FirebaseMessaging.requestPermissions();
-        
+
         if (receive === 'granted') {
           console.log('✅ [Push] Permissão concedida! Buscando token...');
-          
+
           // Pega o Token do Firebase
           const { token } = await FirebaseMessaging.getToken();
           console.log('📲 [Push] Token gerado:', token);
 
           // Salva no Supabase atrelado ao usuário
           if (token) {
-            // Pegamos o Device ID consistente com o resto do app
             const deviceId = localStorage.getItem("chamo_device_id");
             const platform = Capacitor.getPlatform();
             const deviceName = platform === 'ios' ? 'iPhone App' : platform === 'android' ? 'Android App' : 'App';
@@ -41,12 +57,8 @@ export const usePush = (userId?: string) => {
                 push_token: token,
                 device_name: deviceName,
                 last_active: new Date().toISOString()
-              }, 
-              { 
-                // 🚨 CORREÇÃO VITAL: O conflito deve ser baseado nas duas colunas
-                // para bater com a regra de unicidade do banco de dados
-                onConflict: 'user_id,device_id' 
-              }
+              },
+              { onConflict: 'user_id,device_id' }
             );
 
             if (error) {
@@ -65,14 +77,28 @@ export const usePush = (userId?: string) => {
       }
     };
 
-    // Atraso de 2 segundos para estabilidade
     const timer = setTimeout(() => {
       setupPush();
     }, 2000);
 
-    // Escuta notificações recebidas com o app aberto
-    const receivedListener = FirebaseMessaging.addListener('pushNotificationReceived', (message) => {
+    // Android: com app em primeiro plano o FCM não mostra na bandeja — exibir notificação local
+    const receivedListener = FirebaseMessaging.addListener('pushNotificationReceived', (message: { notification?: { title?: string; body?: string }; data?: Record<string, string> }) => {
       console.log('📬 [Push] Nova notificação recebida (App Aberto):', message);
+      if (isAndroid()) {
+        const title = message?.notification?.title ?? message?.data?.title ?? 'Chamô';
+        const body = message?.notification?.body ?? message?.data?.body ?? message?.data?.message ?? 'Nova atualização.';
+        const id = Math.abs(Math.floor(Math.random() * 2147483647));
+        LocalNotifications.schedule({
+          notifications: [{
+            id,
+            title,
+            body,
+            channelId: 'default',
+            schedule: { at: new Date(Date.now() + 300) },
+            extra: message?.data ?? {},
+          }],
+        }).catch((err) => console.warn('📬 [Push] Falha ao exibir notificação local:', err));
+      }
     });
 
     // Quando o usuário toca na notificação (abre o app): envia o link para o app navegar
@@ -84,10 +110,22 @@ export const usePush = (userId?: string) => {
       }
     });
 
+    // Toque em notificação local (Android, push em primeiro plano)
+    const localActionPromise = isAndroid()
+      ? LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+          const extra = event.notification?.extra as { link?: string } | undefined;
+          const link = extra?.link;
+          if (link && typeof link === 'string') {
+            window.dispatchEvent(new CustomEvent('chamo-notification-open', { detail: { link } }));
+          }
+        })
+      : Promise.resolve({ remove: () => {} });
+
     return () => {
       clearTimeout(timer);
       receivedListener.then(l => l.remove());
       actionListener.then(l => l.remove());
+      localActionPromise.then(l => l.remove());
     };
   }, [userId]);
 };

@@ -40,6 +40,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Canal padrão para FCM: notificações em background/killed aparecem na bandeja -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="default" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

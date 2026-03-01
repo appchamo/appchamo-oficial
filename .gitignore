@@ -24,5 +24,8 @@ dist-ssr
 *.sw?
 .env
 
+# Chaves e credenciais (nunca commitar)
+firebase-service-account.json
+
 # Instalador/arquivos pesados (evitar no repo)
 *.dmg

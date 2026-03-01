@@ -1,6 +1,6 @@
 # Push de mensagens no chat
 
-Quando um usuário envia mensagem (texto, áudio, cobrança ou comprovante), o destinatário recebe uma **notificação push** no celular.
+Quando um usuário envia mensagem (texto, áudio, cobrança ou comprovante), o destinatário recebe uma **notificação push** no celular (iOS e Android).
 
 - **Título (sempre visível):** `Fulano enviou uma mensagem para você`
 - **Corpo (visível ao desbloquear):** preview do conteúdo (ex.: "Oi", "Áudio", "Cobrança", "Comprovante")
@@ -31,3 +31,52 @@ Para o push ser enviado ao inserir em `notifications`, é preciso um **Database 
    (o Supabase costuma oferecer um template tipo “New record” que já manda o row como `record`)
 
 Se o webhook não estiver configurado, a linha em `notifications` será criada (e aparecerá no centro de notificações do app), mas o **push no celular** não será disparado.
+
+---
+
+## Android
+
+O mesmo fluxo (Firebase/FCM, `user_devices.push_token`, Edge Function) funciona no Android. O app já está configurado com:
+
+- **`@capacitor-firebase/messaging`** no projeto Android (`capacitor.build.gradle`).
+- **`google-services.json`** em `android/app/` (mesmo projeto Firebase que o iOS: `chamo-9cd5b`).
+- **Permissão `POST_NOTIFICATIONS`** no `AndroidManifest.xml` (obrigatória no Android 13+).
+- **usePush** pede permissão, obtém o token FCM e grava em `user_devices` (igual ao iOS).
+
+### Conferir no Android
+
+1. **Build e sync:**  
+   `npm run build` → `npx cap sync android`
+2. Abrir no Android Studio ou rodar em dispositivo/emulador:  
+   `npx cap open android` ou `npx cap run android`
+3. Fazer login no app; quando aparecer o popup **“Permitir notificações?”**, aceitar.
+4. Enviar uma mensagem para esse usuário a partir de outro (ou do backend); a notificação deve chegar no Android.
+
+O backend **send-push-notification** usa o mesmo `FIREBASE_CONFIG` (conta de serviço do projeto Firebase) para enviar tanto para tokens iOS quanto Android.
+
+---
+
+## Push não aparece – checklist de debug
+
+1. **Token no banco**
+   - Supabase → **Table Editor** → tabela **user_devices**.
+   - Filtre pelo **user_id** do usuário que deveria receber o push.
+   - Confira se existe pelo menos uma linha com **push_token** preenchido (não NULL).
+   - Se estiver vazio: abra o app nesse usuário, aceite notificações e aguarde alguns segundos; o **usePush** grava o token no login.
+
+2. **Webhook disparando**
+   - Ao enviar uma mensagem no chat (ou inserir em **notifications**), o webhook deve chamar a Edge Function.
+   - Supabase → **Edge Functions** → **send-push-notification** → **Logs**.
+   - Veja se aparece "🚀 Nova notificação detectada para o usuário: ...". Se não aparecer, o webhook não está configurado ou a URL/headers estão errados.
+
+3. **Resposta do FCM nos logs**
+   - Nos mesmos logs da função, procure por "✅ Resposta FCM" ou "💥 FCM erro".
+   - Se vier erro tipo `invalid argument` ou `unregistered`, o token pode estar expirado ou inválido (reinstale o app / faça logout e login e aceite notificações de novo).
+   - Se vier `FIREBASE_CONFIG inválido`, confira o secret no Supabase (project_id, client_email, private_key).
+
+4. **Android: permissão e canal**
+   - No Android 13+, o app precisa da permissão **Notificações** (já tratado no projeto).
+   - A função agora envia `android.notification.channelId: "default"` para o Android exibir a notificação.
+
+5. **Reenviar a Edge Function**
+   - Depois de alterar o código da função, faça deploy: no Supabase Dashboard, redeploy da função **send-push-notification** (ou via `supabase functions deploy send-push-notification`).

@@ -231,6 +231,11 @@ otp_expiry = 3600
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
 
+# Template de confirmação de e-mail (cadastro) - estilo Chamô
+# [auth.email.template.confirmation]
+# subject = "Confirme seu e-mail - Chamô"
+# content_path = "./supabase/templates/confirmation.html"
+
 # Template de recuperação de senha (estilo Chamô)
 # [auth.email.template.recovery]
 # subject = "Redefinir senha - Chamô"

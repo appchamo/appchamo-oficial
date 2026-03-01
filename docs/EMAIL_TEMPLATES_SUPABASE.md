@@ -1,10 +1,38 @@
 # Templates de e-mail no Supabase (Chamô)
 
-E-mail de **recuperação de senha** no estilo da marca (CHAMÔ, botão laranja, aviso de segurança).
+E-mails de **confirmação de cadastro** e **recuperação de senha** no estilo da marca (CHAMÔ, botão laranja, aviso de segurança).
 
 ---
 
-## Recuperação de senha (já criado)
+## Confirmação de e-mail (cadastro)
+
+O HTML está em **`supabase/templates/confirmation.html`**.
+
+### Usar no Supabase Cloud (Dashboard)
+
+1. Acesse **[Supabase Dashboard](https://supabase.com/dashboard)** → seu projeto.
+2. Vá em **Authentication** → **Email Templates**.
+3. Selecione o template **"Confirm signup"** / **"Confirmation"**.
+4. **Subject:** `Confirme seu e-mail - Chamô`
+5. No campo do corpo (HTML), **cole o conteúdo** do arquivo `supabase/templates/confirmation.html`.  
+   **Importante:** mantenha a variável `{{ .ConfirmationURL }}` — ela é substituída pelo link de confirmação.
+6. Salve.
+
+### Usar no Supabase local (config.toml)
+
+No `supabase/config.toml`, descomente:
+
+```toml
+[auth.email.template.confirmation]
+subject = "Confirme seu e-mail - Chamô"
+content_path = "./supabase/templates/confirmation.html"
+```
+
+Reinicie o Supabase local para carregar o template.
+
+---
+
+## Recuperação de senha
 
 O HTML está em **`supabase/templates/recovery.html`**.
 
@@ -34,13 +62,13 @@ Reinicie o Supabase local para carregar o template.
 
 ---
 
-## Variáveis disponíveis (recovery)
+## Variáveis (confirmação e recovery)
+
+Em ambos os templates, as principais são:
 
 | Variável             | Uso                          |
 |----------------------|------------------------------|
-| `{{ .ConfirmationURL }}` | Link para redefinir a senha (use no botão) |
+| `{{ .ConfirmationURL }}` | Link de confirmação / redefinição (use no botão) |
 | `{{ .Email }}`       | E-mail do usuário            |
 | `{{ .SiteURL }}`     | URL do site do projeto       |
 | `{{ .RedirectTo }}`  | URL de redirecionamento      |
-
-Não remova `{{ .ConfirmationURL }}` do template.

@@ -14,6 +14,10 @@ interface Pro {
   avatar_url: string | null;
 }
 
+interface FeaturedProfessionalsProps {
+  section?: { title?: string };
+}
+
 /**
  * 🔥 FUNÇÃO QUE CORRIGE O AVATAR
  */
@@ -29,12 +33,13 @@ const getAvatarUrl = (avatarUrl?: string | null) => {
   return `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${avatarUrl}`;
 };
 
-const FeaturedProfessionals = () => {
+const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
-  const cardWidth = 216;
+  const [cardWidth, setCardWidth] = useState(216);
+  const cardWidthRef = useRef(216);
 
   const loadPros = useCallback(async () => {
     const { data: pros } = await supabase
@@ -81,9 +86,24 @@ const FeaturedProfessionals = () => {
     );
   }, []);
 
-  useEffect(() => { 
-    loadPros(); 
+  useEffect(() => {
+    loadPros();
   }, [loadPros]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const gap = 12;
+      const usable = el.offsetWidth;
+      const w = (usable - gap) / 2;
+      const clamped = Math.min(Math.max(w, 150), 280);
+      cardWidthRef.current = clamped;
+      setCardWidth(clamped);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [professionals.length]);
 
   useEffect(() => {
     const channel = supabase
@@ -105,12 +125,25 @@ const FeaturedProfessionals = () => {
 
     const wrappedIndex = index % professionals.length;
     setActiveIndex(wrappedIndex);
-
+    const w = cardWidthRef.current;
+    const gap = 12;
     scrollRef.current.scrollTo({
-      left: wrappedIndex * cardWidth,
+      left: wrappedIndex * (w + gap),
       behavior: "smooth"
     });
   }, [professionals.length]);
+
+  const measureContainer = useCallback((el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    if (el) {
+      const gap = 12;
+      const usable = el.offsetWidth;
+      const w = (usable - gap) / 2;
+      const clamped = Math.min(Math.max(w, 150), 280);
+      cardWidthRef.current = clamped;
+      setCardWidth(clamped);
+    }
+  }, []);
 
   useEffect(() => {
     if (isPaused || professionals.length === 0) return;
@@ -125,10 +158,10 @@ const FeaturedProfessionals = () => {
   if (professionals.length === 0) return null;
 
   return (
-    <section>
+    <section className="w-full min-w-0">
       <div className="flex items-center justify-between mb-3 px-1">
         <h3 className="font-semibold text-foreground">
-          Profissionais em destaque
+          {section?.title ?? "Profissionais em destaque"}
         </h3>
         <Link 
           to="/search" 
@@ -139,8 +172,9 @@ const FeaturedProfessionals = () => {
       </div>
 
       <div
-        ref={scrollRef}
-        className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide"
+        ref={measureContainer}
+        className="w-full min-w-0 flex gap-3 overflow-x-auto overflow-y-hidden pb-2 scrollbar-hide snap-x snap-mandatory"
+        style={{ scrollSnapType: "x mandatory" }}
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
         onTouchStart={() => setIsPaused(true)}
@@ -157,10 +191,11 @@ const FeaturedProfessionals = () => {
           const avatarSrc = getAvatarUrl(pro.avatar_url);
 
           return (
-            <div
-              key={pro.id}
-              className="min-w-[200px] bg-card rounded-xl border shadow-card p-4 flex flex-col gap-3"
-            >
+<div
+            key={pro.id}
+            className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-3 flex-shrink-0 snap-start"
+            style={{ width: cardWidth, minWidth: cardWidth }}
+          >
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
                   {avatarSrc ? (

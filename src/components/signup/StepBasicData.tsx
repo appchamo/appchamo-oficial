@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Mail, Lock, User, Phone, FileText, MapPin, Search, Calendar } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Mail, Lock, User, Phone, FileText, MapPin, Search, Calendar, ScrollText, CheckCircle2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -32,6 +32,7 @@ interface Props {
 }
 
 import { formatCpf, formatCnpj, formatPhone } from "@/lib/formatters";
+import { fetchViaCep } from "@/lib/viacep";
 
 const InputRow = ({ icon: Icon, label, children }: { icon: any; label: string; children: React.ReactNode }) => (
   <div>
@@ -43,13 +44,92 @@ const InputRow = ({ icon: Icon, label, children }: { icon: any; label: string; c
   </div>
 );
 
+/** Modal de um único termo (Uso ou Privacidade): texto rolável; só habilita "Aceitar" quando rolar até o fim. */
+const TermsScrollModal = ({
+  open,
+  onClose,
+  onAccept,
+  title,
+  content,
+  loading,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onAccept: () => void;
+  title: string;
+  content: string;
+  loading: boolean;
+}) => {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrolledToBottom, setScrolledToBottom] = useState(false);
+
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const isAtBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 30;
+    setScrolledToBottom(isAtBottom);
+  }, []);
+
+  useEffect(() => {
+    if (!open) setScrolledToBottom(false);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || loading || !content) return;
+    const t = setTimeout(() => checkScroll(), 100);
+    return () => clearTimeout(t);
+  }, [open, loading, content, checkScroll]);
+
+  const handleAcceptClick = () => {
+    if (!scrolledToBottom) {
+      toast({ title: "Leia por completo os termos antes de aceitar.", variant: "destructive" });
+      return;
+    }
+    onAccept();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {loading ? (
+          <div className="text-center py-8 text-muted-foreground text-sm">Carregando...</div>
+        ) : (
+          <>
+            <div
+              ref={scrollRef}
+              onScroll={checkScroll}
+              className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto border rounded-xl px-3 py-3 text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap"
+            >
+              {content || "Nenhum texto cadastrado."}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">Arraste até o final para habilitar o botão Aceitar.</p>
+            <button
+              onClick={handleAcceptClick}
+              className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-colors mt-2 ${
+                scrolledToBottom
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "bg-muted text-muted-foreground cursor-not-allowed"
+              }`}
+            >
+              Aceitar
+            </button>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const TermsDialogFromAdmin = ({ open, onClose, onAccept }: { open: boolean; onClose: () => void; onAccept: () => void }) => {
   const [termsOfUse, setTermsOfUse] = useState("");
   const [privacyPolicy, setPrivacyPolicy] = useState("");
   const [loadingTerms, setLoadingTerms] = useState(true);
+  const [step, setStep] = useState<"use" | "privacy" | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setStep("use");
     setLoadingTerms(true);
     supabase
       .from("platform_settings")
@@ -67,37 +147,42 @@ const TermsDialogFromAdmin = ({ open, onClose, onAccept }: { open: boolean; onCl
       });
   }, [open]);
 
+  const handleAcceptUse = () => {
+    if (privacyPolicy && privacyPolicy.trim()) {
+      setStep("privacy");
+    } else {
+      onAccept();
+      onClose();
+    }
+  };
+
+  const handleAcceptPrivacy = () => {
+    onAccept();
+    onClose();
+  };
+
+  const openUse = open && step === "use";
+  const openPrivacy = open && step === "privacy";
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Termos de Uso e Privacidade</DialogTitle></DialogHeader>
-        {loadingTerms ? (
-          <div className="text-center py-8 text-muted-foreground text-sm">Carregando...</div>
-        ) : (
-          <div className="text-sm text-muted-foreground space-y-4 leading-relaxed">
-            {termsOfUse && (
-              <div>
-                <h3 className="font-semibold text-foreground mb-2">Termos de Uso</h3>
-                <p className="whitespace-pre-wrap">{termsOfUse}</p>
-              </div>
-            )}
-            {privacyPolicy && (
-              <div>
-                <h3 className="font-semibold text-foreground mb-2">Política de Privacidade (LGPD)</h3>
-                <p className="whitespace-pre-wrap">{privacyPolicy}</p>
-              </div>
-            )}
-            {!termsOfUse && !privacyPolicy && (
-              <p>Nenhum termo cadastrado ainda.</p>
-            )}
-          </div>
-        )}
-        <button onClick={onAccept}
-          className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors mt-2">
-          Concordo
-        </button>
-      </DialogContent>
-    </Dialog>
+    <>
+      <TermsScrollModal
+        open={openUse}
+        onClose={onClose}
+        onAccept={handleAcceptUse}
+        title="Termos de Uso"
+        content={termsOfUse}
+        loading={loadingTerms}
+      />
+      <TermsScrollModal
+        open={openPrivacy}
+        onClose={onClose}
+        onAccept={handleAcceptPrivacy}
+        title="Política de Privacidade (LGPD)"
+        content={privacyPolicy}
+        loading={false}
+      />
+    </>
   );
 };
 
@@ -138,21 +223,24 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     return age < 18;
   };
 
-  // Auto-fetch CEP when 8 digits
+  // Busca endereço pelo CEP (ViaCEP) e preenche cidade, rua, bairro; número fica para o cliente
   const fetchCepAuto = useCallback(async (cep: string) => {
     const clean = cep.replace(/\D/g, "");
     if (clean.length !== 8) return;
     setLoadingCep(true);
     try {
-      const res = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
-      const data = await res.json();
-      if (!data.erro) {
+      const data = await fetchViaCep(clean);
+      if (data) {
         setAddressStreet(data.logradouro || "");
         setAddressNeighborhood(data.bairro || "");
         setAddressCity(data.localidade || "");
         setAddressState(data.uf || "");
+      } else {
+        toast({ title: "CEP não encontrado.", variant: "destructive" });
       }
-    } catch {}
+    } catch {
+      toast({ title: "Erro ao buscar CEP. Tente novamente.", variant: "destructive" });
+    }
     setLoadingCep(false);
   }, []);
 
@@ -354,76 +442,98 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
             </>
           )}
 
-          {/* Address section */}
+          {/* Endereço: CEP busca cidade, rua e bairro automaticamente; só o número o cliente preenche */}
           <div className="border-t pt-3 mt-2">
-            <p className="text-xs font-semibold text-muted-foreground mb-2">Localização *</p>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Endereço *</p>
             <InputRow icon={MapPin} label="CEP">
               <input type="text" value={addressZip} onChange={(e) => handleCepChange(e.target.value)} placeholder="00000-000"
                 className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
-              {loadingCep && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />}
+              {loadingCep && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full flex-shrink-0" />}
             </InputRow>
             <div className="space-y-2 mt-2">
-              {addressStreet && (
-                <>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
-                      <label className="text-xs text-muted-foreground block mb-1">Rua</label>
-                      <input value={addressStreet} onChange={(e) => setAddressStreet(e.target.value)}
-                        className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Nº</label>
-                      <input value={addressNumber} onChange={(e) => setAddressNumber(e.target.value)} placeholder="123"
-                        className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                    </div>
+              <div className="relative">
+                <label className="text-xs text-muted-foreground block mb-1">Cidade *</label>
+                <input value={addressCity} onChange={(e) => handleCityChange(e.target.value)} placeholder="Sua cidade"
+                  onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
+                  onFocus={() => citySuggestions.length > 0 && setShowCitySuggestions(true)}
+                  className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                {showCitySuggestions && (
+                  <div className="absolute z-50 top-full left-0 right-0 bg-card border rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
+                    {citySuggestions.map((city) => (
+                      <button key={city} type="button" onMouseDown={() => selectCity(city)}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors text-foreground">
+                        {city}
+                      </button>
+                    ))}
                   </div>
-                  <input value={addressComplement} onChange={(e) => setAddressComplement(e.target.value)} placeholder="Complemento (opcional)"
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                  <input value={addressNeighborhood} onChange={(e) => setAddressNeighborhood(e.target.value)} placeholder="Bairro"
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                </>
-              )}
+                )}
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Rua</label>
+                <input value={addressStreet} onChange={(e) => setAddressStreet(e.target.value)} placeholder="Sua rua"
+                  className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Bairro</label>
+                <input value={addressNeighborhood} onChange={(e) => setAddressNeighborhood(e.target.value)} placeholder="Seu bairro"
+                  className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
               <div className="grid grid-cols-2 gap-2">
-                <div className="relative">
-                  <label className="text-xs text-muted-foreground block mb-1">Cidade *</label>
-                  <input value={addressCity} onChange={(e) => handleCityChange(e.target.value)} placeholder="Ex: São Paulo"
-                    onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
-                    onFocus={() => citySuggestions.length > 0 && setShowCitySuggestions(true)}
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Número *</label>
+                  <input value={addressNumber} onChange={(e) => setAddressNumber(e.target.value)} placeholder="Ex: 123"
                     className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                  {showCitySuggestions && (
-                    <div className="absolute z-50 top-full left-0 right-0 bg-card border rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
-                      {citySuggestions.map((city) => (
-                        <button key={city} type="button" onMouseDown={() => selectCity(city)}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors text-foreground">
-                          {city}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Complemento</label>
+                  <input value={addressComplement} onChange={(e) => setAddressComplement(e.target.value)} placeholder="Opcional"
+                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Estado *</label>
                   <input value={addressState} onChange={(e) => setAddressState(e.target.value)} placeholder="UF" maxLength={2}
                     className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
                 </div>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">País</label>
-                <input value={addressCountry} onChange={(e) => setAddressCountry(e.target.value)} placeholder="Brasil"
-                  className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">País</label>
+                  <input value={addressCountry} onChange={(e) => setAddressCountry(e.target.value)} placeholder="Brasil"
+                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
               </div>
             </div>
           </div>
 
-          <label className="flex items-start gap-2 cursor-pointer pt-1">
-            <input type="checkbox" checked={termsAccepted} onChange={(e) => setTermsAccepted(e.target.checked)} className="mt-0.5 rounded border-input" />
-            <span className="text-xs text-muted-foreground">
-              Li e concordo com os{" "}
-              <button type="button" onClick={() => setTermsOpen(true)} className="text-primary hover:underline">Termos de Uso e Privacidade (LGPD)</button>
-            </span>
-          </label>
+          {/* Termos: só avança depois de ler e aceitar nos modais */}
+          <div className="border rounded-xl p-4 bg-muted/30 space-y-3">
+            {termsAccepted ? (
+              <div className="flex items-center gap-3 text-foreground">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <CheckCircle2 className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Termos aceitos</p>
+                  <p className="text-xs text-muted-foreground">Você leu e aceitou os Termos de Uso e a Política de Privacidade.</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-foreground font-medium">Termos de Uso e Privacidade</p>
+                <p className="text-xs text-muted-foreground">Para continuar, é necessário ler e aceitar os termos na íntegra.</p>
+                <button
+                  type="button"
+                  onClick={() => setTermsOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors"
+                >
+                  <ScrollText className="w-4 h-4" />
+                  Ler termos
+                </button>
+              </>
+            )}
+          </div>
 
-          <button type="submit" disabled={validating}
+          <button type="submit" disabled={validating || !termsAccepted}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
             {validating ? "Validando..." : "Próximo →"}
           </button>

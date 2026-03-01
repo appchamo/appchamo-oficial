@@ -29,7 +29,8 @@ export const usePush = (userId?: string) => {
           if (token) {
             // Pegamos o Device ID consistente com o resto do app
             const deviceId = localStorage.getItem("chamo_device_id");
-            const deviceName = Capacitor.getPlatform() === 'ios' ? 'iPhone' : 'Android';
+            const platform = Capacitor.getPlatform();
+            const deviceName = platform === 'ios' ? 'iPhone App' : platform === 'android' ? 'Android App' : 'App';
 
             console.log('☁️ [Push] Tentando salvar token para o dispositivo:', deviceId);
 
@@ -70,13 +71,23 @@ export const usePush = (userId?: string) => {
     }, 2000);
 
     // Escuta notificações recebidas com o app aberto
-    const listener = FirebaseMessaging.addListener('pushNotificationReceived', (message) => {
+    const receivedListener = FirebaseMessaging.addListener('pushNotificationReceived', (message) => {
       console.log('📬 [Push] Nova notificação recebida (App Aberto):', message);
+    });
+
+    // Quando o usuário toca na notificação (abre o app): envia o link para o app navegar
+    const actionListener = FirebaseMessaging.addListener('notificationActionPerformed', (event) => {
+      const data = event.notification?.data as { link?: string } | undefined;
+      const link = data?.link;
+      if (link && typeof link === 'string') {
+        window.dispatchEvent(new CustomEvent('chamo-notification-open', { detail: { link } }));
+      }
     });
 
     return () => {
       clearTimeout(timer);
-      listener.then(l => l.remove());
+      receivedListener.then(l => l.remove());
+      actionListener.then(l => l.remove());
     };
   }, [userId]);
 };

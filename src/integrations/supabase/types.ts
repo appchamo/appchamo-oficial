@@ -676,6 +676,7 @@ export type Database = {
       professionals: {
         Row: {
           active: boolean
+          agenda_enabled: boolean
           availability_status: string
           bio: string | null
           bonus_calls: number
@@ -693,6 +694,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          agenda_enabled?: boolean
           availability_status?: string
           bio?: string | null
           bonus_calls?: number
@@ -710,6 +712,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          agenda_enabled?: boolean
           availability_status?: string
           bio?: string | null
           bonus_calls?: number
@@ -966,6 +969,199 @@ export type Database = {
             referencedRelation: "professionals"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      agenda_atendentes: {
+        Row: {
+          id: string
+          professional_id: string
+          name: string
+          photo_url: string | null
+          description: string | null
+          active: boolean
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          professional_id: string
+          name: string
+          photo_url?: string | null
+          description?: string | null
+          active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          professional_id?: string
+          name?: string
+          photo_url?: string | null
+          description?: string | null
+          active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "agenda_atendentes_professional_id_fkey", columns: ["professional_id"], isOneToOne: false, referencedRelation: "professionals", referencedColumns: ["id"] }
+        ]
+      }
+      agenda_services: {
+        Row: {
+          id: string
+          professional_id: string
+          atendente_id: string | null
+          name: string
+          duration_minutes: number
+          active: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          professional_id: string
+          atendente_id?: string | null
+          name: string
+          duration_minutes: number
+          active?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          professional_id?: string
+          atendente_id?: string | null
+          name?: string
+          duration_minutes?: number
+          active?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "agenda_services_professional_id_fkey", columns: ["professional_id"], isOneToOne: false, referencedRelation: "professionals", referencedColumns: ["id"] },
+          { foreignKeyName: "agenda_services_atendente_id_fkey", columns: ["atendente_id"], isOneToOne: false, referencedRelation: "agenda_atendentes", referencedColumns: ["id"] }
+        ]
+      }
+      agenda_availability_rules: {
+        Row: {
+          id: string
+          professional_id: string
+          atendente_id: string | null
+          weekday: number
+          start_time: string
+          end_time: string
+          slot_interval_minutes: number
+          capacity: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          professional_id: string
+          atendente_id?: string | null
+          weekday: number
+          start_time: string
+          end_time: string
+          slot_interval_minutes?: number
+          capacity?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          professional_id?: string
+          atendente_id?: string | null
+          weekday?: number
+          start_time?: string
+          end_time?: string
+          slot_interval_minutes?: number
+          capacity?: number
+          created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "agenda_availability_rules_professional_id_fkey", columns: ["professional_id"], isOneToOne: false, referencedRelation: "professionals", referencedColumns: ["id"] },
+          { foreignKeyName: "agenda_availability_rules_atendente_id_fkey", columns: ["atendente_id"], isOneToOne: false, referencedRelation: "agenda_atendentes", referencedColumns: ["id"] }
+        ]
+      }
+      agenda_availability_blocks: {
+        Row: {
+          id: string
+          professional_id: string
+          atendente_id: string | null
+          block_date: string
+          start_time: string
+          end_time: string
+          reason: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          professional_id: string
+          atendente_id?: string | null
+          block_date: string
+          start_time: string
+          end_time: string
+          reason?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          professional_id?: string
+          atendente_id?: string | null
+          block_date?: string
+          start_time?: string
+          end_time?: string
+          reason?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "agenda_availability_blocks_professional_id_fkey", columns: ["professional_id"], isOneToOne: false, referencedRelation: "professionals", referencedColumns: ["id"] },
+          { foreignKeyName: "agenda_availability_blocks_atendente_id_fkey", columns: ["atendente_id"], isOneToOne: false, referencedRelation: "agenda_atendentes", referencedColumns: ["id"] }
+        ]
+      }
+      agenda_appointments: {
+        Row: {
+          id: string
+          professional_id: string
+          atendente_id: string | null
+          client_id: string
+          service_id: string
+          appointment_date: string
+          start_time: string
+          end_time: string
+          status: string
+          chat_request_id: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          professional_id: string
+          atendente_id?: string | null
+          client_id: string
+          service_id: string
+          appointment_date: string
+          start_time: string
+          end_time: string
+          status?: string
+          chat_request_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          professional_id?: string
+          atendente_id?: string | null
+          client_id?: string
+          service_id?: string
+          appointment_date?: string
+          start_time?: string
+          end_time?: string
+          status?: string
+          chat_request_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "agenda_appointments_professional_id_fkey", columns: ["professional_id"], isOneToOne: false, referencedRelation: "professionals", referencedColumns: ["id"] },
+          { foreignKeyName: "agenda_appointments_atendente_id_fkey", columns: ["atendente_id"], isOneToOne: false, referencedRelation: "agenda_atendentes", referencedColumns: ["id"] },
+          { foreignKeyName: "agenda_appointments_service_id_fkey", columns: ["service_id"], isOneToOne: false, referencedRelation: "agenda_services", referencedColumns: ["id"] },
+          { foreignKeyName: "agenda_appointments_chat_request_id_fkey", columns: ["chat_request_id"], isOneToOne: false, referencedRelation: "service_requests", referencedColumns: ["id"] }
         ]
       }
       sponsor_clicks: {

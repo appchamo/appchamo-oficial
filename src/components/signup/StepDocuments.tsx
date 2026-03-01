@@ -1,6 +1,9 @@
 import { useState, useRef } from "react";
-import { Upload, FileText, X, Check } from "lucide-react";
+import { Upload, FileText, X, Camera, Image, FolderOpen } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Capacitor } from "@capacitor/core";
+import { Camera as CapacitorCamera, CameraSource } from "@capacitor/camera";
 
 interface UploadedDoc {
   file: File;
@@ -20,7 +23,10 @@ const ACCEPTED = ".jpg,.jpeg,.png,.pdf";
 const StepDocuments = ({ documentType, onNext, onBack }: Props) => {
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputImageOnlyRef = useRef<HTMLInputElement>(null);
   const [currentSlot, setCurrentSlot] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const slots = documentType === "cnpj"
     ? [
@@ -33,14 +39,82 @@ const StepDocuments = ({ documentType, onNext, onBack }: Props) => {
         { key: "id_back", label: "Documento com foto (verso)" },
       ];
 
+  const addFile = (file: File) => {
+    if (file.size > MAX_SIZE) {
+      toast({ title: "Arquivo muito grande. Máximo 15MB." });
+      return;
+    }
+    const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : "";
+    setDocs((prev) => [...prev.filter((d) => d.label !== currentSlot), { file, preview, label: currentSlot }]);
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > MAX_SIZE) { toast({ title: "Arquivo muito grande. Máximo 15MB." }); return; }
-    
-    const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : "";
-    setDocs((prev) => [...prev.filter((d) => d.label !== currentSlot), { file, preview, label: currentSlot }]);
+    addFile(file);
     e.target.value = "";
+  };
+
+  const handlePickFromGallery = async () => {
+    setPicking(true);
+    setPickerOpen(false);
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await new Promise((r) => setTimeout(r, 300));
+        const photo = await CapacitorCamera.getPhoto({
+          source: CameraSource.Photos,
+          quality: 90,
+          allowEditing: false,
+        });
+        if (!photo.webPath) throw new Error("Sem imagem");
+        const res = await fetch(photo.webPath);
+        const blob = await res.blob();
+        const file = new File([blob], `foto_${Date.now()}.${photo.format || "jpg"}`, { type: blob.type || "image/jpeg" });
+        addFile(file);
+      } else {
+        inputImageOnlyRef.current?.removeAttribute("capture");
+        inputImageOnlyRef.current?.click();
+      }
+    } catch (err: any) {
+      if (err?.message !== "User cancelled photos app") {
+        const msg = (err?.message || "").toLowerCase();
+        const hint = msg.includes("permission") || msg.includes("denied") ? " Verifique em Ajustes > Chamô > Fotos." : "";
+        toast({ title: "Não foi possível abrir a galeria." + hint, variant: "destructive" });
+      }
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    setPicking(true);
+    setPickerOpen(false);
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const photo = await CapacitorCamera.getPhoto({
+          source: CameraSource.Camera,
+          quality: 90,
+          allowEditing: false,
+        });
+        if (!photo.webPath) throw new Error("Sem imagem");
+        const res = await fetch(photo.webPath);
+        const blob = await res.blob();
+        const file = new File([blob], `foto_${Date.now()}.${photo.format || "jpg"}`, { type: blob.type || "image/jpeg" });
+        addFile(file);
+      } else {
+        inputImageOnlyRef.current?.setAttribute("capture", "user");
+        inputImageOnlyRef.current?.click();
+      }
+    } catch (err: any) {
+      if (err?.message !== "User cancelled photos app") toast({ title: "Não foi possível abrir a câmera.", variant: "destructive" });
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const handleChooseFile = () => {
+    setPickerOpen(false);
+    setTimeout(() => inputRef.current?.click(), 100);
   };
 
   const removeDoc = (label: string) => setDocs((prev) => prev.filter((d) => d.label !== label));
@@ -71,6 +145,7 @@ const StepDocuments = ({ documentType, onNext, onBack }: Props) => {
           </p>
 
           <input ref={inputRef} type="file" accept={ACCEPTED} onChange={handleFileSelect} className="hidden" />
+          <input ref={inputImageOnlyRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
 
           {slots.map((slot) => {
             const uploaded = docs.find((d) => d.label === slot.label);
@@ -95,15 +170,59 @@ const StepDocuments = ({ documentType, onNext, onBack }: Props) => {
                     </button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => { setCurrentSlot(slot.label); inputRef.current?.click(); }}
-                    className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed rounded-xl text-xs text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => { setCurrentSlot(slot.label); setPickerOpen(true); }}
+                    disabled={picking}
+                    className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed rounded-xl text-xs text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors disabled:opacity-60"
+                  >
                     <Upload className="w-4 h-4" />
-                    Selecionar arquivo
+                    {picking ? "Abrindo..." : "Selecionar arquivo"}
                   </button>
                 )}
               </div>
             );
           })}
+
+          <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+          <DialogContent className="max-w-xs rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-base">Como deseja enviar?</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handlePickFromGallery}
+                className="flex items-center gap-3 w-full p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Image className="w-5 h-5 text-primary" />
+                </div>
+                <span className="font-medium text-foreground">Galeria de fotos</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTakePhoto}
+                className="flex items-center gap-3 w-full p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Camera className="w-5 h-5 text-primary" />
+                </div>
+                <span className="font-medium text-foreground">Tirar foto</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleChooseFile}
+                className="flex items-center gap-3 w-full p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <FolderOpen className="w-5 h-5 text-primary" />
+                </div>
+                <span className="font-medium text-foreground">Escolher arquivo</span>
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
           <div className="flex gap-2 pt-1">
             <button onClick={onBack}

@@ -391,9 +391,16 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 enabled = true
 verify_jwt = true
 import_map = "./functions/send-push-notification/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/send-push-notification/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/send-push-notification/*.html" ]
+
+[functions.agenda-reminders]
+enabled = true
+verify_jwt = false
+# Chamada por cron com Authorization: Bearer SUPABASE_SERVICE_ROLE_KEY
+entrypoint = "./functions/agenda-reminders/index.ts"
+
+# JWT do usuário usa ES256; o gateway pode retornar 401. Validamos o token dentro da função.
+[functions.complete-signup]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/complete-signup/index.ts"

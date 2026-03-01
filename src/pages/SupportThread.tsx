@@ -266,8 +266,18 @@ const SupportThread = () => {
   if (loading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="animate-spin w-6 h-6 text-primary" /></div>;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pb-20">
-      <header className="sticky top-0 z-30 bg-amber-500/90 backdrop-blur-md border-b border-amber-600/30">
+    <div
+      className="bg-background flex flex-col overflow-hidden fixed inset-0 w-full"
+      style={{
+        paddingBottom: "calc(5rem + env(safe-area-inset-bottom, 0px))",
+        minHeight: "100vh",
+        height: "100dvh",
+      }}
+    >
+      <header
+        className="flex-shrink-0 z-30 bg-amber-500/90 backdrop-blur-md border-b border-amber-600/30"
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+      >
         <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto text-white">
           <Link to="/support" className="p-1.5 rounded-lg hover:bg-amber-600/20"><ArrowLeft className="w-5 h-5" /></Link>
           <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center"><HelpCircle className="w-5 h-5" /></div>
@@ -278,7 +288,7 @@ const SupportThread = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
+      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
         {messages.map((msg) => {
           const isMine = msg.sender_id === user?.id;
           if (msg.content === "[CLOSED]") return (
@@ -300,7 +310,12 @@ const SupportThread = () => {
       </main>
 
       {!isClosed && (
-        <div className="sticky bottom-20 bg-background border-t px-4 py-3">
+        <div
+          className="flex-shrink-0 bg-background border-t px-4 py-3"
+          style={{
+            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+          }}
+        >
           <div className="flex items-center gap-2 max-w-screen-lg mx-auto">
             {isRecording ? (
               <>

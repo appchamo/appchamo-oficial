@@ -17,6 +17,7 @@ interface Profile {
   user_type: string;
   is_blocked: boolean;
   accepted_terms_version: string | null;
+  job_posting_enabled?: boolean;
 }
 
 type AppRole =
@@ -61,7 +62,7 @@ let lastProcessedUrl = "";
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, avatar_url, user_type, is_blocked")
+    .select("id, user_id, full_name, email, phone, avatar_url, user_type, is_blocked, job_posting_enabled")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -130,25 +131,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // 1) Sessão inicial - Na web, o INITIAL_SESSION cuida disso, mas o getSession garante consistência
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      loadUserData(s);
-    });
+    // 1) Sessão inicial. No iOS/Capacitor o storage é async; getSession pode voltar null na 1ª leitura.
+    const loadInitialSession = async () => {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (s) {
+        loadUserData(s);
+        return;
+      }
+      // No native, dar uma segunda chance ao storage (evita "perdeu sessão" ao reabrir o app)
+      if (Capacitor.isNativePlatform()) {
+        await new Promise((r) => setTimeout(r, 300));
+        const { data: { session: s2 } } = await supabase.auth.getSession();
+        loadUserData(s2 ?? null);
+      } else {
+        loadUserData(null);
+      }
+    };
+    loadInitialSession();
 
-    // 2) Listener de mudanças (Google login, Logout, etc)
+    // 2) Listener de mudanças (Google login, Apple, Logout, restauração no iOS, etc)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sess) => {
-      console.log("🔐 Auth Event:", event);
-      if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setSession(null);
-        setProfile(null);
-        setRoles([]);
-        localStorage.removeItem("chamo_cached_profile");
-        localStorage.removeItem("chamo_cached_roles");
+      try {
+        console.log("🔐 Auth Event:", event);
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+          setRoles([]);
+          localStorage.removeItem("chamo_cached_profile");
+          localStorage.removeItem("chamo_cached_roles");
+          setLoading(false);
+        } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          loadUserData(sess ?? null);
+        }
+      } catch (e) {
+        console.error("Erro no listener de auth:", e);
         setLoading(false);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        // Na Web, deixamos o Login.tsx cuidar do redirecionamento se manual_login_intent for true
-        loadUserData(sess);
       }
     });
 
@@ -183,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     return () => {
-      subscription.unsubscribe();
+      subscription?.unsubscribe?.();
       if (urlListener) urlListener.then((l: any) => l.remove());
     };
   }, [isSignOutInProgress]);

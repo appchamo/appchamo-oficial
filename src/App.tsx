@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
-import { SplashScreen } from '@capacitor/splash-screen'; 
+import { SplashScreen } from '@capacitor/splash-screen';
+import { CustomSplash, type SplashConfig } from "@/components/CustomSplash";
+import { supabase } from "@/integrations/supabase/client"; 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom"; 
+import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom"; 
 import { AuthProvider, useAuth } from "@/hooks/useAuth"; // ✅ Importando useAuth
+import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
-import { supabase } from "@/integrations/supabase/client";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { Capacitor } from "@capacitor/core";
 import { CheckCircle2, Star, Loader2 } from "lucide-react";
 
@@ -35,6 +38,9 @@ import ClientDashboard from "./pages/ClientDashboard";
 import ProfessionalDashboard from "./pages/ProfessionalDashboard";
 import ProfessionalFinancial from "./pages/ProfessionalFinancial";
 import ProfessionalProfile from "./pages/ProfessionalProfile";
+import ProAgenda from "./pages/ProAgenda";
+import ProAgendaCalendar from "./pages/ProAgendaCalendar";
+import MeusAgendamentos from "./pages/MeusAgendamentos";
 import BecomeProfessional from "./pages/BecomeProfessional";
 import Support from "./pages/Support";
 import SupportThread from "./pages/SupportThread";
@@ -72,6 +78,28 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 
 const queryClient = new QueryClient();
 
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  return null;
+};
+
+/** Quando o usuário abre o app tocando numa push (ex.: mensagem), navega para o link (ex.: /messages/threadId). */
+const NotificationOpenHandler = () => {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ link: string }>) => {
+      const link = e.detail?.link;
+      if (link && link.startsWith("/")) navigate(link);
+    };
+    window.addEventListener("chamo-notification-open", handler as EventListener);
+    return () => window.removeEventListener("chamo-notification-open", handler as EventListener);
+  }, [navigate]);
+  return null;
+};
+
 const BackButtonHandler = () => {
   const navigate = useNavigate();
   useEffect(() => {
@@ -86,17 +114,41 @@ const BackButtonHandler = () => {
   return null;
 };
 
+const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "splash_duration_seconds"] as const;
+
 const AppContent = () => {
-  const { session, loading } = useAuth(); // ✅ Agora pegamos a sessão do Provider centralizado
+  const { session, loading } = useAuth();
+  const [splashConfig, setSplashConfig] = useState<SplashConfig | null>(null);
+  const [showCustomSplash, setShowCustomSplash] = useState(false);
 
   useEffect(() => {
-    // Esconde a Splash Screen assim que o useAuth terminar de carregar
-    if (!loading && Capacitor.isNativePlatform()) {
-      setTimeout(async () => {
-        await SplashScreen.hide({ fadeOutDuration: 400 });
-      }, 500);
-    }
+    if (loading) return;
+    setShowCustomSplash(true);
+    supabase
+      .from("platform_settings")
+      .select("key, value")
+      .in("key", SPLASH_KEYS)
+      .then(({ data }) => {
+        const map: SplashConfig = {};
+        data?.forEach((r: { key: string; value: unknown }) => {
+          if (SPLASH_KEYS.includes(r.key as any)) map[r.key as keyof SplashConfig] = r.value as string;
+        });
+        // Cache-bust da imagem do splash para mobile pegar alterações do admin
+        const url = map.splash_logo_url?.trim();
+        if (url) {
+          const sep = url.includes("?") ? "&" : "?";
+          map.splash_logo_url = `${url}${sep}v=${Date.now()}`;
+        }
+        setSplashConfig(Object.keys(map).length ? map : null);
+      });
   }, [loading]);
+
+  const handleSplashFinish = useCallback(async () => {
+    setShowCustomSplash(false);
+    if (Capacitor.isNativePlatform()) {
+      await SplashScreen.hide({ fadeOutDuration: 500 });
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -104,6 +156,10 @@ const AppContent = () => {
         <Loader2 className="w-10 h-10 text-primary animate-spin" />
       </div>
     );
+  }
+
+  if (showCustomSplash) {
+    return <CustomSplash config={splashConfig} onFinish={handleSplashFinish} />;
   }
 
   const isWeb = Capacitor.getPlatform() === 'web';
@@ -185,7 +241,7 @@ const AppContent = () => {
     <>
       <BackButtonHandler />
       <Routes>
-        <Route path="/" element={<Index />} />
+        <Route path="/" element={session ? <Navigate to="/home" replace /> : <Index />} />
         <Route path="/login" element={<Login />} />
         
         <Route path="/signup" element={<Signup />} />
@@ -214,6 +270,9 @@ const AppContent = () => {
         <Route path="/pro" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro-dashboard" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro/financeiro" element={<ProtectedRoute><ProfessionalFinancial /></ProtectedRoute>} />
+        <Route path="/pro/agenda" element={<ProtectedRoute><ProAgenda /></ProtectedRoute>} />
+        <Route path="/pro/agenda/calendario" element={<ProtectedRoute><ProAgendaCalendar /></ProtectedRoute>} />
+        <Route path="/meus-agendamentos" element={<ProtectedRoute><MeusAgendamentos /></ProtectedRoute>} />
         <Route path="/pro/:id" element={<ProtectedRoute><ProfessionalProfile /></ProtectedRoute>} />
         <Route path="/professional/:id" element={<ProtectedRoute><ProfessionalProfile /></ProtectedRoute>} />
         <Route path="/support" element={<ProtectedRoute><Support /></ProtectedRoute>} />
@@ -260,8 +319,14 @@ const App = () => {
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
-            <BackButtonHandler />
-            <AppContent />
+            <RefreshProvider>
+              <ScrollToTop />
+              <NotificationOpenHandler />
+              <BackButtonHandler />
+              <ErrorBoundary>
+                <AppContent />
+              </ErrorBoundary>
+            </RefreshProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

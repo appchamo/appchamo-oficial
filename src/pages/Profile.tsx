@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -235,6 +235,7 @@ const Profile = () => {
           {[
             { icon: LayoutDashboard, label: "Painel do Cliente", path: "/client" },
             ...((profile.user_type === "professional" || profile.user_type === "company") ? [{ icon: Briefcase, label: "Painel Profissional", path: "/pro" }] : []),
+            { icon: CalendarCheck, label: "Meus agendamentos", path: "/meus-agendamentos" },
             { icon: Crown, label: "Planos e Assinatura", path: "/subscriptions" },
             { icon: Ticket, label: "Meus Cupons", path: "/coupons" },
           ].map((item) => (

@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,12 +12,15 @@ import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import StepPlanSelect from "@/components/signup/StepPlanSelect";
 import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
-import { Capacitor } from "@capacitor/core"; 
+import { Capacitor } from "@capacitor/core";
+import { Browser } from "@capacitor/browser"; 
 
 type AccountType = "client" | "professional";
 type Step = "method-choice" | "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email";
 
-const friendlyError = (msg: string) => {
+const friendlyError = (msg: string, status?: number) => {
+  if (status === 429 || /429|too many|rate limit|rate_limit/i.test(msg))
+    return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
   if (msg.includes("already registered")) return "Este e-mail já está cadastrado.";
   if (msg.includes("password")) return "A senha deve ter pelo menos 6 caracteres.";
   if (msg.includes("cpf") || msg.includes("cnpj") || msg.includes("unique"))
@@ -37,6 +41,7 @@ const fileToBase64 = (file: File): Promise<string> =>
 
 const Signup = () => {
   const navigate = useNavigate();
+  const { session, profile, loading: authLoading, refreshProfile } = useAuth();
   const [accountType, setAccountType] = useState<AccountType>("client");
   const [step, setStep] = useState<Step>("method-choice");
   const [basicData, setBasicData] = useState<BasicData | null>(null);
@@ -54,6 +59,28 @@ const Signup = () => {
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+  const didAdvanceFromOAuth = useRef(false);
+
+  // Se voltou do OAuth com erro na URL (ex.: Apple config errada), mostrar toast e limpar URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("error");
+    const description = params.get("error_description") || params.get("error_description") || "";
+    if (error) {
+      window.history.replaceState({}, "", window.location.pathname);
+      let msg = "Verifique a configuração (Apple/Google) no Supabase.";
+      try {
+        if (description) msg = decodeURIComponent(description);
+      } catch (_) {
+        msg = description || msg;
+      }
+      toast({
+        title: "Cadastro com rede social falhou",
+        description: msg,
+        variant: "destructive",
+      });
+    }
+  }, []);
 
   const forceExitToLogin = async () => {
     setLoading(true);
@@ -74,79 +101,126 @@ const Signup = () => {
     }
   };
 
+  // Ao montar: checa se já existe sessão (ex.: refresh) e avança ou redireciona
   useEffect(() => {
+    if (localStorage.getItem("manual_login_intent") === "true") return;
     const checkSocialUser = async () => {
-      if (localStorage.getItem("manual_login_intent") === "true") return;
-
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (session?.user) {
-        setLoading(true);
-        try {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("cpf, phone")
-            .eq("user_id", session.user.id)
-            .maybeSingle();
-
-          const isComplete = profile?.cpf || profile?.phone;
-
-          if (isComplete) {
-            localStorage.removeItem("signup_in_progress");
-            navigate("/home");
-          } else {
-            setCreatedUserId(session.user.id);
-            setBasicData({
-              name: session.user.user_metadata?.full_name || "",
-              email: session.user.email || "",
-              password: "", 
-              phone: "",
-              document: "",
-              documentType: "cpf",
-              birthDate: "",
-              addressZip: "",
-              addressStreet: "",
-              addressNumber: "",
-              addressComplement: "",
-              addressNeighborhood: "",
-              addressCity: "",
-              addressState: "",
-              addressCountry: "Brasil"
-            });
-            setStep("type");
-          }
-        } catch (err) {
-          console.error("Erro na Blitz Social:", err);
-        } finally {
-          setLoading(false);
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (!currentSession?.user) return;
+      setLoading(true);
+      try {
+        const { data: profileRow, error: profileError } = await supabase
+          .from("profiles")
+          .select("cpf, phone")
+          .eq("user_id", currentSession.user.id)
+          .maybeSingle();
+        // Sessão inválida (ex.: usuário excluído no Supabase) → limpa e manda pro login
+        const errMsg = (profileError?.message || "").toLowerCase();
+        if (profileError && (errMsg.includes("jwt") || errMsg.includes("refresh") || errMsg.includes("session") || profileError.code === "PGRST301")) {
+          await forceExitToLogin();
+          return;
         }
+        const isComplete = profileRow?.cpf || profileRow?.phone;
+        if (isComplete) {
+          localStorage.removeItem("signup_in_progress");
+          navigate("/home");
+        } else {
+          setCreatedUserId(currentSession.user.id);
+          setBasicData({
+            name: currentSession.user.user_metadata?.full_name || "",
+            email: currentSession.user.email || "",
+            password: "",
+            phone: "",
+            document: "",
+            documentType: "cpf",
+            birthDate: "",
+            addressZip: "",
+            addressStreet: "",
+            addressNumber: "",
+            addressComplement: "",
+            addressNeighborhood: "",
+            addressCity: "",
+            addressState: "",
+            addressCountry: "Brasil",
+          });
+          setStep("type");
+        }
+      } catch (err) {
+        console.error("Erro na Blitz Social:", err);
+      } finally {
+        setLoading(false);
       }
     };
     checkSocialUser();
   }, [navigate]);
 
+  // Quando volta do OAuth no mobile: sessão chega depois; avança para "Escolha o tipo" (type)
+  useEffect(() => {
+    if (authLoading || !session?.user) return;
+    if (localStorage.getItem("manual_login_intent") === "true") return;
+    if (step !== "method-choice") return;
+    if (!localStorage.getItem("signup_in_progress")) return;
+    if (didAdvanceFromOAuth.current) return;
+
+    const isComplete = profile?.cpf || profile?.phone;
+    if (isComplete) {
+      localStorage.removeItem("signup_in_progress");
+      navigate("/home");
+      return;
+    }
+
+    didAdvanceFromOAuth.current = true;
+    setCreatedUserId(session.user.id);
+    setBasicData({
+      name: session.user.user_metadata?.full_name || "",
+      email: session.user.email || "",
+      password: "",
+      phone: "",
+      document: "",
+      documentType: "cpf",
+      birthDate: "",
+      addressZip: "",
+      addressStreet: "",
+      addressNumber: "",
+      addressComplement: "",
+      addressNeighborhood: "",
+      addressCity: "",
+      addressState: "",
+      addressCountry: "Brasil",
+    });
+    setStep("type");
+  }, [session, profile, authLoading, step, navigate]);
+
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
     localStorage.removeItem("manual_login_intent");
-    
-    const isNative = Capacitor.isNativePlatform();
-    const redirectTo = isNative 
-      ? 'com.chamo.app://google-auth' 
-      : `${window.location.origin}/signup`; 
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: redirectTo, 
-        queryParams: {
-          prompt: 'select_account',
-        },
+    try {
+      if (Capacitor.isNativePlatform()) {
+        // Abre no navegador do sistema (Safari/Chrome) para cumprir política do Google (não usar WebView)
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo: "com.chamo.app://google-auth",
+            skipBrowserRedirect: true,
+            queryParams: { prompt: "select_account" },
+          },
+        });
+        if (error) throw error;
+        if (data?.url) await Browser.open({ url: data.url });
+      } else {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo: `${window.location.origin}/signup`,
+            queryParams: { prompt: "select_account" },
+          },
+        });
+        if (error) throw error;
       }
-    });
-
-    if (error) {
+    } catch (err: any) {
       localStorage.removeItem("signup_in_progress");
-      toast({ title: "Erro ao conectar", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao conectar", description: err?.message ?? "Tente novamente.", variant: "destructive" });
     }
   };
 
@@ -223,7 +297,12 @@ const Signup = () => {
           },
         });
         if (authError) {
-          toast({ title: friendlyError(authError.message), variant: "destructive" });
+          const status = (authError as { status?: number }).status;
+          toast({
+            title: friendlyError(authError.message, status),
+            description: status === 429 ? "O limite de cadastros por minuto foi atingido." : undefined,
+            variant: "destructive",
+          });
           setLoading(false);
           return;
         }
@@ -232,8 +311,26 @@ const Signup = () => {
       
       if (!userId) { setLoading(false); return; }
 
-      // Pegamos a sessão atual para garantir o JWT mais fresco
-      const { data: { session } } = await supabase.auth.getSession();
+      // Garante JWT válido para a Edge Function (evita 401)
+      let token = session?.access_token ?? null;
+      if (!token) {
+        const { data: { session: fresh } } = await supabase.auth.getSession();
+        token = fresh?.access_token ?? null;
+      }
+      if (!token) {
+        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+        token = refreshed?.access_token ?? null;
+      }
+      if (!token) {
+        toast({
+          title: "Sessão expirada",
+          description: "Volte e faça login com Google (ou e-mail) novamente para continuar.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        await forceExitToLogin();
+        return;
+      }
 
       const docFilesPayload = await Promise.all(
         docFiles.map(async (file) => ({
@@ -243,14 +340,13 @@ const Signup = () => {
         }))
       );
 
-      // Chamada da função com tratamento de JWT
       const { data: result, error: fnError } = await supabase.functions.invoke(
         "complete-signup",
         {
           body: { userId, accountType, profileData: pData, basicData, docFiles: docFilesPayload, planId },
           headers: {
-            Authorization: `Bearer ${session?.access_token}`, // ✅ Força o envio do JWT correto
-          }
+            Authorization: `Bearer ${token}`,
+          },
         }
       );
 
@@ -288,9 +384,11 @@ const Signup = () => {
     setResending(false);
   };
 
-  const handleCouponClose = () => {
+  const handleCouponClose = async () => {
     setCouponPopup(false);
     if (createdUserId) {
+      // Atualiza perfil (user_type, etc.) antes de ir para a Home para já abrir como profissional/cliente
+      await refreshProfile?.();
       navigate("/home");
     } else {
       setStep("awaiting-email");

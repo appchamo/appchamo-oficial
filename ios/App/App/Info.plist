@@ -39,6 +39,14 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>O Chamô usa a câmera para você enviar fotos dos documentos no cadastro.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>O Chamô acessa suas fotos para você enviar documentos e imagens no cadastro.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>O Chamô usa a galeria para você escolher e enviar fotos de perfil e documentos.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>O Chamô usa o microfone para você enviar mensagens de áudio no chat.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

@@ -1,11 +1,19 @@
-import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package } from "lucide-react";
+import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
+import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Capacitor } from "@capacitor/core";
+import { formatCep } from "@/lib/formatters";
+import { fetchViaCep } from "@/lib/viacep";
 
 interface Message {
   id: string;
@@ -43,6 +51,8 @@ const getOptimizedChatImage = (url: string | null | undefined) => {
 const MessageThread = () => {
   const { threadId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isFetchingMessages, setIsFetchingMessages] = useState(true); // NOVO: Controle visual de carregamento
   
@@ -58,6 +68,8 @@ const MessageThread = () => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
+  /** user_id do destinatário (quem recebe a mensagem) — usado para push de nova mensagem */
+  const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
 
   // Billing state
   const [billingOpen, setBillingOpen] = useState(false);
@@ -81,6 +93,8 @@ const MessageThread = () => {
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [cardStep, setCardStep] = useState(false);
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
+  const [cepFetchedAddress, setCepFetchedAddress] = useState<string | null>(null);
+  const [searchingCep, setSearchingCep] = useState(false);
   const [installments, setInstallments] = useState("1");
   const [processingPayment, setProcessingPayment] = useState(false);
   const [clientPassFee, setClientPassFee] = useState(false); 
@@ -96,6 +110,21 @@ const MessageThread = () => {
   const [rewardCoupon, setRewardCoupon] = useState<{type: string;value: number;} | null>(null);
   const [rewardOpen, setRewardOpen] = useState(false);
 
+  // Agenda (appointment) state
+  const [appointment, setAppointment] = useState<{
+    id: string;
+    status: string;
+    service_id: string;
+    appointment_date: string;
+    start_time: string;
+    end_time: string;
+    client_id: string;
+    professional_id: string;
+    agenda_services?: { name: string; duration_minutes?: number } | null;
+  } | null>(null);
+  const [remarcarOpen, setRemarcarOpen] = useState(false);
+  const [agendaClientModal, setAgendaClientModal] = useState<"cancel" | "reschedule" | null>(null);
+
   // PIX & Audio states
   const [pixData, setPixData] = useState<{qrCode: string;copyPaste: string;paymentId: string;} | null>(null);
   const [pixOpen, setPixOpen] = useState(false);
@@ -108,6 +137,11 @@ const MessageThread = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const recordingLevelsRef = useRef<number[]>(Array(20).fill(0.2));
+  const [recordingLevels, setRecordingLevels] = useState<number[]>(Array(20).fill(0.2));
+  const recordingAnimRef = useRef<number | null>(null);
 
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [dismissedReceipt, setDismissedReceipt] = useState(false);
@@ -127,7 +161,7 @@ const MessageThread = () => {
     }
   }, []);
 
-  const sendNotification = async (targetId: string | null, title: string, msg: string) => {
+  const sendNotification = async (targetId: string | null, title: string, msg: string, link: string | null = null) => {
     if (!targetId) return;
     try {
       await supabase.from("notifications").insert({
@@ -135,13 +169,38 @@ const MessageThread = () => {
         title: title,
         message: msg,
         read: false,
-        type: "system",
-        link: null
+        type: link ? "appointment" : "system",
+        link: link
       } as any);
     } catch (err) {
       console.error("Erro ao enviar notificação:", err);
     }
   };
+
+  /** Push para o destinatário: "Fulano enviou uma mensagem para você" + preview (ex: "Oi"). No celular bloqueado só o título aparece. */
+  const sendMessagePushNotification = async (recipientId: string | null, preview: string) => {
+    if (!recipientId || !threadId) return;
+    const senderName = profile?.full_name?.trim() || "Alguém";
+    const title = `${senderName} enviou uma mensagem para você`;
+    const body = preview.slice(0, 120);
+    try {
+      await supabase.from("notifications").insert({
+        user_id: recipientId,
+        title,
+        message: body,
+        read: false,
+        type: "chat",
+        link: `/messages/${threadId}`
+      } as any);
+    } catch (err) {
+      console.error("Erro ao enviar push de mensagem:", err);
+    }
+  };
+
+  const markAppointmentDone = useCallback(async () => {
+    if (!threadId) return;
+    await supabase.from("agenda_appointments").update({ status: "done" }).eq("chat_request_id", threadId!);
+  }, [threadId]);
 
   useEffect(() => { loadFeeSettings(); }, [loadFeeSettings]);
 
@@ -187,13 +246,24 @@ const MessageThread = () => {
           const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
           if (pro) {
             setChatProUserId(pro.user_id);
+            setRecipientUserId(pro.user_id);
             const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
             if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
           }
         } else {
+          setRecipientUserId(req.client_id);
           const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
           if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
         }
+
+        const { data: appSingle } = await supabase
+          .from("agenda_appointments")
+          .select("id, status, service_id, appointment_date, start_time, end_time, client_id, professional_id, agenda_services(name, duration_minutes)")
+          .eq("chat_request_id", threadId)
+          .order("start_time", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        setAppointment(appSingle ? (appSingle as any) : null);
       }
 
       const { data } = await supabase.
@@ -247,14 +317,36 @@ const MessageThread = () => {
       if (updated.protocol) setRequestProtocol(updated.protocol);
     }).
     subscribe();
-    return () => {supabase.removeChannel(channel);};
+    return () => { supabase.removeChannel(channel); };
   }, [threadId]);
+
+  useEffect(() => {
+    if (!threadId || !appointment?.id) return;
+    const channel = supabase
+      .channel(`appointment-${appointment.id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "agenda_appointments", filter: `id=eq.${appointment.id}` },
+        (payload) => {
+          const updated = payload.new as any;
+          setAppointment((a) => (a && a.id === updated.id ? { ...a, ...updated } : a));
+        })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [threadId, appointment?.id]);
 
   useEffect(() => {
     return () => {
       if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const state = location.state as { showAgendaModal?: "cancel" | "reschedule" } | null;
+    const modal = state?.showAgendaModal;
+    if (modal === "cancel" || modal === "reschedule") {
+      setAgendaClientModal(modal);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, navigate]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -274,15 +366,21 @@ const MessageThread = () => {
       sender_id: userId,
       content: text.trim()
     });
-    if (error) toast({ title: "Erro ao enviar mensagem", variant: "destructive" });else
-    setText("");
+    if (error) toast({ title: "Erro ao enviar mensagem", variant: "destructive" }); else {
+      sendMessagePushNotification(recipientUserId, text.trim());
+      setText("");
+    }
     setSending(false);
   };
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4' });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType,
+        audioBitsPerSecond: 128000,
+      });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -294,16 +392,60 @@ const MessageThread = () => {
         stream.getTracks().forEach((t) => t.stop());
       };
 
+      // Barra de áudio ao vivo: AnalyserNode + requestAnimationFrame
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const barCount = 20;
+
+      const updateLevels = () => {
+        if (!analyserRef.current || !audioContextRef.current) return;
+        analyser.getByteFrequencyData(dataArray);
+        const step = Math.floor(dataArray.length / barCount);
+        const levels = Array.from({ length: barCount }, (_, i) => {
+          const idx = i * step;
+          const v = dataArray[idx] ?? 0;
+          return 0.2 + (v / 255) * 0.8;
+        });
+        recordingLevelsRef.current = levels;
+        setRecordingLevels([...levels]);
+        recordingAnimRef.current = requestAnimationFrame(updateLevels);
+      };
+      updateLevels();
+
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
       recordingTimerRef.current = setInterval(() => setRecordingTime((t) => t + 1), 1000);
     } catch {
-      toast({ title: "Não foi possível acessar o microfone", description: "Verifique as permissões do navegador.", variant: "destructive" });
+      const isApp = Capacitor.isNativePlatform();
+      toast({
+        title: "Microfone indisponível",
+        description: isApp
+          ? "Vá em Ajustes > Chamô e permita o acesso ao microfone. Depois abra o app novamente."
+          : "Verifique se o site tem permissão para usar o microfone nas configurações do navegador.",
+        variant: "destructive",
+      });
     }
   };
 
   const cancelRecording = () => {
+    if (recordingAnimRef.current) {
+      cancelAnimationFrame(recordingAnimRef.current);
+      recordingAnimRef.current = null;
+    }
+    analyserRef.current = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.onstop = () => {
         mediaRecorderRef.current?.stream?.getTracks().forEach((t) => t.stop());
@@ -313,6 +455,7 @@ const MessageThread = () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setIsRecording(false);
     setRecordingTime(0);
+    setRecordingLevels(Array(20).fill(0.2));
     audioChunksRef.current = [];
   };
 
@@ -334,6 +477,16 @@ const MessageThread = () => {
     });
 
     setIsRecording(false);
+    if (recordingAnimRef.current) {
+      cancelAnimationFrame(recordingAnimRef.current);
+      recordingAnimRef.current = null;
+    }
+    analyserRef.current = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    setRecordingLevels(Array(20).fill(0.2));
 
     const ext = MediaRecorder.isTypeSupported('audio/webm') ? 'webm' : 'm4a';
     const mimeType = ext === 'webm' ? 'audio/webm' : 'audio/mp4';
@@ -367,6 +520,7 @@ const MessageThread = () => {
     });
 
     if (error) toast({ title: "Erro ao enviar áudio", variant: "destructive" });
+    else sendMessagePushNotification(recipientUserId, "Áudio");
     setUploadingAudio(false);
     setRecordingTime(0);
   };
@@ -441,8 +595,8 @@ const MessageThread = () => {
       sender_id: userId,
       content: billingContent
     });
-    if (error) toast({ title: "Erro ao enviar cobrança", variant: "destructive" });else
-    {
+    if (error) toast({ title: "Erro ao enviar cobrança", variant: "destructive" }); else {
+      sendMessagePushNotification(recipientUserId, "Cobrança");
       setBillingOpen(false);
       setBillingAmount("");
       setBillingDesc("");
@@ -804,6 +958,7 @@ const MessageThread = () => {
               });
               await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
               setRequestStatus("completed");
+              await markAppointmentDone();
 
               await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
               await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
@@ -851,6 +1006,7 @@ const MessageThread = () => {
       });
       await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
       setRequestStatus("completed");
+      await markAppointmentDone();
 
       await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento no Cartão de Crédito no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
       await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via Cartão no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
@@ -940,7 +1096,7 @@ const MessageThread = () => {
       });
 
       if (msgError) throw msgError;
-      
+      sendMessagePushNotification(recipientUserId, "Comprovante");
       toast({ title: "Comprovante enviado com sucesso!" });
     } catch (error) {
       toast({ title: "Erro ao enviar comprovante", variant: "destructive" });
@@ -1112,11 +1268,21 @@ const MessageThread = () => {
     return <p className="whitespace-pre-wrap">{msg.content}</p>;
   };
 
-  const otherInitials = otherParty.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const otherInitials = (otherParty?.name ?? "Chat").split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pb-20">
-      <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b">
+    <div 
+      className="bg-background flex flex-col overflow-hidden pb-20 fixed inset-0 w-full"
+      style={{ 
+        paddingBottom: '5rem',
+        minHeight: '100vh',
+        height: '100dvh',
+      }}
+    >
+      <header 
+        className="flex-shrink-0 z-30 bg-card/95 backdrop-blur-md border-b"
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      >
         <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
           <Link to="/messages" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
             <ArrowLeft className="w-5 h-5 text-foreground" />
@@ -1151,7 +1317,8 @@ const MessageThread = () => {
                 });
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
                 setRequestStatus("completed");
-                
+                await markAppointmentDone();
+
                 await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
                 setClosingCall(false);
@@ -1166,13 +1333,20 @@ const MessageThread = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
+      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
         {!isProfessional && requestStatus === "pending" && !isChatFinished &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 shadow-sm">
             <p className="text-sm font-semibold text-foreground text-center">Aguardando resposta</p>
             <p className="text-xs text-muted-foreground text-center">O profissional ainda não aceitou. Se desejar desistir, você pode cancelar a solicitação.</p>
             <button
               onClick={async () => {
+                if (appointment) {
+                  await supabase.from("agenda_appointments").update({ status: "canceled" }).eq("chat_request_id", threadId);
+                  setAppointment((a) => (a ? { ...a, status: "canceled" } : null));
+                  const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", appointment.professional_id).single();
+                  if ((pro as { user_id?: string })?.user_id)
+                    await sendNotification((pro as { user_id: string }).user_id, "Agendamento cancelado", "O cliente cancelou o agendamento.", `/messages/${threadId}`);
+                }
                 await supabase.from("service_requests").update({ status: "cancelled" } as any).eq("id", threadId!);
                 setRequestStatus("cancelled");
                 await supabase.from("chat_messages").insert({
@@ -1188,15 +1362,88 @@ const MessageThread = () => {
         </div>
         }
 
-        {isProfessional && requestStatus === "pending" && !isChatFinished &&
-        <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2">
-            <p className="text-sm font-semibold text-foreground text-center">Nova solicitação de serviço</p>
+        {isProfessional && requestStatus === "pending" && !isChatFinished && appointment?.status === "pending" &&
+        <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 flex-shrink-0">
+            <p className="text-sm font-semibold text-foreground text-center leading-snug flex items-center justify-center gap-1.5">
+              <Calendar className="w-4 h-4 text-primary" /> Novo agendamento
+            </p>
+            <p className="text-xs text-muted-foreground text-center">
+              {appointment.agenda_services?.name ?? "Serviço"} — {format(new Date(appointment.appointment_date + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às {appointment.start_time}
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <button
+              onClick={async () => {
+                if (!threadId || !userId || !appointment) return;
+                await supabase.from("agenda_appointments").update({ status: "rejected" }).eq("chat_request_id", threadId);
+                setAppointment((a) => (a ? { ...a, status: "rejected" } : null));
+                await supabase.from("service_requests").update({ status: "cancelled" } as any).eq("id", threadId);
+                setRequestStatus("cancelled");
+                await supabase.from("chat_messages").insert({
+                  request_id: threadId,
+                  sender_id: userId,
+                  content: "❌ Agendamento recusado pelo profissional."
+                });
+                await sendNotification(appointment.client_id, "Agendamento recusado", "O profissional recusou seu agendamento.", `/messages/${threadId}`);
+                toast({ title: "Agendamento recusado" });
+              }}
+              className="flex-1 min-w-[80px] py-2.5 rounded-xl border-2 border-destructive text-destructive font-semibold text-sm hover:bg-destructive/10 transition-colors">
+                Recusar
+              </button>
+              <button
+              onClick={() => setRemarcarOpen(true)}
+              className="flex-1 min-w-[80px] py-2.5 rounded-xl border-2 border-primary text-primary font-semibold text-sm hover:bg-primary/10 transition-colors">
+                Remarcar
+              </button>
+              <button
+              onClick={async () => {
+                if (!threadId || !userId || !appointment) return;
+                await supabase.from("agenda_appointments").update({ status: "confirmed" }).eq("chat_request_id", threadId);
+                setAppointment((a) => (a ? { ...a, status: "confirmed" } : null));
+                await supabase.from("service_requests").update({ status: "accepted" } as any).eq("id", threadId);
+                setRequestStatus("accepted");
+                await supabase.from("chat_messages").insert({
+                  request_id: threadId,
+                  sender_id: userId,
+                  content: "✅ Agendamento confirmado! Nos vemos no dia e horário combinados."
+                });
+                await sendNotification(appointment.client_id, "Agendamento confirmado", `${appointment.agenda_services?.name ?? "Serviço"} em ${format(new Date(appointment.appointment_date + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${appointment.start_time}`, `/messages/${threadId}`);
+                toast({ title: "Agendamento aceito!" });
+              }}
+              className="flex-1 min-w-[80px] py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
+                Aceitar
+              </button>
+            </div>
+          </div>
+        }
+
+        {isProfessional && requestStatus === "accepted" && !isChatFinished && appointment && (appointment.status === "confirmed" || appointment.status === "pending") &&
+        <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 flex-shrink-0">
+            <p className="text-sm font-semibold text-foreground text-center leading-snug flex items-center justify-center gap-1.5">
+              <Calendar className="w-4 h-4 text-primary" /> Agendamento confirmado
+            </p>
+            <p className="text-xs text-muted-foreground text-center">
+              {appointment.agenda_services?.name ?? "Serviço"} — {format(new Date(appointment.appointment_date + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às {appointment.start_time}
+            </p>
+            <div className="flex justify-center">
+              <button
+                onClick={() => setRemarcarOpen(true)}
+                className="py-2.5 px-4 rounded-xl border-2 border-primary text-primary font-semibold text-sm hover:bg-primary/10 transition-colors"
+              >
+                Remarcar
+              </button>
+            </div>
+          </div>
+        }
+
+        {isProfessional && requestStatus === "pending" && !isChatFinished && !appointment &&
+        <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 flex-shrink-0">
+            <p className="text-sm font-semibold text-foreground text-center leading-snug">Nova solicitação de serviço</p>
             <p className="text-xs text-muted-foreground text-center">Deseja aceitar esta chamada?</p>
             <div className="flex gap-2">
               <button
               onClick={async () => {
-                await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId!);
-                setRequestStatus("rejected");
+                await supabase.from("service_requests").update({ status: "cancelled" } as any).eq("id", threadId!);
+                setRequestStatus("cancelled");
                 await supabase.from("chat_messages").insert({
                   request_id: threadId!,
                   sender_id: userId!,
@@ -1345,7 +1592,7 @@ const MessageThread = () => {
         </div> :
 
       <div 
-        className="sticky bottom-20 bg-background border-t px-4 py-3"
+        className="flex-shrink-0 bg-background border-t px-4 py-3"
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 16px) + 12px)" }}
       >
           <div className="flex items-center gap-2 max-w-screen-lg mx-auto">
@@ -1355,10 +1602,18 @@ const MessageThread = () => {
             className="w-10 h-10 rounded-xl bg-muted text-destructive flex items-center justify-center hover:bg-muted/80 transition-colors">
                   <X className="w-4 h-4" />
                 </button>
-                <div className="flex-1 flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5">
-                  <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
-                  <span className="text-sm font-medium text-destructive">{formatRecTime(recordingTime)}</span>
-                  <span className="text-xs text-muted-foreground ml-1">Gravando...</span>
+                <div className="flex-1 flex items-center gap-3 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5">
+                  <span className="w-2 h-2 rounded-full bg-destructive animate-pulse flex-shrink-0" />
+                  <div className="flex items-end gap-[2px] h-7 flex-1 min-w-0" aria-hidden>
+                    {recordingLevels.map((h, i) => (
+                      <div
+                        key={i}
+                        className="flex-1 rounded-full min-w-[3px] bg-destructive/60 transition-all duration-75"
+                        style={{ height: `${Math.max(4, h * 100)}%` }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-sm font-medium text-destructive flex-shrink-0 tabular-nums">{formatRecTime(recordingTime)}</span>
                 </div>
                 <button onClick={stopAndSendRecording}
             className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors">
@@ -1372,11 +1627,19 @@ const MessageThread = () => {
               </div> :
 
           <>
-                <input
-              type="text" value={text} onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                if (e.shiftKey) return; // Shift+Enter = nova linha
+                e.preventDefault();
+                handleSend();
+              }}
               placeholder="Digite sua mensagem..."
-              className="flex-1 bg-card border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+              rows={1}
+              className="flex-1 min-h-[40px] max-h-24 bg-card border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+            />
 
                 {text.trim() ?
             <button onClick={handleSend} disabled={sending}
@@ -1478,7 +1741,8 @@ const MessageThread = () => {
                 });
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
                 setRequestStatus("completed");
-                
+                await markAppointmentDone();
+
                 await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
                 setBillingOpen(false);
@@ -1793,15 +2057,33 @@ const MessageThread = () => {
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
+                  <div className="relative">
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">CEP</label>
                     <input
-                    value={cardForm.postalCode}
-                    onChange={(e) => setCardForm((f) => ({ ...f, postalCode: e.target.value.replace(/\D/g, "").slice(0, 8) }))}
-                    placeholder="00000000"
-                    maxLength={8}
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
-
+                      value={formatCep(cardForm.postalCode)}
+                      onChange={async (e) => {
+                        const raw = e.target.value.replace(/\D/g, "").slice(0, 8);
+                        setCardForm((f) => ({ ...f, postalCode: raw }));
+                        setCepFetchedAddress(null);
+                        if (raw.length === 8) {
+                          setSearchingCep(true);
+                          try {
+                            const data = await fetchViaCep(raw);
+                            if (data) {
+                              const addr = [data.logradouro, data.bairro, data.localidade && data.uf ? `${data.localidade}/${data.uf}` : null].filter(Boolean).join(", ");
+                              setCepFetchedAddress(addr || null);
+                            }
+                          } finally {
+                            setSearchingCep(false);
+                          }
+                        }
+                      }}
+                      placeholder="00000-000"
+                      maxLength={9}
+                      className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                    />
+                    {searchingCep && <div className="absolute right-3 top-9 w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+                    {cepFetchedAddress && <p className="text-[10px] text-muted-foreground mt-1 truncate" title={cepFetchedAddress}>{cepFetchedAddress}</p>}
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Nº endereço</label>
@@ -1971,6 +2253,47 @@ const MessageThread = () => {
             }
             </div>
           }
+        </DialogContent>
+      </Dialog>
+
+      {appointment && (
+        <AgendaRescheduleDialog
+          open={remarcarOpen}
+          onOpenChange={setRemarcarOpen}
+          appointmentId={appointment.id}
+          professionalId={appointment.professional_id}
+          serviceId={appointment.service_id}
+          durationMinutes={appointment.agenda_services?.duration_minutes ?? 30}
+          clientId={appointment.client_id}
+          onRescheduled={async (newDate, newStart, newEnd) => {
+            if (!threadId || !userId) return;
+            setAppointment((a) => (a ? { ...a, appointment_date: newDate, start_time: newStart, end_time: newEnd } : null));
+            const serviceName = appointment.agenda_services?.name ?? "Serviço";
+            await supabase.from("chat_messages").insert({
+              request_id: threadId,
+              sender_id: userId,
+              content: `📅 Agendamento remarcado para ${format(new Date(newDate + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${newStart}.`,
+            });
+            await sendNotification(appointment.client_id, "Agendamento remarcado", `${serviceName} foi remarcado para ${format(new Date(newDate + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${newStart}.`, `/messages/${threadId}`);
+          }}
+        />
+      )}
+
+      <Dialog open={!!agendaClientModal} onOpenChange={(open) => !open && setAgendaClientModal(null)}>
+        <DialogContent className="max-w-xs rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {agendaClientModal === "cancel" ? "Cancelar agendamento" : "Remarcar"}
+            </DialogTitle>
+            <DialogDescription>
+              {agendaClientModal === "cancel"
+                ? "Para cancelar, solicite que o profissional cancele seu agendamento pelo chat."
+                : "Solicite que o profissional remarque seu horário pelo chat."}
+            </DialogDescription>
+          </DialogHeader>
+          <Button className="rounded-xl w-full" onClick={() => setAgendaClientModal(null)}>
+            Entendi
+          </Button>
         </DialogContent>
       </Dialog>
     </div>);

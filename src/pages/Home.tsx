@@ -8,8 +8,9 @@ import HomeBanners from "@/components/HomeBanners";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
+import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Zap, Ticket } from "lucide-react"; 
+import { Zap, Ticket, CalendarCheck } from "lucide-react"; 
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -49,11 +50,13 @@ const HomeSkeleton = () => (
 );
 
 const Home = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { isFreePlan, callsRemaining, loading: subLoading } = useSubscription();
-  const { sections, isVisible, getSection } = useHomeLayout();
+  const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
+  const isRefreshing = useIsRefreshing();
   const navigate = useNavigate();
   const userName = profile?.full_name?.split(" ")[0] || "Usuário";
+  const [hasUpcomingAppointment, setHasUpcomingAppointment] = useState(false);
   
   // ✅ ATIVAÇÃO DO PUSH: Registra o token assim que o perfil carregar
   usePush(profile?.user_id || profile?.id); 
@@ -77,6 +80,18 @@ const Home = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    const today = new Date().toISOString().slice(0, 10);
+    supabase
+      .from("agenda_appointments")
+      .select("id", { count: "exact", head: true })
+      .eq("client_id", user.id)
+      .in("status", ["pending", "confirmed"])
+      .gte("appointment_date", today)
+      .then(({ count }) => setHasUpcomingAppointment((count ?? 0) > 0));
+  }, [user?.id]);
+
   // ✅ 2. TRANSIÇÃO SUAVE: Espera o layout carregar para liberar a tela
   useEffect(() => {
     // Timeout de segurança (fallback caso a internet caia)
@@ -89,14 +104,26 @@ const Home = () => {
     return () => clearTimeout(fallback);
   }, [sections, profile]);
 
+  // ✅ Pull-to-refresh: atualiza dados sem dar reload (evita piscada)
+  const onRefresh = async () => {
+    const minDelay = new Promise(r => setTimeout(r, 400));
+    await Promise.all([
+      refreshLayout(),
+      supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => setJobCount(count ?? 0)),
+      user?.id ? supabase.from("agenda_appointments").select("id", { count: "exact", head: true }).eq("client_id", user.id).in("status", ["pending", "confirmed"]).gte("appointment_date", new Date().toISOString().slice(0, 10)).then(({ count }) => setHasUpcomingAppointment((count ?? 0) > 0)) : Promise.resolve(),
+    ]);
+    await minDelay;
+  };
+  useRefresh(onRefresh);
+
   const sectionComponents: Record<string, React.ReactNode> = {
     welcome: <HomeWelcome key="welcome" userName={userName} section={getSection("welcome")} />,
-    sponsors: <SponsorCarousel key="sponsors" />,
+    sponsors: <SponsorCarousel key="sponsors" section={getSection("sponsors")} />,
     jobs: <HomeJobsBanner key="jobs" jobCount={jobCount} section={getSection("jobs")} />,
     search: <HomeSearchBar key="search" section={getSection("search")} />,
-    featured: <FeaturedProfessionals key="featured" />,
-    categories: <CategoriesGrid key="categories" />,
-    benefits: <BenefitsPanel key="benefits" />,
+    featured: <FeaturedProfessionals key="featured" section={getSection("featured")} />,
+    categories: <CategoriesGrid key="categories" section={getSection("categories")} />,
+    benefits: <BenefitsPanel key="benefits" section={getSection("benefits")} />,
     tutorials: <TutorialsSection key="tutorials" />
   };
 
@@ -125,7 +152,10 @@ const Home = () => {
       {!isReady ? (
         <HomeSkeleton />
       ) : (
-        <main className="max-w-screen-lg mx-auto px-4 py-5 flex flex-col gap-6 bg-secondary animate-in fade-in duration-500">
+        <main
+          className="max-w-screen-lg mx-auto px-4 py-5 flex flex-col gap-6 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
+          style={{ opacity: isRefreshing ? 0.7 : 1 }}
+        >
           {!subLoading && isFreePlan && profile?.user_type !== "client" && callsRemaining <= 1 &&
           <Link to="/subscriptions" className="flex items-center gap-3 bg-accent border border-primary/20 rounded-xl p-3.5 hover:border-primary/40 transition-all">
               <Zap className="w-5 h-5 text-primary" />
@@ -139,6 +169,17 @@ const Home = () => {
             </Link>
           }
 
+          {hasUpcomingAppointment && (
+            <Link to="/meus-agendamentos" className="flex items-center gap-3 bg-primary/10 border border-primary/30 rounded-xl p-3.5 hover:bg-primary/15 transition-all">
+              <CalendarCheck className="w-5 h-5 text-primary" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-foreground">Você tem agendamento</p>
+                <p className="text-xs text-muted-foreground">Confira data, horário e opções</p>
+              </div>
+              <span className="text-xs font-semibold text-primary">Ver →</span>
+            </Link>
+          )}
+
           {sections.filter((s) => s.visible).map((section) =>
             <div key={section.id} className={`w-full ${sectionMinHeights[section.id] || ""}`}>
               {sectionComponents[section.id]}
@@ -150,7 +191,7 @@ const Home = () => {
 
           <footer className="text-center py-6 border-t mt-4">
             <p className="text-xs text-muted-foreground">
-              © 2026 Chamô. Todos os direitos reservados.
+              {footerText}
             </p>
           </footer>
         </main>

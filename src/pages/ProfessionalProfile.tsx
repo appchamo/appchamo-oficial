@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ProductCatalog from "@/components/ProductCatalog";
 import ServiceRequestDialog from "@/components/ServiceRequestDialog";
+import AgendaBookingDialog from "@/components/AgendaBookingDialog";
 
 interface ProData {
   id: string;
@@ -24,6 +25,7 @@ interface ProData {
   avatar_url: string | null;
   category_name: string;
   user_type: string;
+  agenda_enabled?: boolean;
 }
 
 interface Review {
@@ -49,6 +51,7 @@ const ProfessionalProfile = () => {
   const [loading, setLoading] = useState(true);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [callDialogOpen, setCallDialogOpen] = useState(false);
+  const [agendaDialogOpen, setAgendaDialogOpen] = useState(false);
 
   // Estado para edição do nome
   const [editingName, setEditingName] = useState(false);
@@ -58,7 +61,7 @@ const ProfessionalProfile = () => {
     const load = async () => {
       const { data } = await supabase
         .from("professionals")
-        .select("id, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, categories(name)")
+        .select("id, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, categories(name), agenda_enabled")
         .eq("id", id!)
         .maybeSingle();
         
@@ -90,7 +93,8 @@ const ProfessionalProfile = () => {
           avatar_url: profileData?.avatar_url || null,
           category_name: (data.categories as any)?.name || "Sem categoria",
           availability_status: (data as any).availability_status || "available",
-          user_type: profileData?.user_type || "professional", // ✅ PUXA O TIPO CORRETO AGORA!
+          user_type: profileData?.user_type || "professional",
+          agenda_enabled: !!(data as any).agenda_enabled,
         });
         
         const { data: { user } } = await supabase.auth.getUser();
@@ -291,7 +295,16 @@ const ProfessionalProfile = () => {
           )}
 
           {!isOwner && pro.availability_status !== "unavailable" && (
-            <div className="mt-5">
+            <div className="mt-5 flex flex-col gap-2">
+              {pro.user_type === "company" && pro.agenda_enabled && (
+                <button
+                  onClick={() => setAgendaDialogOpen(true)}
+                  className="w-full py-3 rounded-xl border-2 border-primary text-primary font-bold text-sm hover:bg-primary/10 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Calendar className="w-4 h-4" />
+                  Agendar Serviço
+                </button>
+              )}
               <button onClick={handleCall} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors flex items-center justify-center">
                 CHAMAR
               </button>
@@ -363,12 +376,24 @@ const ProfessionalProfile = () => {
         </div>
 
         {pro && (
-          <ServiceRequestDialog
-            open={callDialogOpen}
-            onOpenChange={setCallDialogOpen}
-            professionalId={pro.id}
-            professionalName={pro.full_name}
-          />
+          <>
+            <ServiceRequestDialog
+              open={callDialogOpen}
+              onOpenChange={setCallDialogOpen}
+              professionalId={pro.id}
+              professionalName={pro.full_name}
+            />
+            {pro.user_type === "company" && pro.agenda_enabled && (
+              <AgendaBookingDialog
+                open={agendaDialogOpen}
+                onOpenChange={setAgendaDialogOpen}
+                professionalId={pro.id}
+                professionalName={pro.full_name}
+                professionalUserId={pro.user_id}
+                professionalAvatarUrl={pro.avatar_url}
+              />
+            )}
+          </>
         )}
       </main>
     </AppLayout>

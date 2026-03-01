@@ -15,34 +15,63 @@ interface SectionConfig {
 
 const DEFAULT_SECTIONS: SectionConfig[] = [
   { id: "welcome", label: "Bem-vindo", visible: true, order: 0, title: "Bem-vindo, {nome} 👋", subtitle: "Encontre o profissional ideal perto de você" },
-  { id: "sponsors", label: "Patrocinadores", visible: true, order: 1 },
+  { id: "sponsors", label: "Patrocinadores", visible: true, order: 1, title: "Patrocinadores", subtitle: "Patrocinado" },
   { id: "jobs", label: "Vagas de Emprego", visible: true, order: 2, title: "🔥 {count} vaga(s) de emprego disponíveis", subtitle: "Confira as oportunidades na sua região" },
   { id: "search", label: "Lupa de Pesquisa", visible: true, order: 3, title: "Buscar profissional ou serviço...", subtitle: "Ex: eletricista, encanador, designer..." },
-  { id: "featured", label: "Profissionais em Destaque", visible: true, order: 4 },
-  { id: "categories", label: "Categorias", visible: true, order: 5 },
-  { id: "benefits", label: "Seus Benefícios", visible: true, order: 6 },
+  { id: "featured", label: "Profissionais em Destaque", visible: true, order: 4, title: "Profissionais em destaque" },
+  { id: "categories", label: "Categorias", visible: true, order: 5, title: "Categorias" },
+  { id: "benefits", label: "Seus Benefícios", visible: true, order: 6, title: "Seus Benefícios" },
   { id: "tutorials", label: "Tutoriais", visible: true, order: 7 },
 ];
 
+const DEFAULT_FOOTER = "© 2026 Chamô. Todos os direitos reservados.";
+
+interface TutorialItem { id: string; icon: string; label: string; path: string; }
+const DEFAULT_TUTORIALS = {
+  title: "Dúvidas sobre como usar o app?",
+  subtitle: "Acesse nossos tutoriais!",
+  items: [
+    { id: "1", icon: "BookOpen", label: "Como usar", path: "/tutorial/1" },
+    { id: "2", icon: "UserCheck", label: "Como contratar", path: "/tutorial/2" },
+    { id: "3", icon: "CreditCard", label: "Como pagar", path: "/tutorial/3" },
+    { id: "4", icon: "Wallet", label: "Assinaturas e saques", path: "/tutorial/4" },
+  ] as TutorialItem[],
+};
+
 const AdminLayoutPage = () => {
   const [sections, setSections] = useState<SectionConfig[]>([]);
+  const [footerText, setFooterText] = useState(DEFAULT_FOOTER);
+  const [tutorialsConfig, setTutorialsConfig] = useState(DEFAULT_TUTORIALS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase.from("platform_settings").select("value").eq("key", "home_layout").single();
-      if (data?.value && Array.isArray(data.value)) {
-        // Merge saved with defaults to include any new sections
-        const saved = data.value as unknown as SectionConfig[];
+      const [layoutRes, footerRes, tutorialsRes] = await Promise.all([
+        supabase.from("platform_settings").select("value").eq("key", "home_layout").single(),
+        supabase.from("platform_settings").select("value").eq("key", "home_footer_text").single(),
+        supabase.from("platform_settings").select("value").eq("key", "home_tutorials").single(),
+      ]);
+      if (layoutRes.data?.value && Array.isArray(layoutRes.data.value)) {
+        const saved = layoutRes.data.value as unknown as SectionConfig[];
         const savedMap = new Map(saved.map(s => [s.id, s]));
         const merged = DEFAULT_SECTIONS.map(def => savedMap.get(def.id) || def);
-        // Add any saved sections not in defaults
         saved.forEach(s => { if (!merged.find(m => m.id === s.id)) merged.push(s); });
         merged.sort((a, b) => a.order - b.order);
         setSections(merged);
       } else {
         setSections([...DEFAULT_SECTIONS]);
+      }
+      if (footerRes.data?.value && typeof footerRes.data.value === "string") {
+        setFooterText(footerRes.data.value);
+      }
+      if (tutorialsRes.data?.value && typeof tutorialsRes.data.value === "object" && !Array.isArray(tutorialsRes.data.value)) {
+        const val = tutorialsRes.data.value as any;
+        setTutorialsConfig({
+          title: val.title || DEFAULT_TUTORIALS.title,
+          subtitle: val.subtitle || DEFAULT_TUTORIALS.subtitle,
+          items: val.items || DEFAULT_TUTORIALS.items,
+        });
       }
       setLoading(false);
     };
@@ -67,14 +96,15 @@ const AdminLayoutPage = () => {
 
   const handleSave = async () => {
     setSaving(true);
-    const { error } = await supabase.from("platform_settings").upsert(
-      { key: "home_layout", value: sections as any },
-      { onConflict: "key" }
-    );
-    if (error) {
+    const [layoutErr, footerErr, tutorialsErr] = await Promise.all([
+      supabase.from("platform_settings").upsert({ key: "home_layout", value: sections as any }, { onConflict: "key" }).then(r => r.error),
+      supabase.from("platform_settings").upsert({ key: "home_footer_text", value: footerText }, { onConflict: "key" }).then(r => r.error),
+      supabase.from("platform_settings").upsert({ key: "home_tutorials", value: tutorialsConfig as any }, { onConflict: "key" }).then(r => r.error),
+    ]);
+    if (layoutErr || footerErr || tutorialsErr) {
       toast({ title: "Erro ao salvar", variant: "destructive" });
     } else {
-      toast({ title: "Layout salvo com sucesso!" });
+      toast({ title: "Layout e textos salvos com sucesso!" });
     }
     setSaving(false);
   };
@@ -113,7 +143,7 @@ const AdminLayoutPage = () => {
             </div>
 
             {/* Editable fields for sections that support text customization */}
-            {section.visible && (section.id === "welcome" || section.id === "jobs" || section.id === "search") && (
+            {section.visible && (section.title !== undefined || section.subtitle !== undefined) && (
               <div className="mt-3 space-y-2 pl-12">
                 {section.title !== undefined && (
                   <div>
@@ -139,6 +169,42 @@ const AdminLayoutPage = () => {
             )}
           </div>
         ))}
+
+        <div className="bg-card border rounded-xl p-4 mt-4">
+          <h4 className="font-semibold text-sm text-foreground mb-2">Rodapé da Home</h4>
+          <p className="text-[10px] text-muted-foreground mb-2">Texto exibido no final da página (ex.: copyright)</p>
+          <input value={footerText} onChange={(e) => setFooterText(e.target.value)}
+            placeholder={DEFAULT_FOOTER}
+            className="w-full border rounded-lg px-3 py-2 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+        </div>
+
+        <div className="bg-card border rounded-xl p-4 mt-3">
+          <h4 className="font-semibold text-sm text-foreground mb-2">Tutoriais (título e cards)</h4>
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Título</label>
+              <input value={tutorialsConfig.title} onChange={(e) => setTutorialsConfig(c => ({ ...c, title: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+            <div>
+              <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Subtítulo</label>
+              <input value={tutorialsConfig.subtitle} onChange={(e) => setTutorialsConfig(c => ({ ...c, subtitle: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+            <p className="text-[10px] text-muted-foreground">Textos dos 4 cards:</p>
+            {tutorialsConfig.items.map((item, i) => (
+              <div key={item.id}>
+                <label className="text-[10px] text-muted-foreground">Card {i + 1}</label>
+                <input value={item.label} onChange={(e) => {
+                  const next = [...tutorialsConfig.items];
+                  next[i] = { ...next[i], label: e.target.value };
+                  setTutorialsConfig(c => ({ ...c, items: next }));
+                }}
+                  className="w-full border rounded-lg px-3 py-2 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30 mt-0.5" />
+              </div>
+            ))}
+          </div>
+        </div>
 
         <button onClick={handleSave} disabled={saving}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 mt-4">

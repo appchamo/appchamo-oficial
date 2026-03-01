@@ -28,12 +28,13 @@ const BottomNav = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Unread notifications count
+      // 1. Unread notifications count (exclui chat; mensagens só no push)
       const { count: notifCount } = await supabase
         .from("notifications")
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
-        .eq("read", false);
+        .eq("read", false)
+        .neq("type", "chat");
 
       // 2. Unread chat messages count
       const { data: clientReqs } = await supabase
@@ -120,7 +121,7 @@ const BottomNav = () => {
   useEffect(() => {
     fetchBadges();
 
-    // 1. Realtime Subscriptions usando o Debounce Wrapper
+    // Realtime: atualiza badges em qualquer mudança nas tabelas relevantes
     const channel = supabase
       .channel("bottom-nav-badges")
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, debouncedFetchBadges)
@@ -129,24 +130,9 @@ const BottomNav = () => {
       .on("postgres_changes", { event: "*", schema: "public", table: "service_requests" }, debouncedFetchBadges)
       .subscribe();
 
-    // 2. BLINDAGEM: Polling Invisível a cada 15 segundos (Reduzido para salvar recursos)
-    const pollingInterval = setInterval(() => {
-      fetchBadges();
-    }, 15000);
-
-    // 3. Sensor de Foco
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        fetchBadges();
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(pollingInterval);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [fetchBadges, debouncedFetchBadges]);
 
@@ -156,10 +142,17 @@ const BottomNav = () => {
         {tabs.map((tab) => {
           const isActive = location.pathname === tab.path || location.pathname.startsWith(tab.path + "/");
           const badgeCount = tab.badgeKey ? badges[tab.badgeKey] : 0;
+          const handleTabClick = (e: React.MouseEvent) => {
+            if (isActive) {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+          };
           return (
             <Link
               key={tab.path}
               to={tab.path}
+              onClick={handleTabClick}
               className={`flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl transition-colors relative ${
                 isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
               }`}

@@ -2,9 +2,11 @@ import { useState, useCallback, useRef } from "react";
 import Cropper, { Area } from "react-easy-crop";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
-import { Upload, ZoomIn, Check, X } from "lucide-react";
+import { Upload, ZoomIn, Check, X, Image as ImageIcon, Camera, FolderOpen } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { Capacitor } from "@capacitor/core";
+import { Camera as CapacitorCamera, CameraSource } from "@capacitor/camera";
 
 interface ImageCropUploadProps {
   onUpload: (path: string) => void; // AGORA RECEBE PATH
@@ -44,8 +46,9 @@ async function getCroppedImg(imageSrc: string, pixelCrop: Area): Promise<Blob> {
     pixelCrop.height
   );
 
+  if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = "high";
   return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob!), "image/webp", 0.9);
+    canvas.toBlob((blob) => resolve(blob!), "image/webp", 0.95);
   });
 }
 
@@ -63,23 +66,15 @@ const ImageCropUpload = ({
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const openCropWithFile = (file: File) => {
     const allowedTypes = ["image/png", "image/jpeg", "image/jpg"];
     if (!allowedTypes.includes(file.type)) {
-      toast({
-        title: "Formato não permitido",
-        description: "Apenas PNG e JPEG são aceitos.",
-        variant: "destructive",
-      });
-      e.target.value = "";
+      toast({ title: "Formato não permitido", description: "Apenas PNG e JPEG são aceitos.", variant: "destructive" });
       return;
     }
-
     const reader = new FileReader();
     reader.onload = () => {
       setImageSrc(reader.result as string);
@@ -88,7 +83,72 @@ const ImageCropUpload = ({
       setZoom(1);
     };
     reader.readAsDataURL(file);
+  };
+
+  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    openCropWithFile(file);
     e.target.value = "";
+  };
+
+  const onButtonClick = () => {
+    if (Capacitor.isNativePlatform()) {
+      setPickerOpen(true);
+    } else {
+      inputRef.current?.click();
+    }
+  };
+
+  const handlePickFromGallery = async () => {
+    setPickerOpen(false);
+    try {
+      // Pequeno delay no native para o dialog fechar antes do picker abrir (evita falha no iOS)
+      if (Capacitor.isNativePlatform()) {
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      const photo = await CapacitorCamera.getPhoto({
+        source: CameraSource.Photos,
+        quality: 95,
+        allowEditing: false,
+      });
+      if (!photo.webPath) return;
+      const res = await fetch(photo.webPath);
+      const blob = await res.blob();
+      const file = new File([blob], `foto_${Date.now()}.${photo.format || "jpg"}`, { type: blob.type || "image/jpeg" });
+      openCropWithFile(file);
+    } catch (err: any) {
+      if (err?.message !== "User cancelled photos app") {
+        const msg = err?.message || "";
+        const hint = msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied")
+          ? " Verifique em Ajustes > Chamô > Fotos."
+          : "";
+        toast({ title: "Não foi possível abrir a galeria." + hint, variant: "destructive" });
+      }
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    setPickerOpen(false);
+    try {
+      const photo = await CapacitorCamera.getPhoto({
+        source: CameraSource.Camera,
+        quality: 95,
+        allowEditing: false,
+      });
+      if (!photo.webPath) return;
+      const res = await fetch(photo.webPath);
+      const blob = await res.blob();
+      const file = new File([blob], `foto_${Date.now()}.${photo.format || "jpg"}`, { type: blob.type || "image/jpeg" });
+      openCropWithFile(file);
+    } catch (err: any) {
+      if (err?.message !== "User cancelled photos app") toast({ title: "Não foi possível abrir a câmera.", variant: "destructive" });
+    }
+  };
+
+  const handleChooseFile = () => {
+    setPickerOpen(false);
+    setTimeout(() => inputRef.current?.click(), 100);
   };
 
   const onCropComplete = useCallback((_: Area, croppedPixels: Area) => {
@@ -150,7 +210,7 @@ onUpload(publicData.publicUrl);
       {label ? (
         <button
           type="button"
-          onClick={() => inputRef.current?.click()}
+          onClick={onButtonClick}
           className="group relative flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-4 hover:border-primary/50 transition-colors cursor-pointer bg-muted/30"
         >
           {currentImage ? (
@@ -170,12 +230,37 @@ onUpload(publicData.publicUrl);
       ) : (
         <button
           type="button"
-          onClick={() => inputRef.current?.click()}
+          onClick={onButtonClick}
           className="w-8 h-8 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center shadow-md hover:bg-primary transition-colors"
         >
           <Upload className="w-3.5 h-3.5" />
         </button>
       )}
+
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent className="max-w-xs rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">Como deseja enviar?</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2 pt-2">
+            <button type="button" onClick={handlePickFromGallery}
+              className="flex items-center gap-3 w-full p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors text-left">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"><ImageIcon className="w-5 h-5 text-primary" /></div>
+              <span className="font-medium text-foreground">Galeria de fotos</span>
+            </button>
+            <button type="button" onClick={handleTakePhoto}
+              className="flex items-center gap-3 w-full p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors text-left">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"><Camera className="w-5 h-5 text-primary" /></div>
+              <span className="font-medium text-foreground">Tirar foto</span>
+            </button>
+            <button type="button" onClick={handleChooseFile}
+              className="flex items-center gap-3 w-full p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors text-left">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"><FolderOpen className="w-5 h-5 text-primary" /></div>
+              <span className="font-medium text-foreground">Escolher arquivo</span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md p-0 overflow-hidden">

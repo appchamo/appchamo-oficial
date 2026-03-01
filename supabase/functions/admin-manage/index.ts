@@ -228,6 +228,42 @@ serve(async (req) => {
     }
 
     // ==========================================
+    // ✅ AÇÃO: FORÇAR APROVAÇÃO (sem Asaas – ex.: CPF errado)
+    // ==========================================
+    if (action === "force_approve_subscription") {
+      const caller = await verifyAdmin();
+      const { userId } = body;
+      if (!userId) throw new Error("userId é obrigatório.");
+
+      const { data: sub, error: subErr } = await supabase
+        .from("subscriptions")
+        .select("id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (subErr || !sub) {
+        throw new Error("Assinatura não encontrada no banco da Chamô.");
+      }
+
+      await supabase
+        .from("subscriptions")
+        .update({ status: "ACTIVE" })
+        .eq("user_id", userId);
+
+      await supabase.from("admin_logs").insert({
+        admin_user_id: caller.id,
+        action: "force_approve_subscription",
+        target_type: "user",
+        target_id: userId,
+        details: { note: "Aprovado sem cobrança no Asaas (ex.: CPF inválido)" },
+      });
+
+      return new Response(JSON.stringify({ success: true, message: "Assinatura ativada no app (sem Asaas)." }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ==========================================
     // ❌ AÇÃO: RECUSAR ASSINATURA (NOVO)
     // ==========================================
     if (action === "reject_subscription") {

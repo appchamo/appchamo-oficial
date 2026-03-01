@@ -27,16 +27,16 @@ const Notifications = () => {
       .from("notifications")
       .select("*")
       .eq("user_id", user.id)
+      .neq("type", "chat")
       .order("created_at", { ascending: false });
     
     setNotifications((data as Notification[]) || []);
     setLoading(false);
 
-    // ✅ LIMPEZA AUTOMÁTICA SILENCIOSA:
-    // Se houver notificações não lidas, marca todas como lidas no banco sem o usuário precisar clicar em nada
-    const unread = (data as Notification[])?.filter(n => !n.read) || [];
+    // ✅ LIMPEZA AUTOMÁTICA SILENCIOSA (exclui chat; mensagens só aparecem no push)
+    const unread = (data as Notification[])?.filter(n => !n.read && n.type !== "chat") || [];
     if (unread.length > 0) {
-      await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+      await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false).neq("type", "chat");
     }
   };
 
@@ -81,6 +81,13 @@ const Notifications = () => {
     return `${days}d`;
   };
 
+  // Remove artefatos de string (ex: "}" no final) de notificações antigas salvas no banco
+  const sanitizeMessage = (msg: string | null): string | null => {
+    if (!msg) return null;
+    const cleaned = msg.replace(/"}\s*$/, "").replace(/\}"\s*$/, "").trim();
+    return cleaned || null;
+  };
+
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
@@ -102,7 +109,9 @@ const Notifications = () => {
           </div>
         ) : (
           <div className="space-y-2">
-            {notifications.map(n => (
+            {notifications.map(n => {
+                const message = sanitizeMessage(n.message);
+                return (
               <button
                 key={n.id}
                 onClick={() => handleClick(n)}
@@ -114,12 +123,13 @@ const Notifications = () => {
                   <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "bg-transparent" : "bg-primary"}`} />
                   <div className="flex-1 min-w-0">
                     <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>{n.title}</p>
-                    {n.message && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>}
+                    {message && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>}
                   </div>
                   <span className="text-[10px] text-muted-foreground flex-shrink-0">{timeAgo(n.created_at)}</span>
                 </div>
               </button>
-            ))}
+                );
+            })}
           </div>
         )}
       </main>

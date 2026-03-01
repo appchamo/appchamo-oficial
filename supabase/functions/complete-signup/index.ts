@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as jose from "jsr:@panva/jose@6";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,7 +31,36 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ✅ 3. Verificação do usuário no Auth (Admin bypass para garantir que funcione)
+    // Validação do JWT (verify_jwt desligado no gateway por causa do ES256)
+    const authHeader = req.headers.get("Authorization");
+    const token = authHeader?.replace(/^Bearer\s+/i, "")?.trim();
+    if (!token) {
+      return new Response(
+        JSON.stringify({ error: "Token ausente." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    try {
+      const JWKS = jose.createRemoteJWKSet(
+        new URL(supabaseUrl + "/auth/v1/.well-known/jwks.json")
+      );
+      const issuer = supabaseUrl + "/auth/v1";
+      const { payload } = await jose.jwtVerify(token, JWKS, { issuer });
+      const sub = payload.sub as string | undefined;
+      if (!sub || sub !== userId) {
+        return new Response(
+          JSON.stringify({ error: "Token inválido para este usuário." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } catch (_e) {
+      return new Response(
+        JSON.stringify({ error: "Token inválido ou expirado." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Verificação do usuário no Auth
     const { data: authUser, error: authError } = await supabase.auth.admin.getUserById(userId);
 
     if (authError || !authUser?.user) {
@@ -84,6 +114,12 @@ Deno.serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Garante user_type após upsert (evita que trigger ou default deixe como client)
+    await supabase
+      .from("profiles")
+      .update({ user_type: accountType })
+      .eq("user_id", userId);
 
     // 🔥 5. Fluxo de Profissional
     if (accountType === "professional") {

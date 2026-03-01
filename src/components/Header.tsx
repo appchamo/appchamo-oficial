@@ -103,7 +103,8 @@ const Header = () => {
         .from("notifications")
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
-        .eq("read", false);
+        .eq("read", false)
+        .neq("type", "chat");
       const newCount = count || 0;
 
       // Play sound if count increased (but not on initial load)

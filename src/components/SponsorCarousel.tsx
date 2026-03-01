@@ -9,7 +9,11 @@ interface Sponsor {
   logo_url: string | null;
 }
 
-const SponsorCarousel = () => {
+interface SponsorCarouselProps {
+  section?: { title?: string; subtitle?: string };
+}
+
+const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -47,9 +51,12 @@ const SponsorCarousel = () => {
 
   if (sponsors.length === 0) return null;
 
+  const title = section?.title ?? "Patrocinadores";
+  const subtitle = section?.subtitle ?? "Patrocinado";
+
   return (
     <section>
-      <h3 className="font-semibold text-sm text-muted-foreground mb-3 px-1">Patrocinadores</h3>
+      <h3 className="font-semibold text-sm text-muted-foreground mb-3 px-1">{title}</h3>
       <div
         ref={scrollRef}
         className="flex overflow-x-auto pb-2 scrollbar-hide gap-[14px] border-0 shadow-none"
@@ -78,7 +85,7 @@ const SponsorCarousel = () => {
             <span className="text-[11px] font-medium text-foreground truncate max-w-[76px] text-center">
               {sponsor.name}
             </span>
-            <span className="text-[9px] text-muted-foreground -mt-1">Patrocinado</span>
+            <span className="text-[9px] text-muted-foreground -mt-1">{subtitle}</span>
           </button>
         )}
       </div>

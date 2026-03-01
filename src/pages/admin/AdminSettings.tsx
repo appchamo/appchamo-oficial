@@ -151,6 +151,46 @@ const AdminSettings = () => {
             <input value={settings.landing_subheadline || ""} onChange={(e) => set("landing_subheadline", e.target.value)}
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
+
+          <h3 className="font-medium text-sm text-foreground pt-4 border-t mt-4">Tela de carregamento (ao abrir o app)</h3>
+          <p className="text-xs text-muted-foreground">Exibida por alguns segundos ao abrir o app. Logo + fundo + efeito de entrada.</p>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Logo da tela de carregamento</label>
+            <ImageCropUpload aspect={1} shape="rect" bucketPath="branding" currentImage={settings.splash_logo_url || null}
+              onUpload={(url) => set("splash_logo_url", url)} label="Enviar logo" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cor de fundo da tela de carregamento</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={settings.splash_bg_color || "#f97316"}
+                onChange={(e) => set("splash_bg_color", e.target.value)}
+                className="w-12 h-10 rounded-lg border cursor-pointer bg-background" />
+              <input type="text" value={settings.splash_bg_color || "#f97316"} onChange={(e) => set("splash_bg_color", e.target.value)}
+                className="flex-1 border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" placeholder="#f97316" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Efeito de entrada da logo</label>
+            <select value={settings.splash_animation || "scaleIn"} onChange={(e) => set("splash_animation", e.target.value)}
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
+              <option value="fadeIn">Fade in (aparecer suave)</option>
+              <option value="scaleIn">Scale in (aumentar do centro)</option>
+              <option value="slideUp">Slide up (subir de baixo)</option>
+              <option value="slideDown">Slide down (descer de cima)</option>
+              <option value="slideLeft">Slide left (entrar pela esquerda)</option>
+              <option value="slideRight">Slide right (entrar pela direita)</option>
+              <option value="zoomIn">Zoom in (aproximar)</option>
+              <option value="bounceIn">Bounce in (quicar)</option>
+              <option value="flipIn">Flip in (virar)</option>
+              <option value="pulseIn">Pulse in (pulsar)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Duração (segundos)</label>
+            <input type="number" min={1} max={5} step={0.5} value={settings.splash_duration_seconds || "2"}
+              onChange={(e) => set("splash_duration_seconds", e.target.value)}
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
         </div>
 
         {/* Coupon Rules */}

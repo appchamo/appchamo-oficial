@@ -27,7 +27,11 @@ interface Category {
   icon_url: string | null;
 }
 
-const CategoriesGrid = () => {
+interface CategoriesGridProps {
+  section?: { title?: string };
+}
+
+const CategoriesGrid = ({ section }: CategoriesGridProps) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [expanded, setExpanded] = useState(false);
   const cols = typeof window !== "undefined" && window.innerWidth >= 640 ? 5 : 4;
@@ -45,7 +49,7 @@ const CategoriesGrid = () => {
 
   return (
     <section>
-      <h3 className="font-semibold text-foreground mb-3 px-1">Categorias</h3>
+      <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Categorias"}</h3>
       <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
       {shown.map((cat, i) => {
           const Icon = iconMap[cat.icon_name] || Briefcase;

@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { MessageSquare, MoreVertical, Archive, EyeOff, AlertTriangle, Inbox, Mic, Package } from "lucide-react"; 
+import { MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle, Inbox, Mic, Package, CheckCheck, Trash2 } from "lucide-react"; 
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -63,6 +63,8 @@ const Messages = () => {
   const [reportingChatId, setReportingChatId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const load = useCallback(async (isBackgroundUpdate = false) => {
     // Só mostra o loading pesado se for a primeira vez que a tela abre
@@ -196,28 +198,18 @@ const Messages = () => {
 
     const channel = supabase.channel('messages-list-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
-        setTimeout(() => load(true), 500); 
+        setTimeout(() => load(true), 500);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_read_status' }, () => {
+        setTimeout(() => load(true), 500);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'service_requests' }, () => {
         setTimeout(() => load(true), 500);
       })
       .subscribe();
 
-    const pollingInterval = setInterval(() => {
-      load(true);
-    }, 8000);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        load(true);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(pollingInterval);
-      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [load]);
 
@@ -227,10 +219,65 @@ const Messages = () => {
     load(true);
   };
 
-  const handleMarkUnread = async (chatId: string, current: boolean) => {
+  /** Marca uma conversa como lida (atualiza last_read_at e remove manual_unread). O badge do Chat na barra atualiza via realtime. */
+  const handleMarkRead = async (chatId: string) => {
     const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("chat_read_status" as any).update({ manual_unread: !current }).eq("user_id", user?.id).eq("request_id", chatId);
+    if (!user) return;
+    await supabase.from("chat_read_status" as any).upsert(
+      { request_id: chatId, user_id: user.id, last_read_at: new Date().toISOString(), manual_unread: false },
+      { onConflict: "request_id,user_id" }
+    );
     load(true);
+  };
+
+  /** Marca uma conversa como não lida (manual_unread = true). */
+  const handleMarkUnread = async (chatId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("chat_read_status" as any).update({ manual_unread: true }).eq("user_id", user?.id).eq("request_id", chatId);
+    load(true);
+  };
+
+  /** Marca todas as conversas como lidas. Atualiza o badge do Chat na barra inferior. */
+  const handleMarkAllRead = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: proData } = await supabase.from("professionals").select("id").eq("user_id", user.id);
+    const proIds = proData?.map(p => p.id) || [];
+    let reqIds: string[] = [];
+    if (proIds.length > 0) {
+      const { data: reqs } = await supabase.from("service_requests").select("id").or(`client_id.eq.${user.id},professional_id.in.(${proIds.join(",")})`);
+      reqIds = (reqs || []).map((r: { id: string }) => r.id);
+    } else {
+      const { data: reqs } = await supabase.from("service_requests").select("id").eq("client_id", user.id);
+      reqIds = (reqs || []).map((r: { id: string }) => r.id);
+    }
+    const now = new Date().toISOString();
+    await Promise.all(
+      reqIds.map((request_id) =>
+        supabase.from("chat_read_status" as any).upsert(
+          { request_id, user_id: user.id, last_read_at: now, manual_unread: false },
+          { onConflict: "request_id,user_id" }
+        )
+      )
+    );
+    load(true);
+  };
+
+  /** Exclui a conversa para o usuário (some da lista). Só disponível em arquivados. */
+  const handleDeleteConversation = async (chatId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setIsDeleting(true);
+    try {
+      await supabase.from("chat_read_status" as any).upsert(
+        { request_id: chatId, user_id: user.id, last_read_at: new Date().toISOString(), is_deleted: true },
+        { onConflict: "request_id,user_id" }
+      );
+      setDeletingChatId(null);
+      load(true);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleReportSubmit = async () => {
@@ -312,19 +359,30 @@ const Messages = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
           <h1 className="text-xl font-bold text-foreground">
             {showArchived ? "Arquivados" : "Mensagens"}
           </h1>
-          {archivedThreads.length > 0 && (
-            <button 
-              onClick={() => setShowArchived(!showArchived)}
-              className="text-xs font-bold text-primary flex items-center gap-1 bg-primary/5 px-3 py-1.5 rounded-full transition-all"
-            >
-              {showArchived ? <Inbox className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
-              {showArchived ? "Ver entrada" : `Arquivados (${archivedThreads.length})`}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {!showArchived && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
+              <button
+                onClick={handleMarkAllRead}
+                className="text-xs font-bold text-primary flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-full transition-all"
+              >
+                <CheckCheck className="w-3.5 h-3.5" />
+                Marcar todas como lidas
+              </button>
+            )}
+            {archivedThreads.length > 0 && (
+              <button 
+                onClick={() => setShowArchived(!showArchived)}
+                className="text-xs font-bold text-primary flex items-center gap-1 bg-primary/5 px-3 py-1.5 rounded-full transition-all"
+              >
+                {showArchived ? <Inbox className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                {showArchived ? "Ver entrada" : `Arquivados (${archivedThreads.length})`}
+              </button>
+            )}
+          </div>
         </div>
         
         {!showArchived && (
@@ -360,7 +418,7 @@ const Messages = () => {
               <div key={t.id} className={`flex items-center gap-3 px-2 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors rounded-lg ${hasUnread ? "bg-primary/5" : ""}`}>
                 <div 
                   onClick={() => {
-                    if (t.manual_unread) handleMarkUnread(t.id, true);
+                    if (hasUnread) handleMarkRead(t.id);
                     navigate(`/messages/${t.id}`);
                   }}
                   className="flex flex-1 items-center gap-3 cursor-pointer min-w-0"
@@ -394,10 +452,14 @@ const Messages = () => {
                         <MoreVertical className="w-4 h-4" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48 rounded-xl shadow-lg border-muted">
-                      <DropdownMenuItem onClick={() => handleMarkUnread(t.id, t.manual_unread)} className="gap-2 cursor-pointer py-2">
+                    <DropdownMenuContent align="end" className="w-52 rounded-xl shadow-lg border-muted">
+                      <DropdownMenuItem onClick={() => handleMarkRead(t.id)} className="gap-2 cursor-pointer py-2">
+                        <Eye className="w-4 h-4 text-muted-foreground" />
+                        <span className="font-medium text-sm">Marcar como lida</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleMarkUnread(t.id)} className="gap-2 cursor-pointer py-2">
                         <EyeOff className="w-4 h-4 text-muted-foreground" />
-                        <span className="font-medium text-sm">{t.manual_unread ? "Marcar como lida" : "Marcar como não lida"}</span>
+                        <span className="font-medium text-sm">Marcar como não lida</span>
                       </DropdownMenuItem>
                       
                       {isChatFinished && (
@@ -405,6 +467,19 @@ const Messages = () => {
                           <Archive className="w-4 h-4 text-muted-foreground" />
                           <span className="font-medium text-sm">{t.is_archived ? "Desarquivar" : "Arquivar conversa"}</span>
                         </DropdownMenuItem>
+                      )}
+
+                      {showArchived && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => setDeletingChatId(t.id)}
+                            className="gap-2 cursor-pointer py-2 text-destructive focus:text-destructive focus:bg-destructive/10"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            <span className="font-medium text-sm">Excluir conversa</span>
+                          </DropdownMenuItem>
+                        </>
                       )}
                       
                       <DropdownMenuSeparator />
@@ -452,6 +527,30 @@ const Messages = () => {
               <Button variant="outline" onClick={() => setReportingChatId(null)} className="rounded-xl">Cancelar</Button>
               <Button onClick={handleReportSubmit} disabled={isSubmittingReport} className="rounded-xl bg-amber-600 text-white">
                 {isSubmittingReport ? "Enviando..." : "Enviar Denúncia"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!deletingChatId} onOpenChange={(open) => !open && setDeletingChatId(null)}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <Trash2 className="w-5 h-5" /> Excluir conversa
+              </DialogTitle>
+              <DialogDescription>
+                Tem certeza que deseja excluir essa conversa? Você perderá histórico, comprovante ou qualquer conversa desse serviço.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setDeletingChatId(null)} className="rounded-xl">Cancelar</Button>
+              <Button
+                variant="destructive"
+                onClick={() => deletingChatId && handleDeleteConversation(deletingChatId)}
+                disabled={isDeleting}
+                className="rounded-xl"
+              >
+                {isDeleting ? "Excluindo..." : "Excluir"}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -23,8 +23,8 @@ const config: CapacitorConfig = {
       style: 'DEFAULT' 
     },
     SplashScreen: {
-      launchShowDuration: 2000,
-      launchAutoHide: true, 
+      launchShowDuration: 0,
+      launchAutoHide: false, 
       // ✅ ALTERADO: CENTER faz o ícone ficar no tamanho real no centro
       androidScaleType: "CENTER", 
       showSpinner: false,

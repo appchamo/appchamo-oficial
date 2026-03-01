@@ -168,6 +168,7 @@ const FinancialConfig = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [planPrices, setPlanPrices] = useState<Record<string, string>>({});
   const [planFeatures, setPlanFeatures] = useState<Record<string, string[]>>({});
+  const [planMaxDevices, setPlanMaxDevices] = useState<Record<string, string>>({});
   const [expandedPlan, setExpandedPlan] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -193,21 +194,23 @@ const FinancialConfig = () => {
         setSettings(map);
       }
 
-      // Busca preço e benefícios da tabela "plans"
-      const { data: plansData } = await supabase.from("plans").select("id, price_monthly, features");
+      // Busca preço, benefícios e limite de dispositivos da tabela "plans"
+      const { data: plansData } = await supabase.from("plans").select("id, price_monthly, features, max_devices");
       if (plansData) {
         const plansMap: Record<string, string> = {};
         const featsMap: Record<string, string[]> = {};
+        const maxDevicesMap: Record<string, string> = {};
         
         plansData.forEach(p => {
           plansMap[p.id] = p.price_monthly.toString().replace('.', ',');
-          
+          maxDevicesMap[p.id] = String((p as any).max_devices ?? 1);
           // Se já tem salvo no banco, usa. Se não, preenche com os textos padrão.
           featsMap[p.id] = p.features && p.features.length > 0 ? p.features : defaultFeatures[p.id as keyof typeof defaultFeatures];
         });
         
         setPlanPrices(plansMap);
         setPlanFeatures(featsMap);
+        setPlanMaxDevices(maxDevicesMap);
       }
 
       setLoading(false);
@@ -217,6 +220,7 @@ const FinancialConfig = () => {
 
   const set = (key: string, value: string) => setSettings(prev => ({ ...prev, [key]: value }));
   const setPlanPrice = (id: string, value: string) => setPlanPrices(prev => ({ ...prev, [id]: value }));
+  const updatePlanMaxDevices = (id: string, value: string) => setPlanMaxDevices(prev => ({ ...prev, [id]: value }));
   
   const toggleExpand = (id: string) => setExpandedPlan(prev => ({ ...prev, [id]: !prev[id] }));
   const addFeature = (id: string) => setPlanFeatures(prev => ({ ...prev, [id]: [...(prev[id] || []), ""] }));
@@ -263,6 +267,12 @@ const FinancialConfig = () => {
             updateData.features = planFeatures[planId].filter(f => f.trim() !== "");
         }
 
+        // Limite de dispositivos simultâneos (free: 1, pro: 2, vip: 10, business: 20)
+        if (planMaxDevices[planId] !== undefined) {
+            const num = parseInt(planMaxDevices[planId], 10);
+            if (!isNaN(num) && num >= 1 && num <= 100) updateData.max_devices = num;
+        }
+
         if (Object.keys(updateData).length > 0) {
            await supabase.from("plans").update(updateData).eq("id", planId);
         }
@@ -291,6 +301,11 @@ const FinancialConfig = () => {
         {id === 'free' && (
            <label className={`text-xs font-bold ${color} block`}>{name}</label>
         )}
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Dispositivos simultâneos</label>
+          <input type="number" min={1} max={100} value={planMaxDevices[id] ?? "1"} onChange={(e) => updatePlanMaxDevices(id, e.target.value)} className={inputCls} />
+        </div>
 
         <div>
           <button onClick={() => toggleExpand(id)} className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 transition-colors">

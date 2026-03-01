@@ -6,7 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
-import { formatCpf, formatCnpj, validateCpf, validateCnpj } from "@/lib/formatters";
+import { formatCpf, formatCnpj, formatCep, validateCpf, validateCnpj } from "@/lib/formatters";
+import { fetchViaCep } from "@/lib/viacep";
 
 type Period = "day" | "month";
 type DateRange = "7d" | "30d" | "custom";
@@ -51,6 +52,7 @@ const FiscalTab = ({ proId, userDoc }: { proId: string; userDoc: string | null }
   const [fiscal, setFiscal] = useState<FiscalData>(emptyFiscal(proId));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [searchingCep, setSearchingCep] = useState(false);
 
   useEffect(() => {
     supabase.from("professional_fiscal_data").select("*").eq("professional_id", proId).maybeSingle()
@@ -61,6 +63,30 @@ const FiscalTab = ({ proId, userDoc }: { proId: string; userDoc: string | null }
   }, [proId]);
 
   const set = (key: keyof FiscalData, val: any) => setFiscal(prev => ({ ...prev, [key]: val }));
+
+  const handleCepChange = async (value: string) => {
+    const formatted = formatCep(value);
+    set("fiscal_address_zip", formatted);
+    const raw = value.replace(/\D/g, "");
+    if (raw.length === 8) {
+      setSearchingCep(true);
+      try {
+        const data = await fetchViaCep(raw);
+        if (data) {
+          setFiscal(prev => ({
+            ...prev,
+            fiscal_address_zip: formatted,
+            fiscal_address_street: data.logradouro ?? prev.fiscal_address_street,
+            fiscal_address_neighborhood: data.bairro ?? prev.fiscal_address_neighborhood,
+            fiscal_address_city: data.localidade ?? prev.fiscal_address_city,
+            fiscal_address_state: (data.uf ?? prev.fiscal_address_state).toUpperCase(),
+          }));
+        }
+      } finally {
+        setSearchingCep(false);
+      }
+    }
+  };
 
   const handleSave = async () => {
     // Validate document matches profile CPF/CNPJ
@@ -188,8 +214,19 @@ const FiscalTab = ({ proId, userDoc }: { proId: string; userDoc: string | null }
             <input value={fiscal.fiscal_address_city} onChange={e => set("fiscal_address_city", e.target.value)} className={inputCls} /></div>
           <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">UF</label>
             <input maxLength={2} value={fiscal.fiscal_address_state} onChange={e => set("fiscal_address_state", e.target.value.toUpperCase())} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">CEP</label>
-            <input value={fiscal.fiscal_address_zip} onChange={e => set("fiscal_address_zip", e.target.value)} className={inputCls} /></div>
+          <div className="relative">
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CEP</label>
+            <input
+              value={fiscal.fiscal_address_zip}
+              onChange={e => handleCepChange(e.target.value)}
+              placeholder="00000-000"
+              maxLength={9}
+              className={inputCls}
+            />
+            {searchingCep && (
+              <div className="absolute right-3 top-9 w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            )}
+          </div>
         </div>
       </div>
 

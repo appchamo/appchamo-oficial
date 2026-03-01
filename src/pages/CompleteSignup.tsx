@@ -68,16 +68,15 @@ const CompleteSignup = () => {
 
     const fullAddress = `${formData.street}, ${formData.number} - ${formData.neighborhood}, ${formData.city}/${formData.state}`;
 
-    // ✅ ESTRATÉGIA DE SALVAMENTO:
-    // Tentamos salvar no campo 'address'. Se o seu banco usa outro nome, 
-    // a gente captura o erro e avisa exatamente qual coluna falta.
+    // Inclui user_type para que quem escolheu "Profissional" não fique como cliente.
     const { error } = await supabase
       .from("profiles")
       .update({
         full_name: formData.full_name,
         cpf: formData.cpf,
         phone: formData.phone,
-        address: fullAddress, // Se der erro aqui, o nome no seu banco é outro
+        address: fullAddress,
+        user_type: accountType,
         onboarding_completed: true
       } as any)
       .eq("id", user.id);

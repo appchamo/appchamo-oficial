@@ -96,6 +96,7 @@ const AdminPros = () => {
   const [rejectReason, setRejectReason] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
   const [processingSub, setProcessingSub] = useState<string | null>(null);
+  const [showForceApproveForUserId, setShowForceApproveForUserId] = useState<string | null>(null);
 
   // Estados para o Modal de Recusa de Assinatura
   const [rejectSubOpen, setRejectSubOpen] = useState(false);
@@ -260,10 +261,52 @@ const AdminPros = () => {
         fetchPros();
       } catch (err: any) {
         toast({ title: err.message, variant: "destructive" });
+        setShowForceApproveForUserId(pro.user_id);
       }
       setProcessingSub(null);
       if (detailPro?.id === pro.id) setDetailPro(null);
     }
+  };
+
+  const handleForceApproveSubscription = async (pro: Professional) => {
+    if (!confirm(`Forçar aprovação de ${pro.full_name}? O app será ativado sem cobrança no Asaas (ex.: CPF inválido).`)) return;
+    setProcessingSub(pro.id);
+    try {
+      const res = await supabase.functions.invoke("admin-manage", {
+        body: { action: "force_approve_subscription", userId: pro.user_id },
+      });
+      if (res.error || res.data?.error) {
+        throw new Error(res.data?.error || "Erro ao forçar aprovação.");
+      }
+      if (pro.plan_id === "business") {
+        await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", pro.user_id);
+      }
+      if (pro.profile_status === "pending") {
+        await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", pro.id);
+        await supabase.from("notifications").insert({
+          user_id: pro.user_id,
+          title: "Assinatura e Cadastro Aprovados! 🎉",
+          message: "Sua assinatura foi ativada e seu perfil já está visível para os clientes.",
+          type: "approval",
+          link: "/pro",
+        });
+      } else {
+        await supabase.from("notifications").insert({
+          user_id: pro.user_id,
+          title: "Assinatura Aprovada! 👑",
+          message: "Seu plano foi ativado no app.",
+          type: "approval",
+          link: "/subscriptions",
+        });
+      }
+      toast({ title: "Aprovação forçada: ativo no app (sem Asaas)." });
+      setShowForceApproveForUserId((prev) => (prev === pro.user_id ? null : prev));
+      fetchPros();
+    } catch (err: any) {
+      toast({ title: err.message, variant: "destructive" });
+    }
+    setProcessingSub(null);
+    if (detailPro?.id === pro.id) setDetailPro(null);
   };
 
   const openRejectSubscriptionModal = (pro: Professional) => {
@@ -474,6 +517,12 @@ const AdminPros = () => {
                               <CheckCircle className="w-3.5 h-3.5 mr-2 text-green-500" /> 
                               {processingSub === pro.id ? "Aprovando..." : "Aprovar Assinatura"}
                             </DropdownMenuItem>
+                            {showForceApproveForUserId === pro.user_id && (
+                              <DropdownMenuItem onClick={() => handleForceApproveSubscription(pro)} disabled={processingSub === pro.id}>
+                                <AlertTriangle className="w-3.5 h-3.5 mr-2 text-amber-500" /> 
+                                {processingSub === pro.id ? "Forçando..." : "Forçar aprovação (sem Asaas)"}
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => openRejectSubscriptionModal(pro)} disabled={processingSub === pro.id}>
                               <XCircle className="w-3.5 h-3.5 mr-2 text-red-500" /> 
                               {processingSub === pro.id ? "Recusando..." : "Recusar Assinatura"}
@@ -574,11 +623,16 @@ const AdminPros = () => {
                    <p className="text-xs font-semibold text-amber-800 dark:text-amber-400 mb-2 flex items-center gap-1.5">
                      <CreditCard className="w-4 h-4" /> Assinatura aguardando aprovação
                    </p>
-                   <div className="flex gap-2">
-                     <button onClick={() => handleApproveSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors">
+                   <div className="flex flex-wrap gap-2">
+                     <button onClick={() => handleApproveSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 min-w-[120px] py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors">
                        {processingSub === detailPro.id ? "Aprovando..." : "✅ Aprovar e Cobrar"}
                      </button>
-                     <button onClick={() => { setDetailPro(null); openRejectSubscriptionModal(detailPro); }} disabled={processingSub === detailPro.id} className="flex-1 py-1.5 rounded-lg border border-red-200 text-red-600 bg-red-50 text-xs font-medium hover:bg-red-100 transition-colors">
+                     {showForceApproveForUserId === detailPro.user_id && (
+                       <button onClick={() => handleForceApproveSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 min-w-[120px] py-1.5 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 transition-colors">
+                         {processingSub === detailPro.id ? "Forçando..." : "⚠️ Forçar aprovação (sem Asaas)"}
+                       </button>
+                     )}
+                     <button onClick={() => { setDetailPro(null); openRejectSubscriptionModal(detailPro); }} disabled={processingSub === detailPro.id} className="flex-1 min-w-[120px] py-1.5 rounded-lg border border-red-200 text-red-600 bg-red-50 text-xs font-medium hover:bg-red-100 transition-colors">
                        {processingSub === detailPro.id ? "Recusando..." : "❌ Recusar Plano"}
                      </button>
                    </div>

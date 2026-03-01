@@ -64,7 +64,8 @@ serve(async (req) => {
         },
         data: {
           notification_id: String(record.id || ""),
-          type: String(record.type || "general")
+          type: String(record.type || "general"),
+          link: String(record.link || "")
         }
       }
     }

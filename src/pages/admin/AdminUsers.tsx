@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Shield, Eye, FileText, CreditCard } from "lucide-react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Shield, Eye, FileText, CreditCard, Briefcase } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -23,6 +23,7 @@ interface Profile {
   email: string;
   user_type: string;
   is_blocked: boolean;
+  job_posting_enabled?: boolean;
   created_at: string;
 }
 
@@ -130,6 +131,28 @@ const AdminUsers = () => {
     fetchUsers(); 
   };
 
+  const toggleJobPosting = async (user: Profile) => {
+    const newValue = !user.job_posting_enabled;
+    const { error } = await supabase.from("profiles").update({ job_posting_enabled: newValue }).eq("id", user.id);
+    if (error) {
+      toast({ title: "Erro ao atualizar", description: translateError(error.message), variant: "destructive" });
+      return;
+    }
+    if (newValue) {
+      const { data: existingPro } = await supabase.from("professionals").select("id").eq("user_id", user.user_id).maybeSingle();
+      if (!existingPro) {
+        await supabase.from("professionals").insert({
+          user_id: user.user_id,
+          profile_status: "approved",
+          active: true,
+        });
+      }
+    }
+    await logAction(newValue ? "enable_job_posting" : "disable_job_posting", "user", user.user_id);
+    toast({ title: newValue ? "Vaga de emprego liberada para este usuário" : "Vaga de emprego removida" });
+    fetchUsers();
+  };
+
   const openDocs = async (user: Profile) => {
     setDocsUser(user);
     const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.user_id).maybeSingle();
@@ -215,6 +238,10 @@ const AdminUsers = () => {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openPlanModal(user)}>
                               <CreditCard className="w-3.5 h-3.5 mr-2" /> Alterar plano
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => toggleJobPosting(user)}>
+                              <Briefcase className="w-3.5 h-3.5 mr-2" />
+                              {user.job_posting_enabled ? "Remover vaga de emprego" : "Liberar vaga de emprego"}
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setDeleteId(user.id)} className="text-destructive">
                               <Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir

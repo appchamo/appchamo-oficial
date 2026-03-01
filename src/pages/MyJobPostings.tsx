@@ -47,13 +47,17 @@ const MyJobPostings = () => {
     if (!user) return;
 
     const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
-    if (!pro) { setLoading(false); return; }
+    if (!pro) {
+      setLoading(false);
+      return;
+    }
     setProId(pro.id);
 
-    const { data: profile } = await supabase.from("profiles").select("user_type").eq("user_id", user.id).maybeSingle();
+    const { data: profile } = await supabase.from("profiles").select("user_type, job_posting_enabled").eq("user_id", user.id).maybeSingle();
     const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
-    // Only company accounts with business plan can post jobs
-    setIsBusinessPlan(sub?.plan_id === "business" && profile?.user_type === "company");
+    const businessCanPost = sub?.plan_id === "business" && profile?.user_type === "company";
+    const adminAllowedPost = profile?.job_posting_enabled === true;
+    setIsBusinessPlan(businessCanPost || adminAllowedPost);
 
     const { data } = await supabase
       .from("job_postings")

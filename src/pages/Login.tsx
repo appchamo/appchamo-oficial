@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Capacitor } from "@capacitor/core"; 
-import { Browser } from "@capacitor/browser"; 
+import { Browser } from "@capacitor/browser";
+import { Loader2 } from "lucide-react"; 
 
 type LoginError = "email_not_confirmed" | "invalid_login" | "rate_limit" | "generic";
 
@@ -32,13 +34,44 @@ const getDeviceId = () => {
   return deviceId;
 };
 
+const getDeviceName = (): string => {
+  if (!Capacitor.isNativePlatform()) return "Web Browser";
+  const platform = Capacitor.getPlatform();
+  if (platform === "ios") return "iPhone App";
+  if (platform === "android") return "Android App";
+  return "App";
+};
+
 let isRedirecting = false;
 
+const hasOAuthCodeInUrl = () => {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.has("code");
+};
+
+/** Quando o Supabase/Apple falha no OAuth, a URL vem com error e error_description. Tratar aqui evita tela branca. */
+const readOAuthErrorFromUrl = (): { error: string; description: string } | null => {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const error = params.get("error");
+  const description = params.get("error_description") || params.get("error_description") || "";
+  if (error) {
+    try {
+      return { error, description: description ? decodeURIComponent(description) : "" };
+    } catch {
+      return { error, description };
+    }
+  }
+  return null;
+};
+
 const Login = () => {
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
+  const { session } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(hasOAuthCodeInUrl());
   const [bgUrl, setBgUrl] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<LoginError | null>(null);
   const [resending, setResending] = useState(false);
@@ -47,11 +80,33 @@ const Login = () => {
   
   const [deviceLimitHit, setDeviceLimitHit] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [processingOAuth, setProcessingOAuth] = useState(hasOAuthCodeInUrl());
+
+  // Limpa flag de "veio do signup por sessão expirada" para não afetar próximo cadastro
+  useEffect(() => {
+    localStorage.removeItem("manual_login_intent");
+  }, []);
+
+  // Logo ao montar: se a URL veio com erro do OAuth (ex.: Apple config errada no Supabase), mostrar e limpar
+  useEffect(() => {
+    const oauthError = readOAuthErrorFromUrl();
+    if (oauthError) {
+      window.history.replaceState({}, "", window.location.pathname);
+      const msg = oauthError.description || oauthError.error;
+      toast({
+        title: "Login com rede social falhou",
+        description: msg || "Verifique a configuração (Apple/Google) no Supabase.",
+        variant: "destructive",
+      });
+      setLoading(false);
+      setProcessingOAuth(false);
+    }
+  }, []);
 
   const checkDeviceLimitAndRedirect = async (userId: string) => {
     try {
       const deviceId = getDeviceId();
-      const deviceName = Capacitor.isNativePlatform() ? "iPhone App" : "Web Browser";
+      const deviceName = getDeviceName();
 
       const { data: canLogin, error: deviceError } = await supabase.rpc('check_device_limit', {
         p_user_id: userId,
@@ -72,6 +127,7 @@ const Login = () => {
       }
     } catch (err) {
       console.error("Erro na verificação do dispositivo:", err);
+      toast({ title: "Erro ao entrar. Tente novamente.", variant: "destructive" });
       setLoading(false);
     }
   };
@@ -107,6 +163,7 @@ const Login = () => {
 
       if (isProfileIncomplete) {
         localStorage.setItem("signup_in_progress", "true");
+        localStorage.removeItem("manual_login_intent"); // para o Signup mostrar "Escolha o tipo de conta"
         navigate("/signup", { replace: true });
         return;
       }
@@ -164,6 +221,23 @@ const Login = () => {
     setForgotLoading(false);
   };
 
+  // Ao voltar do OAuth (Apple/Google) com ?code=, mostrar "Processando login..." até ter sessão ou timeout
+  useEffect(() => {
+    if (!processingOAuth) return;
+    if (session?.user) {
+      setProcessingOAuth(false);
+      return;
+    }
+    const t = setTimeout(() => {
+      setProcessingOAuth(false);
+      setLoading(false);
+      if (hasOAuthCodeInUrl()) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    }, 12000);
+    return () => clearTimeout(t);
+  }, [processingOAuth, session]);
+
   useEffect(() => {
     supabase
       .from("platform_settings")
@@ -190,7 +264,7 @@ const Login = () => {
     });
 
     return () => {
-      authListener.subscription.unsubscribe();
+      authListener?.subscription?.unsubscribe?.();
       isRedirecting = false; 
     };
   }, []);
@@ -269,6 +343,15 @@ const Login = () => {
       setLoading(false);
     }
   };
+
+  if (processingOAuth) {
+    return (
+      <div className="min-h-[100dvh] w-full flex flex-col items-center justify-center px-4 bg-background">
+        <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
+        <p className="text-sm text-muted-foreground">Processando login...</p>
+      </div>
+    );
+  }
 
   return (
     <div

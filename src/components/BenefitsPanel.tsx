@@ -3,7 +3,11 @@ import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-const BenefitsPanel = () => {
+interface BenefitsPanelProps {
+  section?: { title?: string };
+}
+
+const BenefitsPanel = ({ section }: BenefitsPanelProps) => {
   const [raffleCouponCount, setRaffleCouponCount] = useState(0);
   const [discountCouponCount, setDiscountCouponCount] = useState(0);
   const [nextDraw, setNextDraw] = useState<string | null>(null);
@@ -32,7 +36,7 @@ const BenefitsPanel = () => {
       );
       setDiscountCouponCount(activeDiscounts.length);
 
-      const { data: raffle } = await supabase.from("raffles").select("draw_date").eq("status", "upcoming").order("draw_date").limit(1).single();
+      const { data: raffle } = await supabase.from("raffles").select("draw_date").eq("status", "upcoming").order("draw_date", { ascending: true }).limit(1).maybeSingle();
       if (raffle) setNextDraw(raffle.draw_date);
     };
     load();
@@ -51,7 +55,7 @@ const BenefitsPanel = () => {
     <div className="gradient-card rounded-2xl p-5 text-primary-foreground shadow-elevated">
       <div className="flex items-center gap-2 mb-4">
         <Gift className="w-5 h-5" />
-        <h2 className="font-bold text-base">Seus Benefícios</h2>
+        <h2 className="font-bold text-base">{section?.title ?? "Seus Benefícios"}</h2>
       </div>
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div className="bg-primary-foreground/15 backdrop-blur-sm rounded-xl p-3">

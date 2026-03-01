@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Instalador/arquivos pesados (evitar no repo)
+*.dmg

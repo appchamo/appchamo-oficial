@@ -1,11 +1,10 @@
 <!doctype html>
 <html lang="pt-BR">
   <head>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' capacitor: https: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://wfxeiuqxzrlnvlopcrwd.supabase.co https://*.supabase.co wss://*.supabase.co;">
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' capacitor: https: 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: https: blob:; connect-src 'self' https://wfxeiuqxzrlnvlopcrwd.supabase.co wss://wfxeiuqxzrlnvlopcrwd.supabase.co https://*.supabase.co https://*.onesignal.com;">
+    <!-- Uma única CSP: img-src com data: permite recorte de imagem (foto perfil/atendente) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' capacitor: https: 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: https: blob:; connect-src 'self' https://wfxeiuqxzrlnvlopcrwd.supabase.co wss://wfxeiuqxzrlnvlopcrwd.supabase.co https://*.supabase.co wss://*.supabase.co https://*.onesignal.com https://viacep.com.br;">
 
     <title>Chamô</title>
     <meta name="description" content="Chamô - Encontre profissionais qualificados" />
@@ -26,14 +25,25 @@
         --safe-top: env(safe-area-inset-top, 44px);
       }
 
-      html, body {
+      html {
         margin: 0;
         padding: 0;
         height: 100%;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        min-height: 100dvh;
         background-color: #ffffff;
+        overflow-x: hidden;
       }
 
       #root {
+        min-height: 100%;
+        min-height: 100dvh;
         padding-top: var(--safe-top) !important;
       }
 

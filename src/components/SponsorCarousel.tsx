@@ -27,7 +27,16 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
     for (let i = 0; i < sponsors.length; i += ITEMS_PER_PAGE) p.push(sponsors.slice(i, i + ITEMS_PER_PAGE));
     return p;
   }, [sponsors]);
-  const totalPages = pages.length;
+
+  // Inclui uma cópia da primeira página no final para sempre avançar (sem “voltar”)
+  const displayPages = useMemo(() => {
+    if (pages.length <= 1) return pages;
+    return [...pages, pages[0]];
+  }, [pages]);
+  const totalDisplayPages = displayPages.length;
+  const totalPages = pages.length; // para os dots
+
+  const fromCloneToReset = useRef(false);
 
   useEffect(() => {
     supabase.from("sponsors").select("id, name, niche, link_url, logo_url").eq("active", true).order("sort_order").then(({ data }) => {
@@ -44,18 +53,24 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   }, [totalPages]);
 
   useEffect(() => {
-    if (isPaused || totalPages <= 1) return;
+    if (isPaused || totalDisplayPages <= 1) return;
     const interval = setInterval(() => {
-      setActivePage((p) => (p + 1) % totalPages);
+      setActivePage((p) => {
+        const next = (p + 1) % totalDisplayPages;
+        if (p === totalDisplayPages - 1 && next === 0) fromCloneToReset.current = true;
+        return next;
+      });
     }, AUTO_ADVANCE_MS);
     return () => clearInterval(interval);
-  }, [isPaused, totalPages]);
+  }, [isPaused, totalDisplayPages]);
 
   useEffect(() => {
-    if (!scrollRef.current || totalPages === 0) return;
+    if (!scrollRef.current || totalDisplayPages === 0) return;
     const left = activePage * scrollRef.current.clientWidth;
-    scrollRef.current.scrollTo({ left, behavior: "smooth" });
-  }, [activePage, totalPages]);
+    const behavior = activePage === 0 && fromCloneToReset.current ? "auto" : "smooth";
+    if (fromCloneToReset.current) fromCloneToReset.current = false;
+    scrollRef.current.scrollTo({ left, behavior });
+  }, [activePage, totalDisplayPages]);
 
   const handleClick = (sponsor: Sponsor) => {
     window.open(sponsor.link_url, "_blank");
@@ -82,7 +97,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         onTouchStart={() => setIsPaused(true)}
         onTouchEnd={() => setIsPaused(false)}
       >
-        {pages.map((pageSponsors, pageIndex) => (
+        {displayPages.map((pageSponsors, pageIndex) => (
           <div
             key={pageIndex}
             className="flex gap-[14px] flex-[0_0_100%] min-w-0 shrink-0 snap-start justify-evenly items-stretch px-0.5"
@@ -115,7 +130,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
             <button
               key={i}
               onClick={() => scrollToPage(i)}
-              className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${i === activePage ? "bg-primary" : "bg-muted-foreground/30"}`}
+              className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${i === activePage % totalPages ? "bg-primary" : "bg-muted-foreground/30"}`}
               aria-label={`Página ${i + 1}`}
             />
           ))}

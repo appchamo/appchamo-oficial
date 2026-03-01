@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, ArrowRight } from "lucide-react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
@@ -70,20 +71,8 @@ const ResetPassword = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-6 shadow-card space-y-4">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nova senha</label>
-            <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
-              <Lock className="w-4 h-4 text-muted-foreground" />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Confirmar nova senha</label>
-            <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
-              <Lock className="w-4 h-4 text-muted-foreground" />
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
-            </div>
-          </div>
+          <PasswordInput label="Nova senha" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="new-password" />
+          <PasswordInput label="Confirmar nova senha" value={confirm} onChange={setConfirm} placeholder="••••••••" autoComplete="new-password" />
           <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
             {loading ? "Salvando..." : "Salvar nova senha"} <ArrowRight className="w-4 h-4" />
           </button>

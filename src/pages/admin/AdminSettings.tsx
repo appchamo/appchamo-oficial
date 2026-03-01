@@ -1,5 +1,6 @@
 import AdminLayout from "@/components/AdminLayout";
 import { Save, Loader2, Lock, Volume2, Trash2 } from "lucide-react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -106,16 +107,8 @@ const AdminSettings = () => {
         {/* Change Password */}
         <div className="bg-card border rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-foreground flex items-center gap-2"><Lock className="w-4 h-4" /> Alterar Senha do Admin</h2>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nova senha</label>
-            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••"
-              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Confirmar nova senha</label>
-            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••"
-              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-          </div>
+          <PasswordInput label="Nova senha" value={newPassword} onChange={setNewPassword} placeholder="••••••••" />
+          <PasswordInput label="Confirmar nova senha" value={confirmPassword} onChange={setConfirmPassword} placeholder="••••••••" />
           <button onClick={handleChangePassword} disabled={changingPassword}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
             {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}

@@ -115,6 +115,7 @@ const BackButtonHandler = () => {
 };
 
 const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "splash_duration_seconds"] as const;
+const SPLASH_SHOWN_KEY = "chamo_splash_shown";
 
 const AppContent = () => {
   const { session, loading } = useAuth();
@@ -127,9 +128,15 @@ const AppContent = () => {
       setShowCustomSplash(false);
       return;
     }
-    // Só mostra o splash na abertura do app (uma vez por sessão); demais carregamentos usam o loading normal
+    // Só na abertura do app: uma vez por sessão (sessionStorage sobrevive a remounts)
     if (hasShownSplashRef.current) return;
+    try {
+      if (sessionStorage.getItem(SPLASH_SHOWN_KEY) === "1") return;
+    } catch (_) {}
     hasShownSplashRef.current = true;
+    try {
+      sessionStorage.setItem(SPLASH_SHOWN_KEY, "1");
+    } catch (_) {}
     setShowCustomSplash(true);
     supabase
       .from("platform_settings")

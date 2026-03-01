@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Mail, Lock, ArrowRight, Shield } from "lucide-react";
+import { PasswordInput } from "@/components/ui/password-input";
 
 const AdminLogin = () => {
   const navigate = useNavigate();
@@ -73,20 +74,7 @@ const AdminLogin = () => {
               />
             </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha</label>
-            <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
-              <Lock className="w-4 h-4 text-muted-foreground" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-                required
-              />
-            </div>
-          </div>
+          <PasswordInput label="Senha" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="current-password" />
           <button
             type="submit"
             disabled={loading}

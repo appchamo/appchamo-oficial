@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
@@ -410,13 +411,7 @@ const Login = () => {
                   <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
                 </div>
               </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha</label>
-                <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
-                  <Lock className="w-4 h-4 text-muted-foreground" />
-                  <input type="password" value={password} placeholder="••••••••" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" onChange={(e) => setPassword(e.target.value)} />
-                </div>
-              </div>
+              <PasswordInput label="Senha" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="current-password" />
 
               {errorType === "email_not_confirmed" && (
                 <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-3 space-y-2">

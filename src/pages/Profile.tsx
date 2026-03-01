@@ -1,5 +1,6 @@
 import AppLayout from "@/components/AppLayout";
 import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck } from "lucide-react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -283,18 +284,9 @@ const Profile = () => {
               <DialogTitle>Alterar senha</DialogTitle>
             </DialogHeader>
             <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha atual</label>
-                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="••••••••" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nova senha</label>
-                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="••••••••" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Confirmar nova senha</label>
-                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="••••••••" />
-              </div>
+              <PasswordInput label="Senha atual" value={currentPassword} onChange={setCurrentPassword} placeholder="••••••••" autoComplete="current-password" />
+              <PasswordInput label="Nova senha" value={newPassword} onChange={setNewPassword} placeholder="••••••••" autoComplete="new-password" />
+              <PasswordInput label="Confirmar nova senha" value={confirmPassword} onChange={setConfirmPassword} placeholder="••••••••" autoComplete="new-password" />
               <button onClick={async () => {
                 if (!currentPassword) { toast({ title: "Digite sua senha atual.", variant: "destructive" }); return; }
                 if (newPassword.length < 6) { toast({ title: "A senha deve ter pelo menos 6 caracteres.", variant: "destructive" }); return; }

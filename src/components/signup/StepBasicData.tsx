@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Mail, Lock, User, Phone, FileText, MapPin, Search, Calendar, ScrollText, CheckCircle2 } from "lucide-react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -431,13 +432,11 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
           {!isSocialSignup && (
             <>
               <InputRow icon={Lock} label="Senha *">
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres"
-                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+                <PasswordInput noIcon value={password} onChange={setPassword} placeholder="Mínimo 6 caracteres" autoComplete="new-password" />
               </InputRow>
 
               <InputRow icon={Lock} label="Confirmar senha *">
-                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repita a senha"
-                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+                <PasswordInput noIcon value={confirmPassword} onChange={setConfirmPassword} placeholder="Repita a senha" autoComplete="new-password" />
               </InputRow>
             </>
           )}

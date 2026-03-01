@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
 import { SplashScreen } from '@capacitor/splash-screen';
 import { CustomSplash, type SplashConfig } from "@/components/CustomSplash";
@@ -120,9 +120,16 @@ const AppContent = () => {
   const { session, loading } = useAuth();
   const [splashConfig, setSplashConfig] = useState<SplashConfig | null>(null);
   const [showCustomSplash, setShowCustomSplash] = useState(false);
+  const hasShownSplashRef = useRef(false);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading) {
+      setShowCustomSplash(false);
+      return;
+    }
+    // Só mostra o splash na abertura do app (uma vez por sessão); demais carregamentos usam o loading normal
+    if (hasShownSplashRef.current) return;
+    hasShownSplashRef.current = true;
     setShowCustomSplash(true);
     supabase
       .from("platform_settings")

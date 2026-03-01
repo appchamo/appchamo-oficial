@@ -55,6 +55,7 @@ const Signup = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
+  const [showVerifyEmailModal, setShowVerifyEmailModal] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [resending, setResending] = useState(false);
@@ -285,9 +286,11 @@ const Signup = () => {
     setLoading(true);
     try {
       let userId = createdUserId;
+      let signedUpWithEmail = false;
 
       // Se não logou via Social, faz o cadastro manual por e-mail/senha
       if (!userId) {
+        signedUpWithEmail = true;
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: basicData.email,
           password: basicData.password,
@@ -300,7 +303,9 @@ const Signup = () => {
           const status = (authError as { status?: number }).status;
           toast({
             title: friendlyError(authError.message, status),
-            description: status === 429 ? "O limite de cadastros por minuto foi atingido." : undefined,
+            description: status === 429
+              ? "Limite do servidor (por rede/IP). Tente em outra rede (ex.: 4G) ou aguarde até 1 hora. O admin pode aumentar em Supabase → Auth → Rate limits."
+              : undefined,
             variant: "destructive",
           });
           setLoading(false);
@@ -357,13 +362,16 @@ const Signup = () => {
         return;
       }
 
+      setLoading(false);
+      localStorage.removeItem("signup_in_progress");
+
       if (accountType === "professional" && planId !== "free") {
-        setLoading(false);
         setIsSubscriptionOpen(true);
+      } else if (signedUpWithEmail) {
+        // Cadastro por e-mail: exige confirmação → modal e depois ir para login
+        setShowVerifyEmailModal(true);
       } else {
-        setLoading(false);
-        localStorage.removeItem("signup_in_progress");
-        setCouponPopup(true); 
+        setCouponPopup(true);
       }
     } catch (err: any) {
       toast({ title: "Erro ao criar conta.", variant: "destructive" });
@@ -476,6 +484,31 @@ const Signup = () => {
           </button>
         </p>
       )}
+
+      <Dialog open={showVerifyEmailModal} onOpenChange={(open) => !open && setShowVerifyEmailModal(false)}>
+        <DialogContent className="max-w-xs text-center">
+          <DialogHeader>
+            <DialogTitle className="text-center flex items-center justify-center gap-2">
+              <MailCheck className="w-5 h-5 text-primary" />
+              Cadastro realizado!
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-3 py-4">
+            <p className="text-sm font-medium text-foreground">
+              Verifique seu e-mail e faça login para ativar sua conta.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Você também ganhou 1 cupom para o sorteio mensal do Chamô.
+            </p>
+          </div>
+          <button
+            onClick={forceExitToLogin}
+            className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors"
+          >
+            Ir para o login
+          </button>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={couponPopup} onOpenChange={handleCouponClose}>
         <DialogContent className="max-w-xs text-center">

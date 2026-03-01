@@ -3,9 +3,10 @@ import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText } from "lucide-react";
+import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AudioPlayer from "@/components/AudioPlayer";
+import { isSupportBotMessage } from "@/lib/supportBot";
 
 interface Message {
   id: string;
@@ -91,9 +92,18 @@ const SupportThread = () => {
       content: text.trim(),
       ticket_id: ticketId,
     });
-    if (error) toast({ title: "Erro ao enviar", variant: "destructive" });
-    else setText("");
+    if (error) {
+      toast({ title: "Erro ao enviar", variant: "destructive" });
+      setSending(false);
+      return;
+    }
+    setText("");
     setSending(false);
+    try {
+      await supabase.functions.invoke("support-ai-reply", { body: { ticket_id: ticketId } });
+    } catch (_) {
+      // IA opcional; falha silenciosa
+    }
   };
 
   // ✅ FUNÇÃO DE COMPRESSÃO ADICIONADA PARA O SUPORTE
@@ -296,10 +306,16 @@ const SupportThread = () => {
               <div className="bg-muted/50 border rounded-xl px-4 py-2 text-xs font-medium text-muted-foreground">✅ Chamado encerrado</div>
             </div>
           );
+          const isBot = !isMine && isSupportBotMessage(msg.sender_id);
           return (
             <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
-              {!isMine && <div className="w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center mt-1 flex-shrink-0"><HelpCircle className="w-4 h-4 text-amber-600" /></div>}
+              {!isMine && (
+                <div className="w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center mt-1 flex-shrink-0" title={isBot ? "Assistente Chamô" : undefined}>
+                  {isBot ? <Bot className="w-4 h-4 text-amber-600" /> : <HelpCircle className="w-4 h-4 text-amber-600" />}
+                </div>
+              )}
               <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-amber-500/10 border border-amber-500/20 rounded-bl-md text-foreground"}`}>
+                {isBot && <p className="text-[9px] font-medium text-amber-700 dark:text-amber-400 mb-1">Assistente Chamô</p>}
                 {renderContent(msg)}
                 <p className={`text-[9px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
               </div>

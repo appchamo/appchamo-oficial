@@ -62,6 +62,22 @@ Reinicie o Supabase local para carregar o template.
 
 ---
 
+## Redirecionamento após confirmar e-mail (evitar localhost no celular)
+
+Se, ao clicar em **“Confirmar e-mail”** no celular, o navegador abrir **localhost:8080** e der erro de conexão, o projeto Supabase está usando a URL errada.
+
+O link de confirmação é montado pelo Supabase com a **Site URL** do projeto. Ajuste assim:
+
+1. Acesse **[Supabase Dashboard](https://supabase.com/dashboard)** → seu projeto.
+2. Vá em **Authentication** → **URL Configuration**.
+3. Em **Site URL**, coloque a URL pública do seu app (ex.: `https://appchamo.com` ou `https://app.chamo.com`), **não** `http://localhost:8080`.
+4. Em **Redirect URLs**, adicione a mesma URL (ex.: `https://appchamo.com/**`) para permitir o retorno após a confirmação.
+5. Salve.
+
+Depois disso, os novos e-mails de confirmação passarão a apontar para o site em produção. Quem abrir o link no celular será redirecionado para o app/site correto em vez de localhost.
+
+---
+
 ## Variáveis (confirmação e recovery)
 
 Em ambos os templates, as principais são:

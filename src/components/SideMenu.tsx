@@ -110,7 +110,8 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
             </div>
           ))}
         </nav>
-        <div className="border-t p-3">
+        {/* pb-16 evita que o botão Sair fique atrás da barra de navegação do Android */}
+        <div className="border-t p-3 pb-16">
           <div className="px-3 py-2 mb-2">
             <p className="text-xs font-medium text-foreground">{profile?.email || ""}</p>
             <p className="text-[10px] text-muted-foreground">{profile?.user_type === "professional" ? "Profissional" : profile?.user_type === "company" ? "Empresa" : "Cliente"}</p>

@@ -1,9 +1,16 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { ArrowLeft, HelpCircle, Plus } from "lucide-react";
+import { ArrowLeft, HelpCircle, Plus, MessageCircle, CreditCard, Smartphone, FileQuestion } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import BottomNav from "@/components/BottomNav";
+
+const SUPPORT_TOPICS = [
+  { id: "planos", label: "Dúvidas sobre planos", icon: MessageCircle, message: "Assunto: Planos e assinaturas" },
+  { id: "pagamento", label: "Problema com pagamento", icon: CreditCard, message: "Assunto: Pagamento" },
+  { id: "app", label: "Erro ou dúvida no app", icon: Smartphone, message: "Assunto: Uso do app" },
+  { id: "outro", label: "Outro assunto", icon: FileQuestion, message: "Assunto: Outro" },
+] as const;
 
 interface Ticket {
   id: string;
@@ -34,19 +41,25 @@ const Support = () => {
     load();
   }, [user]);
 
-  const handleNewTicket = async () => {
+  const openTicketWithSubject = async (subject: string, initialMessage: string) => {
     if (!user) return;
     setCreating(true);
     const { data: newTicket, error } = await supabase
       .from("support_tickets")
-      .insert({ user_id: user.id, subject: "Nova solicitação", message: "Abertura de suporte" })
+      .insert({ user_id: user.id, subject, message: initialMessage })
       .select("id")
       .single();
-    if (error || !newTicket) {
-      setCreating(false);
-      return;
-    }
+    setCreating(false);
+    if (error || !newTicket) return;
     navigate(`/support/${newTicket.id}`);
+  };
+
+  const handleTopic = (topic: (typeof SUPPORT_TOPICS)[number]) => {
+    openTicketWithSubject(topic.message, `Usuário escolheu: ${topic.label}`);
+  };
+
+  const handleNewTicket = () => {
+    openTicketWithSubject("Nova solicitação", "Abertura de suporte");
   };
 
   if (loading) return (
@@ -73,13 +86,32 @@ const Support = () => {
       </header>
 
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4">
+        <p className="text-sm font-medium text-foreground mb-3">Escolha um assunto ou abra um chat livre:</p>
+        <div className="grid gap-2 mb-4">
+          {SUPPORT_TOPICS.map((topic) => {
+            const Icon = topic.icon;
+            return (
+              <button
+                key={topic.id}
+                onClick={() => handleTopic(topic)}
+                disabled={creating}
+                className="flex items-center gap-3 w-full p-4 rounded-xl border border-border bg-card hover:border-primary/40 hover:bg-muted/30 transition-colors text-left disabled:opacity-50"
+              >
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                  <Icon className="w-5 h-5 text-amber-600" />
+                </div>
+                <span className="font-medium text-sm text-foreground">{topic.label}</span>
+              </button>
+            );
+          })}
+        </div>
         <button
           onClick={handleNewTicket}
           disabled={creating}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 mb-4"
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
         >
           <Plus className="w-4 h-4" />
-          {creating ? "Criando..." : "Nova solicitação de suporte"}
+          {creating ? "Abrindo..." : "Abrir chat sem assunto específico"}
         </button>
 
         {tickets.length === 0 ? (

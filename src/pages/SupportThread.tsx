@@ -103,8 +103,14 @@ const SupportThread = () => {
     // Pequena pausa para a mensagem ser gravada antes da função ler o histórico
     await new Promise((r) => setTimeout(r, 800));
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.warn("[Suporte IA] Sem sessão; não é possível chamar a função.");
+        return;
+      }
       const { data, error: fnError } = await supabase.functions.invoke("support-ai-reply", {
         body: { ticket_id: ticketId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (fnError) {
         console.error("[Suporte IA] Erro na função:", fnError);

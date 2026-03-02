@@ -145,21 +145,25 @@ const AndroidPushChannelInit = () => {
   return null;
 };
 
-/** Prefetch das páginas mais usadas em idle para navegação instantânea. */
+/** Prefetch das páginas mais usadas. Mensagens em segundo plano assim que o usuário entra no app. */
 const RoutePrefetcher = () => {
   useEffect(() => {
     const prefetch = (fn: () => Promise<unknown>) => {
       fn().catch(() => {});
     };
+    // Mensagens carrega em segundo plano logo ao entrar no app, para abrir instantâneo ao clicar
+    const t = setTimeout(() => {
+      prefetch(() => import("./pages/Messages"));
+    }, 200);
     const schedule = typeof requestIdleCallback !== "undefined" ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 500);
     schedule(() => {
       prefetch(() => import("./pages/Home"));
-      prefetch(() => import("./pages/Messages"));
       prefetch(() => import("./pages/Profile"));
       prefetch(() => import("./pages/Search"));
       prefetch(() => import("./pages/Categories"));
       prefetch(() => import("./pages/Notifications"));
     });
+    return () => clearTimeout(t);
   }, []);
   return null;
 };

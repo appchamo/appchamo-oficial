@@ -71,8 +71,15 @@ serve(async (req) => {
             }
           },
           android: {
-            notification: { title, body, channelId: "default" },
-            data: dataPayload
+            priority: "high",
+            notification: {
+              title,
+              body,
+              channelId: "default",
+              defaultSound: true,
+              defaultVibrateTimings: true,
+            },
+            data: dataPayload,
           }
         }
       }

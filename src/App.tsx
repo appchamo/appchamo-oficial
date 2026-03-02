@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
 import { SplashScreen } from '@capacitor/splash-screen';
 import { CustomSplash, type SplashConfig } from "@/components/CustomSplash";
@@ -8,75 +8,87 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom"; 
-import { AuthProvider, useAuth } from "@/hooks/useAuth"; // ✅ Importando useAuth
+import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { Capacitor } from "@capacitor/core";
 import { CheckCircle2, Star, Loader2 } from "lucide-react";
 
-// Pages
-import Index from "./pages/Index";
-import Home from "./pages/Home";
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
-import ResetPassword from "./pages/ResetPassword";
-import Search from "./pages/Search";
-import Categories from "./pages/Categories";
-import CategoryDetail from "./pages/CategoryDetail";
-import Messages from "./pages/Messages";
-import MessageThread from "./pages/MessageThread";
-import Notifications from "./pages/Notifications";
-import Coupons from "./pages/Coupons";
-import Profile from "./pages/Profile";
-import Jobs from "./pages/Jobs";
-import JobDetail from "./pages/JobDetail";
-import MyJobPostings from "./pages/MyJobPostings";
-import MyCatalog from "./pages/MyCatalog";
-import ClientRequests from "./pages/ClientRequests";
-import ClientDashboard from "./pages/ClientDashboard";
-import ProfessionalDashboard from "./pages/ProfessionalDashboard";
-import ProfessionalFinancial from "./pages/ProfessionalFinancial";
-import ProfessionalProfile from "./pages/ProfessionalProfile";
-import ProAgenda from "./pages/ProAgenda";
-import ProAgendaCalendar from "./pages/ProAgendaCalendar";
-import MeusAgendamentos from "./pages/MeusAgendamentos";
-import BecomeProfessional from "./pages/BecomeProfessional";
-import Support from "./pages/Support";
-import SupportThread from "./pages/SupportThread";
-import Terms from "./pages/Terms";
-import TutorialDetail from "./pages/TutorialDetail";
-import HowItWorks from "./pages/HowItWorks";
-import HowToUse from "./pages/HowToUse";
-import HowToHire from "./pages/HowToHire";
-import HowToPay from "./pages/HowToPay";
-import Subscriptions from "./pages/Subscriptions";
-import NotFound from "./pages/NotFound";
-import JobApply from "./pages/JobApply";
-import BusinessCheckout from "./pages/BusinessCheckout";
+// Lazy pages – carregam sob demanda para navegação mais rápida
+const Index = lazy(() => import("./pages/Index"));
+const Home = lazy(() => import("./pages/Home"));
+const Login = lazy(() => import("./pages/Login"));
+const Signup = lazy(() => import("./pages/Signup"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const Search = lazy(() => import("./pages/Search"));
+const Categories = lazy(() => import("./pages/Categories"));
+const CategoryDetail = lazy(() => import("./pages/CategoryDetail"));
+const Messages = lazy(() => import("./pages/Messages"));
+const MessageThread = lazy(() => import("./pages/MessageThread"));
+const Notifications = lazy(() => import("./pages/Notifications"));
+const Coupons = lazy(() => import("./pages/Coupons"));
+const Profile = lazy(() => import("./pages/Profile"));
+const Jobs = lazy(() => import("./pages/Jobs"));
+const JobDetail = lazy(() => import("./pages/JobDetail"));
+const MyJobPostings = lazy(() => import("./pages/MyJobPostings"));
+const MyCatalog = lazy(() => import("./pages/MyCatalog"));
+const ClientRequests = lazy(() => import("./pages/ClientRequests"));
+const ClientDashboard = lazy(() => import("./pages/ClientDashboard"));
+const ProfessionalDashboard = lazy(() => import("./pages/ProfessionalDashboard"));
+const ProfessionalFinancial = lazy(() => import("./pages/ProfessionalFinancial"));
+const ProfessionalProfile = lazy(() => import("./pages/ProfessionalProfile"));
+const ProAgenda = lazy(() => import("./pages/ProAgenda"));
+const ProAgendaCalendar = lazy(() => import("./pages/ProAgendaCalendar"));
+const MeusAgendamentos = lazy(() => import("./pages/MeusAgendamentos"));
+const BecomeProfessional = lazy(() => import("./pages/BecomeProfessional"));
+const Support = lazy(() => import("./pages/Support"));
+const SupportThread = lazy(() => import("./pages/SupportThread"));
+const Terms = lazy(() => import("./pages/Terms"));
+const TutorialDetail = lazy(() => import("./pages/TutorialDetail"));
+const HowItWorks = lazy(() => import("./pages/HowItWorks"));
+const HowToUse = lazy(() => import("./pages/HowToUse"));
+const HowToHire = lazy(() => import("./pages/HowToHire"));
+const HowToPay = lazy(() => import("./pages/HowToPay"));
+const Subscriptions = lazy(() => import("./pages/Subscriptions"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const JobApply = lazy(() => import("./pages/JobApply"));
+const BusinessCheckout = lazy(() => import("./pages/BusinessCheckout"));
 
-// Admin
-import AdminLogin from "./pages/admin/AdminLogin";
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import AdminUsers from "./pages/admin/AdminUsers";
-import AdminPros from "./pages/admin/AdminPros";
-import AdminSponsors from "./pages/admin/AdminSponsors";
-import AdminTransactions from "./pages/admin/AdminTransactions";
-import AdminReports from "./pages/admin/AdminReports";
-import AdminCoupons from "./pages/admin/AdminCoupons";
-import AdminSettings from "./pages/admin/AdminSettings";
-import AdminLogs from "./pages/admin/AdminLogs";
-import AdminCategories from "./pages/admin/AdminCategories";
-import AdminProfessions from "./pages/admin/AdminProfessions";
-import AdminBanners from "./pages/admin/AdminBanners";
-import AdminEnterprise from "./pages/admin/AdminEnterprise";
-import AdminSupport from "./pages/admin/AdminSupport";
-import AdminNotifications from "./pages/admin/AdminNotifications";
-import AdminLayoutPage from "./pages/admin/AdminLayout";
-import AdminTutorials from "./pages/admin/AdminTutorials";
-import AdminProfiles from "./pages/admin/AdminProfiles";
+const AdminLogin = lazy(() => import("./pages/admin/AdminLogin"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
+const AdminPros = lazy(() => import("./pages/admin/AdminPros"));
+const AdminSponsors = lazy(() => import("./pages/admin/AdminSponsors"));
+const AdminTransactions = lazy(() => import("./pages/admin/AdminTransactions"));
+const AdminReports = lazy(() => import("./pages/admin/AdminReports"));
+const AdminCoupons = lazy(() => import("./pages/admin/AdminCoupons"));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
+const AdminLogs = lazy(() => import("./pages/admin/AdminLogs"));
+const AdminCategories = lazy(() => import("./pages/admin/AdminCategories"));
+const AdminProfessions = lazy(() => import("./pages/admin/AdminProfessions"));
+const AdminBanners = lazy(() => import("./pages/admin/AdminBanners"));
+const AdminEnterprise = lazy(() => import("./pages/admin/AdminEnterprise"));
+const AdminSupport = lazy(() => import("./pages/admin/AdminSupport"));
+const AdminNotifications = lazy(() => import("./pages/admin/AdminNotifications"));
+const AdminLayoutPage = lazy(() => import("./pages/admin/AdminLayout"));
+const AdminTutorials = lazy(() => import("./pages/admin/AdminTutorials"));
+const AdminProfiles = lazy(() => import("./pages/admin/AdminProfiles"));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60 * 1000,
+      gcTime: 5 * 60 * 1000,
+    },
+  },
+});
+
+const PageFallback = () => (
+  <div className="min-h-[50vh] flex items-center justify-center" aria-hidden>
+    <Loader2 className="w-8 h-8 text-primary animate-spin" />
+  </div>
+);
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
@@ -116,6 +128,41 @@ const BackButtonHandler = () => {
 
 const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "splash_duration_seconds"] as const;
 const SPLASH_SHOWN_KEY = "chamo_splash_shown";
+
+/** No Android, cria o canal "default" logo na abertura do app para push em background aparecer. */
+const AndroidPushChannelInit = () => {
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== "android") return;
+    import("@capacitor/local-notifications").then(({ LocalNotifications }) => {
+      LocalNotifications.createChannel({
+        id: "default",
+        name: "Notificações",
+        importance: 5,
+        visibility: 1,
+      }).catch(() => {});
+    });
+  }, []);
+  return null;
+};
+
+/** Prefetch das páginas mais usadas em idle para navegação instantânea. */
+const RoutePrefetcher = () => {
+  useEffect(() => {
+    const prefetch = (fn: () => Promise<unknown>) => {
+      fn().catch(() => {});
+    };
+    const schedule = typeof requestIdleCallback !== "undefined" ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 500);
+    schedule(() => {
+      prefetch(() => import("./pages/Home"));
+      prefetch(() => import("./pages/Messages"));
+      prefetch(() => import("./pages/Profile"));
+      prefetch(() => import("./pages/Search"));
+      prefetch(() => import("./pages/Categories"));
+      prefetch(() => import("./pages/Notifications"));
+    });
+  }, []);
+  return null;
+};
 
 const AppContent = () => {
   const { session, loading } = useAuth();
@@ -254,7 +301,8 @@ const AppContent = () => {
   return (
     <>
       <BackButtonHandler />
-      <Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
         <Route path="/" element={session ? <Navigate to="/home" replace /> : <Index />} />
         <Route path="/login" element={<Login />} />
         
@@ -320,7 +368,8 @@ const AppContent = () => {
         <Route path="/admin/profiles" element={<ProtectedRoute><AdminProfiles /></ProtectedRoute>} />
 
         <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </>
   );
 };
@@ -336,6 +385,8 @@ const App = () => {
             <RefreshProvider>
               <ScrollToTop />
               <NotificationOpenHandler />
+              <AndroidPushChannelInit />
+              <RoutePrefetcher />
               <BackButtonHandler />
               <ErrorBoundary>
                 <AppContent />

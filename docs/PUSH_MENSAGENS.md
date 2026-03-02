@@ -74,11 +74,12 @@ O backend **send-push-notification** usa o mesmo `FIREBASE_CONFIG` (conta de ser
    - Se vier erro tipo `invalid argument` ou `unregistered`, o token pode estar expirado ou inválido (reinstale o app / faça logout e login e aceite notificações de novo).
    - Se vier `FIREBASE_CONFIG inválido`, confira o secret no Supabase (project_id, client_email, private_key).
 
-4. **Android: permissão, canal e app em primeiro plano**
+4. **Android: permissão, canal, prioridade e app em primeiro plano**
    - No Android 13+, o app precisa da permissão **Notificações** (já tratado no projeto).
-   - A Edge Function envia `android.notification.channelId: "default"`. O app cria o canal "default" (e pede permissão para notificações locais) no **usePush**.
+   - A Edge Function envia `android.notification.channelId: "default"` e **priority: "high"**. O app cria o canal "default" na abertura (**App.tsx** → `AndroidPushChannelInit`) e também no **usePush**.
    - No **AndroidManifest** está definido `com.google.firebase.messaging.default_notification_channel_id` = `default` para notificações em background/killed.
    - Com o **app em primeiro plano**, o FCM entrega a mensagem mas não mostra na bandeja. Por isso o **usePush** exibe uma **notificação local** (via `@capacitor/local-notifications`) quando recebe o evento `pushNotificationReceived` no Android.
+   - Se ainda não aparecer: em **Configurações** do celular → **Apps** → **Chamô** → **Notificações**, confira se estão ligadas e se o canal "Notificações" não está silenciado. Desative economia de bateria / "Não perturbe" para testar.
 
 5. **Reenviar a Edge Function**
    - Depois de alterar o código da função, faça deploy: no Supabase Dashboard, redeploy da função **send-push-notification** (ou via `supabase functions deploy send-push-notification`).

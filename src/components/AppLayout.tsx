@@ -26,7 +26,7 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
   );
 
   return (
-    <div className={`min-h-[100dvh] pb-20 flex flex-col ${isHome ? "bg-secondary" : "bg-background"}`}
+    <div className={`min-h-[100dvh] pb-20 flex flex-col ${isHome ? "bg-secondary" : "bg-background"}`}>
       {showHeader && <MemoizedHeader />}
       {isHome ? <PullToRefresh>{mainContent}</PullToRefresh> : mainContent}
       <MemoizedBottomNav />

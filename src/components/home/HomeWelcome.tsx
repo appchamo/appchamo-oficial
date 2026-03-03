@@ -8,7 +8,7 @@ const HomeWelcome = ({ section }: HomeWelcomeProps) => {
   const subtitle = section?.subtitle || "Encontre o profissional ideal perto de você";
 
   return (
-    <p className="text-sm text-muted-foreground">{subtitle}</p>
+    <p className="text-sm text-muted-foreground mt-3">{subtitle}</p>
   );
 };
 

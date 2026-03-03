@@ -140,12 +140,14 @@ const Login = () => {
     }
   };
 
-  /** No Android (e em alguns dispositivos) o perfil pode demorar a aparecer após OAuth. Re-tenta buscar antes de mandar para signup. */
+  /** No Android (e em alguns dispositivos) o perfil pode demorar a aparecer após OAuth. Re-tenta várias vezes antes de mandar para signup. */
   const fetchProfileWithRetry = async (userId: string): Promise<{ profile: any; roles: any[] }> => {
-    const delays = [0, 500, 1200]; // 1ª imediata, 2ª após 500ms, 3ª após 1200ms
+    // No native: mais tentativas e delays maiores (alguns Androids demoram a ver o perfil após Google OAuth)
+    const isNative = Capacitor.isNativePlatform();
+    const delays = isNative ? [0, 600, 1500, 3000, 5000] : [0, 500, 1200];
     let lastProfile: any = null;
     let lastRoles: any[] = [];
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < delays.length; attempt++) {
       if (attempt > 0) {
         await new Promise((r) => setTimeout(r, delays[attempt]));
       }
@@ -207,6 +209,32 @@ const Login = () => {
       const isProfileIncomplete = !profile || (!profile.cpf && !profile.phone);
 
       if (isProfileIncomplete) {
+        // No Android, usuário que já tem conta às vezes cai aqui porque o perfil demora a aparecer após OAuth.
+        // Se a intenção era login (não signup), dar uma última chance: esperar 2,5s e buscar uma vez.
+        const manualLogin = localStorage.getItem("manual_login_intent") === "true";
+        if (Capacitor.isNativePlatform() && manualLogin) {
+          await new Promise((r) => setTimeout(r, 2500));
+          const [{ data: retryProfile }, { data: retryRoles }] = await Promise.all([
+            supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
+            supabase.from("user_roles").select("role").eq("user_id", userId),
+          ]);
+          const retryComplete = retryProfile && (retryProfile.cpf || retryProfile.phone);
+          if (retryComplete) {
+            const isAdminRetry = (retryRoles ?? []).some((r: any) =>
+              ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
+            );
+            if (isAdminRetry) {
+              localStorage.removeItem("signup_in_progress");
+              localStorage.removeItem("manual_login_intent");
+              navigate("/admin", { replace: true });
+              return;
+            }
+            localStorage.removeItem("signup_in_progress");
+            localStorage.removeItem("manual_login_intent");
+            navigate("/home", { replace: true });
+            return;
+          }
+        }
         localStorage.setItem("signup_in_progress", "true");
         localStorage.removeItem("manual_login_intent"); // para o Signup mostrar "Escolha o tipo de conta"
         navigate("/signup", { replace: true });

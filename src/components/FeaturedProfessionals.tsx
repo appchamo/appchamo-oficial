@@ -1,10 +1,25 @@
-import { Star, BadgeCheck } from "lucide-react";
+import { Star, BadgeCheck, MapPin } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
+
+function haversineKm(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number
+): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
 interface Pro {
   id: string;
@@ -15,6 +30,9 @@ interface Pro {
   profession_name: string;
   full_name: string;
   avatar_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  distance_km: number | null;
 }
 
 interface FeaturedProfessionalsProps {
@@ -32,20 +50,31 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const fromCloneToReset = useRef(false);
 
-  const pages = useMemo(() => {
-    const p: Pro[][] = [];
-    for (let i = 0; i < professionals.length; i += ITEMS_PER_PAGE) p.push(professionals.slice(i, i + ITEMS_PER_PAGE));
-    return p;
-  }, [professionals]);
-
-  const displayPages = useMemo(() => {
-    if (pages.length <= 1) return pages;
-    return [...pages, pages[0]];
-  }, [pages]);
-  const totalDisplayPages = displayPages.length;
-  const totalPages = pages.length;
+  const loadUserCoords = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data } = await supabase
+        .from("profiles")
+        .select("latitude, longitude")
+        .eq("user_id", user.id)
+        .single();
+      if (data?.latitude != null && data?.longitude != null) {
+        setUserCoords({ lat: data.latitude, lng: data.longitude });
+        return;
+      }
+    }
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => setUserCoords(null)
+      );
+    } else {
+      setUserCoords(null);
+    }
+  }, []);
 
   const loadPros = useCallback(async () => {
     const { data: pros } = await supabase
@@ -58,37 +87,72 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       .order("rating", { ascending: false })
       .limit(10);
 
-    if (!pros || pros.length === 0) { 
-      setProfessionals([]); 
-      return; 
+    if (!pros || pros.length === 0) {
+      setProfessionals([]);
+      return;
     }
 
     const userIds = pros.map((p) => p.user_id);
 
-    const { data: profiles } = await supabase
-      .from("profiles_public" as any)
-      .select("user_id, full_name, avatar_url")
-      .in("user_id", userIds) as { 
-        data: { user_id: string; full_name: string; avatar_url: string | null }[] | null 
-      };
+    const [profilesRes, locationsRes] = await Promise.all([
+      supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, latitude, longitude").in("user_id", userIds),
+    ]);
 
     const profileMap = new Map(
-      (profiles || []).map((p) => [p.user_id, p])
+      ((profilesRes.data || []) as { user_id: string; full_name: string; avatar_url: string | null }[]).map((p) => [p.user_id, p])
+    );
+    const locationMap = new Map(
+      ((locationsRes.data || []) as { user_id: string; latitude: number | null; longitude: number | null }[]).map((p) => [p.user_id, p])
     );
 
     setProfessionals(
-      pros.map((p) => ({
-        id: p.id,
-        rating: p.rating,
-        total_services: p.total_services,
-        verified: p.verified,
-        user_id: p.user_id,
-        profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
-        full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
-        avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
-      }))
+      pros.map((p) => {
+        const loc = locationMap.get(p.user_id);
+        return {
+          id: p.id,
+          rating: p.rating,
+          total_services: p.total_services,
+          verified: p.verified,
+          user_id: p.user_id,
+          profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
+          full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+          avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
+          latitude: loc?.latitude ?? null,
+          longitude: loc?.longitude ?? null,
+          distance_km: null as number | null,
+        };
+      })
     );
   }, []);
+
+  const professionalsWithDistance = useMemo(() => {
+    if (!userCoords) return professionals;
+    return professionals.map((p) => {
+      const distance_km =
+        p.latitude != null && p.longitude != null
+          ? haversineKm(userCoords.lat, userCoords.lng, p.latitude, p.longitude)
+          : null;
+      return { ...p, distance_km };
+    });
+  }, [professionals, userCoords]);
+
+  const pages = useMemo(() => {
+    const p: Pro[][] = [];
+    for (let i = 0; i < professionalsWithDistance.length; i += ITEMS_PER_PAGE) p.push(professionalsWithDistance.slice(i, i + ITEMS_PER_PAGE));
+    return p;
+  }, [professionalsWithDistance]);
+
+  const displayPages = useMemo(() => {
+    if (pages.length <= 1) return pages;
+    return [...pages, pages[0]];
+  }, [pages]);
+  const totalDisplayPages = displayPages.length;
+  const totalPages = pages.length;
+
+  useEffect(() => {
+    loadUserCoords();
+  }, [loadUserCoords]);
 
   useEffect(() => {
     loadPros();
@@ -134,17 +198,23 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     scrollRef.current.scrollTo({ left, behavior });
   }, [activePage, totalDisplayPages]);
 
-  if (professionals.length === 0) return null;
+  if (professionalsWithDistance.length === 0) return null;
 
   const renderCard = (pro: Pro) => {
     const initials = pro.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
     const avatarSrc = getAvatarUrl(pro.avatar_url);
+    const distanceText =
+      pro.distance_km != null
+        ? pro.distance_km < 1
+          ? "Menos de 1 km"
+          : `${Math.round(pro.distance_km)} km de você`
+        : null;
     return (
       <div
         key={pro.id}
         className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-3 flex-1 min-w-0"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
           <div className="w-12 h-12 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
             {avatarSrc ? (
               <img src={avatarSrc} alt={pro.full_name} className="w-full h-full object-cover rounded-full" />
@@ -152,11 +222,16 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
               initials
             )}
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1">
-              <p className="font-semibold text-sm text-foreground truncate">{pro.full_name}</p>
-              {pro.verified && <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />}
-            </div>
+          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+            {pro.verified && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-semibold text-foreground">Verificado</span>
+                <div className="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center bg-primary/10">
+                  <BadgeCheck className="w-3 h-3 text-primary" />
+                </div>
+              </div>
+            )}
+            <p className="font-semibold text-sm text-foreground truncate">{pro.full_name}</p>
             <p className="text-xs text-muted-foreground truncate">{pro.profession_name}</p>
           </div>
         </div>
@@ -165,16 +240,22 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
           <span className="text-xs text-muted-foreground">· {pro.total_services} serviços</span>
         </div>
-        <div className="flex gap-2">
+        {distanceText && (
+          <div className="flex items-center gap-1.5 text-xs text-foreground">
+            <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+            <span>{distanceText}</span>
+          </div>
+        )}
+        <div className="flex flex-col gap-2 mt-auto">
           <Link
             to={`/professional/${pro.id}`}
-            className="flex-1 text-center text-xs font-medium py-2 rounded-lg border border-primary text-primary hover:bg-accent transition-colors"
+            className="w-full text-center text-xs font-medium py-2.5 rounded-lg border border-primary text-primary hover:bg-accent transition-colors"
           >
             Ver perfil
           </Link>
           <Link
             to={`/professional/${pro.id}`}
-            className="flex-1 text-center text-xs font-medium py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            className="w-full text-center text-xs font-medium py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             Contratar
           </Link>

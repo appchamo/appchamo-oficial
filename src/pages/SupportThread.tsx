@@ -68,7 +68,8 @@ const SupportThread = () => {
         event: "INSERT", schema: "public", table: "support_messages",
         filter: `ticket_id=eq.${ticketId}`,
       }, (payload) => {
-        setMessages(prev => [...prev, payload.new as Message]);
+        const msg = payload.new as Message;
+        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -89,12 +90,17 @@ const SupportThread = () => {
   const handleSend = async () => {
     if (!text.trim() || !user || isClosed) return;
     setSending(true);
-    const { error } = await supabase.from("support_messages").insert({
-      user_id: user.id,
-      sender_id: user.id,
-      content: text.trim(),
-      ticket_id: ticketId,
-    });
+    const content = text.trim();
+    const { data: newMsg, error } = await supabase
+      .from("support_messages")
+      .insert({
+        user_id: user.id,
+        sender_id: user.id,
+        content,
+        ticket_id: ticketId,
+      })
+      .select("id, sender_id, content, created_at")
+      .single();
     if (error) {
       toast({ title: "Erro ao enviar", variant: "destructive" });
       setSending(false);
@@ -102,6 +108,7 @@ const SupportThread = () => {
     }
     setText("");
     setSending(false);
+    if (newMsg) setMessages((prev) => [...prev, { ...newMsg, image_urls: null } as Message]);
 
     // Pequena pausa para a mensagem ser gravada antes da função ler o histórico
     await new Promise((r) => setTimeout(r, 800));

@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useRefresh } from "@/contexts/RefreshContext";
 import { ArrowLeft, HelpCircle, Plus, MessageCircle, CreditCard, Smartphone, FileQuestion } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import BottomNav from "@/components/BottomNav";
+import PullToRefresh from "@/components/PullToRefresh";
 
 const SUPPORT_TOPICS = [
   { id: "planos", label: "Dúvidas sobre planos", icon: MessageCircle, message: "Assunto: Planos e assinaturas" },
@@ -27,19 +29,41 @@ const Support = () => {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
+  const loadTickets = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("support_tickets")
+      .select("id, protocol, subject, status, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    setTickets((data as Ticket[]) || []);
+    setLoading(false);
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
-    const load = async () => {
-      const { data } = await supabase
-        .from("support_tickets")
-        .select("id, protocol, subject, status, created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-      setTickets((data as Ticket[]) || []);
-      setLoading(false);
-    };
-    load();
-  }, [user]);
+    loadTickets();
+  }, [user, loadTickets]);
+
+  useRefresh(loadTickets);
+
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel("support-tickets-updates")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "support_tickets", filter: `user_id=eq.${user.id}` },
+        () => { loadTickets(); }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "support_tickets", filter: `user_id=eq.${user.id}` },
+        () => { loadTickets(); }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user, loadTickets]);
 
   const openTicketWithSubject = async (subject: string, initialMessage: string) => {
     if (!user) return;
@@ -102,6 +126,7 @@ const Support = () => {
         </div>
       </header>
 
+      <PullToRefresh>
       <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4">
         <p className="text-sm font-medium text-foreground mb-3">Escolha um assunto ou abra um chat livre:</p>
         <div className="grid gap-2 mb-4">
@@ -166,6 +191,7 @@ const Support = () => {
           </div>
         )}
       </main>
+      </PullToRefresh>
       <BottomNav />
     </div>
   );

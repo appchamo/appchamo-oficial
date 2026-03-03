@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Search, Star, BadgeCheck, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { fuzzyMatch, normalize } from "@/lib/fuzzyMatch";
+import { useAuth } from "@/hooks/useAuth";
+import { fuzzyMatch } from "@/lib/fuzzyMatch";
+import { sameCityState } from "@/lib/locationUtils";
 
 interface SearchResult {
   id: string;
@@ -21,6 +23,7 @@ interface HomeSearchBarProps {
 
 const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [allItems, setAllItems] = useState<SearchResult[]>([]);
   const [showResults, setShowResults] = useState(false);
@@ -31,6 +34,14 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
 
   useEffect(() => {
     const load = async () => {
+      let userCity: string | null = null;
+      let userState: string | null = null;
+      if (user) {
+        const { data } = await supabase.from("profiles").select("address_city, address_state").eq("user_id", user.id).single();
+        if (data?.address_city) userCity = data.address_city;
+        if (data?.address_state) userState = data.address_state;
+      }
+
       const [prosRes, catsRes, profsRes] = await Promise.all([
         supabase
           .from("professionals")
@@ -44,12 +55,10 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
 
       const items: SearchResult[] = [];
 
-      // Categories
       (catsRes.data || []).forEach(c => {
         items.push({ id: c.id, type: "category", label: c.name, sublabel: "Categoria", link: `/category/${c.slug}` });
       });
 
-      // Professions
       (profsRes.data || []).forEach((p: any) => {
         const catSlug = p.categories?.slug;
         items.push({
@@ -59,16 +68,19 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
         });
       });
 
-      // Professionals
       const pros = prosRes.data || [];
       if (pros.length > 0) {
         const userIds = pros.map(p => p.user_id);
-        const { data: profiles } = await supabase
-          .from("profiles_public")
-          .select("user_id, full_name, avatar_url")
-          .in("user_id", userIds);
-        const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
-        pros.forEach(p => {
+        const [profilesPublic, profilesLocation] = await Promise.all([
+          supabase.from("profiles_public").select("user_id, full_name, avatar_url").in("user_id", userIds),
+          supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
+        ]);
+        const profileMap = new Map((profilesPublic.data || []).map(p => [p.user_id, p]));
+        const locationMap = new Map((profilesLocation.data || []).map(p => [p.user_id, p]));
+        const prosToShow = (userCity || userState)
+          ? pros.filter(p => sameCityState(userCity, userState, locationMap.get(p.user_id)?.address_city ?? null, locationMap.get(p.user_id)?.address_state ?? null))
+          : pros;
+        prosToShow.forEach(p => {
           items.push({
             id: p.id, type: "professional",
             label: profileMap.get(p.user_id)?.full_name || "Profissional",
@@ -83,7 +95,7 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
       setAllItems(items);
     };
     load();
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {

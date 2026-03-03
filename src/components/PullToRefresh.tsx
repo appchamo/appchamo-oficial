@@ -6,7 +6,13 @@ const PULL_THRESHOLD = 72;
 const MAX_PULL = 100;
 const INDICATOR_SIZE = 44;
 
-export default function PullToRefresh({ children }: { children: React.ReactNode }) {
+interface PullToRefreshProps {
+  children: React.ReactNode;
+  /** Ref do elemento que faz scroll (ex.: main). Se não passar, usa document. */
+  scrollContainerRef?: React.RefObject<HTMLElement | null>;
+}
+
+export default function PullToRefresh({ children, scrollContainerRef }: PullToRefreshProps) {
   const triggerRefresh = useTriggerRefresh();
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -15,8 +21,10 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
   const refreshingRef = useRef(false);
 
   const getScrollTop = useCallback(() => {
+    const el = scrollContainerRef?.current;
+    if (el) return el.scrollTop;
     return window.scrollY ?? document.documentElement.scrollTop ?? 0;
-  }, []);
+  }, [scrollContainerRef]);
 
   pullDistanceRef.current = pullDistance;
   refreshingRef.current = refreshing;

@@ -3,6 +3,8 @@ import { ArrowLeft, Star, BadgeCheck, MapPin, ChevronRight } from "lucide-react"
 import AppLayout from "@/components/AppLayout";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { sameCityState } from "@/lib/locationUtils";
 
 interface Profession {
   id: string;
@@ -24,6 +26,9 @@ interface Pro {
 
 const CategoryDetail = () => {
   const { id: slug } = useParams();
+  const { user } = useAuth();
+  const [userCity, setUserCity] = useState<string | null>(null);
+  const [userState, setUserState] = useState<string | null>(null);
   const [categoryName, setCategoryName] = useState("Categoria");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [professions, setProfessions] = useState<Profession[]>([]);
@@ -31,6 +36,14 @@ const CategoryDetail = () => {
   const [pros, setPros] = useState<Pro[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingPros, setLoadingPros] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("profiles").select("address_city, address_state").eq("user_id", user.id).single().then(({ data }) => {
+      if (data?.address_city) setUserCity(data.address_city);
+      if (data?.address_state) setUserState(data.address_state);
+    });
+  }, [user]);
 
   // Load category + professions
   useEffect(() => {
@@ -120,7 +133,7 @@ const CategoryDetail = () => {
     ]);
     const profileMap = new Map(((profilesRes.data || []) as any[]).map(p => [p.user_id, p]));
     const locationMap = new Map((locationsRes.data || []).map(p => [p.user_id, p]));
-    setPros(data.map(p => ({
+    const list = data.map(p => ({
       id: p.id,
       rating: p.rating,
       total_services: p.total_services,
@@ -130,7 +143,9 @@ const CategoryDetail = () => {
       user_type: profileMap.get(p.user_id)?.user_type || "professional",
       city: locationMap.get(p.user_id)?.address_city || null,
       state: locationMap.get(p.user_id)?.address_state || null,
-    })));
+    }));
+    const filtered = (userCity || userState) ? list.filter(p => sameCityState(userCity, userState, p.city, p.state)) : list;
+    setPros(filtered);
   };
 
   const goBack = () => {

@@ -100,7 +100,7 @@ serve(async (req) => {
           ticket_id: ticket_id,
           user_id: ticket.user_id,
           sender_id: BOT_SENDER_ID,
-          content: "Um atendente foi notificado e entrará em contato em breve.",
+          content: "Entendido, em breve um atendente entrará em contato, aguarde.",
         });
         return jsonResponse({ ok: true, requested_human: true }, 200);
       }

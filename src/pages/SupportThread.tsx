@@ -1,12 +1,14 @@
-import { useState, useEffect, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useRefresh } from "@/contexts/RefreshContext";
 import { toast } from "@/hooks/use-toast";
 import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot, UserCircle } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AudioPlayer from "@/components/AudioPlayer";
-import { isSupportBotMessage } from "@/lib/supportBot";
+import PullToRefresh from "@/components/PullToRefresh";
+import { isSupportBotMessage, SUPPORT_BOT_SENDER_ID } from "@/lib/supportBot";
 
 interface Message {
   id: string;
@@ -18,9 +20,13 @@ interface Message {
 
 const SupportThread = () => {
   const { ticketId } = useParams<{ ticketId: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
+  const [ticketSubject, setTicketSubject] = useState<string | null>(null);
+  const invokedAiForHumanRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -30,6 +36,7 @@ const SupportThread = () => {
   const [requestingHuman, setRequestingHuman] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -38,27 +45,62 @@ const SupportThread = () => {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const loadThread = useCallback(async () => {
+    if (!user || !ticketId) return;
+    const { data: ticket } = await supabase
+      .from("support_tickets")
+      .select("protocol, requested_human_at, subject")
+      .eq("id", ticketId)
+      .single();
+    if (ticket?.protocol) setSupportProtocol(ticket.protocol);
+    setRequestedHumanAt((ticket as any)?.requested_human_at ?? null);
+    setTicketSubject((ticket as any)?.subject ?? null);
+
+    const { data } = await supabase
+      .from("support_messages")
+      .select("*")
+      .eq("ticket_id", ticketId)
+      .order("created_at");
+    setMessages((data as Message[]) || []);
+    setLoading(false);
+  }, [user, ticketId]);
+
   useEffect(() => {
     if (!user || !ticketId) return;
-    const load = async () => {
-      const { data: ticket } = await supabase
-        .from("support_tickets")
-        .select("protocol, requested_human_at")
-        .eq("id", ticketId)
-        .single();
-      if (ticket?.protocol) setSupportProtocol(ticket.protocol);
-      setRequestedHumanAt((ticket as any)?.requested_human_at ?? null);
+    loadThread();
+  }, [user, ticketId, loadThread]);
 
-      const { data } = await supabase
-        .from("support_messages")
-        .select("*")
-        .eq("ticket_id", ticketId)
-        .order("created_at");
-      setMessages((data as Message[]) || []);
-      setLoading(false);
-    };
-    load();
-  }, [user, ticketId]);
+  useRefresh(loadThread);
+
+  // Preencher campo de mensagem quando veio de um botão de assunto
+  useEffect(() => {
+    const initial = (location.state as { initialMessage?: string } | null)?.initialMessage;
+    if (initial) {
+      setText(initial);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.pathname, location.state, navigate]);
+
+  // Disparar resposta da IA ao abrir "chat sem assunto" (já tem uma mensagem do usuário)
+  useEffect(() => {
+    if (!user || !ticketId || invokedAiForHumanRef.current || !ticketSubject || loading) return;
+    if (ticketSubject !== "Nova solicitação") return;
+    if (messages.length !== 1 || messages[0].sender_id === SUPPORT_BOT_SENDER_ID) return;
+    invokedAiForHumanRef.current = true;
+    (async () => {
+      await new Promise((r) => setTimeout(r, 800));
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+        await supabase.functions.invoke("support-ai-reply", {
+          body: { ticket_id: ticketId },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+      } catch {
+        // silencioso
+      }
+    })();
+  }, [user, ticketId, ticketSubject, messages, loading]);
 
   useEffect(() => {
     if (!user || !ticketId) return;
@@ -68,8 +110,21 @@ const SupportThread = () => {
         event: "INSERT", schema: "public", table: "support_messages",
         filter: `ticket_id=eq.${ticketId}`,
       }, (payload) => {
-        const msg = payload.new as Message;
-        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+        const row = payload.new as Record<string, unknown>;
+        const msg: Message = {
+          id: row.id as string,
+          sender_id: row.sender_id as string,
+          content: (row.content as string) ?? "",
+          created_at: (row.created_at as string) ?? new Date().toISOString(),
+          image_urls: (row.image_urls as string[] | null) ?? null,
+        };
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          const next = [...prev, msg].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+          return next;
+        });
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -354,15 +409,20 @@ const SupportThread = () => {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
+      <PullToRefresh scrollContainerRef={scrollContainerRef}>
+      <main
+        ref={scrollContainerRef}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2"
+      >
         {messages.map((msg) => {
-          const isMine = msg.sender_id === user?.id;
+          const isFromBot = isSupportBotMessage(msg.sender_id);
+          const isMine = msg.sender_id === user?.id && !isFromBot;
           if (msg.content === "[CLOSED]") return (
             <div key={msg.id} className="flex justify-center my-2">
               <div className="bg-muted/50 border rounded-xl px-4 py-2 text-xs font-medium text-muted-foreground">✅ Chamado encerrado</div>
             </div>
           );
-          const isBot = !isMine && isSupportBotMessage(msg.sender_id);
+          const isBot = isFromBot;
           return (
             <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
               {!isMine && (
@@ -380,6 +440,7 @@ const SupportThread = () => {
         })}
         <div ref={bottomRef} />
       </main>
+      </PullToRefresh>
 
       {!isClosed && (
         <div

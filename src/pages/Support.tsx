@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useRefresh } from "@/contexts/RefreshContext";
-import { ArrowLeft, HelpCircle, Plus, MessageCircle, CreditCard, Smartphone, FileQuestion } from "lucide-react";
+import { ArrowLeft, HelpCircle, Plus, MessageCircle, CreditCard, Smartphone, FileQuestion, RefreshCw } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import BottomNav from "@/components/BottomNav";
 import PullToRefresh from "@/components/PullToRefresh";
@@ -28,6 +28,14 @@ const Support = () => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadTickets();
+    setRefreshing(false);
+  }, [loadTickets]);
 
   const loadTickets = useCallback(async () => {
     if (!user) return;
@@ -45,7 +53,7 @@ const Support = () => {
     loadTickets();
   }, [user, loadTickets]);
 
-  useRefresh(loadTickets);
+  useRefresh(handleRefresh);
 
   useEffect(() => {
     if (!user) return;
@@ -65,17 +73,29 @@ const Support = () => {
     return () => { supabase.removeChannel(channel); };
   }, [user, loadTickets]);
 
-  const openTicketWithSubject = async (subject: string, initialMessage: string) => {
+  const openTicketWithSubject = async (
+    subject: string,
+    ticketMessage: string,
+    firstThreadMessage?: string
+  ) => {
     if (!user) return;
     setCreating(true);
     const { data: newTicket, error } = await supabase
       .from("support_tickets")
-      .insert({ user_id: user.id, subject, message: initialMessage })
+      .insert({ user_id: user.id, subject, message: ticketMessage })
       .select("id")
       .single();
     if (error || !newTicket) {
       setCreating(false);
       return;
+    }
+    if (firstThreadMessage) {
+      await supabase.from("support_messages").insert({
+        user_id: user.id,
+        sender_id: user.id,
+        ticket_id: newTicket.id,
+        content: firstThreadMessage,
+      });
     }
     const { data: supportProfile } = await supabase
       .from("profiles")
@@ -92,15 +112,19 @@ const Support = () => {
       });
     }
     setCreating(false);
-    navigate(`/support/${newTicket.id}`);
+    if (firstThreadMessage) {
+      navigate(`/support/${newTicket.id}`);
+    } else {
+      navigate(`/support/${newTicket.id}`, { state: { initialMessage: subject } });
+    }
   };
 
   const handleTopic = (topic: (typeof SUPPORT_TOPICS)[number]) => {
-    openTicketWithSubject(topic.message, `Usuário escolheu: ${topic.label}`);
+    openTicketWithSubject(topic.message, "");
   };
 
   const handleNewTicket = () => {
-    openTicketWithSubject("Nova solicitação", "Abertura de suporte");
+    openTicketWithSubject("Nova solicitação", "Abertura de suporte", "Quero falar com um atendente humano");
   };
 
   if (loading) return (
@@ -110,8 +134,8 @@ const Support = () => {
   );
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pb-20">
-      <header className="sticky top-0 z-30 bg-amber-500/90 backdrop-blur-md border-b border-amber-600/30">
+    <div className="h-[100dvh] bg-background flex flex-col pb-20 overflow-hidden">
+      <header className="flex-shrink-0 z-30 bg-amber-500/90 backdrop-blur-md border-b border-amber-600/30">
         <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
           <Link to="/home" className="p-1.5 rounded-lg hover:bg-amber-600/20 transition-colors">
             <ArrowLeft className="w-5 h-5 text-white" />
@@ -123,11 +147,23 @@ const Support = () => {
             <p className="text-sm font-semibold text-white truncate">Suporte Chamô</p>
             <p className="text-[10px] text-white/70">Suas solicitações</p>
           </div>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="p-2 rounded-lg hover:bg-amber-600/20 transition-colors disabled:opacity-60"
+            aria-label="Atualizar"
+          >
+            <RefreshCw className={`w-5 h-5 text-white ${refreshing ? "animate-spin" : ""}`} />
+          </button>
         </div>
       </header>
 
-      <PullToRefresh>
-      <main className="flex-1 max-w-screen-lg mx-auto w-full px-4 py-4">
+      <PullToRefresh scrollContainerRef={scrollContainerRef}>
+      <main
+        ref={scrollContainerRef}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4"
+      >
         <p className="text-sm font-medium text-foreground mb-3">Escolha um assunto ou abra um chat livre:</p>
         <div className="grid gap-2 mb-4">
           {SUPPORT_TOPICS.map((topic) => {

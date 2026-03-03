@@ -2,6 +2,7 @@ import { Star, BadgeCheck, MapPin } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { sameCityState } from "@/lib/locationUtils";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
@@ -51,6 +52,8 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const [isPaused, setIsPaused] = useState(false);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [userCity, setUserCity] = useState<string | null>(null);
+  const [userState, setUserState] = useState<string | null>(null);
   const fromCloneToReset = useRef(false);
 
   const loadUserCoords = useCallback(async () => {
@@ -58,9 +61,11 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     if (user) {
       const { data } = await supabase
         .from("profiles")
-        .select("latitude, longitude")
+        .select("latitude, longitude, address_city, address_state")
         .eq("user_id", user.id)
         .single();
+      if (data?.address_city) setUserCity(data.address_city);
+      if (data?.address_state) setUserState(data.address_state);
       if (data?.latitude != null && data?.longitude != null) {
         setUserCoords({ lat: data.latitude, lng: data.longitude });
         return;
@@ -85,7 +90,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       .neq("availability_status", "unavailable")
       .eq("verified", true)
       .order("rating", { ascending: false })
-      .limit(10);
+      .limit(80);
 
     if (!pros || pros.length === 0) {
       setProfessionals([]);
@@ -96,35 +101,42 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
     const [profilesRes, locationsRes] = await Promise.all([
       supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
-      supabase.from("profiles").select("user_id, latitude, longitude").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, latitude, longitude, address_city, address_state").in("user_id", userIds),
     ]);
 
     const profileMap = new Map(
       ((profilesRes.data || []) as { user_id: string; full_name: string; avatar_url: string | null }[]).map((p) => [p.user_id, p])
     );
     const locationMap = new Map(
-      ((locationsRes.data || []) as { user_id: string; latitude: number | null; longitude: number | null }[]).map((p) => [p.user_id, p])
+      ((locationsRes.data || []) as { user_id: string; latitude: number | null; longitude: number | null; address_city: string | null; address_state: string | null }[]).map((p) => [p.user_id, p])
     );
 
-    setProfessionals(
-      pros.map((p) => {
-        const loc = locationMap.get(p.user_id);
-        return {
-          id: p.id,
-          rating: p.rating,
-          total_services: p.total_services,
-          verified: p.verified,
-          user_id: p.user_id,
-          profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
-          full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
-          avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
-          latitude: loc?.latitude ?? null,
-          longitude: loc?.longitude ?? null,
-          distance_km: null as number | null,
-        };
-      })
-    );
-  }, []);
+    const withLocation = pros.map((p) => {
+      const loc = locationMap.get(p.user_id);
+      return {
+        id: p.id,
+        rating: p.rating,
+        total_services: p.total_services,
+        verified: p.verified,
+        user_id: p.user_id,
+        profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
+        full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+        avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
+        latitude: loc?.latitude ?? null,
+        longitude: loc?.longitude ?? null,
+        distance_km: null as number | null,
+        _city: loc?.address_city ?? null,
+        _state: loc?.address_state ?? null,
+      };
+    });
+
+    const filtered = (userCity || userState)
+      ? withLocation.filter((p) => sameCityState(userCity, userState, p._city, p._state))
+      : withLocation;
+    const top10 = filtered.slice(0, 10).map(({ _city, _state, ...p }) => p);
+
+    setProfessionals(top10);
+  }, [userCity, userState]);
 
   const professionalsWithDistance = useMemo(() => {
     if (!userCoords) return professionals;

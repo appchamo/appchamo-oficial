@@ -148,6 +148,7 @@ const MessageThread = () => {
 
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
+  const hasPaymentConfirmed = messages.some(m => m.content && m.content.includes("PAGAMENTO CONFIRMADO"));
 
   const loadFeeSettings = useCallback(async () => {
     const { data } = await supabase.from("platform_settings").select("key, value");
@@ -951,18 +952,8 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
-              await supabase.from("chat_messages").insert({
-                request_id: threadId,
-                sender_id: userId,
-                content: "🔒 CHAMADA ENCERRADA automaticamente após pagamento."
-              });
-              await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
-              setRequestStatus("completed");
-              await markAppointmentDone();
-
               await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
               await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
-              await sendNotification(chatProUserId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
               await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
@@ -999,18 +990,8 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
-      await supabase.from("chat_messages").insert({
-        request_id: threadId,
-        sender_id: userId,
-        content: "🔒 CHAMADA ENCERRADA automaticamente após pagamento."
-      });
-      await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
-      setRequestStatus("completed");
-      await markAppointmentDone();
-
       await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento no Cartão de Crédito no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
       await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via Cartão no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
-      await sendNotification(chatProUserId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
 
       await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
@@ -1049,8 +1030,6 @@ const MessageThread = () => {
     if (error) {
       console.error("submit_review error:", error);
       toast({ title: "Erro ao registrar avaliação", variant: "destructive" });
-    } else {
-      setRequestStatus("completed");
     }
 
     setHasRated(true);
@@ -1330,6 +1309,30 @@ const MessageThread = () => {
               </button>
             </>
           }
+          {!isProfessional && !isChatFinished && requestStatus === "accepted" && hasPaymentConfirmed &&
+            <button
+              onClick={async () => {
+                if (!userId || !threadId) return;
+                setClosingCall(true);
+                await supabase.from("chat_messages").insert({
+                  request_id: threadId,
+                  sender_id: userId,
+                  content: "🔒 CHAMADA ENCERRADA pelo cliente."
+                });
+                await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
+                setRequestStatus("completed");
+                await markAppointmentDone();
+                if (chatProUserId) {
+                  await sendNotification(chatProUserId, "Chat encerrado", "O cliente encerrou a conversa.", `/messages/${threadId}`);
+                }
+                setClosingCall(false);
+                toast({ title: "Chat encerrado!" });
+              }}
+              disabled={closingCall}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors">
+              <LogOut className="w-3.5 h-3.5" /> Encerrar chat
+            </button>
+          }
         </div>
       </header>
 
@@ -1535,60 +1538,12 @@ const MessageThread = () => {
       </main>
 
       {isChatFinished ?
-      <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-3">
-          <div className="flex flex-col items-center justify-center max-w-screen-lg mx-auto gap-2">
-            <p className="text-sm text-muted-foreground">
-              {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : 
-               requestStatus === "cancelled" ? "Solicitação cancelada — chat encerrado" : 
-               "Serviço finalizado — chat encerrado"}
-            </p>
-
-            {!isProfessional && requestStatus !== "rejected" && requestStatus !== "cancelled" && !dismissedReceipt && (
-              <div className="w-full max-w-xs mt-2 space-y-2 p-4 bg-background border rounded-2xl shadow-sm animate-in fade-in zoom-in duration-300">
-                <p className="text-xs font-bold text-center">Deseja enviar o comprovante?</p>
-                
-                {messages.some(m => m.content.includes("📄 COMPROVANTE ENVIADO") && m.sender_id === userId) ? (
-                  <div className="py-2 text-[10px] font-black text-emerald-600 text-center uppercase tracking-widest bg-emerald-50 rounded-lg border border-emerald-100">
-                    Comprovante enviado com sucesso
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    <label className={`w-full py-2.5 rounded-xl bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider hover:bg-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer ${uploadingReceipt ? 'opacity-50 pointer-events-none' : ''}`}>
-                      {uploadingReceipt ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
-                      Selecionar Imagem ou PDF
-                      <input 
-                        type="file" 
-                        className="hidden" 
-                        accept="image/jpeg,image/png,application/pdf"
-                        onChange={handleUploadReceipt}
-                        disabled={uploadingReceipt}
-                      />
-                    </label>
-                    <button 
-                      onClick={() => {
-                        setDismissedReceipt(true);
-                        if (threadId) localStorage.setItem(`receipt_dismissed_${threadId}`, "true"); 
-                      }}
-                      className="w-full py-2 rounded-xl text-muted-foreground text-[11px] font-medium hover:bg-muted transition-all"
-                    >
-                      Não enviar
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!isProfessional && !hasRated && requestStatus !== "rejected" && requestStatus !== "cancelled" &&
-              <button
-                onClick={() => {setRatingStars(0);setRatingComment("");setRatingOpen(true);}}
-                className="px-4 py-2 mt-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center gap-1.5 animate-in fade-in zoom-in">
-                <Star className="w-4 h-4" /> Avaliar profissional
-              </button>
-            }
-            {!isProfessional && hasRated &&
-              <p className="text-xs text-muted-foreground">✅ Avaliação enviada</p>
-            }
-          </div>
+      <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-4">
+          <p className="text-sm text-muted-foreground text-center max-w-screen-lg mx-auto">
+            {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : 
+             requestStatus === "cancelled" ? "Solicitação cancelada — chat encerrado" : 
+             "Serviço finalizado — chat encerrado"}
+          </p>
         </div> :
 
       <div 

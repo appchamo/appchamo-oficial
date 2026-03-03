@@ -21,6 +21,7 @@ interface Banner {
 
 const positionLabels: Record<string, string> = {
   top: "Topo (acima de tudo)",
+  carousel: "Carrossel (1 banner por vez na Home)",
   below_benefits: "Abaixo dos benefícios",
   below_sponsors: "Abaixo dos patrocinadores",
   below_search: "Abaixo da busca",

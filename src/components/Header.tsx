@@ -166,14 +166,14 @@ const Header = () => {
               </div>
             )}
             
-            {/* Selo do Plano (Aparece apenas quando tudo está aprovado e ativo) */}
+            {/* Selo do Plano – destaque igual ao botão Contratar (fundo laranja, texto e ícone brancos) */}
             {showPlanBadge && (
               <button
                 onClick={() => navigate("/subscriptions")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/30 hover:bg-primary/20 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
               >
-                <Crown className="w-3.5 h-3.5 text-primary" />
-                <span className="text-[11px] font-semibold text-primary">{planName}</span>
+                <Crown className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-semibold">{planName}</span>
               </button>
             )}
 

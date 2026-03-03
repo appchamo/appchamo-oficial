@@ -87,7 +87,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
 
   return (
     <section>
-      <h3 className="font-semibold text-sm text-muted-foreground mb-3 px-1">{title}</h3>
+      <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">{title}</h3>
       <div
         ref={scrollRef}
         className="flex overflow-x-auto overflow-y-hidden pb-2 scrollbar-hide border-0 shadow-none snap-x snap-mandatory scroll-smooth"
@@ -125,7 +125,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         ))}
       </div>
       {totalPages > 1 && (
-        <div className="flex justify-center gap-1.5 mt-2">
+        <div className="flex justify-center gap-1.5 mt-1">
           {pages.map((_, i) => (
             <button
               key={i}

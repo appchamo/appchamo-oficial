@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Menu, Clock, Crown, Bell } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -40,6 +41,8 @@ const Header = () => {
   }, []);
 
   const playNotificationSound = useCallback(() => {
+    // iOS: não usar Audio() aqui — no iPhone vira "Now Playing" na tela de bloqueio
+    if (Capacitor.getPlatform() === "ios") return;
     if (notifSoundRef.current) {
       notifSoundRef.current.currentTime = 0;
       notifSoundRef.current.play().catch(() => {});

@@ -94,3 +94,30 @@ Se o token não estiver em `user_devices` para aquele `user_id`, o push não ser
 | **App** | Usuário aceitar notificações; token salvo em **user_devices.push_token**. |
 
 Depois disso, ao inserir um registro em `notifications` com `user_id` que tenha dispositivo com `push_token`, o push deve aparecer no celular.
+
+---
+
+## 6. iOS: som customizado (evitar som duplo)
+
+Para o iPhone tocar **só** o som do app (ex.: `chamo_notification.caf`) e não o som padrão do sistema junto:
+
+### O que já está no código
+- A Edge Function envia para iOS **apenas** o payload **apns** (sem o bloco `notification` no topo), com `aps.sound: "chamo_notification.caf"` (só o nome do arquivo, como a Apple recomenda) e **sem** `content-available`, para evitar som duplo.
+
+### Firebase Console
+- Não existe opção de “som padrão” por app para iOS no Firebase. O som vem do payload que enviamos. Não é necessário mudar nada no Firebase para o som.
+
+### Apple (Developer / Xcode)
+- **Certificados:** Push Notifications habilitado no App ID e certificado APNs (desenvolvimento e/ou produção) configurado no Firebase (Project Settings → Cloud Messaging → Apple app configuration).
+- **App:** O arquivo de som `chamo_notification.caf` deve estar no target em Xcode (**Copy Bundle Resources**). O payload usa só o nome (`"chamo_notification.caf"`), então o ideal é o arquivo ficar na **raiz do bundle** (no Xcode, no grupo **App**, não dentro de uma pasta Sounds).
+- **Formato do áudio:** CAF, AIFF ou WAV; até 30 segundos; codecs suportados (Linear PCM, IMA4, aLaw, µLaw). Se o arquivo for inválido ou longo demais, o iOS pode ignorar o custom e tocar só o padrão (ou em alguns casos comportar-se de forma estranha).
+
+### Player “Chamô” na tela de bloqueio (Now Playing)
+No iOS, sons de notificação **mais longos** podem fazer o sistema mostrar o widget de “Now Playing” na tela de bloqueio (com play/pause). Apps como WhatsApp e Instagram usam sons **bem curtos** (menos de 1 segundo), e aí esse widget costuma não aparecer.
+
+**Recomendação:** use um `chamo_notification.caf` **bem curto** (por exemplo 0,3–0,5 s), no estilo “ding” ou “pop”. Assim o comportamento fica parecido com WhatsApp/Instagram e o Now Playing tende a não aparecer. O app também limpa o Now Playing ao ser aberto (AppDelegate).
+
+### Se ainda tocar os dois sons
+1. Confirme que a função em produção está **sem** `content-available` no `aps` para notificações visíveis.
+2. No iPhone: **Ajustes** → **Chamô** → **Notificações** → verifique se não há opção extra de “som” do sistema ligada em duplicidade.
+3. Teste com o app **fechado** ou em **background** (não em primeiro plano), pois o comportamento pode mudar.

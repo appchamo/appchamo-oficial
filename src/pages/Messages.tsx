@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle, Inbox, Mic, Package, CheckCheck, Trash2 } from "lucide-react"; 
+import { MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle, Inbox, Mic, Package, CheckCheck, Trash2, XCircle } from "lucide-react"; 
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,6 +19,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface Thread {
   id: string;
@@ -54,6 +55,7 @@ const Messages = () => {
   const [supportLastTime, setSupportLastTime] = useState<string | null>(null);
   const [hasSupportMessages, setHasSupportMessages] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [chatTab, setChatTab] = useState<"geral" | "cancelados">("geral");
   const navigate = useNavigate();
 
   // 🚀 OTIMIZAÇÃO: Estados de paginação
@@ -352,19 +354,21 @@ const Messages = () => {
     );
   }
 
-  const activeThreads = threads.filter(t => !t.is_archived);
-  const archivedThreads = threads.filter(t => t.is_archived);
-  const currentList = showArchived ? archivedThreads : activeThreads;
+  const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
+  const threadsGeral = threads.filter((t) => !isCancelledOrRejected(t));
+  const threadsCancelados = threads.filter(isCancelledOrRejected).sort((a, b) => new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime());
+
+  const activeThreads = threadsGeral.filter((t) => !t.is_archived);
+  const archivedThreads = threadsGeral.filter((t) => t.is_archived);
+  const currentList = chatTab === "cancelados" ? threadsCancelados : showArchived ? archivedThreads : activeThreads;
 
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-          <h1 className="text-xl font-bold text-foreground">
-            {showArchived ? "Arquivados" : "Mensagens"}
-          </h1>
+          <h1 className="text-xl font-bold text-foreground">Mensagens</h1>
           <div className="flex items-center gap-2">
-            {!showArchived && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
+            {chatTab === "geral" && !showArchived && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
               <button
                 onClick={handleMarkAllRead}
                 className="text-xs font-bold text-primary flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-full transition-all"
@@ -373,8 +377,8 @@ const Messages = () => {
                 Marcar todas como lidas
               </button>
             )}
-            {archivedThreads.length > 0 && (
-              <button 
+            {chatTab === "geral" && archivedThreads.length > 0 && (
+              <button
                 onClick={() => setShowArchived(!showArchived)}
                 className="text-xs font-bold text-primary flex items-center gap-1 bg-primary/5 px-3 py-1.5 rounded-full transition-all"
               >
@@ -384,8 +388,24 @@ const Messages = () => {
             )}
           </div>
         </div>
-        
-        {!showArchived && (
+
+        <Tabs value={chatTab} onValueChange={(v) => setChatTab(v as "geral" | "cancelados")} className="mb-4">
+          <TabsList className="w-full grid grid-cols-2 rounded-xl h-11 p-1 bg-muted/60">
+            <TabsTrigger value="geral" className="rounded-lg font-semibold data-[state=active]:shadow-sm">
+              Geral
+            </TabsTrigger>
+            <TabsTrigger value="cancelados" className="rounded-lg font-semibold data-[state=active]:shadow-sm flex items-center gap-1.5">
+              Cancelados
+              {threadsCancelados.length > 0 && (
+                <span className="min-w-[20px] h-5 rounded-full bg-muted-foreground/20 text-muted-foreground text-[10px] font-bold flex items-center justify-center px-1.5">
+                  {threadsCancelados.length}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="geral" className="mt-3">
+            {!showArchived && (
           <Link to="/support"
             className={`flex items-center gap-3 px-2 py-3 border-b hover:bg-amber-500/5 transition-colors rounded-lg ${supportUnread > 0 ? "bg-amber-500/10" : ""}`}>
             <div className="relative flex-shrink-0">
@@ -506,6 +526,73 @@ const Messages = () => {
              </Button>
           </div>
         )}
+          </TabsContent>
+
+          <TabsContent value="cancelados" className="mt-3">
+            <div className="flex flex-col">
+              {threadsCancelados.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                  <XCircle className="w-12 h-12 mb-3 opacity-50" />
+                  <p className="text-sm font-medium">Nenhuma conversa cancelada</p>
+                  <p className="text-xs mt-1">Chamados cancelados por você ou recusados pelo profissional aparecem aqui.</p>
+                </div>
+              ) : (
+                threadsCancelados.map((t) => {
+                  const initials = t.otherName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                  const hasUnread = t.unreadCount > 0 || t.manual_unread;
+                  return (
+                    <div key={t.id} className={`flex items-center gap-3 px-2 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors rounded-lg ${hasUnread ? "bg-primary/5" : ""}`}>
+                      <div
+                        onClick={() => {
+                          if (hasUnread) handleMarkRead(t.id);
+                          navigate(`/messages/${t.id}`);
+                        }}
+                        className="flex flex-1 items-center gap-3 cursor-pointer min-w-0"
+                      >
+                        <div className="relative flex-shrink-0">
+                          {t.otherAvatar ? (
+                            <img src={getOptimizedAvatar(t.otherAvatar)} alt={t.otherName} loading="lazy" className="w-14 h-14 rounded-full object-cover border-2 border-background shadow-sm" />
+                          ) : (
+                            <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground border-2 border-background shadow-sm">
+                              {initials}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate font-semibold text-foreground">{t.otherName}</p>
+                          <div className="text-xs truncate mt-0.5 text-muted-foreground flex items-center gap-1">
+                            {t.status === "rejected" ? "Recusado pelo profissional" : "Cancelado"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        <span className="text-[11px] text-muted-foreground">{timeLabel(t.lastMessageTime)}</span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="p-1 hover:bg-muted rounded-full transition-colors text-muted-foreground">
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-52 rounded-xl shadow-lg border-muted">
+                            <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2">
+                              <Archive className="w-4 h-4 text-muted-foreground" />
+                              <span className="font-medium text-sm">{t.is_archived ? "Desarquivar" : "Arquivar conversa"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => setReportingChatId(t.id)} className="gap-2 cursor-pointer py-2 text-amber-600 focus:text-amber-600 focus:bg-amber-50">
+                              <AlertTriangle className="w-4 h-4" />
+                              <span className="font-medium text-sm">Denunciar conversa</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
 
         <Dialog open={!!reportingChatId} onOpenChange={(open) => !open && setReportingChatId(null)}>
           <DialogContent className="sm:max-w-md rounded-2xl">

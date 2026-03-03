@@ -18,17 +18,19 @@ export const usePush = (userId?: string) => {
       try {
         console.log('🔔 [Push] Solicitando permissão para o usuário...');
 
-        // Android: canal "default" e permissão para notificações locais (exibir push em primeiro plano)
+        // Android: canal default_v2 (som chamo_notification) e permissão para notificações locais
         if (isAndroid()) {
           const { display } = await LocalNotifications.checkPermissions();
           if (display !== 'granted') {
             await LocalNotifications.requestPermissions();
           }
+          // Canal com som do app (celular bloqueado). default_v2 para quem já tem "default" sem som.
           await LocalNotifications.createChannel({
-            id: 'default',
+            id: 'default_v2',
             name: 'Notificações',
             importance: 5,
             visibility: 1,
+            sound: 'chamo_notification',
           });
         }
 
@@ -81,7 +83,7 @@ export const usePush = (userId?: string) => {
       setupPush();
     }, 2000);
 
-    // Android: com app em primeiro plano o FCM não mostra na bandeja — exibir notificação local
+    // App em primeiro plano: Android exibe notificação local; iOS não toca som nem usa Audio() para não aparecer como "Now Playing"
     const receivedListener = FirebaseMessaging.addListener('pushNotificationReceived', (message: { notification?: { title?: string; body?: string }; data?: Record<string, string> }) => {
       console.log('📬 [Push] Nova notificação recebida (App Aberto):', message);
       if (isAndroid()) {
@@ -93,7 +95,7 @@ export const usePush = (userId?: string) => {
             id,
             title,
             body,
-            channelId: 'default',
+            channelId: 'default_v2',
             schedule: { at: new Date(Date.now() + 300) },
             extra: message?.data ?? {},
           }],

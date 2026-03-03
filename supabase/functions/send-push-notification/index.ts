@@ -1,6 +1,32 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { JWT } from 'https://esm.sh/google-auth-library@8.7.0'
+import { SignJWT, importPKCS8 } from 'npm:jose@5.2.0'
+
+/** Obtém access_token do Google OAuth2 com conta de serviço (compatível com Deno, sem google-auth-library). */
+async function getGoogleAccessToken(clientEmail: string, privateKeyPem: string): Promise<string> {
+  const pem = privateKeyPem.replace(/\\n/g, '\n')
+  const key = await importPKCS8(pem, 'RS256')
+  const now = Math.floor(Date.now() / 1000)
+  const jwt = await new SignJWT({ scope: 'https://www.googleapis.com/auth/cloud-platform' })
+    .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+    .setIssuer(clientEmail)
+    .setAudience('https://oauth2.googleapis.com/token')
+    .setSubject(clientEmail)
+    .setIssuedAt(now)
+    .setExpirationTime(now + 3600)
+    .sign(key)
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }),
+  })
+  const data = await res.json()
+  if (data.error) throw new Error(data.error_description || data.error)
+  return data.access_token
+}
 
 serve(async (req) => {
   try {
@@ -20,10 +46,10 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // 3. Busca TODOS os dispositivos do usuário (pode ter iOS + Android)
+    // 3. Busca TODOS os dispositivos do usuário (push_token + device_name para iOS vs Android)
     const { data: devices, error: deviceError } = await supabaseAdmin
       .from('user_devices')
-      .select('push_token')
+      .select('push_token, device_name')
       .eq('user_id', record.user_id)
       .not('push_token', 'is', null)
 
@@ -32,22 +58,27 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: deviceError.message }), { status: 500 })
     }
 
-    const tokens = (devices || []).map((d: { push_token: string }) => d.push_token).filter(Boolean)
-    if (tokens.length === 0) {
+    const devicesList = (devices || []).filter((d: { push_token: string }) => Boolean(d.push_token))
+    if (devicesList.length === 0) {
       console.log(`⚠️ Nenhum token encontrado para o usuário ${record.user_id}. O app já pediu permissão e salvou em user_devices?`);
       return new Response(JSON.stringify({ ok: false, reason: "Token não encontrado" }), { status: 200 })
     }
 
-    console.log("📱 Tokens encontrados:", tokens.length, "Preparando envio para o Firebase...");
+    // 3b. Som do painel admin (só usado no Android, em primeiro plano)
+    const { data: soundRow } = await supabaseAdmin
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'notification_sound_url')
+      .maybeSingle()
+    const notificationSoundUrl = (soundRow?.value as string)?.trim() || ''
 
-    // 4. Gera o Token de Autenticação para o Google/Firebase
-    const client = new JWT(
+    console.log("📱 Dispositivos encontrados:", devicesList.length, "Preparando envio para o Firebase...");
+
+    // 4. Access token do Google (jose = compatível com Deno; evita erro do google-auth-library/jws)
+    const accessToken = await getGoogleAccessToken(
       firebaseConfig.client_email,
-      undefined,
-      firebaseConfig.private_key,
-      ['https://www.googleapis.com/auth/cloud-platform']
+      firebaseConfig.private_key
     )
-    const auth = await client.authorize()
 
     const fcmUrl = `https://fcm.googleapis.com/v1/projects/${firebaseConfig.project_id}/messages:send`
     const title = record.title || "Chamô 🚀"
@@ -55,40 +86,60 @@ serve(async (req) => {
     const dataPayload: Record<string, string> = {
       notification_id: String(record.id || ""),
       type: String(record.type || "general"),
-      link: String(record.link || "")
+      link: String(record.link || ""),
+      ...(notificationSoundUrl ? { sound_url: notificationSoundUrl } : {})
+    }
+
+    const isIosDevice = (name: string | null) => {
+      const n = (name || "").toLowerCase()
+      return n.includes("iphone") || n.includes("ipad") || n.includes("ios")
     }
 
     const results: unknown[] = []
-    for (const token of tokens) {
-      const payload = {
-        message: {
-          token,
-          notification: { title, body },
-          data: dataPayload,
-          apns: {
-            payload: {
-              aps: { sound: "default", badge: 1, contentAvailable: true }
+    for (const device of devicesList) {
+      const token = device.push_token as string
+      const isIos = isIosDevice(device.device_name as string | null)
+
+      const message: Record<string, unknown> = {
+        token,
+        data: dataPayload,
+      }
+
+      if (isIos) {
+        // iOS: sem "sound" no payload; só a Notification Service Extension adiciona o som (evita som padrão + chamo)
+        message.apns = {
+          headers: { "apns-push-type": "alert" },
+          payload: {
+            aps: {
+              alert: { title, body },
+              badge: 1,
+              "mutable-content": 1,
             }
-          },
-          android: {
-            priority: "high",
-            notification: {
-              title,
-              body,
-              channelId: "default",
-              defaultSound: true,
-              defaultVibrateTimings: true,
-            },
-            data: dataPayload,
           }
         }
+      } else {
+        message.notification = { title, body }
+        message.android = {
+          priority: "high",
+          ttl: "3600s",
+          notification: {
+            title,
+            body,
+            channelId: "default_v2",
+            defaultSound: false, // usa o som do canal (chamo_notification) no app
+            defaultVibrateTimings: true,
+          },
+          data: dataPayload,
+        }
       }
+
+      const payload = { message }
 
       const res = await fetch(fcmUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${auth.access_token}`
+          'Authorization': `Bearer ${accessToken}`
         },
         body: JSON.stringify(payload)
       })
@@ -101,7 +152,7 @@ serve(async (req) => {
       results.push(result)
     }
 
-    return new Response(JSON.stringify({ sent: tokens.length, results }), { status: 200 })
+    return new Response(JSON.stringify({ sent: devicesList.length, results }), { status: 200 })
 
   } catch (err) {
     console.error("💥 Erro fatal na Edge Function:", err.message);

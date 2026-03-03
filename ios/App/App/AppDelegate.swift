@@ -2,7 +2,8 @@ import UIKit
 import Capacitor
 import FirebaseCore
 import FirebaseMessaging
-import UserNotifications // ✅ Necessário para gerenciar notificações com o app aberto
+import UserNotifications
+import MediaPlayer // Para limpar Now Playing quando o app abre (evita player "Chamô" na tela de bloqueio)
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate { // ✅ Adicionado o Delegate aqui
@@ -41,7 +42,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
     func applicationWillEnterForeground(_ application: UIApplication) {}
 
-    func applicationDidBecomeActive(_ application: UIApplication) {}
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        // Limpa o Now Playing para o player "Chamô" sumir da tela de bloqueio ao abrir o app
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
 
     func applicationWillTerminate(_ application: UIApplication) {}
 

@@ -1,9 +1,17 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Lock, ArrowRight } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
+import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+
+/** Lê parâmetros do hash (#key=val&...) ou da query (?key=val&...). */
+function getParam(name: string, url?: string): string | null {
+  const u = url || (typeof window !== "undefined" ? window.location.href : "");
+  const regex = new RegExp(`[#?&]${name}=([^&#]*)`);
+  const m = regex.exec(u);
+  return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : null;
+}
 
 const ResetPassword = () => {
   const navigate = useNavigate();
@@ -11,21 +19,52 @@ const ResetPassword = () => {
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
+  const [linkInvalid, setLinkInvalid] = useState(false);
 
   useEffect(() => {
-    // Check if we have a recovery session from the URL hash
-    const hash = window.location.hash;
-    if (hash.includes("type=recovery")) {
-      setReady(true);
-    } else {
-      // Also listen for auth state change
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-        if (event === "PASSWORD_RECOVERY") {
-          setReady(true);
+    const access_token = getParam("access_token");
+    const refresh_token = getParam("refresh_token");
+    const type = getParam("type");
+    const isRecovery = type === "recovery";
+
+    const establishSession = async () => {
+      if (access_token && refresh_token && isRecovery) {
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (error) {
+          console.error("Erro ao estabelecer sessão de recovery:", error);
+          setLinkInvalid(true);
+          return;
         }
-      });
-      return () => subscription.unsubscribe();
-    }
+        // Limpa o hash da URL para não reenviar os tokens
+        if (window.history.replaceState) {
+          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        }
+        setReady(true);
+        return;
+      }
+      if (isRecovery && (!access_token || !refresh_token)) {
+        setLinkInvalid(true);
+        return;
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setLinkInvalid(false);
+        setReady(true);
+      }
+    });
+
+    establishSession();
+
+    const timeout = setTimeout(() => {
+      if (!ready) setLinkInvalid(true);
+    }, 6000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,8 +94,17 @@ const ResetPassword = () => {
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
         <div className="text-center">
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
-          <p className="text-sm text-muted-foreground">Verificando link de recuperação...</p>
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mt-4" />
+          {linkInvalid ? (
+            <>
+              <p className="text-sm text-muted-foreground mb-4">Link inválido ou expirado. Solicite um novo e-mail de recuperação.</p>
+              <Link to="/login" className="text-sm font-medium text-primary hover:underline">Voltar ao login</Link>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">Verificando link de recuperação...</p>
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mt-4" />
+            </>
+          )}
         </div>
       </div>
     );

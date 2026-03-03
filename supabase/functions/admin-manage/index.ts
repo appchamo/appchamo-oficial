@@ -185,18 +185,32 @@ serve(async (req) => {
       const { userId } = body;
       
       if (!userId) throw new Error("userId é obrigatório.");
-      if (!ASAAS_API_KEY) throw new Error("Chave do Asaas não configurada.");
 
       const { data: subData, error: subError } = await supabase
         .from("subscriptions")
-        .select("asaas_subscription_id")
+        .select("id, asaas_subscription_id")
         .eq("user_id", userId)
-        .single();
+        .maybeSingle();
 
-      if (subError || !subData?.asaas_subscription_id) {
-        throw new Error("Assinatura não encontrada no banco de dados da Chamô.");
+      if (subError) throw new Error("Erro ao buscar assinatura.");
+
+      if (!subData?.asaas_subscription_id) {
+        if (!subData) {
+          await supabase.from("subscriptions").insert({ user_id: userId, plan_id: "free", status: "ACTIVE" });
+        } else {
+          await supabase.from("subscriptions").update({ status: "ACTIVE" }).eq("user_id", userId);
+        }
+        await supabase.from("admin_logs").insert({
+          admin_user_id: caller.id, action: "approve_subscription", target_type: "user", target_id: userId,
+          details: { note: "Sem assinatura no Asaas; ativado no app (plano free)." },
+        });
+        return new Response(JSON.stringify({
+          success: true,
+          message: "Usuário não tinha assinatura no Asaas. Ativado no app (plano free).",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
+      if (!ASAAS_API_KEY) throw new Error("Chave do Asaas não configurada.");
       const today = new Date().toISOString().split("T")[0];
 
       const response = await fetch(`${ASAAS_BASE_URL}/subscriptions/${subData.asaas_subscription_id}`, {
@@ -241,14 +255,13 @@ serve(async (req) => {
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (subErr || !sub) {
-        throw new Error("Assinatura não encontrada no banco da Chamô.");
-      }
+      if (subErr) throw new Error("Erro ao buscar assinatura.");
 
-      await supabase
-        .from("subscriptions")
-        .update({ status: "ACTIVE" })
-        .eq("user_id", userId);
+      if (!sub) {
+        await supabase.from("subscriptions").insert({ user_id: userId, plan_id: "free", status: "ACTIVE" });
+      } else {
+        await supabase.from("subscriptions").update({ status: "ACTIVE" }).eq("user_id", userId);
+      }
 
       await supabase.from("admin_logs").insert({
         admin_user_id: caller.id,

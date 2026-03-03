@@ -414,3 +414,15 @@ entrypoint = "./functions/agenda-reminders/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/complete-signup/index.ts"
+
+# Chamada no cadastro do profissional (usuário ainda não logado) — sem JWT
+[functions.validate-cpf-signup]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/validate-cpf-signup/index.ts"
+
+# Admin: gateway pode falhar com JWT ES256; a função valida admin via verifyAdmin()
+[functions.admin-manage]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/admin-manage/index.ts"

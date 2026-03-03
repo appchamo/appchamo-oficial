@@ -48,6 +48,7 @@ const SupportThread = lazy(() => import("./pages/SupportThread"));
 const Terms = lazy(() => import("./pages/Terms"));
 const TermsOfUse = lazy(() => import("./pages/TermsOfUse"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const ExclusaoDeConta = lazy(() => import("./pages/ExclusaoDeConta"));
 const TutorialDetail = lazy(() => import("./pages/TutorialDetail"));
 const HowItWorks = lazy(() => import("./pages/HowItWorks"));
 const HowToUse = lazy(() => import("./pages/HowToUse"));
@@ -322,7 +323,10 @@ const AppContent = () => {
         <Routes>
         <Route path="/" element={session ? <RedirectLoggedIn /> : <Index />} />
         <Route path="/login" element={<Login />} />
-        
+        <Route path="/terms-of-use" element={<TermsOfUse />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/exclusao-de-conta" element={<ExclusaoDeConta />} />
+
         <Route path="/signup" element={<Signup />} />
         <Route path="/complete-signup" element={<Signup />} />
         <Route path="/reset-password" element={<ResetPassword />} />
@@ -359,8 +363,6 @@ const AppContent = () => {
         <Route path="/suporte-desk" element={<SupportDeskRoute><SupportDesk /></SupportDeskRoute>} />
         <Route path="/suporte-desk/notificacoes" element={<SupportDeskRoute><SupportDeskNotifications /></SupportDeskRoute>} />
         <Route path="/terms" element={<ProtectedRoute><Terms /></ProtectedRoute>} />
-        <Route path="/terms-of-use" element={<TermsOfUse />} />
-        <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/tutorial/:id" element={<ProtectedRoute><TutorialDetail /></ProtectedRoute>} />
         <Route path="/how-it-works" element={<ProtectedRoute><HowItWorks /></ProtectedRoute>} />
         <Route path="/how-to-use" element={<ProtectedRoute><HowToUse /></ProtectedRoute>} />

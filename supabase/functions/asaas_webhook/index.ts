@@ -4,13 +4,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 serve(async (req) => {
   try {
     const WEBHOOK_TOKEN = Deno.env.get("ASAAS_WEBHOOK_TOKEN");
-    const receivedToken = req.headers.get("asaas-access-token");
+    const receivedToken = req.headers.get("asaas-access-token") ?? null;
 
-    // Log para te ajudar a debugar se o token bater ou não
-    if (receivedToken !== WEBHOOK_TOKEN) {
-      console.error("❌ Erro de Autenticação: Token recebido não confere com o salvo no Supabase.");
-      return new Response("Unauthorized", { status: 401 });
+    // Só exige token se você configurou ASAAS_WEBHOOK_TOKEN no Supabase
+    if (WEBHOOK_TOKEN && WEBHOOK_TOKEN.length > 0) {
+      if (receivedToken !== WEBHOOK_TOKEN) {
+        console.error("❌ Webhook: token recebido não confere com ASAAS_WEBHOOK_TOKEN.");
+        return new Response("Unauthorized", { status: 401 });
+      }
     }
+    // Se não configurou token no Supabase, aceita (Asaas pode não enviar header)
 
     const body = await req.json();
     console.log("ASAAS EVENT:", body.event);

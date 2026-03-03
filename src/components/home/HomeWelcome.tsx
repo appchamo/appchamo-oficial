@@ -3,13 +3,9 @@ interface HomeWelcomeProps {
   section?: { title?: string; subtitle?: string };
 }
 
-/** Subtítulo compacto: o "Bem-vindo, Nome" está no Header, aqui só a frase abaixo. */
-const HomeWelcome = ({ section }: HomeWelcomeProps) => {
-  const subtitle = section?.subtitle || "Encontre o profissional ideal perto de você";
-
-  return (
-    <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
-  );
+/** Reservado para subtítulo; atualmente sem texto para deixar Patrocinadores logo abaixo do header. */
+const HomeWelcome = (_props: HomeWelcomeProps) => {
+  return null;
 };
 
 export default HomeWelcome;

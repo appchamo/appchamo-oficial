@@ -205,7 +205,8 @@ const Home = () => {
 
           {sections.filter((s) => s.visible).map((section) => {
             const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
-            const minHeight = isJobsEmpty ? "" : (sectionMinHeights[section.id] || "");
+            const isWelcomeCollapsed = section.id === "welcome";
+            const minHeight = isWelcomeCollapsed || isJobsEmpty ? "" : (sectionMinHeights[section.id] || "");
             return (
               <div key={section.id} className={`w-full ${minHeight}`}>
                 {sectionComponents[section.id]}

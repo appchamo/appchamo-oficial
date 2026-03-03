@@ -46,6 +46,8 @@ const BecomeProfessional = lazy(() => import("./pages/BecomeProfessional"));
 const Support = lazy(() => import("./pages/Support"));
 const SupportThread = lazy(() => import("./pages/SupportThread"));
 const Terms = lazy(() => import("./pages/Terms"));
+const TermsOfUse = lazy(() => import("./pages/TermsOfUse"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const TutorialDetail = lazy(() => import("./pages/TutorialDetail"));
 const HowItWorks = lazy(() => import("./pages/HowItWorks"));
 const HowToUse = lazy(() => import("./pages/HowToUse"));
@@ -357,6 +359,8 @@ const AppContent = () => {
         <Route path="/suporte-desk" element={<SupportDeskRoute><SupportDesk /></SupportDeskRoute>} />
         <Route path="/suporte-desk/notificacoes" element={<SupportDeskRoute><SupportDeskNotifications /></SupportDeskRoute>} />
         <Route path="/terms" element={<ProtectedRoute><Terms /></ProtectedRoute>} />
+        <Route path="/terms-of-use" element={<ProtectedRoute><TermsOfUse /></ProtectedRoute>} />
+        <Route path="/privacy" element={<ProtectedRoute><PrivacyPolicy /></ProtectedRoute>} />
         <Route path="/tutorial/:id" element={<ProtectedRoute><TutorialDetail /></ProtectedRoute>} />
         <Route path="/how-it-works" element={<ProtectedRoute><HowItWorks /></ProtectedRoute>} />
         <Route path="/how-to-use" element={<ProtectedRoute><HowToUse /></ProtectedRoute>} />

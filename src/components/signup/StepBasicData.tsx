@@ -135,15 +135,28 @@ const TermsDialogFromAdmin = ({ open, onClose, onAccept, variant = "client" }: {
     const isPro = variant === "professional";
     const keys = isPro ? ["terms_of_use_professional", "privacy_policy_professional"] : ["terms_of_use", "privacy_policy"];
     setStep("use");
+    setTermsOfUse("");
+    setPrivacyPolicy("");
     setLoadingTerms(true);
     supabase
       .from("platform_settings")
       .select("key, value")
       .in("key", keys)
-      .then(({ data }) => {
-        if (data) {
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Erro ao carregar termos (platform_settings):", error);
+          setLoadingTerms(false);
+          return;
+        }
+        if (data && data.length > 0) {
+          const parseVal = (v: unknown): string => {
+            if (v == null) return "";
+            if (typeof v === "string") return v;
+            const str = JSON.stringify(v);
+            return str.replace(/^"|"$/g, "");
+          };
           for (const s of data) {
-            const val = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
+            const val = parseVal(s.value);
             if (s.key === (isPro ? "terms_of_use_professional" : "terms_of_use")) setTermsOfUse(val);
             if (s.key === (isPro ? "privacy_policy_professional" : "privacy_policy")) setPrivacyPolicy(val);
           }

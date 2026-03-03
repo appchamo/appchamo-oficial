@@ -140,6 +140,27 @@ const Login = () => {
     }
   };
 
+  /** No Android (e em alguns dispositivos) o perfil pode demorar a aparecer após OAuth. Re-tenta buscar antes de mandar para signup. */
+  const fetchProfileWithRetry = async (userId: string): Promise<{ profile: any; roles: any[] }> => {
+    const delays = [0, 500, 1200]; // 1ª imediata, 2ª após 500ms, 3ª após 1200ms
+    let lastProfile: any = null;
+    let lastRoles: any[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, delays[attempt]));
+      }
+      const [{ data: profile }, { data: roles }] = await Promise.all([
+        supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
+        supabase.from("user_roles").select("role").eq("user_id", userId),
+      ]);
+      lastProfile = profile ?? null;
+      lastRoles = roles ?? [];
+      const complete = lastProfile && (lastProfile.cpf || lastProfile.phone);
+      if (complete) return { profile: lastProfile, roles: lastRoles };
+    }
+    return { profile: lastProfile, roles: lastRoles };
+  };
+
   const proceedToRedirect = async (userId: string, emailFromAuth?: string) => {
     if (isRedirecting) return;
     isRedirecting = true; 
@@ -154,11 +175,15 @@ const Login = () => {
         return;
       }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
+      const { profile, roles } = await (Capacitor.isNativePlatform()
+        ? fetchProfileWithRetry(userId)
+        : (async () => {
+            const [{ data: profile }, { data: roles }] = await Promise.all([
+              supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
+              supabase.from("user_roles").select("role").eq("user_id", userId),
+            ]);
+            return { profile: profile ?? null, roles: roles ?? [] };
+          })());
 
       const profileEmail = (profile?.email || "").toLowerCase().trim();
       if (profileEmail === normalizedSupportEmail) {
@@ -168,11 +193,6 @@ const Login = () => {
         return;
       }
 
-      const { data: roles } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId);
-        
       const isAdmin = roles?.some((r: any) =>
         ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
       );

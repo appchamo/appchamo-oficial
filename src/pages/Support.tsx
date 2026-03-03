@@ -31,12 +31,6 @@ const Support = () => {
   const [refreshing, setRefreshing] = useState(false);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadTickets();
-    setRefreshing(false);
-  }, [loadTickets]);
-
   const loadTickets = useCallback(async () => {
     if (!user?.id) {
       setLoading(false);
@@ -55,6 +49,12 @@ const Support = () => {
       setLoading(false);
     }
   }, [user]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadTickets();
+    setRefreshing(false);
+  }, [loadTickets]);
 
   useEffect(() => {
     if (!user) return;

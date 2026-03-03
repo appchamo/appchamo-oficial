@@ -122,7 +122,9 @@ const TermsScrollModal = ({
   );
 };
 
-const TermsDialogFromAdmin = ({ open, onClose, onAccept }: { open: boolean; onClose: () => void; onAccept: () => void }) => {
+type TermsVariant = "client" | "professional";
+
+const TermsDialogFromAdmin = ({ open, onClose, onAccept, variant = "client" }: { open: boolean; onClose: () => void; onAccept: () => void; variant?: TermsVariant }) => {
   const [termsOfUse, setTermsOfUse] = useState("");
   const [privacyPolicy, setPrivacyPolicy] = useState("");
   const [loadingTerms, setLoadingTerms] = useState(true);
@@ -130,23 +132,25 @@ const TermsDialogFromAdmin = ({ open, onClose, onAccept }: { open: boolean; onCl
 
   useEffect(() => {
     if (!open) return;
+    const isPro = variant === "professional";
+    const keys = isPro ? ["terms_of_use_professional", "privacy_policy_professional"] : ["terms_of_use", "privacy_policy"];
     setStep("use");
     setLoadingTerms(true);
     supabase
       .from("platform_settings")
       .select("key, value")
-      .in("key", ["terms_of_use", "privacy_policy"])
+      .in("key", keys)
       .then(({ data }) => {
         if (data) {
           for (const s of data) {
             const val = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
-            if (s.key === "terms_of_use") setTermsOfUse(val);
-            if (s.key === "privacy_policy") setPrivacyPolicy(val);
+            if (s.key === (isPro ? "terms_of_use_professional" : "terms_of_use")) setTermsOfUse(val);
+            if (s.key === (isPro ? "privacy_policy_professional" : "privacy_policy")) setPrivacyPolicy(val);
           }
         }
         setLoadingTerms(false);
       });
-  }, [open]);
+  }, [open, variant]);
 
   const handleAcceptUse = () => {
     if (privacyPolicy && privacyPolicy.trim()) {
@@ -539,7 +543,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
         </form>
       </div>
 
-      <TermsDialogFromAdmin open={termsOpen} onClose={() => setTermsOpen(false)} onAccept={() => { setTermsAccepted(true); setTermsOpen(false); }} />
+      <TermsDialogFromAdmin open={termsOpen} onClose={() => setTermsOpen(false)} onAccept={() => { setTermsAccepted(true); setTermsOpen(false); }} variant={accountType} />
     </div>
   );
 };

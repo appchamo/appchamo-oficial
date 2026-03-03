@@ -259,22 +259,44 @@ const AdminSettings = () => {
           </div>
         </div>
 
-        {/* Terms */}
+        {/* Terms - Cliente */}
         <div className="bg-card border rounded-xl p-5 space-y-4">
-          <h2 className="font-semibold text-foreground">Termos de Uso</h2>
+          <h2 className="font-semibold text-foreground">Termos de Uso e Privacidade — Cliente</h2>
+          <p className="text-xs text-muted-foreground">Exibidos no cadastro e na tela de termos para usuários clientes.</p>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Versão</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Versão (cliente)</label>
             <input value={settings.terms_version || "1.0"} onChange={(e) => set("terms_version", e.target.value)}
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Texto dos Termos</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Termos de Uso (cliente)</label>
             <textarea value={settings.terms_of_use || ""} onChange={(e) => set("terms_of_use", e.target.value)} rows={5}
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Política de Privacidade</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Política de Privacidade (cliente)</label>
             <textarea value={settings.privacy_policy || ""} onChange={(e) => set("privacy_policy", e.target.value)} rows={5}
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+          </div>
+        </div>
+
+        {/* Terms - Profissional */}
+        <div className="bg-card border rounded-xl p-5 space-y-4">
+          <h2 className="font-semibold text-foreground">Termos de Uso e Privacidade — Profissional</h2>
+          <p className="text-xs text-muted-foreground">Termos específicos para profissionais (diferentes do cliente). Usados no fluxo de cadastro/completar perfil profissional.</p>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Versão (profissional)</label>
+            <input value={settings.terms_version_professional || "1.0"} onChange={(e) => set("terms_version_professional", e.target.value)}
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Termos de Uso (profissional)</label>
+            <textarea value={settings.terms_of_use_professional || ""} onChange={(e) => set("terms_of_use_professional", e.target.value)} rows={5}
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Política de Privacidade (profissional)</label>
+            <textarea value={settings.privacy_policy_professional || ""} onChange={(e) => set("privacy_policy_professional", e.target.value)} rows={5}
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
           </div>
         </div>

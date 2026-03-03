@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle, Inbox, Mic, Package, CheckCheck, Trash2, XCircle } from "lucide-react"; 
+import { MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle, Inbox, Mic, Package, CheckCheck, Trash2, XCircle, Search, CheckSquare, Square } from "lucide-react"; 
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -28,6 +28,7 @@ interface Thread {
   description: string | null;
   created_at: string;
   updated_at: string;
+  protocol: string | null;
   otherName: string;
   otherAvatar: string | null;
   lastMessage: string | null;
@@ -62,11 +63,15 @@ const Messages = () => {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
 
+  const [searchChat, setSearchChat] = useState("");
   const [reportingChatId, setReportingChatId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [canceladosSelectMode, setCanceladosSelectMode] = useState(false);
+  const [selectedCanceladosIds, setSelectedCanceladosIds] = useState<Set<string>>(new Set());
+  const [deletingBatchIds, setDeletingBatchIds] = useState<string[] | null>(null);
 
   const load = useCallback(async (isBackgroundUpdate = false) => {
     // Só mostra o loading pesado se for a primeira vez que a tela abre
@@ -282,8 +287,29 @@ const Messages = () => {
     }
   };
 
+  const handleBatchDeleteConfirm = async () => {
+    if (!deletingBatchIds?.length) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setIsDeleting(true);
+    try {
+      for (const chatId of deletingBatchIds) {
+        await supabase.from("chat_read_status" as any).upsert(
+          { request_id: chatId, user_id: user.id, last_read_at: new Date().toISOString(), is_deleted: true },
+          { onConflict: "request_id,user_id" }
+        );
+      }
+      setDeletingBatchIds(null);
+      setSelectedCanceladosIds(new Set());
+      setCanceladosSelectMode(false);
+      load(true);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleReportSubmit = async () => {
-    if (!reportingChatId || !reportReason.trim()) return;
+    if (!reportingChatId || reportReason.trim().length < 20) return;
     setIsSubmittingReport(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -370,7 +396,38 @@ const Messages = () => {
 
   const activeThreads = threadsGeral.filter((t) => !t.is_archived);
   const archivedThreads = threadsGeral.filter((t) => t.is_archived);
-  const currentList = chatTab === "cancelados" ? threadsCancelados : showArchived ? archivedThreads : activeThreads;
+  const baseList = chatTab === "cancelados" ? threadsCancelados : showArchived ? archivedThreads : activeThreads;
+
+  const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/\u0300-\u036f/g, "");
+  const currentList = !searchChat.trim()
+    ? baseList
+    : baseList.filter((t) => {
+        const q = normalizeSearch(searchChat);
+        const name = normalizeSearch(t.otherName);
+        const protocol = normalizeSearch(t.protocol || "");
+        return name.includes(q) || protocol.includes(q);
+      });
+
+  const canceladosListToShow = !searchChat.trim()
+    ? threadsCancelados
+    : threadsCancelados.filter((t) => {
+        const q = normalizeSearch(searchChat);
+        const name = normalizeSearch(t.otherName);
+        const protocol = normalizeSearch(t.protocol || "");
+        return name.includes(q) || protocol.includes(q);
+      });
+
+  const toggleCanceladoSelection = (id: string) => {
+    setSelectedCanceladosIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllCancelados = () => setSelectedCanceladosIds(new Set(canceladosListToShow.map((t) => t.id)));
+  const deselectAllCancelados = () => setSelectedCanceladosIds(new Set());
 
   return (
     <AppLayout>
@@ -414,6 +471,31 @@ const Messages = () => {
             </TabsTrigger>
           </TabsList>
 
+          {(activeThreads.length > 0 || archivedThreads.length > 0) && chatTab === "geral" && (
+            <div className="relative mt-3 mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchChat}
+                onChange={(e) => setSearchChat(e.target.value)}
+                placeholder="Buscar por nome ou protocolo..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+          )}
+          {(threadsCancelados.length > 0) && chatTab === "cancelados" && (
+            <div className="relative mt-3 mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchChat}
+                onChange={(e) => setSearchChat(e.target.value)}
+                placeholder="Buscar por nome ou protocolo..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+          )}
+
           <TabsContent value="geral" className="mt-3">
             {!showArchived && (
           <Link to="/support"
@@ -439,7 +521,9 @@ const Messages = () => {
         )}
 
         <div className="flex flex-col">
-          {currentList.map((t) => {
+          {searchChat.trim() && currentList.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground text-sm">Nenhum resultado para &quot;{searchChat}&quot;</div>
+          ) : currentList.map((t) => {
             const initials = t.otherName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
             const hasUnread = t.unreadCount > 0 || t.manual_unread;
             const isChatFinished = t.status === "completed" || t.status === "closed" || t.status === "cancelled" || t.status === "rejected";
@@ -525,7 +609,7 @@ const Messages = () => {
                 </div>
               </div>
             );
-          })}
+          }) }
         </div>
         
         {/* 🚀 OTIMIZAÇÃO: Botão para carregar mais mensagens caso o usuário queira descer */}
@@ -539,6 +623,37 @@ const Messages = () => {
           </TabsContent>
 
           <TabsContent value="cancelados" className="mt-3">
+            {threadsCancelados.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                {!canceladosSelectMode ? (
+                  <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setCanceladosSelectMode(true)}>
+                    Selecionar
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => { setCanceladosSelectMode(false); setSelectedCanceladosIds(new Set()); }}>
+                      Cancelar
+                    </Button>
+                    <Button variant="outline" size="sm" className="rounded-xl" onClick={selectAllCancelados}>
+                      Selecionar todas
+                    </Button>
+                    <Button variant="outline" size="sm" className="rounded-xl" onClick={deselectAllCancelados}>
+                      Desmarcar todas
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="rounded-xl"
+                      disabled={selectedCanceladosIds.size === 0}
+                      onClick={() => setDeletingBatchIds(Array.from(selectedCanceladosIds))}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1" />
+                      Excluir selecionadas {selectedCanceladosIds.size > 0 ? `(${selectedCanceladosIds.size})` : ""}
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
             <div className="flex flex-col">
               {threadsCancelados.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
@@ -546,16 +661,27 @@ const Messages = () => {
                   <p className="text-sm font-medium">Nenhuma conversa cancelada</p>
                   <p className="text-xs mt-1">Chamados cancelados por você ou recusados pelo profissional aparecem aqui.</p>
                 </div>
+              ) : searchChat.trim() && canceladosListToShow.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground text-sm">Nenhum resultado para &quot;{searchChat}&quot;</div>
               ) : (
-                threadsCancelados.map((t) => {
+                canceladosListToShow.map((t) => {
                   const initials = t.otherName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
                   const hasUnread = t.unreadCount > 0 || t.manual_unread;
+                  const isSelected = selectedCanceladosIds.has(t.id);
                   return (
                     <div key={t.id} className={`flex items-center gap-3 px-2 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors rounded-lg ${hasUnread ? "bg-primary/5" : ""}`}>
+                      {canceladosSelectMode && (
+                        <button type="button" onClick={() => toggleCanceladoSelection(t.id)} className="flex-shrink-0 p-1 rounded-lg hover:bg-muted">
+                          {isSelected ? <CheckSquare className="w-5 h-5 text-primary" /> : <Square className="w-5 h-5 text-muted-foreground" />}
+                        </button>
+                      )}
                       <div
                         onClick={() => {
-                          if (hasUnread) handleMarkRead(t.id);
-                          navigate(`/messages/${t.id}`);
+                          if (canceladosSelectMode) toggleCanceladoSelection(t.id);
+                          else {
+                            if (hasUnread) handleMarkRead(t.id);
+                            navigate(`/messages/${t.id}`);
+                          }
                         }}
                         className="flex flex-1 items-center gap-3 cursor-pointer min-w-0"
                       >
@@ -575,27 +701,29 @@ const Messages = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                        <span className="text-[11px] text-muted-foreground">{timeLabel(t.lastMessageTime)}</span>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button className="p-1 hover:bg-muted rounded-full transition-colors text-muted-foreground">
-                              <MoreVertical className="w-4 h-4" />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-52 rounded-xl shadow-lg border-muted">
-                            <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2">
-                              <Archive className="w-4 h-4 text-muted-foreground" />
-                              <span className="font-medium text-sm">{t.is_archived ? "Desarquivar" : "Arquivar conversa"}</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => setReportingChatId(t.id)} className="gap-2 cursor-pointer py-2 text-amber-600 focus:text-amber-600 focus:bg-amber-50">
-                              <AlertTriangle className="w-4 h-4" />
-                              <span className="font-medium text-sm">Denunciar conversa</span>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
+                      {!canceladosSelectMode && (
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          <span className="text-[11px] text-muted-foreground">{timeLabel(t.lastMessageTime)}</span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button className="p-1 hover:bg-muted rounded-full transition-colors text-muted-foreground">
+                                <MoreVertical className="w-4 h-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52 rounded-xl shadow-lg border-muted">
+                              <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2">
+                                <Archive className="w-4 h-4 text-muted-foreground" />
+                                <span className="font-medium text-sm">{t.is_archived ? "Desarquivar" : "Arquivar conversa"}</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => setReportingChatId(t.id)} className="gap-2 cursor-pointer py-2 text-amber-600 focus:text-amber-600 focus:bg-amber-50">
+                                <AlertTriangle className="w-4 h-4" />
+                                <span className="font-medium text-sm">Denunciar conversa</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -604,25 +732,30 @@ const Messages = () => {
           </TabsContent>
         </Tabs>
 
-        <Dialog open={!!reportingChatId} onOpenChange={(open) => !open && setReportingChatId(null)}>
+        <Dialog open={!!reportingChatId} onOpenChange={(open) => { if (!open) { setReportingChatId(null); setReportReason(""); } }}>
           <DialogContent className="sm:max-w-md rounded-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-amber-600">
                 <AlertTriangle className="w-5 h-5" /> Denunciar Conversa
               </DialogTitle>
               <DialogDescription>
-                Descreva o motivo da denúncia para análise do suporte.
+                Descreva o motivo da denúncia para análise do suporte. Mínimo 20 caracteres.
               </DialogDescription>
             </DialogHeader>
             <textarea
               value={reportReason}
               onChange={(e) => setReportReason(e.target.value)}
               className="w-full min-h-[120px] p-3 rounded-xl border border-muted bg-background text-sm outline-none focus:border-amber-500"
-              placeholder="Descreva o motivo..."
+              placeholder="Descreva o motivo da denúncia (mínimo 20 caracteres)..."
             />
+            <p className="text-xs text-muted-foreground">{reportReason.trim().length}/20 caracteres (mínimo)</p>
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button variant="outline" onClick={() => setReportingChatId(null)} className="rounded-xl">Cancelar</Button>
-              <Button onClick={handleReportSubmit} disabled={isSubmittingReport} className="rounded-xl bg-amber-600 text-white">
+              <Button variant="outline" onClick={() => { setReportingChatId(null); setReportReason(""); }} className="rounded-xl">Cancelar</Button>
+              <Button
+                onClick={handleReportSubmit}
+                disabled={isSubmittingReport || reportReason.trim().length < 20}
+                className="rounded-xl bg-amber-600 text-white"
+              >
                 {isSubmittingReport ? "Enviando..." : "Enviar Denúncia"}
               </Button>
             </DialogFooter>
@@ -648,6 +781,25 @@ const Messages = () => {
                 className="rounded-xl"
               >
                 {isDeleting ? "Excluindo..." : "Excluir"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={deletingBatchIds !== null && deletingBatchIds.length > 0} onOpenChange={(open) => !open && setDeletingBatchIds(null)}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <Trash2 className="w-5 h-5" /> Excluir conversas
+              </DialogTitle>
+              <DialogDescription>
+                Tem certeza que deseja excluir {deletingBatchIds?.length || 0} conversa(s)? Você perderá o histórico e comprovantes desses serviços.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setDeletingBatchIds(null)} className="rounded-xl">Cancelar</Button>
+              <Button variant="destructive" onClick={handleBatchDeleteConfirm} disabled={isDeleting} className="rounded-xl">
+                {isDeleting ? "Excluindo..." : "Excluir todas"}
               </Button>
             </DialogFooter>
           </DialogContent>

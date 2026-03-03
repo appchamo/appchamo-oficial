@@ -381,6 +381,18 @@ const SupportThread = () => {
     });
     toast({ title: "Solicitação enviada", description: "Um atendente será notificado em breve." });
     setRequestingHuman(false);
+    // Disparar a IA para responder "Entendido, em breve um atendente entrará em contato, aguarde."
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await supabase.functions.invoke("support-ai-reply", {
+          body: { ticket_id: ticketId },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+      }
+    } catch {
+      // silencioso
+    }
   };
 
   const renderContent = (msg: Message) => {
@@ -475,7 +487,7 @@ const SupportThread = () => {
       >
         {messages.map((msg) => {
           const isFromBot = isSupportBotMessage(msg.sender_id);
-          const isMine = msg.sender_id === user?.id && !isFromBot;
+          const isMine = !isFromBot && msg.sender_id != null && user?.id != null && String(msg.sender_id) === String(user.id);
           if (msg.content === "[CLOSED]") return (
             <div key={msg.id} className="flex justify-center my-2">
               <div className="bg-muted/50 border rounded-xl px-4 py-2 text-xs font-medium text-muted-foreground">✅ Chamado encerrado</div>

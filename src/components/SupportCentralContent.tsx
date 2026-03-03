@@ -1,9 +1,10 @@
-import { HelpCircle, Send, ArrowLeft, Clock, XCircle, FileText, AlertTriangle, MessageSquare, CheckCircle2, Eye } from "lucide-react";
+import { HelpCircle, Send, ArrowLeft, Clock, XCircle, FileText, AlertTriangle, MessageSquare, CheckCircle2, Eye, Search } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import AudioPlayer from "@/components/AudioPlayer";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { isSupportBotMessage } from "@/lib/supportBot";
 
 export interface TicketThread {
   id: string;
@@ -64,6 +65,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [activeTab, setActiveTab] = useState<"support" | "reports">("support");
+  const [searchSupport, setSearchSupport] = useState("");
   const [reports, setReports] = useState<ChatReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [viewingReportChat, setViewingReportChat] = useState<string | null>(null);
@@ -337,6 +339,16 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const openTickets = tickets.filter(t => t.status !== "closed");
   const pendingReports = reports.filter(r => r.status !== "resolvido");
 
+  const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/\u0300-\u036f/g, "");
+  const filteredTickets = !searchSupport.trim()
+    ? tickets
+    : tickets.filter((t) => {
+        const q = normalizeSearch(searchSupport);
+        const name = normalizeSearch(t.full_name);
+        const protocol = normalizeSearch(t.protocol || "");
+        return name.includes(q) || protocol.includes(q);
+      });
+
   const wrap = (title: string, children: React.ReactNode) => {
     if (renderLayout) return renderLayout({ title, children });
     return <>{children}</>;
@@ -369,7 +381,8 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         <div className="bg-card border rounded-xl p-4 max-h-[60vh] overflow-y-auto flex flex-col gap-2">
           {messages.length === 0 && <p className="text-center text-muted-foreground text-sm py-8">Nenhuma mensagem ainda.</p>}
           {messages.map((msg) => {
-            const isAdmin = msg.sender_id === adminId;
+            const isBot = isSupportBotMessage(msg.sender_id);
+            const isAdmin = !isBot && msg.sender_id === adminId;
             const isSystem = msg.content.startsWith("[CLOSED]");
             if (isSystem) {
               return (
@@ -460,13 +473,27 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
 
       {activeTab === "support" && (
         <>
+          {tickets.length > 0 && (
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchSupport}
+                onChange={(e) => setSearchSupport(e.target.value)}
+                placeholder="Buscar por nome ou protocolo..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+          )}
           {loading ? (
             <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
           ) : tickets.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma conversa de suporte.</div>
+          ) : filteredTickets.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground text-sm">Nenhum resultado para &quot;{searchSupport}&quot;</div>
           ) : (
             <div className="space-y-3">
-              {openTickets.length > 0 && (
+              {openTickets.length > 0 && !searchSupport.trim() && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4">
                   <p className="text-sm font-medium text-amber-700 flex items-center gap-2">
                     <Clock className="w-4 h-4" /> {openTickets.length} chamado(s) aberto(s)
@@ -474,7 +501,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                 </div>
               )}
               <div className="flex flex-col">
-                {tickets.map((t) => {
+                {filteredTickets.map((t) => {
                   const initials = t.full_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
                   let preview = t.lastMessage;
                   if (preview.includes("[AUDIO:")) preview = "🎤 Mensagem de voz";

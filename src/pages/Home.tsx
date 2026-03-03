@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Zap, Ticket, CalendarCheck } from "lucide-react"; 
+import { Zap, Ticket, CalendarCheck, X } from "lucide-react"; 
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -57,6 +57,9 @@ const Home = () => {
   const navigate = useNavigate();
   const userName = profile?.full_name?.split(" ")[0] || "Usuário";
   const [hasUpcomingAppointment, setHasUpcomingAppointment] = useState(false);
+  const [appointmentBannerDismissed, setAppointmentBannerDismissed] = useState(() =>
+    localStorage.getItem("chamo_appointment_banner_dismissed") === "1"
+  );
   
   // ✅ ATIVAÇÃO DO PUSH: Registra o token assim que o perfil carregar
   usePush(profile?.user_id || profile?.id); 
@@ -89,7 +92,14 @@ const Home = () => {
       .eq("client_id", user.id)
       .in("status", ["pending", "confirmed"])
       .gte("appointment_date", today)
-      .then(({ count }) => setHasUpcomingAppointment((count ?? 0) > 0));
+      .then(({ count }) => {
+        const has = (count ?? 0) > 0;
+        setHasUpcomingAppointment(has);
+        if (!has) {
+          localStorage.removeItem("chamo_appointment_banner_dismissed");
+          setAppointmentBannerDismissed(false);
+        }
+      });
   }, [user?.id]);
 
   // ✅ 2. TRANSIÇÃO SUAVE: Espera o layout carregar para liberar a tela
@@ -169,15 +179,28 @@ const Home = () => {
             </Link>
           }
 
-          {hasUpcomingAppointment && (
-            <Link to="/meus-agendamentos" className="flex items-center gap-3 bg-primary/10 border border-primary/30 rounded-xl p-3.5 hover:bg-primary/15 transition-all">
-              <CalendarCheck className="w-5 h-5 text-primary" />
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-foreground">Você tem agendamento</p>
-                <p className="text-xs text-muted-foreground">Confira data, horário e opções</p>
-              </div>
-              <span className="text-xs font-semibold text-primary">Ver →</span>
-            </Link>
+          {hasUpcomingAppointment && !appointmentBannerDismissed && (
+            <div className="relative flex items-center gap-3 bg-primary/10 border border-primary/30 rounded-xl p-3.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAppointmentBannerDismissed(true);
+                  localStorage.setItem("chamo_appointment_banner_dismissed", "1");
+                }}
+                className="absolute top-2 right-2 p-1 rounded-full hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Fechar aviso"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <Link to="/meus-agendamentos" className="flex items-center gap-3 flex-1 min-w-0 pr-6" onClick={() => { setAppointmentBannerDismissed(true); localStorage.setItem("chamo_appointment_banner_dismissed", "1"); }}>
+                <CalendarCheck className="w-5 h-5 text-primary flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground">Você tem agendamento</p>
+                  <p className="text-xs text-muted-foreground">Confira data, horário e opções</p>
+                </div>
+                <span className="text-xs font-semibold text-primary flex-shrink-0">Ver →</span>
+              </Link>
+            </div>
           )}
 
           {sections.filter((s) => s.visible).map((section) =>

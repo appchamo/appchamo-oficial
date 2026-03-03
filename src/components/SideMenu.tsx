@@ -1,4 +1,4 @@
-import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LayoutDashboard, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, DollarSign, ScrollText, Calendar, ShieldCheck } from "lucide-react";
+import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LayoutDashboard, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, DollarSign, ScrollText, Calendar, CalendarCheck, ShieldCheck } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -59,6 +59,7 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
       title: "Cliente",
       items: [
         { icon: FileText, label: "Minhas Solicitações", path: "/client/requests" },
+        { icon: CalendarCheck, label: "Meus agendamentos", path: "/meus-agendamentos" },
         { icon: MessageSquare, label: "Mensagens", path: "/messages" },
         { icon: Ticket, label: "Meus Cupons", path: "/coupons" },
         { icon: User, label: "Meu Perfil", path: "/profile" },

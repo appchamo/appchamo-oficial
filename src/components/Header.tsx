@@ -143,7 +143,8 @@ const Header = () => {
   }, [user, playNotificationSound]);
 
   const isPro = profile && profile.user_type !== "client";
-  
+  const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "Usuário";
+
   // Regra de Exibição do Selo
   const showPendingBadge = isPro && (proStatus === "pending" || (planId !== "free" && subStatus && subStatus.toUpperCase() !== "ACTIVE"));
   const showPlanBadge = isPro && proStatus === "approved" && (!subStatus || subStatus.toUpperCase() === "ACTIVE" || planId === "free") && planName;
@@ -152,7 +153,9 @@ const Header = () => {
     <>
       <header className="sticky top-0 z-30 bg-card/90 backdrop-blur-md border-b">
         <div className="flex items-center justify-between px-4 py-3 max-w-screen-lg mx-auto">
-          <span className="text-2xl font-extrabold text-gradient tracking-tight">Chamô</span>
+          <span className="text-lg font-bold text-foreground truncate max-w-[55%]">
+            Bem-vindo, <span className="text-primary">{firstName}</span> 👋
+          </span>
           <div className="flex items-center gap-2">
             
             {/* Selo Em Análise (Aparece para perfil pendente ou pagamento aguardando aprovação) */}

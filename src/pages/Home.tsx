@@ -147,7 +147,7 @@ const Home = () => {
 
   // ✅ 3. RESERVA DE ESPAÇO: Evita que os componentes empurrem uns aos outros ("Piscada")
   const sectionMinHeights: Record<string, string> = {
-    welcome: "min-h-[60px]",
+    welcome: "min-h-0",
     sponsors: "min-h-[160px]",
     jobs: "min-h-[90px]",
     search: "min-h-[60px]",

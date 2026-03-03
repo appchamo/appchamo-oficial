@@ -203,12 +203,16 @@ const Home = () => {
             </div>
           )}
 
-          {sections.filter((s) => s.visible).map((section) =>
-            <div key={section.id} className={`w-full ${sectionMinHeights[section.id] || ""}`}>
-              {sectionComponents[section.id]}
-              {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
-            </div>
-          )}
+          {sections.filter((s) => s.visible).map((section) => {
+            const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
+            const minHeight = isJobsEmpty ? "" : (sectionMinHeights[section.id] || "");
+            return (
+              <div key={section.id} className={`w-full ${minHeight}`}>
+                {sectionComponents[section.id]}
+                {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
+              </div>
+            );
+          })}
 
           <HomeBanners position="bottom" />
 

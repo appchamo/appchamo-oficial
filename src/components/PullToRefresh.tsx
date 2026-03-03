@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useTriggerRefresh } from "@/contexts/RefreshContext";
 
-const PULL_THRESHOLD = 72;
+const PULL_THRESHOLD = 60;
 const MAX_PULL = 100;
 const INDICATOR_SIZE = 44;
 
@@ -10,9 +10,11 @@ interface PullToRefreshProps {
   children: React.ReactNode;
   /** Ref do elemento que faz scroll (ex.: main). Se não passar, usa document. */
   scrollContainerRef?: React.RefObject<HTMLElement | null>;
+  /** Elemento de scroll (alternativa ao ref; no iOS ajuda anexar os toques no próprio elemento). */
+  scrollContainer?: HTMLElement | null;
 }
 
-export default function PullToRefresh({ children, scrollContainerRef }: PullToRefreshProps) {
+export default function PullToRefresh({ children, scrollContainerRef, scrollContainer }: PullToRefreshProps) {
   const triggerRefresh = useTriggerRefresh();
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -20,16 +22,21 @@ export default function PullToRefresh({ children, scrollContainerRef }: PullToRe
   const pullDistanceRef = useRef(0);
   const refreshingRef = useRef(false);
 
+  const el = scrollContainer ?? scrollContainerRef?.current;
+
   const getScrollTop = useCallback(() => {
-    const el = scrollContainerRef?.current;
-    if (el) return el.scrollTop;
+    const target = scrollContainer ?? scrollContainerRef?.current;
+    if (target) return target.scrollTop;
     return window.scrollY ?? document.documentElement.scrollTop ?? 0;
-  }, [scrollContainerRef]);
+  }, [scrollContainerRef, scrollContainer]);
 
   pullDistanceRef.current = pullDistance;
   refreshingRef.current = refreshing;
 
   useEffect(() => {
+    const target = el ?? document;
+    const isDoc = target === document;
+
     const onTouchStart = (e: TouchEvent) => {
       startY.current = e.touches[0].clientY;
     };
@@ -37,13 +44,13 @@ export default function PullToRefresh({ children, scrollContainerRef }: PullToRe
     const onTouchMove = (e: TouchEvent) => {
       if (refreshingRef.current) return;
       const scrollTop = getScrollTop();
-      if (scrollTop > 0) return;
+      if (scrollTop > 2) return;
       const currentY = e.touches[0].clientY;
       const diff = currentY - startY.current;
       if (diff > 0) {
-        const distance = Math.min(diff * 0.5, MAX_PULL);
+        const distance = Math.min(diff * 0.55, MAX_PULL);
         setPullDistance(distance);
-        if (distance > 10) e.preventDefault();
+        if (distance > 8) e.preventDefault();
       }
     };
 
@@ -63,15 +70,27 @@ export default function PullToRefresh({ children, scrollContainerRef }: PullToRe
       }
     };
 
-    document.addEventListener("touchstart", onTouchStart, { passive: true });
-    document.addEventListener("touchmove", onTouchMove, { passive: false });
-    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    if (isDoc) {
+      document.addEventListener("touchstart", onTouchStart, { passive: true });
+      document.addEventListener("touchmove", onTouchMove, { passive: false });
+      document.addEventListener("touchend", onTouchEnd, { passive: true });
+      return () => {
+        document.removeEventListener("touchstart", onTouchStart);
+        document.removeEventListener("touchmove", onTouchMove);
+        document.removeEventListener("touchend", onTouchEnd);
+      };
+    }
+
+    const scrollEl = target as HTMLElement;
+    scrollEl.addEventListener("touchstart", onTouchStart, { passive: true });
+    scrollEl.addEventListener("touchmove", onTouchMove, { passive: false });
+    scrollEl.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
-      document.removeEventListener("touchstart", onTouchStart);
-      document.removeEventListener("touchmove", onTouchMove);
-      document.removeEventListener("touchend", onTouchEnd);
+      scrollEl.removeEventListener("touchstart", onTouchStart);
+      scrollEl.removeEventListener("touchmove", onTouchMove);
+      scrollEl.removeEventListener("touchend", onTouchEnd);
     };
-  }, [getScrollTop, triggerRefresh]);
+  }, [getScrollTop, triggerRefresh, el]);
 
   const progress = Math.min(pullDistance / PULL_THRESHOLD, 1);
   const rotation = progress * 360;

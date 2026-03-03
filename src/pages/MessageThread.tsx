@@ -87,6 +87,7 @@ const MessageThread = () => {
   const [viewingBilling, setViewingBilling] = useState<any | null>(null);
 
   // Payment state
+  const [confirmServiceModal, setConfirmServiceModal] = useState<Message | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string; installments: string} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
@@ -1168,7 +1169,7 @@ const MessageThread = () => {
               </div>
             ) : (
               <button
-                onClick={() => openPayment(msg)}
+                onClick={() => setConfirmServiceModal(msg)}
                 className="mt-1 w-full py-2 rounded-lg bg-background/20 backdrop-blur-sm text-xs font-semibold hover:bg-background/30 transition-colors border border-current/20">
                 Pagar agora
               </button>
@@ -1838,6 +1839,38 @@ const MessageThread = () => {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Confirmação de que o serviço foi prestado (antes de abrir o pagamento) */}
+      <Dialog open={!!confirmServiceModal} onOpenChange={(open) => !open && setConfirmServiceModal(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirmar serviço</DialogTitle>
+            <DialogDescription>
+              Você confirma que o serviço foi prestado?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-3 mt-4">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setConfirmServiceModal(null)}
+            >
+              Não
+            </Button>
+            <Button
+              className="flex-1"
+              onClick={() => {
+                if (confirmServiceModal) {
+                  openPayment(confirmServiceModal);
+                  setConfirmServiceModal(null);
+                }
+              }}
+            >
+              Sim, foi prestado
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

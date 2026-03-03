@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useRefresh } from "@/contexts/RefreshContext";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot, UserCircle } from "lucide-react";
+import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot, UserCircle, RefreshCw } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AudioPlayer from "@/components/AudioPlayer";
 import PullToRefresh from "@/components/PullToRefresh";
@@ -37,6 +37,12 @@ const SupportThread = () => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLElement | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const setScrollRef = useCallback((el: HTMLElement | null) => {
+    (scrollContainerRef as { current: HTMLElement | null }).current = el;
+    setScrollContainerEl(el);
+  }, []);
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -128,6 +134,22 @@ const SupportThread = () => {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  }, [user, ticketId]);
+
+  // Fallback: polling a cada 15s quando Realtime falha (ex.: iOS/WebView)
+  useEffect(() => {
+    if (!user || !ticketId) return;
+    const interval = setInterval(() => {
+      supabase
+        .from("support_messages")
+        .select("id, sender_id, content, created_at, image_urls")
+        .eq("ticket_id", ticketId)
+        .order("created_at")
+        .then(({ data }) => {
+          if (data?.length) setMessages((data as Message[]).map(m => ({ ...m, image_urls: m.image_urls ?? null })));
+        });
+    }, 15000);
+    return () => clearInterval(interval);
   }, [user, ticketId]);
 
   useEffect(() => {
@@ -406,12 +428,25 @@ const SupportThread = () => {
             <p className="text-sm font-semibold truncate">Suporte Chamô</p>
             <p className="text-[10px] opacity-70">{supportProtocol ? `Protocolo: ${supportProtocol}` : "Atendimento"}</p>
           </div>
+          <button
+            type="button"
+            onClick={async () => {
+              setRefreshing(true);
+              await loadThread();
+              setRefreshing(false);
+            }}
+            disabled={refreshing}
+            className="p-2 rounded-lg hover:bg-amber-600/20 transition-colors disabled:opacity-60"
+            aria-label="Atualizar"
+          >
+            <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
+          </button>
         </div>
       </header>
 
-      <PullToRefresh scrollContainerRef={scrollContainerRef}>
+      <PullToRefresh scrollContainerRef={scrollContainerRef} scrollContainer={scrollContainerEl}>
       <main
-        ref={scrollContainerRef}
+        ref={setScrollRef}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2"
       >
         {messages.map((msg) => {

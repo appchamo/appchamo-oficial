@@ -226,48 +226,56 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         key={pro.id}
         className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-3 flex-1 min-w-0"
       >
-        <div className="flex items-start gap-3">
-          <div className="w-12 h-12 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
+        {/* Foto com "Verificado" na frente (ao lado direito da foto) */}
+        <div className="flex items-center gap-2">
+          <div className="w-14 h-14 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
             {avatarSrc ? (
               <img src={avatarSrc} alt={pro.full_name} className="w-full h-full object-cover rounded-full" />
             ) : (
               initials
             )}
           </div>
-          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-            {pro.verified && (
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-semibold text-foreground">Verificado</span>
-                <div className="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center bg-primary/10">
-                  <BadgeCheck className="w-3 h-3 text-primary" />
-                </div>
+          {pro.verified && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-foreground">Verificado</span>
+              <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                <BadgeCheck className="w-3 h-3 text-primary-foreground" />
               </div>
-            )}
-            <p className="font-semibold text-sm text-foreground truncate">{pro.full_name}</p>
-            <p className="text-xs text-muted-foreground truncate">{pro.profession_name}</p>
-          </div>
+            </div>
+          )}
         </div>
+
+        {/* Nome em baixo da foto */}
+        <p className="font-bold text-foreground truncate">{pro.full_name}</p>
+        {/* Profissão em baixo do nome */}
+        <p className="text-sm text-muted-foreground truncate -mt-2">{pro.profession_name}</p>
+
+        {/* Avaliações */}
         <div className="flex items-center gap-1">
-          <Star className="w-3.5 h-3.5 fill-primary text-primary" />
+          <Star className="w-4 h-4 fill-primary text-primary flex-shrink-0" />
           <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
           <span className="text-xs text-muted-foreground">· {pro.total_services} serviços</span>
         </div>
+
+        {/* Localização */}
         {distanceText && (
-          <div className="flex items-center gap-1.5 text-xs text-foreground">
-            <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+          <div className="flex items-center gap-1.5 text-sm text-foreground">
+            <MapPin className="w-4 h-4 text-primary flex-shrink-0" />
             <span>{distanceText}</span>
           </div>
         )}
+
+        {/* Botões */}
         <div className="flex flex-col gap-2 mt-auto">
           <Link
             to={`/professional/${pro.id}`}
-            className="w-full text-center text-xs font-medium py-2.5 rounded-lg border border-primary text-primary hover:bg-accent transition-colors"
+            className="w-full text-center text-sm font-medium py-2.5 rounded-lg border border-primary text-primary hover:bg-accent transition-colors"
           >
             Ver perfil
           </Link>
           <Link
             to={`/professional/${pro.id}`}
-            className="w-full text-center text-xs font-medium py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            className="w-full text-center text-sm font-medium py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             Contratar
           </Link>

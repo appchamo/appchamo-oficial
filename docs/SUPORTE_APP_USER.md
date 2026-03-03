@@ -16,7 +16,28 @@ O perfil **Suporte** acessa apenas a tela de atendimento (Central de Atendimento
    - **Auto Confirm User:** marcado
 3. Crie o usuário.
 
-O trigger `handle_new_user` vai criar o perfil em `profiles` com esse e-mail. Não é necessário atribuir role em `user_roles`; o app identifica o perfil de suporte pelo e-mail.
+O trigger `handle_new_user` vai criar o perfil em `profiles` com esse e-mail.
+
+## Permitir que o suporte veja todos os tickets (RLS)
+
+O app identifica o perfil de suporte pelo e-mail, mas as tabelas `support_tickets` e `support_messages` têm RLS: só **admins** veem todos os chamados. Por isso é preciso dar a role **support_admin** ao usuário de suporte.
+
+**Opção A – Rodar a migration (se usar Supabase CLI):**
+```bash
+supabase db push
+```
+
+**Opção B – Rodar o SQL no Supabase (Dashboard → SQL Editor):**
+```sql
+INSERT INTO public.user_roles (user_id, role)
+SELECT p.user_id, 'support_admin'::public.app_role
+FROM public.profiles p
+WHERE p.email = 'suporte@appchamo.com'
+  AND EXISTS (SELECT 1 FROM auth.users u WHERE u.id = p.user_id)
+ON CONFLICT (user_id, role) DO NOTHING;
+```
+
+Depois disso, o usuário de suporte passa a ver e responder a todas as solicitações na Central de Atendimento.
 
 ## Comportamento no app
 

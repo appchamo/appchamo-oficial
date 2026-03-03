@@ -34,8 +34,8 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
   refreshingRef.current = refreshing;
 
   useEffect(() => {
-    const target = el ?? document;
-    const isDoc = target === document;
+    const isDoc = !el || el === document;
+    const target = isDoc ? document : (el && typeof el.addEventListener === "function" ? el : document);
 
     const onTouchStart = (e: TouchEvent) => {
       startY.current = e.touches[0].clientY;
@@ -70,7 +70,7 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
       }
     };
 
-    if (isDoc) {
+    if (target === document) {
       document.addEventListener("touchstart", onTouchStart, { passive: true });
       document.addEventListener("touchmove", onTouchMove, { passive: false });
       document.addEventListener("touchend", onTouchEnd, { passive: true });
@@ -82,13 +82,19 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
     }
 
     const scrollEl = target as HTMLElement;
-    scrollEl.addEventListener("touchstart", onTouchStart, { passive: true });
-    scrollEl.addEventListener("touchmove", onTouchMove, { passive: false });
-    scrollEl.addEventListener("touchend", onTouchEnd, { passive: true });
+    try {
+      scrollEl.addEventListener("touchstart", onTouchStart, { passive: true });
+      scrollEl.addEventListener("touchmove", onTouchMove, { passive: false });
+      scrollEl.addEventListener("touchend", onTouchEnd, { passive: true });
+    } catch {
+      return;
+    }
     return () => {
-      scrollEl.removeEventListener("touchstart", onTouchStart);
-      scrollEl.removeEventListener("touchmove", onTouchMove);
-      scrollEl.removeEventListener("touchend", onTouchEnd);
+      try {
+        scrollEl.removeEventListener("touchstart", onTouchStart);
+        scrollEl.removeEventListener("touchmove", onTouchMove);
+        scrollEl.removeEventListener("touchend", onTouchEnd);
+      } catch {}
     };
   }, [getScrollTop, triggerRefresh, el]);
 

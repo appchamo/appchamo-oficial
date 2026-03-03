@@ -38,14 +38,22 @@ const Support = () => {
   }, [loadTickets]);
 
   const loadTickets = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from("support_tickets")
-      .select("id, protocol, subject, status, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-    setTickets((data as Ticket[]) || []);
-    setLoading(false);
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data } = await supabase
+        .from("support_tickets")
+        .select("id, protocol, subject, status, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      setTickets((data as Ticket[]) || []);
+    } catch {
+      setTickets([]);
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -78,44 +86,47 @@ const Support = () => {
     ticketMessage: string,
     firstThreadMessage?: string
   ) => {
-    if (!user) return;
+    if (!user?.id) return;
     setCreating(true);
-    const { data: newTicket, error } = await supabase
-      .from("support_tickets")
-      .insert({ user_id: user.id, subject, message: ticketMessage })
-      .select("id")
-      .single();
-    if (error || !newTicket) {
+    try {
+      const { data: newTicket, error } = await supabase
+        .from("support_tickets")
+        .insert({ user_id: user.id, subject, message: ticketMessage })
+        .select("id")
+        .single();
+      if (error || !newTicket?.id) {
+        setCreating(false);
+        return;
+      }
+      if (firstThreadMessage) {
+        await supabase.from("support_messages").insert({
+          user_id: user.id,
+          sender_id: user.id,
+          ticket_id: newTicket.id,
+          content: firstThreadMessage,
+        });
+      }
+      const { data: supportProfile } = await supabase
+        .from("profiles")
+        .select("user_id")
+        .eq("email", "suporte@appchamo.com")
+        .maybeSingle();
+      if (supportProfile?.user_id) {
+        await supabase.from("notifications").insert({
+          user_id: supportProfile.user_id,
+          title: "Nova solicitação de suporte",
+          message: subject,
+          type: "support",
+          link: "/suporte-desk",
+        });
+      }
+      if (firstThreadMessage) {
+        navigate(`/support/${newTicket.id}`);
+      } else {
+        navigate(`/support/${newTicket.id}`, { state: { initialMessage: subject } });
+      }
+    } finally {
       setCreating(false);
-      return;
-    }
-    if (firstThreadMessage) {
-      await supabase.from("support_messages").insert({
-        user_id: user.id,
-        sender_id: user.id,
-        ticket_id: newTicket.id,
-        content: firstThreadMessage,
-      });
-    }
-    const { data: supportProfile } = await supabase
-      .from("profiles")
-      .select("user_id")
-      .eq("email", "suporte@appchamo.com")
-      .maybeSingle();
-    if (supportProfile?.user_id) {
-      await supabase.from("notifications").insert({
-        user_id: supportProfile.user_id,
-        title: "Nova solicitação de suporte",
-        message: subject,
-        type: "support",
-        link: "/suporte-desk",
-      });
-    }
-    setCreating(false);
-    if (firstThreadMessage) {
-      navigate(`/support/${newTicket.id}`);
-    } else {
-      navigate(`/support/${newTicket.id}`, { state: { initialMessage: subject } });
     }
   };
 

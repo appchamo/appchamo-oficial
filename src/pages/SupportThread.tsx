@@ -40,8 +40,12 @@ const SupportThread = () => {
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const setScrollRef = useCallback((el: HTMLElement | null) => {
-    (scrollContainerRef as { current: HTMLElement | null }).current = el;
-    setScrollContainerEl(el);
+    try {
+      (scrollContainerRef as { current: HTMLElement | null }).current = el;
+      setScrollContainerEl(el);
+    } catch {
+      setScrollContainerEl(null);
+    }
   }, []);
 
   const [isRecording, setIsRecording] = useState(false);
@@ -52,23 +56,31 @@ const SupportThread = () => {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadThread = useCallback(async () => {
-    if (!user || !ticketId) return;
-    const { data: ticket } = await supabase
-      .from("support_tickets")
-      .select("protocol, requested_human_at, subject")
-      .eq("id", ticketId)
-      .single();
-    if (ticket?.protocol) setSupportProtocol(ticket.protocol);
-    setRequestedHumanAt((ticket as any)?.requested_human_at ?? null);
-    setTicketSubject((ticket as any)?.subject ?? null);
+    if (!user?.id || !ticketId) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data: ticket } = await supabase
+        .from("support_tickets")
+        .select("protocol, requested_human_at, subject")
+        .eq("id", ticketId)
+        .single();
+      if (ticket?.protocol) setSupportProtocol(ticket.protocol);
+      setRequestedHumanAt((ticket as any)?.requested_human_at ?? null);
+      setTicketSubject((ticket as any)?.subject ?? null);
 
-    const { data } = await supabase
-      .from("support_messages")
-      .select("*")
-      .eq("ticket_id", ticketId)
-      .order("created_at");
-    setMessages((data as Message[]) || []);
-    setLoading(false);
+      const { data } = await supabase
+        .from("support_messages")
+        .select("*")
+        .eq("ticket_id", ticketId)
+        .order("created_at");
+      setMessages((data as Message[]) || []);
+    } catch {
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
   }, [user, ticketId]);
 
   useEffect(() => {
@@ -76,7 +88,7 @@ const SupportThread = () => {
     loadThread();
   }, [user, ticketId, loadThread]);
 
-  useRefresh(loadThread);
+  useRefresh(() => loadThread());
 
   // Preencher campo de mensagem quando veio de um botão de assunto
   useEffect(() => {
@@ -109,7 +121,7 @@ const SupportThread = () => {
   }, [user, ticketId, ticketSubject, messages, loading]);
 
   useEffect(() => {
-    if (!user || !ticketId) return;
+    if (!user || !ticketId || typeof ticketId !== "string") return;
     const channel = supabase
       .channel(`support-thread-${ticketId}`)
       .on("postgres_changes", {
@@ -138,7 +150,7 @@ const SupportThread = () => {
 
   // Fallback: polling a cada 15s quando Realtime falha (ex.: iOS/WebView)
   useEffect(() => {
-    if (!user || !ticketId) return;
+    if (!user || !ticketId || typeof ticketId !== "string") return;
     const interval = setInterval(() => {
       supabase
         .from("support_messages")
@@ -147,7 +159,8 @@ const SupportThread = () => {
         .order("created_at")
         .then(({ data }) => {
           if (data?.length) setMessages((data as Message[]).map(m => ({ ...m, image_urls: m.image_urls ?? null })));
-        });
+        })
+        .catch(() => {});
     }, 15000);
     return () => clearInterval(interval);
   }, [user, ticketId]);
@@ -405,6 +418,17 @@ const SupportThread = () => {
 
     return <p className="whitespace-pre-wrap">{msg.content}</p>;
   };
+
+  if (!ticketId) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
+        <p className="text-sm text-muted-foreground text-center mb-4">Solicitação inválida ou não encontrada.</p>
+        <Link to="/support" className="py-2.5 px-4 rounded-xl bg-primary text-primary-foreground font-semibold text-sm">
+          Voltar ao Suporte
+        </Link>
+      </div>
+    );
+  }
 
   if (loading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="animate-spin w-6 h-6 text-primary" /></div>;
 

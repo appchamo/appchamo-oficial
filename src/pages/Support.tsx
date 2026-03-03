@@ -49,8 +49,25 @@ const Support = () => {
       .insert({ user_id: user.id, subject, message: initialMessage })
       .select("id")
       .single();
+    if (error || !newTicket) {
+      setCreating(false);
+      return;
+    }
+    const { data: supportProfile } = await supabase
+      .from("profiles")
+      .select("user_id")
+      .eq("email", "suporte@appchamo.com")
+      .maybeSingle();
+    if (supportProfile?.user_id) {
+      await supabase.from("notifications").insert({
+        user_id: supportProfile.user_id,
+        title: "Nova solicitação de suporte",
+        message: subject,
+        type: "support",
+        link: "/suporte-desk",
+      });
+    }
     setCreating(false);
-    if (error || !newTicket) return;
     navigate(`/support/${newTicket.id}`);
   };
 

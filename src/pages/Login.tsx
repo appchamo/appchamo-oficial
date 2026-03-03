@@ -104,7 +104,14 @@ const Login = () => {
     }
   }, []);
 
-  const checkDeviceLimitAndRedirect = async (userId: string) => {
+  const SUPPORT_EMAIL = "suporte@appchamo.com";
+
+  const checkDeviceLimitAndRedirect = async (userId: string, emailFromAuth?: string) => {
+    const isSupport = (emailFromAuth || "").toLowerCase().trim() === SUPPORT_EMAIL.toLowerCase().trim();
+    if (isSupport) {
+      await proceedToRedirect(userId, emailFromAuth);
+      return;
+    }
     try {
       const deviceId = getDeviceId();
       const deviceName = getDeviceName();
@@ -117,14 +124,14 @@ const Login = () => {
 
       if (deviceError) {
         console.error("Erro ao verificar aparelhos:", deviceError);
-        await proceedToRedirect(userId);
+        await proceedToRedirect(userId, emailFromAuth);
       } else if (canLogin === false) {
         setDeviceLimitHit(true);
         setPendingUserId(userId);
         setLoading(false);
         return;
       } else {
-        await proceedToRedirect(userId);
+        await proceedToRedirect(userId, emailFromAuth);
       }
     } catch (err) {
       console.error("Erro na verificação do dispositivo:", err);
@@ -133,11 +140,34 @@ const Login = () => {
     }
   };
 
-  const proceedToRedirect = async (userId: string) => {
+  const proceedToRedirect = async (userId: string, emailFromAuth?: string) => {
     if (isRedirecting) return;
     isRedirecting = true; 
 
     try {
+      const normalizedSupportEmail = SUPPORT_EMAIL.toLowerCase().trim();
+      const authEmail = (emailFromAuth || "").toLowerCase().trim();
+      if (authEmail === normalizedSupportEmail) {
+        localStorage.removeItem("signup_in_progress");
+        localStorage.removeItem("manual_login_intent");
+        navigate("/suporte-desk", { replace: true });
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      const profileEmail = (profile?.email || "").toLowerCase().trim();
+      if (profileEmail === normalizedSupportEmail) {
+        localStorage.removeItem("signup_in_progress");
+        localStorage.removeItem("manual_login_intent");
+        navigate("/suporte-desk", { replace: true });
+        return;
+      }
+
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
@@ -153,12 +183,6 @@ const Login = () => {
         navigate("/admin", { replace: true }); 
         return;
       }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
 
       const isProfileIncomplete = !profile || (!profile.cpf && !profile.phone);
 
@@ -254,13 +278,13 @@ const Login = () => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirecting) {
-        checkDeviceLimitAndRedirect(session.user.id);
+        checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
       }
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && !isRedirecting) {
-        checkDeviceLimitAndRedirect(session.user.id);
+        checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
       }
     });
 
@@ -300,7 +324,7 @@ const Login = () => {
     }
     
     localStorage.removeItem("manual_login_intent");
-    await checkDeviceLimitAndRedirect(data.user.id);
+    await checkDeviceLimitAndRedirect(data.user.id, data.user.email ?? undefined);
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {

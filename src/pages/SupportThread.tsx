@@ -97,6 +97,20 @@ const SupportThread = () => {
       setSending(false);
       return;
     }
+    const { data: supportProfile } = await supabase
+      .from("profiles")
+      .select("user_id")
+      .eq("email", "suporte@appchamo.com")
+      .maybeSingle();
+    if (supportProfile?.user_id) {
+      await supabase.from("notifications").insert({
+        user_id: supportProfile.user_id,
+        title: "Nova mensagem no suporte",
+        message: text.trim().slice(0, 80) + (text.trim().length > 80 ? "…" : ""),
+        type: "support",
+        link: "/suporte-desk",
+      });
+    }
     setText("");
     setSending(false);
 

@@ -11,6 +11,7 @@ import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { Capacitor } from "@capacitor/core";
 import { CheckCircle2, Star, Loader2 } from "lucide-react";
@@ -72,6 +73,8 @@ const AdminEnterprise = lazy(() => import("./pages/admin/AdminEnterprise"));
 const AdminSupport = lazy(() => import("./pages/admin/AdminSupport"));
 const AdminNotifications = lazy(() => import("./pages/admin/AdminNotifications"));
 const AdminLayoutPage = lazy(() => import("./pages/admin/AdminLayout"));
+const SupportDesk = lazy(() => import("./pages/SupportDesk"));
+const SupportDeskNotifications = lazy(() => import("./pages/SupportDeskNotifications"));
 const AdminTutorials = lazy(() => import("./pages/admin/AdminTutorials"));
 const AdminProfiles = lazy(() => import("./pages/admin/AdminProfiles"));
 
@@ -130,6 +133,14 @@ const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "
 const SPLASH_SHOWN_KEY = "chamo_splash_shown";
 
 /** No Android, cria o canal "default" logo na abertura do app para push em background aparecer. */
+/** Redireciona usuário logado: suporte → /suporte-desk, demais → /home */
+const RedirectLoggedIn = () => {
+  const { user } = useAuth();
+  const email = (user?.email || "").toLowerCase().trim();
+  if (email === "suporte@appchamo.com") return <Navigate to="/suporte-desk" replace />;
+  return <Navigate to="/home" replace />;
+};
+
 const AndroidPushChannelInit = () => {
   useEffect(() => {
     if (Capacitor.getPlatform() !== "android") return;
@@ -307,7 +318,7 @@ const AppContent = () => {
       <BackButtonHandler />
       <Suspense fallback={<PageFallback />}>
         <Routes>
-        <Route path="/" element={session ? <Navigate to="/home" replace /> : <Index />} />
+        <Route path="/" element={session ? <RedirectLoggedIn /> : <Index />} />
         <Route path="/login" element={<Login />} />
         
         <Route path="/signup" element={<Signup />} />
@@ -343,6 +354,8 @@ const AppContent = () => {
         <Route path="/professional/:id" element={<ProtectedRoute><ProfessionalProfile /></ProtectedRoute>} />
         <Route path="/support" element={<ProtectedRoute><Support /></ProtectedRoute>} />
         <Route path="/support/:ticketId" element={<ProtectedRoute><SupportThread /></ProtectedRoute>} />
+        <Route path="/suporte-desk" element={<SupportDeskRoute><SupportDesk /></SupportDeskRoute>} />
+        <Route path="/suporte-desk/notificacoes" element={<SupportDeskRoute><SupportDeskNotifications /></SupportDeskRoute>} />
         <Route path="/terms" element={<ProtectedRoute><Terms /></ProtectedRoute>} />
         <Route path="/tutorial/:id" element={<ProtectedRoute><TutorialDetail /></ProtectedRoute>} />
         <Route path="/how-it-works" element={<ProtectedRoute><HowItWorks /></ProtectedRoute>} />

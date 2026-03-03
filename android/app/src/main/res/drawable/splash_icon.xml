@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Tamanho quadrado para não achatar o logo (antes 150x200 distorcia o C) -->
+    <!-- Largura 200dp, altura 280dp para o C não ficar achatado -->
     <item
         android:drawable="@drawable/splash"
-        android:width="160dp"
-        android:height="220dp"
+        android:width="200dp"
+        android:height="280dp"
         android:gravity="center" />
 </layer-list>

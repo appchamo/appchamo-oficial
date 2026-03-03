@@ -359,8 +359,8 @@ const AppContent = () => {
         <Route path="/suporte-desk" element={<SupportDeskRoute><SupportDesk /></SupportDeskRoute>} />
         <Route path="/suporte-desk/notificacoes" element={<SupportDeskRoute><SupportDeskNotifications /></SupportDeskRoute>} />
         <Route path="/terms" element={<ProtectedRoute><Terms /></ProtectedRoute>} />
-        <Route path="/terms-of-use" element={<ProtectedRoute><TermsOfUse /></ProtectedRoute>} />
-        <Route path="/privacy" element={<ProtectedRoute><PrivacyPolicy /></ProtectedRoute>} />
+        <Route path="/terms-of-use" element={<TermsOfUse />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/tutorial/:id" element={<ProtectedRoute><TutorialDetail /></ProtectedRoute>} />
         <Route path="/how-it-works" element={<ProtectedRoute><HowItWorks /></ProtectedRoute>} />
         <Route path="/how-to-use" element={<ProtectedRoute><HowToUse /></ProtectedRoute>} />

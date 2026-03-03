@@ -3,8 +3,10 @@ import { ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import AppLayout from "@/components/AppLayout";
+import { useAuth } from "@/hooks/useAuth";
 
 const PrivacyPolicy = () => {
+  const { user } = useAuth();
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -36,7 +38,7 @@ const PrivacyPolicy = () => {
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         <div className="flex items-center gap-3 mb-4">
-          <Link to="/profile" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+          <Link to={user ? "/profile" : "/"} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </Link>
           <h1 className="text-xl font-bold text-foreground">Política de Privacidade</h1>

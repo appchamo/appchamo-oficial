@@ -363,6 +363,36 @@ const SupportThread = () => {
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+  /** Envia mensagem de botão de resposta rápida (final obrigatório do fluxo da IA). */
+  const sendQuickReply = async (content: string) => {
+    if (!user || !ticketId || isClosed) return;
+    setSending(true);
+    const { data: newMsg, error } = await supabase
+      .from("support_messages")
+      .insert({ user_id: user.id, sender_id: user.id, content, ticket_id: ticketId })
+      .select("id, sender_id, content, created_at")
+      .single();
+    if (error) {
+      toast({ title: "Erro ao enviar", variant: "destructive" });
+      setSending(false);
+      return;
+    }
+    if (newMsg) setMessages((prev) => [...prev, { ...newMsg, image_urls: null } as Message]);
+    setSending(false);
+    await new Promise((r) => setTimeout(r, 800));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await supabase.functions.invoke("support-ai-reply", {
+          body: { ticket_id: ticketId },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+      }
+    } catch {
+      // silencioso
+    }
+  };
+
   const handleRequestHuman = async () => {
     if (!ticketId || !user || requestingHuman || requestedHumanAt) return;
     setRequestingHuman(true);
@@ -520,6 +550,25 @@ const SupportThread = () => {
             paddingBottom: "env(safe-area-inset-bottom, 0px)",
           }}
         >
+          <p className="text-[11px] text-muted-foreground mb-2 max-w-screen-lg mx-auto">Essa resposta resolveu seu problema?</p>
+          <div className="flex gap-2 mb-2 max-w-screen-lg mx-auto">
+            <button
+              type="button"
+              onClick={() => sendQuickReply("Problema resolvido")}
+              disabled={sending}
+              className="flex-1 py-2 rounded-xl border border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-400 text-xs font-medium hover:bg-green-500/20 transition-colors disabled:opacity-50"
+            >
+              Problema resolvido
+            </button>
+            <button
+              type="button"
+              onClick={() => sendQuickReply("Falar com atendente humano")}
+              disabled={sending}
+              className="flex-1 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+            >
+              Falar com atendente humano
+            </button>
+          </div>
           {!requestedHumanAt && (
             <div className="max-w-screen-lg mx-auto mb-2">
               <button

@@ -93,6 +93,8 @@ Deno.serve(async (req) => {
       else profileUpdates.cnpj = basicData.document;
     }
 
+    if (basicData.asaas_customer_id) profileUpdates.asaas_customer_id = basicData.asaas_customer_id;
+
     if (profileData?.avatarUrl) profileUpdates.avatar_url = profileData.avatarUrl;
 
     // 🔥 UPSERT (resolve conflito com o Trigger SQL que criamos antes)

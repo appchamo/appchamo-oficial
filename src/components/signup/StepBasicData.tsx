@@ -23,6 +23,8 @@ export interface BasicData {
   addressCity: string;
   addressState: string;
   addressCountry: string;
+  /** Preenchido após validação do CPF/CNPJ no Asaas (cadastro profissional). */
+  asaas_customer_id?: string;
 }
 
 interface Props {
@@ -324,11 +326,39 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
       setValidating(true);
       const field = documentType === "cpf" ? "cpf" : "cnpj";
       const { data: existing } = await supabase.from("profiles").select("id").eq(field, docClean).limit(1);
-      setValidating(false);
       if (existing && existing.length > 0) {
+        setValidating(false);
         toast({ title: `Este ${documentType.toUpperCase()} já está cadastrado.`, variant: "destructive" });
         return;
       }
+
+      // Profissional: validar CPF/CNPJ + nome no Asaas (verifica se documento existe e confere com o nome)
+      if (accountType === "professional") {
+        const { data: validation } = await supabase.functions.invoke("validate-cpf-signup", {
+          body: { name: name.trim(), cpfCnpj: docClean },
+        });
+        setValidating(false);
+        if (validation?.valid !== true) {
+          toast({
+            title: validation?.message || "CPF/CNPJ inválido ou não confere com o nome.",
+            variant: "destructive",
+          });
+          return;
+        }
+        // Guardar asaas_customer_id para o complete-signup salvar no perfil e reutilizar em assinaturas
+        onNext({
+          name, email, phone: phone.replace(/\D/g, ""),
+          document: docClean, documentType,
+          password, birthDate,
+          addressZip: addressZip.replace(/\D/g, ""),
+          addressStreet, addressNumber, addressComplement,
+          addressNeighborhood, addressCity, addressState,
+          addressCountry,
+          asaas_customer_id: validation.asaas_customer_id,
+        });
+        return;
+      }
+      setValidating(false);
     }
 
     onNext({

@@ -67,9 +67,11 @@ const HomeBanners = ({ position }: Props) => {
 
   if (banners.length === 0) return null;
 
+  const spacingClass = "mt-[3%] mb-[3%]";
+
   if (isCarousel) {
     return (
-      <section className="w-full">
+      <section className={`w-full ${spacingClass}`}>
         <div
           ref={scrollRef}
           className="flex overflow-x-auto overflow-y-hidden snap-x snap-mandatory scroll-smooth scrollbar-hide"
@@ -114,7 +116,7 @@ const HomeBanners = ({ position }: Props) => {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={`flex flex-col gap-3 ${spacingClass}`}>
       {banners.map((b) => {
         const displayImage = (isMobile && b.image_url_mobile) ? b.image_url_mobile : b.image_url;
         return (

@@ -95,6 +95,8 @@ Deno.serve(async (req) => {
 
     if (basicData.asaas_customer_id) profileUpdates.asaas_customer_id = basicData.asaas_customer_id;
 
+    if (basicData.gender) profileUpdates.gender = basicData.gender;
+
     if (profileData?.avatarUrl) profileUpdates.avatar_url = profileData.avatarUrl;
 
     // 🔥 UPSERT (resolve conflito com o Trigger SQL que criamos antes)

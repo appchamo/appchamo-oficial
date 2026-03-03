@@ -144,6 +144,8 @@ const Header = () => {
 
   const isPro = profile && profile.user_type !== "client";
   const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "Usuário";
+  const welcomeWord =
+    profile?.gender === "female" ? "Bem-vinda" : profile?.gender === "male" ? "Bem-vindo" : "Bem-vindo(a)";
 
   // Regra de Exibição do Selo
   const showPendingBadge = isPro && (proStatus === "pending" || (planId !== "free" && subStatus && subStatus.toUpperCase() !== "ACTIVE"));
@@ -151,10 +153,10 @@ const Header = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-30 bg-card/90 backdrop-blur-md border-b">
+      <header className="sticky top-0 z-30 bg-card/90 backdrop-blur-md border-b border-secondary">
         <div className="flex items-center justify-between px-4 py-3 max-w-screen-lg mx-auto">
           <span className="text-lg font-bold text-foreground truncate max-w-[55%]">
-            Bem-vindo, <span className="text-primary">{firstName}</span> 👋
+            {welcomeWord}, <span className="text-primary">{firstName}</span> 👋
           </span>
           <div className="flex items-center gap-2">
             

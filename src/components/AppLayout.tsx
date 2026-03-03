@@ -17,13 +17,16 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
   const isHome = location.pathname === "/home";
 
   const mainContent = (
-    <main key={location.pathname} className="flex-1 animate-in fade-in duration-300 pt-3">
+    <main
+      key={location.pathname}
+      className={`flex-1 animate-in fade-in duration-300 ${isHome ? "bg-secondary pt-2" : "pt-3"}`}
+    >
       {children}
     </main>
   );
 
   return (
-    <div className="min-h-[100dvh] bg-background pb-20 flex flex-col">
+    <div className={`min-h-[100dvh] pb-20 flex flex-col ${isHome ? "bg-secondary" : "bg-background"}`}
       {showHeader && <MemoizedHeader />}
       {isHome ? <PullToRefresh>{mainContent}</PullToRefresh> : mainContent}
       <MemoizedBottomNav />

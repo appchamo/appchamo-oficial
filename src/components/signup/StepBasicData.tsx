@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Mail, Lock, User, Phone, FileText, MapPin, Search, Calendar, ScrollText, CheckCircle2 } from "lucide-react";
+import { Mail, Lock, User, Phone, FileText, MapPin, Search, Calendar, ScrollText, CheckCircle2, UserCircle } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type AccountType = "client" | "professional";
+
+export type GenderOption = "male" | "female" | "prefer_not_say";
 
 export interface BasicData {
   name: string;
@@ -15,6 +17,7 @@ export interface BasicData {
   documentType: "cpf" | "cnpj";
   password: string;
   birthDate: string;
+  gender: GenderOption;
   addressZip: string;
   addressStreet: string;
   addressNumber: string;
@@ -223,6 +226,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
   const [addressState, setAddressState] = useState("");
   const [addressCountry, setAddressCountry] = useState("Brasil");
   const [birthDate, setBirthDate] = useState("");
+  const [gender, setGender] = useState<BasicData["gender"]>(initialData?.gender ?? "prefer_not_say");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [loadingCep, setLoadingCep] = useState(false);
@@ -349,7 +353,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
         onNext({
           name, email, phone: phone.replace(/\D/g, ""),
           document: docClean, documentType,
-          password, birthDate,
+          password, birthDate, gender,
           addressZip: addressZip.replace(/\D/g, ""),
           addressStreet, addressNumber, addressComplement,
           addressNeighborhood, addressCity, addressState,
@@ -364,7 +368,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     onNext({
       name, email, phone: phone.replace(/\D/g, ""),
       document: docClean, documentType,
-      password, birthDate,
+      password, birthDate, gender,
       addressZip: addressZip.replace(/\D/g, ""),
       addressStreet, addressNumber, addressComplement,
       addressNeighborhood, addressCity, addressState,
@@ -409,7 +413,24 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
           {birthDate && isUnderage(birthDate) && (
             <p className="text-xs text-destructive font-medium px-1">Você precisa ter 18 anos ou mais para se cadastrar.</p>
           )}
-{/* Documento */}
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Sexo</label>
+            <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+              <UserCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <select
+                value={gender}
+                onChange={(e) => setGender(e.target.value as BasicData["gender"])}
+                className="flex-1 bg-transparent text-sm outline-none text-foreground"
+              >
+                <option value="male">Masculino</option>
+                <option value="female">Feminino</option>
+                <option value="prefer_not_say">Prefiro não informar</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Documento */}
 <div>
   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
     {accountType === "professional"

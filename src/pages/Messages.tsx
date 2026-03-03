@@ -290,6 +290,16 @@ const Messages = () => {
       if (!user) throw new Error("Usuário não autenticado");
       const { error } = await supabase.from('chat_reports' as any).insert({ reporter_id: user.id, chat_id: reportingChatId, reason: reportReason.trim() });
       if (error) throw error;
+      const { data: supportProfile } = await supabase.from("profiles").select("user_id").eq("email", "suporte@appchamo.com").maybeSingle();
+      if (supportProfile?.user_id) {
+        await supabase.from("notifications").insert({
+          user_id: supportProfile.user_id,
+          title: "Nova denúncia de chat",
+          message: "Uma conversa foi denunciada. Abra a Central de Atendimento para revisar.",
+          type: "support",
+          link: "/suporte-desk",
+        });
+      }
       setReportingChatId(null);
       setReportReason("");
       alert("Denúncia enviada com sucesso!");

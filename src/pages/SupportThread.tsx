@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot } from "lucide-react";
+import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot, UserCircle } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AudioPlayer from "@/components/AudioPlayer";
 import { isSupportBotMessage } from "@/lib/supportBot";
@@ -26,6 +26,8 @@ const SupportThread = () => {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false); // ✅ Novo estado
   const [supportProtocol, setSupportProtocol] = useState<string | null>(null);
+  const [requestedHumanAt, setRequestedHumanAt] = useState<string | null>(null);
+  const [requestingHuman, setRequestingHuman] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -41,10 +43,11 @@ const SupportThread = () => {
     const load = async () => {
       const { data: ticket } = await supabase
         .from("support_tickets")
-        .select("protocol")
+        .select("protocol, requested_human_at")
         .eq("id", ticketId)
         .single();
       if (ticket?.protocol) setSupportProtocol(ticket.protocol);
+      setRequestedHumanAt((ticket as any)?.requested_human_at ?? null);
 
       const { data } = await supabase
         .from("support_messages")
@@ -96,20 +99,6 @@ const SupportThread = () => {
       toast({ title: "Erro ao enviar", variant: "destructive" });
       setSending(false);
       return;
-    }
-    const { data: supportProfile } = await supabase
-      .from("profiles")
-      .select("user_id")
-      .eq("email", "suporte@appchamo.com")
-      .maybeSingle();
-    if (supportProfile?.user_id) {
-      await supabase.from("notifications").insert({
-        user_id: supportProfile.user_id,
-        title: "Nova mensagem no suporte",
-        message: text.trim().slice(0, 80) + (text.trim().length > 80 ? "…" : ""),
-        type: "support",
-        link: "/suporte-desk",
-      });
     }
     setText("");
     setSending(false);
@@ -277,6 +266,26 @@ const SupportThread = () => {
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+  const handleRequestHuman = async () => {
+    if (!ticketId || !user || requestingHuman || requestedHumanAt) return;
+    setRequestingHuman(true);
+    const { error } = await supabase.rpc("request_human_attendant", { _ticket_id: ticketId });
+    if (error) {
+      toast({ title: "Erro ao solicitar atendente", variant: "destructive" });
+      setRequestingHuman(false);
+      return;
+    }
+    setRequestedHumanAt(new Date().toISOString());
+    await supabase.from("support_messages").insert({
+      user_id: user.id,
+      sender_id: user.id,
+      ticket_id: ticketId,
+      content: "Solicitei falar com um atendente humano.",
+    });
+    toast({ title: "Solicitação enviada", description: "Um atendente será notificado em breve." });
+    setRequestingHuman(false);
+  };
+
   const renderContent = (msg: Message) => {
     const audioMatch = msg.content.match(/\[AUDIO:(.+):(\d+)\]$/);
     if (audioMatch) return <AudioPlayer src={audioMatch[1]} duration={parseInt(audioMatch[2])} isMine={msg.sender_id === user?.id} />;
@@ -372,6 +381,19 @@ const SupportThread = () => {
             paddingBottom: "env(safe-area-inset-bottom, 0px)",
           }}
         >
+          {!requestedHumanAt && (
+            <div className="max-w-screen-lg mx-auto mb-2">
+              <button
+                type="button"
+                onClick={handleRequestHuman}
+                disabled={requestingHuman}
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+              >
+                {requestingHuman ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCircle className="w-4 h-4" />}
+                {requestingHuman ? "Enviando…" : "Falar com um atendente"}
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-2 max-w-screen-lg mx-auto">
             {isRecording ? (
               <>

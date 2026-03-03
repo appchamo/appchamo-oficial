@@ -79,6 +79,33 @@ serve(async (req) => {
       console.log("Nenhuma mensagem no ticket ainda; enviando boas-vindas.");
     }
 
+    const lastUserContent = lastMessage && !isBot(lastMessage.sender_id) ? (lastMessage.content || "").toLowerCase() : "";
+    const wantsHuman = /\b(atendente\s+humano|falar\s+com\s+(um\s+)?(atendente|humano|pessoa)|quero\s+(um\s+)?(atendente|humano)|atendente\s+por\s+favor|transferir\s+para\s+(um\s+)?(atendente|humano))\b/i.test(lastUserContent);
+
+    if (wantsHuman) {
+      const { data: ticketRow } = await supabase.from("support_tickets").select("requested_human_at").eq("id", ticket_id).single();
+      if (ticketRow && !ticketRow.requested_human_at) {
+        await supabase.from("support_tickets").update({ requested_human_at: new Date().toISOString() }).eq("id", ticket_id);
+        const { data: supportProfile } = await supabase.from("profiles").select("user_id").eq("email", "suporte@appchamo.com").maybeSingle();
+        if (supportProfile?.user_id) {
+          await supabase.from("notifications").insert({
+            user_id: supportProfile.user_id,
+            title: "Um usuário quer falar com um atendente",
+            message: "Clique para abrir o atendimento no suporte.",
+            type: "support",
+            link: "/suporte-desk",
+          });
+        }
+        await supabase.from("support_messages").insert({
+          ticket_id: ticket_id,
+          user_id: ticket.user_id,
+          sender_id: BOT_SENDER_ID,
+          content: "Um atendente foi notificado e entrará em contato em breve.",
+        });
+        return jsonResponse({ ok: true, requested_human: true }, 200);
+      }
+    }
+
     const systemPrompt = `Você é o assistente de suporte do app Chamô. Responda em português do Brasil, de forma clara, objetiva e prestativa.
 Assunto do ticket: ${ticket.subject || "Geral"}.
 Regras: seja breve (2-4 frases quando possível), não invente informações sobre preços ou planos específicos, e sugira "falar com um atendente" se a dúvida for muito específica ou sensível.`;

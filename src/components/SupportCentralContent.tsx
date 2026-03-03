@@ -12,6 +12,7 @@ export interface TicketThread {
   subject: string;
   status: string;
   created_at: string;
+  requested_human_at: string | null;
   full_name: string;
   avatar_url: string | null;
   unreadCount: number;
@@ -77,7 +78,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
     setLoading(true);
     const { data: ticketRows } = await supabase
       .from("support_tickets")
-      .select("id, user_id, protocol, subject, status, created_at")
+      .select("id, user_id, protocol, subject, status, created_at, requested_human_at")
       .order("created_at", { ascending: false });
 
     if (!ticketRows || ticketRows.length === 0) {
@@ -110,6 +111,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         subject: t.subject,
         status: t.status,
         created_at: t.created_at,
+        requested_human_at: (t as any).requested_human_at ?? null,
         full_name: p?.full_name || "Usuário",
         avatar_url: p?.avatar_url || null,
         unreadCount: 0,
@@ -159,6 +161,10 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
 
   const openTicket = async (ticket: TicketThread) => {
     setSelected(ticket);
+    if (ticket.requested_human_at) {
+      await supabase.from("support_tickets").update({ requested_human_at: null }).eq("id", ticket.id);
+      setTickets((prev) => prev.map((t) => (t.id === ticket.id ? { ...t, requested_human_at: null } : t)));
+    }
     const { data } = await supabase
       .from("support_messages")
       .select("*")
@@ -480,7 +486,9 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                     <button
                       key={t.id}
                       onClick={() => openTicket(t)}
-                      className={`flex items-center gap-3 px-3 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors text-left w-full ${t.status !== "closed" ? "bg-amber-500/5" : ""}`}
+                      className={`flex items-center gap-3 px-3 py-3 border-b last:border-b-0 hover:bg-muted/40 transition-colors text-left w-full ${
+                        t.requested_human_at ? "border-l-4 border-l-red-500 bg-red-500/10" : t.status !== "closed" ? "bg-amber-500/5" : ""
+                      }`}
                     >
                       {t.avatar_url ? (
                         <img src={t.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
@@ -492,8 +500,13 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                           <p className="text-sm font-semibold text-foreground truncate">{t.full_name}</p>
                           <span className="text-[11px] text-muted-foreground">{new Date(t.lastTime).toLocaleDateString("pt-BR")}</span>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[10px] text-muted-foreground">{t.protocol || ""}</span>
+                          {t.requested_human_at && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-red-500/20 text-red-700 dark:text-red-400">
+                              Quer atendente
+                            </span>
+                          )}
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                             t.status === "closed" ? "bg-muted text-muted-foreground" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                           }`}>

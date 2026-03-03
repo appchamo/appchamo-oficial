@@ -12,7 +12,7 @@ interface Pro {
   total_services: number;
   verified: boolean;
   user_id: string;
-  category_name: string;
+  profession_name: string;
   full_name: string;
   avatar_url: string | null;
 }
@@ -50,13 +50,11 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const loadPros = useCallback(async () => {
     const { data: pros } = await supabase
       .from("professionals")
-      // ✅ Removido o plan_type que não existe na tabela
-      .select("id, rating, total_services, verified, user_id, category_id, categories(name)") 
+      .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name)")
       .eq("active", true)
       .eq("profile_status", "approved")
       .neq("availability_status", "unavailable")
-      // 🔥 TRAVA: Como não temos plan_type aqui, usamos o verified para filtrar quem pagou VIP/Empresarial
-      .eq("verified", true) 
+      .eq("verified", true)
       .order("rating", { ascending: false })
       .limit(10);
 
@@ -85,7 +83,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         total_services: p.total_services,
         verified: p.verified,
         user_id: p.user_id,
-        category_name: (p.categories as any)?.name || "—",
+        profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
         full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
         avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
       }))
@@ -159,7 +157,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
               <p className="font-semibold text-sm text-foreground truncate">{pro.full_name}</p>
               {pro.verified && <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />}
             </div>
-            <p className="text-xs text-muted-foreground truncate">{pro.category_name}</p>
+            <p className="text-xs text-muted-foreground truncate">{pro.profession_name}</p>
           </div>
         </div>
         <div className="flex items-center gap-1">

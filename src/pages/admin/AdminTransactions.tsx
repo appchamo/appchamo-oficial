@@ -650,14 +650,14 @@ const AdminTransactions = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-4 flex-wrap">
-          <TabsTrigger value="transactions">Transações</TabsTrigger>
-          <TabsTrigger value="subscribers" className="relative">
+        <TabsList className="mb-4 flex flex-wrap w-full gap-1 h-auto min-h-10">
+          <TabsTrigger value="transactions" className="shrink-0">Transações</TabsTrigger>
+          <TabsTrigger value="subscribers" className="relative shrink-0">
             Assinantes
             {subStats.total > 0 && <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold">{subStats.total}</span>}
           </TabsTrigger>
-          <TabsTrigger value="fiscal"><FileText className="w-3.5 h-3.5 mr-1" />Dados Fiscais</TabsTrigger>
-          <TabsTrigger value="config"><Settings2 className="w-3.5 h-3.5 mr-1" />Configurações</TabsTrigger>
+          <TabsTrigger value="fiscal" className="shrink-0"><FileText className="w-3.5 h-3.5 mr-1" />Dados Fiscais</TabsTrigger>
+          <TabsTrigger value="config" className="shrink-0"><Settings2 className="w-3.5 h-3.5 mr-1" />Configurações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="transactions">

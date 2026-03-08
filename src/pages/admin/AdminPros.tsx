@@ -579,16 +579,16 @@ const AdminPros = () => {
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="mb-4 flex-wrap">
-            <TabsTrigger value="pending" className="relative">
+          <TabsList className="mb-4 flex flex-wrap w-full gap-1 h-auto min-h-10">
+            <TabsTrigger value="pending" className="relative shrink-0">
               Pendentes
               {pendingCount > 0 && (
                 <Badge className="ml-1.5 h-5 min-w-[20px] px-1.5 text-[10px]">{pendingCount}</Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="approved">Aprovados</TabsTrigger>
-            <TabsTrigger value="rejected">Reprovados</TabsTrigger>
-            <TabsTrigger value="all">Todos</TabsTrigger>
+            <TabsTrigger value="approved" className="shrink-0">Aprovados</TabsTrigger>
+            <TabsTrigger value="rejected" className="shrink-0">Reprovados</TabsTrigger>
+            <TabsTrigger value="all" className="shrink-0">Todos</TabsTrigger>
           </TabsList>
           <TabsContent value={tab}>
             <ProTable items={filtered} />

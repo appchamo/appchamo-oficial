@@ -225,10 +225,10 @@ const AdminReports = () => {
   return (
     <AdminLayout title="Relatórios">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-4 flex-wrap">
-          <TabsTrigger value="views"><Eye className="w-3.5 h-3.5 mr-1" />Visualizações</TabsTrigger>
-          <TabsTrigger value="clicks"><MousePointerClick className="w-3.5 h-3.5 mr-1" />Cliques</TabsTrigger>
-          <TabsTrigger value="professionals"><Users className="w-3.5 h-3.5 mr-1" />Profissionais</TabsTrigger>
+        <TabsList className="mb-4 flex flex-wrap w-full gap-1 h-auto min-h-10">
+          <TabsTrigger value="views" className="shrink-0"><Eye className="w-3.5 h-3.5 mr-1" />Visualizações</TabsTrigger>
+          <TabsTrigger value="clicks" className="shrink-0"><MousePointerClick className="w-3.5 h-3.5 mr-1" />Cliques</TabsTrigger>
+          <TabsTrigger value="professionals" className="shrink-0"><Users className="w-3.5 h-3.5 mr-1" />Profissionais</TabsTrigger>
         </TabsList>
 
         <TabsContent value="views"><ViewsTab /></TabsContent>

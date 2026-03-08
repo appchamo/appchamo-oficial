@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { formatCpf, validateCpf } from "@/lib/formatters";
 
 const planDetails = [
   {
@@ -69,7 +70,7 @@ const Subscriptions = () => {
   const [changing, setChanging] = useState<string | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
-  const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", address: "" });
+  const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", address: "", cpf: "" });
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
   
@@ -209,7 +210,7 @@ const Subscriptions = () => {
     }
 
     setSelectedPlanId(planId);
-    setCardForm({ number: "", name: "", expiry: "", cvv: "", address: "" });
+    setCardForm({ number: "", name: "", expiry: "", cvv: "", address: "", cpf: "" });
     setBusinessData({ cnpj: "", cep: "", street: "", number: "", neighborhood: "", city: "", state: "" });
     setProofFile(null);
     setShowFullAddress(false);
@@ -259,6 +260,10 @@ const Subscriptions = () => {
       toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
       return;
     }
+    if (!validateCpf(cardForm.cpf)) {
+      toast({ title: "CPF obrigatório", description: "Informe um CPF válido (11 dígitos).", variant: "destructive" });
+      return;
+    }
 
     if (selectedPlanId === "business") {
       if (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile) {
@@ -297,8 +302,9 @@ const Subscriptions = () => {
         .eq("user_id", session.user.id)
         .single();
 
-      if (!profileData?.cpf && !profileData?.cnpj) {
-        toast({ title: "Cadastre seu CPF ou CNPJ no perfil antes de assinar.", variant: "destructive" });
+      const cpfCnpjValue = cardForm.cpf.replace(/\D/g, "") || profileData?.cnpj?.replace(/\D/g, "") || profileData?.cpf?.replace(/\D/g, "") || "";
+      if (!cpfCnpjValue) {
+        toast({ title: "CPF obrigatório", description: "Preencha o CPF no formulário.", variant: "destructive" });
         setProcessing(false);
         return;
       }
@@ -329,7 +335,7 @@ const Subscriptions = () => {
           expiryYear: `20${expiryParts[1]}`,
           ccv: cardForm.cvv,
           email: profileData?.email || "",
-          cpfCnpj: profileData?.cnpj || profileData?.cpf || "",
+          cpfCnpj: cpfCnpjValue,
           postalCode: profileData?.address_zip || "",
           addressNumber: profileData?.address_number || "",
           phone: profileData?.phone || "",
@@ -561,6 +567,10 @@ const Subscriptions = () => {
 
                 <div className="space-y-3">
                   <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CreditCard className="w-3 h-3" /> Dados do Cartão</p>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">CPF do titular *</label>
+                    <input value={cardForm.cpf} onChange={(e) => setCardForm(f => ({ ...f, cpf: formatCpf(e.target.value) }))} placeholder="000.000.000-00" maxLength={14} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                  </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
                     <input value={cardForm.number} onChange={(e) => setCardForm(f => ({ ...f, number: formatCardNumber(e.target.value) }))} placeholder="0000 0000 0000 0000" maxLength={19} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />

@@ -12,7 +12,7 @@ import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Capacitor } from "@capacitor/core";
-import { formatCep } from "@/lib/formatters";
+import { formatCep, formatCpf, validateCpf } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
 
 interface Message {
@@ -93,7 +93,7 @@ const MessageThread = () => {
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [cardStep, setCardStep] = useState(false);
-  const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
+  const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "", cpf: "" });
   const [cepFetchedAddress, setCepFetchedAddress] = useState<string | null>(null);
   const [searchingCep, setSearchingCep] = useState(false);
   const [installments, setInstallments] = useState("1");
@@ -634,7 +634,7 @@ const MessageThread = () => {
     setCardStep(false); 
     
     setPaymentConfirmed(false);
-    setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "" });
+    setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "", cpf: "" });
     if (!billing.method) setInstallments("1");
     setSelectedCouponId(null);
     setCouponDiscount(null);
@@ -819,6 +819,10 @@ const MessageThread = () => {
         toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
         return;
       }
+      if (!validateCpf(cardForm.cpf)) {
+        toast({ title: "CPF obrigatório", description: "Informe um CPF válido (11 dígitos).", variant: "destructive" });
+        return;
+      }
       if (cardForm.number.replace(/\s/g, "").length < 16) {
         toast({ title: "Número do cartão inválido", variant: "destructive" });
         return;
@@ -845,15 +849,14 @@ const MessageThread = () => {
         eq("user_id", userId).
         single();
 
-        if (!profile?.cpf && !profile?.cnpj) {
+        const cpfCnpj = cardForm.cpf.replace(/\D/g, "") || profile?.cpf?.replace(/\D/g, "") || profile?.cnpj?.replace(/\D/g, "") || "";
+        if (!cpfCnpj) {
           toast({
-            title: "Cadastre seu CPF ou CNPJ no perfil antes de realizar pagamentos.",
-            description: "Acesse seu perfil para atualizar seus dados.",
+            title: "CPF obrigatório",
+            description: "Preencha o CPF no formulário de pagamento.",
             variant: "destructive"
           });
           setProcessingPayment(false);
-          setPaymentOpen(false);
-          navigate("/profile");
           return;
         }
 
@@ -874,7 +877,7 @@ const MessageThread = () => {
             credit_card_holder_info: {
               name: profile?.full_name || cardForm.name,
               email: profile?.email || "",
-              cpf_cnpj: profile?.cpf || profile?.cnpj || "",
+              cpf_cnpj: cpfCnpj,
               postal_code: profile?.address_zip || cardForm.postalCode || "",
               address_number: profile?.address_number || cardForm.addressNumber || "",
               phone: profile?.phone || ""
@@ -2011,6 +2014,15 @@ const MessageThread = () => {
                   onChange={(e) => setCardForm((f) => ({ ...f, name: e.target.value.toUpperCase() }))}
                   placeholder="NOME COMPLETO"
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">CPF do titular *</label>
+                  <input
+                  value={cardForm.cpf}
+                  onChange={(e) => setCardForm((f) => ({ ...f, cpf: formatCpf(e.target.value) }))}
+                  placeholder="000.000.000-00"
+                  maxLength={14}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>

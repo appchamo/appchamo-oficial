@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { formatCpf, validateCpf } from "@/lib/formatters";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, ShieldCheck, CreditCard, Building2, Clock, Upload, Check } from "lucide-react";
@@ -21,7 +22,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
   const [loading, setLoading] = useState(false);
 
   // Estados do Cartão
-  const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "" });
+  const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", cpf: "" });
 
   // Estados detalhados para o plano Business
   const [businessData, setBusinessData] = useState({ 
@@ -63,9 +64,15 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
   };
 
   const handleSubscribe = async () => {
-    // 1. Validações Iniciais
+    const cpfDigits = cardForm.cpf.replace(/\D/g, "");
+    const cpfValid = validateCpf(cardForm.cpf);
+
     if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) {
       toast({ title: "Atenção", description: "Preencha todos os dados do cartão.", variant: "destructive" });
+      return;
+    }
+    if (!cpfValid) {
+      toast({ title: "CPF obrigatório", description: "Informe um CPF válido (11 dígitos).", variant: "destructive" });
       return;
     }
 
@@ -94,13 +101,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
         .eq("user_id", user.id)
         .single();
 
-      if (!profileData?.cpf && !profileData?.cnpj) {
-        toast({ title: "CPF/CNPJ ausente", description: "Seu cadastro não possui CPF. Volte e preencha corretamente.", variant: "destructive" });
-        setLoading(false);
-        return;
-      }
-
-      // 3. Prepara Upload e Variáveis
+      // 3. Prepara Upload e Variáveis (CPF do formulário ou do perfil para Asaas)
       const planValues = { pro: "49.90", vip: "140.00", business: "250.00" };
       const value = planValues[planId as keyof typeof planValues];
       
@@ -143,7 +144,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
           expiryYear: `20${expiryParts[1]}`,
           ccv: cardForm.cvv,
           email: profileData?.email || user.email,
-          cpfCnpj: profileData?.cnpj || profileData?.cpf || "",
+          cpfCnpj: cpfDigits || profileData?.cnpj?.replace(/\D/g, "") || profileData?.cpf?.replace(/\D/g, "") || "",
           postalCode: profileData?.address_zip || "",
           addressNumber: profileData?.address_number || "",
           phone: profileData?.phone || "",
@@ -247,6 +248,16 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
 
           <div className="space-y-3">
             <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CreditCard className="w-3 h-3" /> Dados do Cartão</p>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CPF do titular *</label>
+              <input
+                placeholder="000.000.000-00"
+                value={cardForm.cpf}
+                maxLength={14}
+                className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all"
+                onChange={e => setCardForm({ ...cardForm, cpf: formatCpf(e.target.value) })}
+              />
+            </div>
             <div>
               <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Nome no cartão</label>
               <input 

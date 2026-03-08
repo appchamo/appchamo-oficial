@@ -1,4 +1,4 @@
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { ArrowLeft, MapPin, DollarSign, Clock, Briefcase, Send, Upload } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
@@ -23,6 +23,7 @@ interface JobData {
 const JobDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [job, setJob] = useState<JobData | null>(null);
   const [loading, setLoading] = useState(true);
   const [applyOpen, setApplyOpen] = useState(false);
@@ -95,7 +96,7 @@ const JobDetail = () => {
 
   const handleApply = async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { navigate("/login"); return; }
+    if (!user) { navigate("/login", { state: { from: location.pathname } }); return; }
     if (!job) return;
     if (!form.full_name || !form.email) {
       toast({ title: "Preencha nome e email.", variant: "destructive" });

@@ -32,6 +32,12 @@ const Index = () => {
         <p className="text-sm text-muted-foreground">
           Contrate com segurança e concorra a prêmios mensais.
         </p>
+        <button
+          onClick={() => navigate("/home")}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-primary/40 font-semibold text-sm text-primary hover:bg-primary/10 transition-colors"
+        >
+          Explorar o app sem cadastro
+        </button>
         <div className="flex gap-3 w-full">
           {/* ✅ Mantido para Cadastro */}
           <button 

@@ -124,7 +124,7 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast({ title: "Faça login para continuar", variant: "destructive" });
-        navigate("/login");
+        navigate("/login", { state: { from: window.location.pathname } });
         return;
       }
 

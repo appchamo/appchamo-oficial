@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Ticket, MailCheck, Mail } from "lucide-react";
+import { Ticket, MailCheck, Mail, Home } from "lucide-react";
 import StepAccountType from "@/components/signup/StepAccountType";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
 import StepDocuments from "@/components/signup/StepDocuments";
@@ -432,6 +432,16 @@ const Signup = () => {
 
       {!loading && step === "method-choice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 animate-in fade-in duration-500">
+          <div className="absolute top-4 left-0 right-0 z-20 flex justify-between items-center px-4 max-w-sm mx-auto">
+            <span className="text-lg font-bold text-primary">Chamô</span>
+            <Link
+              to="/home"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/40 text-primary text-sm font-semibold hover:bg-primary/10 transition-colors"
+            >
+              <Home className="w-4 h-4" />
+              Início
+            </Link>
+          </div>
           <div className="w-full max-w-sm space-y-8">
             <div className="text-center">
               <h1 className="text-3xl font-extrabold text-gradient mb-2">Chamô</h1>

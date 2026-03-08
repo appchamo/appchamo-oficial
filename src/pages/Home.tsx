@@ -102,17 +102,17 @@ const Home = () => {
       });
   }, [user?.id]);
 
-  // ✅ 2. TRANSIÇÃO SUAVE: Espera o layout carregar para liberar a tela
+  // ✅ 2. TRANSIÇÃO SUAVE: Espera o layout carregar para liberar a tela (com ou sem login)
   useEffect(() => {
     // Timeout de segurança (fallback caso a internet caia)
     const fallback = setTimeout(() => setIsReady(true), 1200); 
     
-    if (sections && sections.length > 0 && profile) {
+    if (sections && sections.length > 0) {
       setIsReady(true);
       clearTimeout(fallback);
     }
     return () => clearTimeout(fallback);
-  }, [sections, profile]);
+  }, [sections]);
 
   // ✅ Pull-to-refresh: atualiza dados sem dar reload (evita piscada)
   const onRefresh = async () => {

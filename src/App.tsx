@@ -333,10 +333,11 @@ const AppContent = () => {
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/signup-pro" element={<BecomeProfessional />} />
 
-        <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-        <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
-        <Route path="/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
-        <Route path="/category/:id" element={<ProtectedRoute><CategoryDetail /></ProtectedRoute>} />
+        {/* Rotas públicas (App Store: explorar sem login) */}
+        <Route path="/home" element={<Home />} />
+        <Route path="/search" element={<Search />} />
+        <Route path="/categories" element={<Categories />} />
+        <Route path="/category/:id" element={<CategoryDetail />} />
         <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
         <Route path="/messages/:threadId" element={<ProtectedRoute><MessageThread /></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
@@ -356,8 +357,8 @@ const AppContent = () => {
         <Route path="/pro/agenda" element={<ProtectedRoute><ProAgenda /></ProtectedRoute>} />
         <Route path="/pro/agenda/calendario" element={<ProtectedRoute><ProAgendaCalendar /></ProtectedRoute>} />
         <Route path="/meus-agendamentos" element={<ProtectedRoute><MeusAgendamentos /></ProtectedRoute>} />
-        <Route path="/pro/:id" element={<ProtectedRoute><ProfessionalProfile /></ProtectedRoute>} />
-        <Route path="/professional/:id" element={<ProtectedRoute><ProfessionalProfile /></ProtectedRoute>} />
+        <Route path="/pro/:id" element={<ProfessionalProfile />} />
+        <Route path="/professional/:id" element={<ProfessionalProfile />} />
         <Route path="/support" element={<ProtectedRoute><Support /></ProtectedRoute>} />
         <Route path="/support/:ticketId" element={<ProtectedRoute><SupportThread /></ProtectedRoute>} />
         <Route path="/suporte-desk" element={<SupportDeskRoute><SupportDesk /></SupportDeskRoute>} />

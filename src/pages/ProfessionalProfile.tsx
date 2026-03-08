@@ -1,4 +1,4 @@
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
@@ -46,6 +46,7 @@ const availabilityOptions = [
 const ProfessionalProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [pro, setPro] = useState<ProData | null>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -169,7 +170,7 @@ const ProfessionalProfile = () => {
 
   const handleCall = async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { navigate("/login"); return; }
+    if (!user) { navigate("/login", { state: { from: location.pathname } }); return; }
     setCallDialogOpen(true);
   };
 

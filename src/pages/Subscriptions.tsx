@@ -395,7 +395,15 @@ const Subscriptions = () => {
         )}
 
         {loading ? (
-          <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+            <p className="text-sm text-muted-foreground">Carregando planos...</p>
+          </div>
+        ) : plans.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+            <p className="text-sm text-muted-foreground">Não foi possível carregar os planos.</p>
+            <Link to="/home" className="text-primary text-sm font-medium hover:underline">Voltar ao início</Link>
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
             {plans.map((p) => {

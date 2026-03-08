@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Send, Upload, Loader2, FileText } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
@@ -8,6 +8,7 @@ import { toast } from "@/hooks/use-toast";
 const JobApply = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
@@ -27,7 +28,7 @@ const JobApply = () => {
     const loadData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        navigate("/login");
+        navigate("/login", { state: { from: location.pathname } });
         return;
       }
       

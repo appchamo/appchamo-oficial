@@ -34,47 +34,55 @@ export function useSubscription() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) setLoading(false);
+    }, 10000); // Fallback: nunca ficar mais de 10s em loading (evita spinner infinito na revisão Apple)
+
     const load = async () => {
-      // Always fetch plans
-      const { data: allPlans } = await supabase.from("plans").select("*").order("sort_order");
-      setPlans((allPlans as Plan[]) || []);
+      try {
+        const { data: allPlans } = await supabase.from("plans").select("*").order("sort_order");
+        if (!cancelled) setPlans((allPlans as Plan[]) || []);
 
-      if (!user) { setLoading(false); return; }
+        if (!user) { setLoading(false); clearTimeout(timeoutId); return; }
 
-      // Count calls RECEIVED (as professional), not sent as client
-      const { data: pro } = await supabase.from("professionals").select("id, bonus_calls").eq("user_id", user.id).maybeSingle();
-      
-      let receivedCount = 0;
-      let bonusCalls = 0;
-      if (pro) {
-        const { count } = await supabase.from("service_requests").select("*", { count: "exact", head: true }).eq("professional_id", pro.id);
-        receivedCount = count || 0;
-        bonusCalls = (pro as any).bonus_calls || 0;
-      }
+        const { data: pro } = await supabase.from("professionals").select("id, bonus_calls").eq("user_id", user.id).maybeSingle();
+        let receivedCount = 0;
+        if (pro) {
+          const { count } = await supabase.from("service_requests").select("*", { count: "exact", head: true }).eq("professional_id", pro.id);
+          receivedCount = count || 0;
+        }
+        if (!cancelled) setCallsUsed(receivedCount);
 
-      setCallsUsed(receivedCount);
-
-      const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
-      if (sub) {
-        setSubscription(sub as Subscription);
-        const currentPlan = (allPlans as Plan[])?.find((p) => p.id === sub.plan_id);
-        setPlan(currentPlan || null);
-      } else {
-        // Create free subscription if missing
-        const { data: newSub } = await supabase
-          .from("subscriptions")
-          .insert({ user_id: user.id, plan_id: "free" })
-          .select()
-          .single();
-        if (newSub) {
-          setSubscription(newSub as Subscription);
-          const freePlan = (allPlans as Plan[])?.find((p) => p.id === "free");
-          setPlan(freePlan || null);
+        const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
+        const plansList = (allPlans as Plan[]) || [];
+        if (sub) {
+          if (!cancelled) {
+            setSubscription(sub as Subscription);
+            const currentPlan = plansList.find((p) => p.id === sub.plan_id);
+            setPlan(currentPlan || null);
+          }
+        } else {
+          const { data: newSub } = await supabase
+            .from("subscriptions")
+            .insert({ user_id: user.id, plan_id: "free" })
+            .select()
+            .single();
+          if (newSub && !cancelled) {
+            setSubscription(newSub as Subscription);
+            const freePlan = plansList.find((p) => p.id === "free");
+            setPlan(freePlan || null);
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          clearTimeout(timeoutId);
         }
       }
-      setLoading(false);
     };
     load();
+    return () => { cancelled = true; clearTimeout(timeoutId); };
   }, [user]);
 
   const effectiveMaxCalls = plan ? (plan.max_calls === -1 ? -1 : plan.max_calls + (callsUsed >= 0 ? 0 : 0)) : 0;

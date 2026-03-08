@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Mail, Lock, ArrowRight, RefreshCw, Smartphone } from "lucide-react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Mail, Lock, ArrowRight, RefreshCw, Smartphone, Home } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -69,7 +69,9 @@ const readOAuthErrorFromUrl = (): { error: string; description: string } | null 
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { session } = useAuth();
+  const returnTo = (location.state as { from?: string } | null)?.from;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(hasOAuthCodeInUrl());
@@ -140,11 +142,10 @@ const Login = () => {
     }
   };
 
-  /** No Android (e em alguns dispositivos) o perfil pode demorar a aparecer após OAuth. Re-tenta várias vezes antes de mandar para signup. */
+  /** Após OAuth (Google/Apple) o trigger pode demorar a criar o perfil. Re-tenta várias vezes antes de mandar para signup. */
   const fetchProfileWithRetry = async (userId: string): Promise<{ profile: any; roles: any[] }> => {
-    // No native: mais tentativas e delays maiores (alguns Androids demoram a ver o perfil após Google OAuth)
     const isNative = Capacitor.isNativePlatform();
-    const delays = isNative ? [0, 600, 1500, 3000, 5000] : [0, 500, 1200];
+    const delays = isNative ? [0, 600, 1500, 3000, 5000] : [0, 400, 1000, 2200]; // web também com retries (evita ir pra signup à toa)
     let lastProfile: any = null;
     let lastRoles: any[] = [];
     for (let attempt = 0; attempt < delays.length; attempt++) {
@@ -157,10 +158,18 @@ const Login = () => {
       ]);
       lastProfile = profile ?? null;
       lastRoles = roles ?? [];
-      const complete = lastProfile && (lastProfile.cpf || lastProfile.phone);
-      if (complete) return { profile: lastProfile, roles: lastRoles };
+      // Perfil “completo” = existe e tem user_type (trigger já rodou). CPF/telefone não são obrigatórios para login.
+      const hasCompleteProfile = lastProfile && lastProfile.user_type;
+      if (hasCompleteProfile) return { profile: lastProfile, roles: lastRoles };
     }
     return { profile: lastProfile, roles: lastRoles };
+  };
+
+  const getRedirectPath = (defaultPath: string): string => {
+    if (returnTo && typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//")) {
+      return returnTo;
+    }
+    return defaultPath;
   };
 
   const proceedToRedirect = async (userId: string, emailFromAuth?: string) => {
@@ -177,15 +186,7 @@ const Login = () => {
         return;
       }
 
-      const { profile, roles } = await (Capacitor.isNativePlatform()
-        ? fetchProfileWithRetry(userId)
-        : (async () => {
-            const [{ data: profile }, { data: roles }] = await Promise.all([
-              supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
-              supabase.from("user_roles").select("role").eq("user_id", userId),
-            ]);
-            return { profile: profile ?? null, roles: roles ?? [] };
-          })());
+      const { profile, roles } = await fetchProfileWithRetry(userId);
 
       const profileEmail = (profile?.email || "").toLowerCase().trim();
       if (profileEmail === normalizedSupportEmail) {
@@ -206,19 +207,19 @@ const Login = () => {
         return;
       }
 
-      const isProfileIncomplete = !profile || (!profile.cpf && !profile.phone);
+      // Conta como “incompleto” só se não tem perfil ou perfil sem user_type (cadastro nunca finalizado).
+      // Não exige CPF/telefone para login; quem já tem user_type vai para a Home.
+      const isProfileIncomplete = !profile || !profile.user_type;
 
       if (isProfileIncomplete) {
-        // No Android, usuário que já tem conta às vezes cai aqui porque o perfil demora a aparecer após OAuth.
-        // Se a intenção era login (não signup), dar uma última chance: esperar 2,5s e buscar uma vez.
         const manualLogin = localStorage.getItem("manual_login_intent") === "true";
-        if (Capacitor.isNativePlatform() && manualLogin) {
-          await new Promise((r) => setTimeout(r, 2500));
+        if (manualLogin) {
+          await new Promise((r) => setTimeout(r, 1500));
           const [{ data: retryProfile }, { data: retryRoles }] = await Promise.all([
             supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
             supabase.from("user_roles").select("role").eq("user_id", userId),
           ]);
-          const retryComplete = retryProfile && (retryProfile.cpf || retryProfile.phone);
+          const retryComplete = retryProfile && retryProfile.user_type;
           if (retryComplete) {
             const isAdminRetry = (retryRoles ?? []).some((r: any) =>
               ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
@@ -231,12 +232,12 @@ const Login = () => {
             }
             localStorage.removeItem("signup_in_progress");
             localStorage.removeItem("manual_login_intent");
-            navigate("/home", { replace: true });
+            navigate(getRedirectPath("/home"), { replace: true });
             return;
           }
         }
         localStorage.setItem("signup_in_progress", "true");
-        localStorage.removeItem("manual_login_intent"); // para o Signup mostrar "Escolha o tipo de conta"
+        localStorage.removeItem("manual_login_intent");
         navigate("/signup", { replace: true });
         return;
       }
@@ -244,7 +245,7 @@ const Login = () => {
       localStorage.removeItem("signup_in_progress"); 
       localStorage.removeItem("manual_login_intent");
       
-      navigate("/home", { replace: true });
+      navigate(getRedirectPath("/home"), { replace: true });
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
@@ -307,7 +308,7 @@ const Login = () => {
       if (hasOAuthCodeInUrl()) {
         window.history.replaceState({}, "", window.location.pathname);
       }
-    }, 12000);
+    }, 8000);
     return () => clearTimeout(t);
   }, [processingOAuth, session]);
 
@@ -432,6 +433,18 @@ const Login = () => {
       style={bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
 
       {bgUrl && <div className="absolute inset-0 backdrop-blur-sm bg-[#454545]/[0.12]" />}
+      {/* Botão Início: volta para a tela inicial (Home) quando usuário foi redirecionado de Contratar/Chat */}
+      <div className="absolute top-4 left-0 right-0 z-20 flex justify-between items-center px-4 max-w-sm mx-auto">
+        <span className="text-lg font-bold text-primary">Chamô</span>
+        <button
+          type="button"
+          onClick={() => navigate("/home")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/40 text-primary text-sm font-semibold hover:bg-primary/10 transition-colors"
+        >
+          <Home className="w-4 h-4" />
+          Início
+        </button>
+      </div>
       <div className="w-full max-w-sm relative z-10">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-gradient mb-2">Chamô</h1>

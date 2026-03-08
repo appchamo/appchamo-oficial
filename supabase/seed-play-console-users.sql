@@ -1,5 +1,5 @@
 -- =============================================================================
--- Seed: 1 cliente + 1 profissional para o Google Play Console (testes de análise)
+-- Seed: 1 cliente + 1 profissional para testes de análise em loja de apps
 -- Cole este script no SQL Editor do Supabase (Dashboard → SQL Editor) e execute.
 --
 -- Requer:

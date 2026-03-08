@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ImagePlus, X, Send, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 interface ServiceRequestDialogProps {
   open: boolean;
@@ -15,6 +15,7 @@ interface ServiceRequestDialogProps {
 
 const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professionalName }: ServiceRequestDialogProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [step, setStep] = useState<"ask" | "form">("ask");
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<{ file: File; preview: string }[]>([]);
@@ -87,7 +88,7 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
     setSending(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { navigate("/login"); return; }
+      if (!user) { navigate("/login", { state: { from: location.pathname } }); return; }
 
       // 1. Upload das fotos
       const photoUrls: string[] = [];

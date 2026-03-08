@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Menu, Clock, Crown, Bell } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Menu, Clock, Crown, Bell, LogIn } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,6 +10,7 @@ const Header = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [proStatus, setProStatus] = useState<string | null>(null);
   const [planName, setPlanName] = useState<string | null>(null);
@@ -151,12 +152,24 @@ const Header = () => {
   const showPendingBadge = isPro && (proStatus === "pending" || (planId !== "free" && subStatus && subStatus.toUpperCase() !== "ACTIVE"));
   const showPlanBadge = isPro && proStatus === "approved" && (!subStatus || subStatus.toUpperCase() === "ACTIVE" || planId === "free") && planName;
 
+  const handleVipOrPlanosClick = () => {
+    if (user) {
+      navigate("/subscriptions");
+    } else {
+      navigate("/login", { state: { from: "/subscriptions" } });
+    }
+  };
+
   return (
     <>
       <header className="sticky top-0 z-30 bg-card/90 backdrop-blur-md border-b border-secondary">
         <div className="flex items-center justify-between px-4 py-3 max-w-screen-lg mx-auto">
           <span className="text-lg font-bold text-foreground truncate max-w-[55%]">
-            {welcomeWord}, <span className="text-primary">{firstName}</span> 👋
+            {user ? (
+              <>{welcomeWord}, <span className="text-primary">{firstName}</span> 👋</>
+            ) : (
+              <>Explorar <span className="text-primary">Chamô</span></>
+            )}
           </span>
           <div className="flex items-center gap-2">
             
@@ -168,14 +181,25 @@ const Header = () => {
               </div>
             )}
             
-            {/* Selo do Plano – destaque igual ao botão Contratar (fundo laranja, texto e ícone brancos) */}
-            {showPlanBadge && (
+            {/* Não logado: botão "Entrar" no mesmo lugar do VIP (como na landing). Logado: VIP/Planos */}
+            {!user && (
               <button
-                onClick={() => navigate("/subscriptions")}
+                onClick={() => navigate("/login", { state: { from: location.pathname } })}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
               >
+                <LogIn className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-semibold">Entrar</span>
+              </button>
+            )}
+            {user && (showPlanBadge || true) && (
+              <button
+                type="button"
+                onClick={handleVipOrPlanosClick}
+                aria-label="Ver planos e assinatura VIP"
+                className="flex items-center gap-1.5 min-h-[44px] min-w-[44px] px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.98] transition-colors shadow-sm touch-manipulation"
+              >
                 <Crown className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold">{planName}</span>
+                <span className="text-[11px] font-semibold">{showPlanBadge ? planName : "VIP"}</span>
               </button>
             )}
 

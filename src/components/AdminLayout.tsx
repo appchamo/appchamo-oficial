@@ -1,8 +1,14 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
   LayoutDashboard, Users, BadgeCheck, Megaphone, 
-  CreditCard, Ticket, Settings, FileText, LogOut, Grid3X3, Briefcase, Image, Building2, HelpCircle, Bell, LayoutList, BarChart3, BookOpen, UserSearch
+  CreditCard, Ticket, Settings, FileText, LogOut, Grid3X3, Briefcase, Image, Building2, HelpCircle, Bell, LayoutList, BarChart3, BookOpen, UserSearch, Menu
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
@@ -38,6 +44,7 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
   const navigate = useNavigate();
   const { adminUser, loading } = useAdminAuth();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!adminUser?.id) return;
@@ -105,7 +112,17 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
         <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b px-3 md:px-6 py-3 flex items-center justify-between gap-2">
-          <h1 className="text-base md:text-lg font-bold text-foreground truncate">{title}</h1>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              className="md:hidden flex items-center justify-center w-10 h-10 rounded-lg hover:bg-muted transition-colors shrink-0"
+              aria-label="Abrir menu de páginas"
+            >
+              <Menu className="w-5 h-5 text-foreground" />
+            </button>
+            <h1 className="text-base md:text-lg font-bold text-foreground truncate">{title}</h1>
+          </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <Link
               to="/admin/notifications"
@@ -129,23 +146,58 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
           </div>
         </header>
 
-        <div className="md:hidden flex overflow-x-auto border-b bg-card gap-1 px-2 py-2 scrollbar-hide">
+        {/* Abas: no desktop (md+) faixa horizontal; no tablet/phone menu via Sheet */}
+        <nav className="hidden md:flex overflow-x-auto border-b border-border bg-muted/30 gap-1 px-2 py-2.5 scrollbar-hide min-h-[44px] items-center shrink-0">
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${
-                  isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-colors shrink-0 ${
+                  isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-muted"
                 }`}
               >
-                <item.icon className="w-3 h-3" />
+                <item.icon className="w-3.5 h-3.5" />
                 {item.label}
               </Link>
             );
           })}
-        </div>
+        </nav>
+
+        <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+          <SheetContent side="left" className="w-[280px] sm:max-w-[280px] overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>Páginas do admin</SheetTitle>
+            </SheetHeader>
+            <nav className="flex flex-col gap-0.5 pt-4">
+              {navItems.map((item) => {
+                const isActive = location.pathname === item.path;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                      isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <item.icon className="w-4 h-4 shrink-0" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+              <div className="border-t mt-2 pt-2">
+                <button
+                  onClick={() => { handleLogout(); setMenuOpen(false); }}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors w-full"
+                >
+                  <LogOut className="w-4 h-4" /> Sair
+                </button>
+              </div>
+            </nav>
+          </SheetContent>
+        </Sheet>
 
         <main className="flex-1 p-3 md:p-6 overflow-x-hidden">
           {children}

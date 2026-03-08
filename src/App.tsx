@@ -132,14 +132,37 @@ const BackButtonHandler = () => {
   return null;
 };
 
+/** Admin sempre fica no painel: se estiver logado como admin e em rota do app (não admin), redireciona para /admin */
+const AdminRedirectGuard = () => {
+  const { session, loading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (loading || !session?.user) return;
+    const email = (session.user.email || "").toLowerCase().trim();
+    if (email !== "admin@appchamo.com") return;
+
+    const path = location.pathname;
+    if (path.startsWith("/admin")) return;
+    if (path === "/login" || path === "/signup" || path === "/reset-password" || path === "/admin/login") return;
+    if (path === "/terms-of-use" || path === "/privacy" || path === "/exclusao-de-conta") return;
+
+    navigate("/admin", { replace: true });
+  }, [loading, session?.user, location.pathname, navigate]);
+
+  return null;
+};
+
 const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "splash_duration_seconds"] as const;
 const SPLASH_SHOWN_KEY = "chamo_splash_shown";
 
 /** No Android, cria o canal "default" logo na abertura do app para push em background aparecer. */
-/** Redireciona usuário logado: suporte → /suporte-desk, demais → /home */
+/** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk, demais → /home */
 const RedirectLoggedIn = () => {
   const { user } = useAuth();
   const email = (user?.email || "").toLowerCase().trim();
+  if (email === "admin@appchamo.com") return <Navigate to="/admin" replace />;
   if (email === "suporte@appchamo.com") return <Navigate to="/suporte-desk" replace />;
   return <Navigate to="/home" replace />;
 };
@@ -408,6 +431,7 @@ const App = () => {
           <AuthProvider>
             <RefreshProvider>
               <ScrollToTop />
+              <AdminRedirectGuard />
               <NotificationOpenHandler />
               <AndroidPushChannelInit />
               <RoutePrefetcher />

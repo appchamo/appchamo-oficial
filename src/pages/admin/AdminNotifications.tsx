@@ -1,12 +1,27 @@
 import AdminLayout from "@/components/AdminLayout";
 import { Bell, Send, Users, Briefcase, Building2, User } from "lucide-react";
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { toast } from "@/hooks/use-toast";
 
 type TargetType = "all" | "clients" | "professionals" | "companies" | "category" | "individual";
 
+interface AdminNotif {
+  id: string;
+  title: string;
+  message: string | null;
+  type: string;
+  link: string | null;
+  read: boolean;
+  created_at: string;
+}
+
 const AdminNotifications = () => {
+  const { adminUser } = useAdminAuth();
+  const [myNotifications, setMyNotifications] = useState<AdminNotif[]>([]);
+  const [loadingMine, setLoadingMine] = useState(true);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [target, setTarget] = useState<TargetType>("all");
@@ -26,6 +41,26 @@ const AdminNotifications = () => {
       setCategories(data || []);
     });
   }, []);
+
+  useEffect(() => {
+    if (!adminUser?.id) return;
+    setLoadingMine(true);
+    supabase
+      .from("notifications")
+      .select("id, title, message, type, link, read, created_at")
+      .eq("user_id", adminUser.id)
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data }) => {
+        setMyNotifications((data as AdminNotif[]) || []);
+      })
+      .finally(() => setLoadingMine(false));
+  }, [adminUser?.id]);
+
+  const markAsRead = async (id: string) => {
+    await supabase.from("notifications").update({ read: true }).eq("id", id);
+    setMyNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+  };
 
   const searchUsers = async (query: string) => {
     setUserSearch(query);
@@ -121,8 +156,46 @@ const AdminNotifications = () => {
     <AdminLayout title="Notificações">
       <div className="max-w-lg space-y-5">
         <div className="bg-card border rounded-xl p-5">
+          <h2 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
+            <Bell className="w-4 h-4 text-primary" /> Suas notificações
+          </h2>
+          {loadingMine ? (
+            <p className="text-xs text-muted-foreground">Carregando...</p>
+          ) : myNotifications.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Nenhuma notificação.</p>
+          ) : (
+            <ul className="space-y-2 max-h-64 overflow-y-auto">
+              {myNotifications.map((n) => (
+                <li key={n.id}>
+                  {n.link ? (
+                    <Link
+                      to={n.link}
+                      onClick={() => markAsRead(n.id)}
+                      className={`block rounded-xl border p-3 transition-colors hover:bg-muted/50 ${!n.read ? "bg-primary/5 border-primary/20" : "border-border"}`}
+                    >
+                      <p className="text-xs font-semibold text-foreground">{n.title}</p>
+                      {n.message && <p className="text-[11px] text-muted-foreground mt-0.5">{n.message}</p>}
+                      <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString("pt-BR")}</p>
+                    </Link>
+                  ) : (
+                    <div
+                      className={`rounded-xl border p-3 ${!n.read ? "bg-primary/5 border-primary/20" : "border-border"}`}
+                      onClick={() => markAsRead(n.id)}
+                    >
+                      <p className="text-xs font-semibold text-foreground">{n.title}</p>
+                      {n.message && <p className="text-[11px] text-muted-foreground mt-0.5">{n.message}</p>}
+                      <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString("pt-BR")}</p>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="bg-card border rounded-xl p-5">
           <h2 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
-            <Bell className="w-4 h-4 text-primary" /> Enviar notificação manual
+            <Send className="w-4 h-4 text-primary" /> Enviar notificação manual
           </h2>
 
           <div className="space-y-4">

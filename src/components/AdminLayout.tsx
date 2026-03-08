@@ -3,6 +3,7 @@ import {
   LayoutDashboard, Users, BadgeCheck, Megaphone, 
   CreditCard, Ticket, Settings, FileText, LogOut, Grid3X3, Briefcase, Image, Building2, HelpCircle, Bell, LayoutList, BarChart3, BookOpen, UserSearch
 } from "lucide-react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 
@@ -36,6 +37,25 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { adminUser, loading } = useAdminAuth();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!adminUser?.id) return;
+    const fetchUnread = async () => {
+      const { count } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", adminUser.id)
+        .eq("read", false);
+      setUnreadCount(count ?? 0);
+    };
+    fetchUnread();
+    const channel = supabase
+      .channel("admin-notifications")
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${adminUser.id}` }, fetchUnread)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [adminUser?.id]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -87,6 +107,18 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
         <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b px-3 md:px-6 py-3 flex items-center justify-between gap-2">
           <h1 className="text-base md:text-lg font-bold text-foreground truncate">{title}</h1>
           <div className="flex items-center gap-2 flex-shrink-0">
+            <Link
+              to="/admin/notifications"
+              className="relative p-2 rounded-lg hover:bg-muted transition-colors"
+              aria-label="Notificações"
+            >
+              <Bell className="w-5 h-5 text-foreground" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </Link>
             <span className="text-xs text-muted-foreground hidden md:block">{adminUser?.email}</span>
             <button
               onClick={handleLogout}

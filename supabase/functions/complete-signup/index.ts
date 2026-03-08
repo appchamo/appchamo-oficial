@@ -197,6 +197,23 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Notifica o admin (admin@appchamo.com) sobre novo cadastro
+    const { data: adminRow } = await supabase
+      .from("profiles")
+      .select("user_id")
+      .eq("email", "admin@appchamo.com")
+      .limit(1)
+      .maybeSingle();
+    if (adminRow?.user_id) {
+      await supabase.from("notifications").insert({
+        user_id: adminRow.user_id,
+        title: "Novo cadastro",
+        message: "Um usuário acabou de se cadastrar. Confira em Usuários.",
+        type: "admin",
+        link: "/admin/users",
+      });
+    }
+
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

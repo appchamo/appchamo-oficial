@@ -10,7 +10,7 @@ const corsHeaders = {
 // 🔁 Ambiente Asaas 
 // ===============================
 const ASAAS_ENV = Deno.env.get("ASAAS_ENV") ?? "sandbox";
-const ASAAS_BASE_URL = ASAAS_ENV === "production" ? "https://api.asaas.com/v3" : "https://sandbox.asaas.com/api/v3";
+const ASAAS_BASE_URL = ASAAS_ENV === "production" ? "https://api.asaas.com/v3" : "https://api-sandbox.asaas.com/v3";
 const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
 
 serve(async (req) => {
@@ -214,7 +214,7 @@ serve(async (req) => {
       const today = new Date().toISOString().split("T")[0];
 
       const response = await fetch(`${ASAAS_BASE_URL}/subscriptions/${subData.asaas_subscription_id}`, {
-        method: "POST",
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           "access_token": ASAAS_API_KEY,

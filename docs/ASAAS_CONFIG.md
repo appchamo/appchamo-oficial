@@ -29,10 +29,10 @@ Só usuários **administradores** da conta Asaas podem gerar chaves. Em Sandbox 
 ## 3. Ambiente (Sandbox vs Produção)
 
 - **`ASAAS_ENV`** (opcional nos secrets do Supabase):
-  - **`sandbox`** (padrão) – usa `sandbox.asaas.com` (testes).
-  - **`production`** – usa `api.asaas.com` (cobranças reais).
+  - **`sandbox`** (padrão) – usa **`https://api-sandbox.asaas.com/v3`** (testes).
+  - **`production`** – usa **`https://api.asaas.com/v3`** (cobranças reais).
 
-Se não definir nada, o app usa **sandbox**. Para ir a produção, crie o secret **`ASAAS_ENV`** com valor **`production`** e use a chave de API de **produção**.
+A URL do sandbox para **chamadas à API** é `api-sandbox.asaas.com`; o site para criar conta e gerar chave é [sandbox.asaas.com](https://sandbox.asaas.com). Use a chave gerada no painel Sandbox quando `ASAAS_ENV` for sandbox.
 
 ---
 
@@ -59,7 +59,18 @@ O Chamô tem a Edge Function **`asaas_webhook`**, que recebe notificações do A
 
 ---
 
-## 6. Validação de CPF no cadastro
+## 6. Erro 401 Unauthorized do Asaas
+
+Se ao aprovar assinatura ou em outras chamadas aparecer `{ "error": "Unauthorized" }` ou `invalid_access_token`:
+
+1. **URL correta:** Sandbox deve usar `https://api-sandbox.asaas.com/v3` (não `sandbox.asaas.com`). O app já usa essa URL quando `ASAAS_ENV` é sandbox.
+2. **Chave do mesmo ambiente:** Use a chave gerada em **Integrações** no painel **Sandbox** para testes; para produção, use a chave de produção.
+3. **Chave completa:** A chave pode começar com `$` (ex.: `$aact_hmlg_...`). Ao colar no Supabase Secrets, não remova o `$`.
+4. **Redeploy:** Depois de alterar os secrets no Supabase, faça redeploy das Edge Functions que usam Asaas (`admin-manage`, `create_subscription`, `create_payment`, `validate-cpf-signup`) para carregarem a nova variável.
+
+---
+
+## 7. Validação de CPF no cadastro
 
 A validação de CPF/CNPJ do **profissional** usa a mesma **ASAAS_API_KEY**: a Edge Function **validate-cpf-signup** chama `POST /customers` no Asaas. Se o Asaas aceitar (200), o documento é considerado válido e o `asaas_customer_id` é salvo no perfil. Não é preciso configurar nada extra no Asaas só para o CPF; basta a chave de API e o deploy da função (com CORS ajustado).
 

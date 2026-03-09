@@ -63,7 +63,7 @@ const planDetails = [
 
 const Subscriptions = () => {
   const navigate = useNavigate();
-  const { plan: currentPlan, plans, loading, changePlan, callsUsed, callsRemaining, isFreePlan } = useSubscription();
+  const { plan: currentPlan, plans, loading, changePlan, callsUsed, callsRemaining, isFreePlan, refetch } = useSubscription();
   const { user, profile } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -360,7 +360,7 @@ const Subscriptions = () => {
       }
       
       setPaymentOpen(false);
-      setTimeout(() => { window.location.reload(); }, 2000);
+      await refetch();
 
     } catch (err: any) {
       toast({ title: err.message || "Erro ao processar assinatura", variant: "destructive" });

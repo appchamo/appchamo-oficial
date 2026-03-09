@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
@@ -35,16 +35,21 @@ export function useSubscription() {
 
   useEffect(() => {
     let cancelled = false;
+    const SAFETY_MS = 5000;
     const timeoutId = setTimeout(() => {
       if (!cancelled) setLoading(false);
-    }, 10000); // Fallback: nunca ficar mais de 10s em loading (evita spinner infinito na revisão Apple)
+    }, SAFETY_MS);
 
     const load = async () => {
       try {
         const { data: allPlans } = await supabase.from("plans").select("*").order("sort_order");
-        if (!cancelled) setPlans((allPlans as Plan[]) || []);
-
-        if (!user) { setLoading(false); clearTimeout(timeoutId); return; }
+        const plansList = (allPlans as Plan[]) || [];
+        if (!cancelled) {
+          setPlans(plansList);
+          setLoading(false);
+          clearTimeout(timeoutId);
+        }
+        if (!user) return;
 
         const { data: pro } = await supabase.from("professionals").select("id, bonus_calls").eq("user_id", user.id).maybeSingle();
         let receivedCount = 0;
@@ -55,14 +60,10 @@ export function useSubscription() {
         if (!cancelled) setCallsUsed(receivedCount);
 
         const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
-        const plansList = (allPlans as Plan[]) || [];
-        if (sub) {
-          if (!cancelled) {
-            setSubscription(sub as Subscription);
-            const currentPlan = plansList.find((p) => p.id === sub.plan_id);
-            setPlan(currentPlan || null);
-          }
-        } else {
+        if (sub && !cancelled) {
+          setSubscription(sub as Subscription);
+          setPlan(plansList.find((p) => p.id === sub.plan_id) || null);
+        } else if (!sub && !cancelled) {
           const { data: newSub } = await supabase
             .from("subscriptions")
             .insert({ user_id: user.id, plan_id: "free" })
@@ -70,9 +71,13 @@ export function useSubscription() {
             .single();
           if (newSub && !cancelled) {
             setSubscription(newSub as Subscription);
-            const freePlan = plansList.find((p) => p.id === "free");
-            setPlan(freePlan || null);
+            setPlan(plansList.find((p) => p.id === "free") || null);
           }
+        }
+      } catch {
+        if (!cancelled) {
+          setLoading(false);
+          clearTimeout(timeoutId);
         }
       } finally {
         if (!cancelled) {
@@ -128,5 +133,20 @@ export function useSubscription() {
     return true;
   };
 
-  return { subscription, plan, plans, callsUsed, callsRemaining, canMakeCall, isFreePlan, loading, changePlan };
+  const refetch = useCallback(async () => {
+    if (!user) return;
+    const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
+    const plansList = [...plans];
+    if (plansList.length === 0) {
+      const { data: allPlans } = await supabase.from("plans").select("*").order("sort_order");
+      plansList.push(...((allPlans as Plan[]) || []));
+      setPlans(plansList);
+    }
+    if (sub) {
+      setSubscription(sub as Subscription);
+      setPlan(plansList.find((p) => p.id === sub.plan_id) || null);
+    }
+  }, [user, plans]);
+
+  return { subscription, plan, plans, callsUsed, callsRemaining, canMakeCall, isFreePlan, loading, changePlan, refetch };
 }

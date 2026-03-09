@@ -20,12 +20,15 @@ const BottomNav = () => {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchBadges = useCallback(async () => {
-    // Se já estiver buscando ou se estiver no cooldown de debounce, ignora
     if (isFetchingRef.current) return;
 
     try {
       isFetchingRef.current = true;
-      const { data: { user } } = await supabase.auth.getUser();
+      const userPromise = supabase.auth.getUser();
+      const timeoutPromise = new Promise<{ data: { user: null } }>((resolve) =>
+        setTimeout(() => resolve({ data: { user: null } }), 3000)
+      );
+      const { data: { user } } = await Promise.race([userPromise, timeoutPromise]);
       if (!user) return;
 
       // 1. Unread notifications count (exclui chat; mensagens só no push)

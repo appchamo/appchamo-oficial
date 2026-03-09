@@ -90,7 +90,12 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
 
     setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session: sessionData }, error: sessionError } = await supabase.auth.getSession();
+      let session = sessionData;
+      if (sessionError || !session) {
+        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+        session = refreshed;
+      }
       if (!session) throw new Error("Usuário não logado. Faça login novamente.");
       const user = session.user;
 
@@ -131,7 +136,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
 
       if (upsertError) throw new Error("Erro ao registrar assinatura no banco.");
 
-      // 5. Envia pro Asaas via Edge Function
+      // 5. Envia pro Asaas via Edge Function (JWT explícito evita 401 Invalid JWT)
       const expiryParts = cardForm.expiry.split("/");
       const res = await supabase.functions.invoke("create_subscription", {
         body: {
@@ -152,6 +157,7 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
           addressBusiness: fullAddress,
           proofUrl: proofUrl,
         },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
       if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no processamento do pagamento Asaas.");

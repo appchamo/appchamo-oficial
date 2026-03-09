@@ -293,7 +293,11 @@ const Subscriptions = () => {
         proofUrl = urlData.publicUrl;
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+        session = refreshed;
+      }
       if (!session) throw new Error("Não autenticado");
 
       const { data: profileData } = await supabase
@@ -343,6 +347,7 @@ const Subscriptions = () => {
           addressBusiness: fullAddress,
           proofUrl: proofUrl,
         },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
       if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no processamento do pagamento.");

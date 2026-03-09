@@ -122,7 +122,8 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
         proofUrl = urlData.publicUrl;
       }
 
-      const finalStatus = planId === "pro" ? "ACTIVE" : "PENDING";
+      const skipAnalysis = user.email?.toLowerCase() === "testes@appchamo.com";
+      const finalStatus = planId === "pro" || skipAnalysis ? "ACTIVE" : "PENDING";
 
       // 4. Registra no Banco
       const { error: upsertError } = await supabase.from("subscriptions").upsert({

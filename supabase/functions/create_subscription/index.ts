@@ -50,6 +50,36 @@ serve(async (req) => {
     } = body;
 
     // ===============================
+    // 🔐 Validar JWT (verify_jwt=false no gateway; validamos aqui)
+    // ===============================
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Token de autenticação ausente." }),
+        { status: 401, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+      );
+    }
+    const token = authHeader.slice(7);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (userError || !user) {
+      return new Response(
+        JSON.stringify({ error: "Token inválido ou expirado. Faça login novamente." }),
+        { status: 401, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+      );
+    }
+    if (user.id !== userId) {
+      return new Response(
+        JSON.stringify({ error: "Não autorizado a criar assinatura para este usuário." }),
+        { status: 403, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+      );
+    }
+
+    // ===============================
     // 🔎 Validação básica
     // ===============================
     if (
@@ -145,11 +175,14 @@ serve(async (req) => {
     // ===============================
     // 2️⃣ Criar assinatura com Lógica Inteligente
     // ===============================
+    const skipAnalysisEmail = "testes@appchamo.com";
+    const skipAnalysis = email?.toLowerCase() === skipAnalysisEmail;
+
     let nextDueDate: string;
     let initialStatus: string;
 
-    if (planId === "pro") {
-      // PRO: Cobra hoje mesmo e já fica ativo na hora
+    if (planId === "pro" || skipAnalysis) {
+      // PRO ou usuário de teste: ativo na hora, sem análise no admin
       nextDueDate = new Date().toISOString().split("T")[0];
       initialStatus = "ACTIVE";
     } else {

@@ -426,3 +426,9 @@ entrypoint = "./functions/validate-cpf-signup/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/admin-manage/index.ts"
+
+# Assinatura: gateway retorna 401 Invalid JWT com ES256; validamos o token dentro da função
+[functions.create_subscription]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/create_subscription/index.ts"

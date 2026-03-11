@@ -199,7 +199,7 @@ const Header = () => {
                 className="flex items-center gap-1.5 min-h-[44px] min-w-[44px] px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.98] transition-colors shadow-sm touch-manipulation"
               >
                 <Crown className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold">{showPlanBadge ? planName : "VIP"}</span>
+                <span className="text-[11px] font-semibold">{showPlanBadge ? planName : "Planos"}</span>
               </button>
             )}
 

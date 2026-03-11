@@ -617,7 +617,12 @@ const Subscriptions = () => {
           </div>
         )}
 
-        <p className="text-xs text-muted-foreground text-center mt-6">A cobrança será processada mensalmente. Cancele a qualquer momento.</p>
+        <p className="text-xs text-muted-foreground text-center mt-6">Assinatura mensal com renovação automática. Cancele a qualquer momento.</p>
+        <p className="text-xs text-muted-foreground text-center mt-2">
+          <Link to="/terms-of-use" className="text-primary hover:underline">Termos de Uso (EULA)</Link>
+          {" · "}
+          <Link to="/privacy" className="text-primary hover:underline">Política de Privacidade</Link>
+        </p>
         {useIAPOnIOS && isIAPAvailable && (
           <p className="text-center mt-2">
             <button type="button" onClick={handleRestorePurchases} disabled={restoring} className="text-sm text-primary hover:underline disabled:opacity-50">
@@ -727,6 +732,12 @@ const Subscriptions = () => {
                         )}
                       </div>
                     )}
+                    <p className="text-[10px] text-muted-foreground text-center">
+                      Assinatura mensal, renovação automática.{" "}
+                      <Link to="/terms-of-use" className="text-primary hover:underline">Termos de Uso (EULA)</Link>
+                      {" · "}
+                      <Link to="/privacy" className="text-primary hover:underline">Política de Privacidade</Link>
+                    </p>
                     <button
                       onClick={handleIAPPurchase}
                       disabled={

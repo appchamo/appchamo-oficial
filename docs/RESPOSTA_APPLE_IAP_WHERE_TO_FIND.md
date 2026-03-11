@@ -33,7 +33,7 @@ Thank you for your feedback.
 
 ## Notas para o revisor (nova submissão)
 
-Ao enviar o novo build, preencha **App Review Information** → **Notes** com algo como:
+Ao enviar o novo build, use o texto em inglês do arquivo **docs/NOTAS_REVISOR_APPLE_ENVIO.txt** (copie e cole em **App Review Information** → **Notes**). Resumo do que está no texto:
 
 **English (sugestão):**
 

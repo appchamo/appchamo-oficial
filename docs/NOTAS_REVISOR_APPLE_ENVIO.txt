@@ -1,0 +1,23 @@
+COLE ESTE TEXTO EM: App Store Connect → sua app → App Review Information → Notes
+Antes de enviar: substitua [coloque aqui a senha que você definiu] pela senha real de testes@appchamo.com
+
+---
+
+In-App Purchases – How to test (Chamô Pro, Chamô VIP, Chamô Business)
+
+Plans and IAP are only available to professional or company accounts.
+
+Recommended: use the test account below
+- Email: testes@appchamo.com
+- Password: [coloque aqui a senha que você definiu]
+
+This account is already set as professional and has CNPJ registered. After logging in, go to Profile (Perfil) → Planos (Plans). You will see the full list (Free, Pro, VIP, Business) and Assinar com Apple for paid plans.
+
+If you use your own account (e.g. Sign in with Apple):
+That account is created as a client, so the Planos screen will show "Os planos são exclusivos para profissionais e empresas." Tap Tornar-se profissional (Become a professional) on that same screen. You will be asked to register CPF (required for professionals); then upload documents and fill profile (category, profession, bio, photo).
+
+Sandbox / test data: For review purposes you may use fictitious data: any valid-format CPF (e.g. for testing), any document image if requested, any profile photo, any category and profession, any biography. This is only for testing the flow. After completing the flow you will have access to Planos and can test Assinar com Apple.
+
+Path to IAP: Bottom tab Perfil → Planos → select a paid plan → Assinar com Apple.
+
+Thank you.

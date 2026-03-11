@@ -1,0 +1,136 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "79CEEB09",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "pt_BR",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "BRA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "D329D9E7",
+      "localizations" : [
+        {
+          "description" : "",
+          "displayName" : "Chamo",
+          "locale" : "pt_BR"
+        }
+      ],
+      "name" : "Chamô Profissionais",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "39.90",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "208EAD23",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "",
+              "displayName" : "Chamo",
+              "locale" : "pt_BR"
+            }
+          ],
+          "productID" : "com.chamo.app.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Plano Pro",
+          "subscriptionGroupID" : "D329D9E7",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "69.90",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "75A22352",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "",
+              "displayName" : "Chamo",
+              "locale" : "pt_BR"
+            }
+          ],
+          "productID" : "com.chamo.app.vip.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Plano Vip",
+          "subscriptionGroupID" : "D329D9E7",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "249.90",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "84F8DC8F",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "",
+              "displayName" : "Chamo",
+              "locale" : "pt_BR"
+            }
+          ],
+          "productID" : "com.chamo.app.business.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Plano Business",
+          "subscriptionGroupID" : "D329D9E7",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

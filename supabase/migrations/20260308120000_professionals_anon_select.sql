@@ -9,3 +9,4 @@ CREATE POLICY "Anon can view active approved professionals"
     active = true
     AND profile_status = 'approved'
   );
+ 

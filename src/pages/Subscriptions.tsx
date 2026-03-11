@@ -1,13 +1,16 @@
 import AppLayout from "@/components/AppLayout";
-import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin } from "lucide-react";
+import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin, Smartphone } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useAuth } from "@/hooks/useAuth";
+import { useIAP } from "@/hooks/useIAP";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatCpf, validateCpf } from "@/lib/formatters";
+import { getProductIdForPlan } from "@/lib/iap-config";
 
 const planDetails = [
   {
@@ -61,10 +64,24 @@ const planDetails = [
   },
 ];
 
+const useIAPOnIOS = Capacitor.getPlatform() === "ios";
+
 const Subscriptions = () => {
   const navigate = useNavigate();
   const { plan: currentPlan, plans, loading, changePlan, callsUsed, callsRemaining, isFreePlan, refetch } = useSubscription();
   const { user, profile } = useAuth();
+  const {
+    isIAPAvailable,
+    isIOS,
+    products,
+    loadingProducts,
+    purchasing,
+    restoring,
+    loadProducts,
+    purchase,
+    restore,
+    openSubscriptionManagement,
+  } = useIAP();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [changing, setChanging] = useState<string | null>(null);
@@ -155,12 +172,27 @@ const Subscriptions = () => {
     load();
   }, [user]);
 
+  // Carregar produtos IAP no iOS quando abrir o modal de pagamento
+  useEffect(() => {
+    if (useIAPOnIOS && isIAPAvailable && paymentOpen) {
+      loadProducts();
+    }
+  }, [useIAPOnIOS, isIAPAvailable, paymentOpen, loadProducts]);
+
   if (profile && profile.user_type === "client") {
     return (
       <AppLayout>
         <main className="max-w-screen-lg mx-auto px-4 py-12 text-center">
           <p className="text-muted-foreground">Os planos são exclusivos para profissionais e empresas.</p>
-          <Link to="/home" className="text-primary text-sm mt-4 inline-block hover:underline">Voltar ao início</Link>
+          <div className="flex flex-col items-center gap-3 mt-6">
+            <Link
+              to="/signup-pro"
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors"
+            >
+              Tornar-se profissional
+            </Link>
+            <Link to="/home" className="text-primary text-sm hover:underline">Voltar ao início</Link>
+          </div>
         </main>
       </AppLayout>
     );
@@ -186,8 +218,8 @@ const Subscriptions = () => {
   }
 
   const handleSelectPlan = (planId: string) => {
-    // ✅ NOVO: Se for o plano Business, vai para a nova página e ignora o resto
-    if (planId === "business") {
+    // No iOS usamos IAP para todos os planos pagos (incluindo Business); na web Business vai para checkout
+    if (planId === "business" && !useIAPOnIOS) {
       navigate("/checkout/business");
       return;
     }
@@ -368,6 +400,103 @@ const Subscriptions = () => {
     setProcessing(false);
   };
 
+  const handleIAPPurchase = async () => {
+    if (!selectedPlanId || selectedPlanId === "free" || !user) return;
+    const planId = selectedPlanId as "pro" | "vip" | "business";
+    if (selectedPlanId === "business" && (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile)) {
+      toast({ title: "CNPJ, CEP, Número e Comprovante são obrigatórios para o plano Business.", variant: "destructive" });
+      return;
+    }
+    setProcessing(true);
+    try {
+      const result = await purchase(planId);
+      if (!result) {
+        setProcessing(false);
+        return;
+      }
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+        session = refreshed;
+      }
+      if (!session) throw new Error("Não autenticado");
+      const res = await supabase.functions.invoke("validate_iap_subscription", {
+        body: {
+          userId: session.user.id,
+          planId: result.planId,
+          transactionId: result.transactionId,
+          productIdentifier: result.productIdentifier,
+          receipt: result.receipt ?? undefined,
+          platform: result.platform,
+        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro ao ativar assinatura.");
+      if (selectedPlanId === "business" && user && businessData.cnpj) {
+        const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
+        let proofUrl = "";
+        if (proofFile) {
+          const fileExt = proofFile.name.split(".").pop();
+          const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage.from("business-proofs").upload(fileName, proofFile);
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(fileName);
+            proofUrl = urlData.publicUrl;
+          }
+        }
+        await supabase.from("subscriptions").update({
+          business_cnpj: businessData.cnpj,
+          business_address: fullAddress,
+          business_proof_url: proofUrl || null,
+        }).eq("user_id", user.id);
+      }
+      toast({ title: "Plano ativado!", description: "Sua assinatura foi confirmada pela App Store." });
+      setPaymentOpen(false);
+      await refetch();
+    } catch (err: any) {
+      toast({ title: err.message || "Erro na compra", variant: "destructive" });
+    }
+    setProcessing(false);
+  };
+
+  const handleRestorePurchases = async () => {
+    if (!user) return;
+    try {
+      const results = await restore();
+      if (results.length === 0) {
+        toast({ title: "Nenhuma compra encontrada para restaurar.", variant: "destructive" });
+        return;
+      }
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+        session = refreshed;
+      }
+      if (!session) throw new Error("Não autenticado");
+      const best = results.sort((a, b) => (a.planId === "business" ? 3 : a.planId === "vip" ? 2 : 1) - (b.planId === "business" ? 3 : b.planId === "vip" ? 2 : 1)).pop();
+      if (best) {
+        const res = await supabase.functions.invoke("validate_iap_subscription", {
+          body: {
+            userId: session.user.id,
+            planId: best.planId,
+            transactionId: best.transactionId,
+            productIdentifier: best.productIdentifier,
+            receipt: best.receipt ?? undefined,
+            platform: best.platform,
+          },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (!res.error && !res.data?.error) {
+          toast({ title: "Compras restauradas!", description: `Plano ${best.planId} ativado.` });
+          setPaymentOpen(false);
+          await refetch();
+        }
+      }
+    } catch (err: any) {
+      toast({ title: err.message || "Erro ao restaurar", variant: "destructive" });
+    }
+  };
+
   const formatCardNumber = (value: string) => {
     const digits = value.replace(/\D/g, "").slice(0, 16);
     return digits.replace(/(\d{4})(?=\d)/g, "$1 ");
@@ -489,22 +618,145 @@ const Subscriptions = () => {
         )}
 
         <p className="text-xs text-muted-foreground text-center mt-6">A cobrança será processada mensalmente. Cancele a qualquer momento.</p>
+        {useIAPOnIOS && isIAPAvailable && (
+          <p className="text-center mt-2">
+            <button type="button" onClick={handleRestorePurchases} disabled={restoring} className="text-sm text-primary hover:underline disabled:opacity-50">
+              {restoring ? "Restaurando compras..." : "Restaurar compras"}
+            </button>
+          </p>
+        )}
 
         <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
           <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <CreditCard className="w-5 h-5 text-primary" />
-                Dados do pagamento
+                {useIAPOnIOS && isIAPAvailable ? (
+                  <Smartphone className="w-5 h-5 text-primary" />
+                ) : (
+                  <CreditCard className="w-5 h-5 text-primary" />
+                )}
+                {useIAPOnIOS && isIAPAvailable ? "Assinatura na App Store" : "Dados do pagamento"}
               </DialogTitle>
             </DialogHeader>
             {selectedPlan && (
               <div className="space-y-4">
                 <div className="bg-muted/50 rounded-xl p-3 text-center">
                   <p className="text-xs text-muted-foreground">Plano {selectedPlan.name}</p>
-                  <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                  {useIAPOnIOS && isIAPAvailable && (() => {
+                    const iapProduct = products.find(p => getProductIdForPlan(selectedPlanId!) === p.identifier);
+                    return iapProduct ? (
+                      <p className="text-xl font-bold text-foreground">{iapProduct.priceString}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                    ) : loadingProducts ? (
+                      <p className="text-sm text-muted-foreground">Carregando preço...</p>
+                    ) : (
+                      <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                    );
+                  })()}
+                  {(!useIAPOnIOS || !isIAPAvailable) && (
+                    <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                  )}
                 </div>
-                
+
+                {useIAPOnIOS && isIAPAvailable ? (
+                  <>
+                    {!loadingProducts && products.length === 0 && (
+                      <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-center">
+                        <p className="text-sm font-medium text-foreground">Os planos da App Store não foram carregados.</p>
+                        <p className="text-xs text-muted-foreground mt-2">• Use um iPhone (não Simulador) e instale pelo TestFlight.</p>
+                        <p className="text-xs text-muted-foreground">• Em Ajustes → App Store, use uma conta Sandbox.</p>
+                        <p className="text-xs text-muted-foreground">• No Xcode: Edit Scheme → Run → Options → StoreKit Configuration = None.</p>
+                        <p className="text-xs text-muted-foreground mt-1">• Crie uma nova versão (ex.: 1.1), envie um build, adicione as assinaturas à versão e aguarde alguns minutos.</p>
+                      </div>
+                    )}
+                    {selectedPlanId === "business" && (
+                      <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4 space-y-3">
+                        <p className="text-[10px] font-bold text-violet-600 uppercase flex items-center gap-1">
+                          <Building2 className="w-3 h-3" /> Verificação Empresa
+                        </p>
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase mb-1 block">CNPJ</label>
+                            <input
+                              value={businessData.cnpj}
+                              onChange={(e) => setBusinessData(d => ({ ...d, cnpj: formatCNPJ(e.target.value) }))}
+                              placeholder="00.000.../0001-00"
+                              className="w-full border-b bg-transparent py-1 text-sm outline-none focus:border-violet-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1 mb-1 block">CEP {searchingCep && <Clock className="w-2 h-2 animate-spin" />}</label>
+                            <input
+                              value={businessData.cep}
+                              onChange={(e) => handleCepChange(e.target.value)}
+                              placeholder="00000-000"
+                              maxLength={9}
+                              className="w-full border-b bg-transparent py-1 text-sm outline-none focus:border-violet-500"
+                            />
+                          </div>
+                        </div>
+                        {showFullAddress && (
+                          <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                            <div className="grid grid-cols-4 gap-2">
+                              <div className="col-span-3">
+                                <label className="text-[10px] font-bold text-muted-foreground uppercase">Rua</label>
+                                <input readOnly value={businessData.street} className="w-full border-b bg-transparent py-1 text-sm text-muted-foreground outline-none" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-emerald-600 uppercase">Nº *</label>
+                                <input
+                                  value={businessData.number}
+                                  onChange={(e) => setBusinessData(d => ({ ...d, number: e.target.value }))}
+                                  placeholder="123"
+                                  className="w-full border-b border-emerald-500/50 bg-transparent py-1 text-sm font-bold text-emerald-700 outline-none"
+                                />
+                              </div>
+                            </div>
+                            <label className="border-2 border-dashed border-violet-300 rounded-xl p-3 text-center cursor-pointer hover:bg-violet-50 transition-colors block">
+                              <input type="file" hidden accept="application/pdf" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
+                              {proofFile ? (
+                                <span className="text-xs text-emerald-600 font-bold flex items-center justify-center gap-1">
+                                  <Check className="w-4 h-4" /> Comprovante OK!
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase flex items-center justify-center gap-1">
+                                  <Upload className="w-3 h-3" /> Anexar Cartão CNPJ (PDF)
+                                </span>
+                              )}
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <button
+                      onClick={handleIAPPurchase}
+                      disabled={
+                        processing ||
+                        purchasing ||
+                        loadingProducts ||
+                        (selectedPlanId === "business" && (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile)) ||
+                        !products.some((p) => getProductIdForPlan(selectedPlanId!) === p.identifier)
+                      }
+                      className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {processing || purchasing ? (
+                        <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</>
+                      ) : loadingProducts || !products.some((p) => getProductIdForPlan(selectedPlanId!) === p.identifier) ? (
+                        <>Aguardando preços da App Store...</>
+                      ) : (
+                        <>Assinar com Apple</>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRestorePurchases}
+                      disabled={restoring}
+                      className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      {restoring ? "Restaurando..." : "Restaurar compras"}
+                    </button>
+                  </>
+                ) : (
+                  <>
                 {selectedPlanId === "business" && (
                   <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4 space-y-3">
                     <p className="text-[10px] font-bold text-violet-600 uppercase flex items-center gap-1">
@@ -601,6 +853,8 @@ const Subscriptions = () => {
                   {processing ? <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</> : <><Lock className="w-4 h-4" /> Assinar Plano</>}
                 </button>
                 <p className="text-[10px] text-muted-foreground text-center flex items-center justify-center gap-1"><Lock className="w-3 h-3" /> Pagamento seguro e criptografado</p>
+                  </>
+                )}
               </div>
             )}
           </DialogContent>

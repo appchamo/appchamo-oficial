@@ -64,7 +64,7 @@ let lastProcessedUrl = "";
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, avatar_url, user_type, is_blocked, job_posting_enabled, gender")
+    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender")
     .eq("user_id", userId)
     .maybeSingle();
 

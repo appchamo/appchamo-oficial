@@ -432,3 +432,9 @@ entrypoint = "./functions/admin-manage/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/create_subscription/index.ts"
+
+# In-App Purchase: valida receipt Apple e ativa assinatura; JWT validado dentro da função
+[functions.validate_iap_subscription]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/validate_iap_subscription/index.ts"

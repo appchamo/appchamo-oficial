@@ -1,30 +1,63 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { formatCpf, validateCpf } from "@/lib/formatters";
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 
-type Step = "documents" | "profile";
+type Step = "cpf" | "documents" | "profile";
 
 const BecomeProfessional = () => {
-  console.log("🔥 BECOMEPROFESSIONAL ESTÁ SENDO EXECUTADO 🔥");
-
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
-  const [step, setStep] = useState<Step>("documents");
+  const [step, setStep] = useState<Step | null>(null);
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
+  const [cpfValue, setCpfValue] = useState("");
+  const [cpfSaving, setCpfSaving] = useState(false);
+  const [cameFromCpfStep, setCameFromCpfStep] = useState(false);
+
+  const needsCpf = profile && profile.user_type === "client" && !profile.cpf && !profile.cnpj;
 
   useEffect(() => {
     if (profile && profile.user_type !== "client") {
       navigate("/home");
+      return;
     }
-  }, [profile, navigate]);
+    if (profile && step === null) {
+      setStep(needsCpf ? "cpf" : "documents");
+    }
+  }, [profile, navigate, needsCpf, step]);
+
+  const handleCpfNext = async () => {
+    const raw = cpfValue.replace(/\D/g, "");
+    if (!validateCpf(cpfValue)) {
+      toast({ title: "CPF inválido", description: "Informe um CPF com 11 dígitos.", variant: "destructive" });
+      return;
+    }
+    setCpfSaving(true);
+    try {
+      const { data: existing } = await supabase.from("profiles").select("id").eq("cpf", raw).limit(1);
+      if (existing?.length) {
+        toast({ title: "Este CPF já está cadastrado.", variant: "destructive" });
+        setCpfSaving(false);
+        return;
+      }
+      const { error } = await supabase.from("profiles").update({ cpf: raw }).eq("user_id", user!.id);
+      if (error) throw error;
+      await refreshProfile();
+      setCameFromCpfStep(true);
+      setStep("documents");
+    } catch (err: any) {
+      toast({ title: "Erro", description: err?.message || "Não foi possível salvar o CPF.", variant: "destructive" });
+    }
+    setCpfSaving(false);
+  };
 
   const handleDocumentsNext = (files: File[]) => {
-    console.log("📂 DOCUMENTOS RECEBIDOS:", files);
     setDocFiles(files);
     setStep("profile");
   };
@@ -146,13 +179,58 @@ const BecomeProfessional = () => {
     );
   }
 
+  if (step === null) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <>
+      {step === "cpf" && (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
+          <div className="w-full max-w-sm">
+            <div className="text-center mb-4">
+              <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
+              <p className="text-sm text-muted-foreground">Tornar-se profissional · <strong>CPF</strong></p>
+              <button type="button" onClick={() => navigate("/home")} className="text-xs text-primary mt-1 hover:underline">← Voltar</button>
+            </div>
+            <div className="bg-card border rounded-2xl p-5 shadow-card space-y-4">
+              <p className="text-sm text-muted-foreground">Para continuar, cadastre seu CPF (obrigatório para profissionais).</p>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CPF *</label>
+                <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+                  <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={cpfValue}
+                    onChange={(e) => setCpfValue(formatCpf(e.target.value))}
+                    placeholder="000.000.000-00"
+                    maxLength={14}
+                    className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCpfNext}
+                disabled={cpfSaving}
+                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 disabled:opacity-50"
+              >
+                {cpfSaving ? "Salvando…" : "Continuar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {step === "documents" && (
         <StepDocuments
           documentType="cpf"
           onNext={handleDocumentsNext}
-          onBack={() => navigate("/home")}
+          onBack={() => (cameFromCpfStep ? setStep("cpf") : navigate("/home"))}
         />
       )}
 

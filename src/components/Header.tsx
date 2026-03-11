@@ -181,7 +181,7 @@ const Header = () => {
               </div>
             )}
             
-            {/* Não logado: botão "Entrar" no mesmo lugar do VIP (como na landing). Logado: VIP/Planos */}
+            {/* Não logado: botão "Entrar" no mesmo lugar do VIP (como na landing). Logado (só pro/empresa): VIP/Planos — cliente não vê para não cair na tela "exclusivo para profissionais" */}
             {!user && (
               <button
                 onClick={() => navigate("/login", { state: { from: location.pathname } })}
@@ -191,7 +191,7 @@ const Header = () => {
                 <span className="text-[11px] font-semibold">Entrar</span>
               </button>
             )}
-            {user && (showPlanBadge || true) && (
+            {user && isPro && (
               <button
                 type="button"
                 onClick={handleVipOrPlanosClick}

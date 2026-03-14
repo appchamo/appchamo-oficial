@@ -20,6 +20,8 @@ interface Profile {
   job_posting_enabled?: boolean;
   /** male | female | prefer_not_say – usado para "Bem-vindo(a)" na Home */
   gender?: string | null;
+  address_city?: string | null;
+  address_state?: string | null;
 }
 
 type AppRole =
@@ -64,7 +66,7 @@ let lastProcessedUrl = "";
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender")
+    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_city, address_state")
     .eq("user_id", userId)
     .maybeSingle();
 

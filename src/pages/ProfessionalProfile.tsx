@@ -23,7 +23,10 @@ interface ProData {
   availability_status: string;
   full_name: string;
   avatar_url: string | null;
+  category_id: string | null;
+  profession_id: string | null;
   category_name: string;
+  profession_name: string;
   user_type: string;
   agenda_enabled?: boolean;
 }
@@ -57,12 +60,16 @@ const ProfessionalProfile = () => {
   // Estado para edição do nome
   const [editingName, setEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState("");
+  // Categoria e profissão (para edição pelo dono)
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [professions, setProfessions] = useState<{ id: string; name: string; category_id: string }[]>([]);
+  const [savingCategoryProfession, setSavingCategoryProfession] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       const { data } = await supabase
         .from("professionals")
-        .select("id, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, categories(name), agenda_enabled")
+        .select("id, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled")
         .eq("id", id!)
         .maybeSingle();
         
@@ -92,7 +99,10 @@ const ProfessionalProfile = () => {
           ...data,
           full_name: profileData?.full_name || "Profissional",
           avatar_url: profileData?.avatar_url || null,
+          category_id: (data as any).category_id || null,
+          profession_id: (data as any).profession_id || null,
           category_name: (data.categories as any)?.name || "Sem categoria",
+          profession_name: (data.professions as any)?.name || "—",
           availability_status: (data as any).availability_status || "available",
           user_type: profileData?.user_type || "professional",
           agenda_enabled: !!(data as any).agenda_enabled,
@@ -100,6 +110,15 @@ const ProfessionalProfile = () => {
         
         const { data: { user } } = await supabase.auth.getUser();
         if (user && user.id === data.user_id) setIsOwner(true);
+
+        if (user && user.id === data.user_id) {
+          const [catRes, profRes] = await Promise.all([
+            supabase.from("categories").select("id, name").eq("active", true).order("sort_order"),
+            supabase.from("professions").select("id, name, category_id").eq("active", true).order("name"),
+          ]);
+          setCategories(catRes.data || []);
+          setProfessions(profRes.data || []);
+        }
 
         // Fetch reviews
         const { data: reviewsData } = await supabase
@@ -166,6 +185,28 @@ const ProfessionalProfile = () => {
     setPro(prev => prev ? { ...prev, full_name: editNameValue.trim() } : prev);
     setEditingName(false);
     toast({ title: "Nome atualizado!" });
+  };
+
+  const handleCategoryChange = async (categoryId: string) => {
+    if (!pro) return;
+    setSavingCategoryProfession(true);
+    const { error } = await supabase.from("professionals").update({ category_id: categoryId || null, profession_id: null }).eq("id", pro.id);
+    setSavingCategoryProfession(false);
+    if (error) { toast({ title: "Erro ao atualizar categoria", variant: "destructive" }); return; }
+    const cat = categories.find(c => c.id === categoryId);
+    setPro(prev => prev ? { ...prev, category_id: categoryId || null, profession_id: null, category_name: cat?.name || "—", profession_name: "—" } : prev);
+    toast({ title: "Categoria atualizada!" });
+  };
+
+  const handleProfessionChange = async (professionId: string) => {
+    if (!pro) return;
+    setSavingCategoryProfession(true);
+    const { error } = await supabase.from("professionals").update({ profession_id: professionId || null }).eq("id", pro.id);
+    setSavingCategoryProfession(false);
+    if (error) { toast({ title: "Erro ao atualizar profissão", variant: "destructive" }); return; }
+    const prof = professions.find(p => p.id === professionId);
+    setPro(prev => prev ? { ...prev, profession_id: professionId || null, profession_name: prof?.name || "—" } : prev);
+    toast({ title: "Profissão atualizada!" });
   };
 
   const handleCall = async () => {
@@ -240,7 +281,35 @@ const ProfessionalProfile = () => {
               </div>
               
               {!editingName && (
-                <p className="text-sm text-muted-foreground truncate">{pro.category_name}</p>
+                <p className="text-sm text-muted-foreground truncate">
+                  {pro.category_name}{pro.profession_name && pro.profession_name !== "—" ? ` · ${pro.profession_name}` : ""}
+                </p>
+              )}
+
+              {isOwner && categories.length > 0 && (
+                <div className="flex flex-wrap gap-2 items-center mt-1.5">
+                  <select
+                    value={pro.category_id || ""}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                    disabled={savingCategoryProfession}
+                    className="border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={pro.profession_id || ""}
+                    onChange={(e) => handleProfessionChange(e.target.value)}
+                    disabled={savingCategoryProfession}
+                    className="border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">— Profissão —</option>
+                    {professions.filter((pr) => pr.category_id === (pro.category_id || "")).map((pr) => (
+                      <option key={pr.id} value={pr.id}>{pr.name}</option>
+                    ))}
+                  </select>
+                </div>
               )}
               
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold mt-0.5 ${

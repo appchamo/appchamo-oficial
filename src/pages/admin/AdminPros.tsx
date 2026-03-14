@@ -15,6 +15,7 @@ interface Professional {
   id: string;
   user_id: string;
   category_id: string | null;
+  profession_id: string | null;
   bio: string | null;
   rating: number;
   total_services: number;
@@ -28,6 +29,7 @@ interface Professional {
   full_name: string;
   email: string;
   category_name: string;
+  profession_name: string;
   plan_id: string;
   calls_used: number;
   max_calls: number;
@@ -39,6 +41,12 @@ interface Professional {
 interface Category {
   id: string;
   name: string;
+}
+
+interface Profession {
+  id: string;
+  name: string;
+  category_id: string;
 }
 
 const statusBadge: Record<string, { label: string; cls: string }> = {
@@ -95,6 +103,7 @@ const AdminPros = () => {
   const [docs, setDocs] = useState<any[]>([]);
   const [rejectReason, setRejectReason] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
+  const [professions, setProfessions] = useState<Profession[]>([]);
   const [processingSub, setProcessingSub] = useState<string | null>(null);
   const [showForceApproveForUserId, setShowForceApproveForUserId] = useState<string | null>(null);
 
@@ -119,10 +128,15 @@ const AdminPros = () => {
     setCategories(data || []);
   };
 
+  const fetchProfessions = async () => {
+    const { data } = await supabase.from("professions").select("id, name, category_id").eq("active", true).order("name");
+    setProfessions(data || []);
+  };
+
   const fetchPros = async () => {
     const { data: professionals } = await supabase
       .from("professionals")
-      .select("*, categories(name)")
+      .select("*, categories(name), professions:profession_id(name)")
       .order("created_at", { ascending: false });
 
     if (!professionals || professionals.length === 0) {
@@ -158,6 +172,7 @@ const AdminPros = () => {
           full_name: profileMap.get(p.user_id)?.full_name || "—",
           email: profileMap.get(p.user_id)?.email || "—",
           category_name: (p.categories as any)?.name || "—",
+          profession_name: (p.professions as any)?.name || "—",
           plan_id: subInfo.plan_id,
           subscription_status: subInfo.status,
           calls_used: callCountMap.get(p.id) || 0,
@@ -170,7 +185,7 @@ const AdminPros = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchPros(); fetchCategories(); }, []);
+  useEffect(() => { fetchPros(); fetchCategories(); fetchProfessions(); }, []);
 
   const filtered = pros.filter((p) => {
     const q = search.toLowerCase();
@@ -351,11 +366,22 @@ const AdminPros = () => {
   };
 
   const handleChangeCategory = async (pro: Professional, categoryId: string) => {
-    const { error } = await supabase.from("professionals").update({ category_id: categoryId }).eq("id", pro.id);
+    const { error } = await supabase.from("professionals").update({ category_id: categoryId, profession_id: null }).eq("id", pro.id);
     if (error) { toast({ title: "Erro ao alterar categoria", variant: "destructive" }); return; }
     await logAction("change_category", "professional", pro.id, { category_id: categoryId });
     toast({ title: "Categoria atualizada!" });
     fetchPros();
+    if (detailPro?.id === pro.id) setDetailPro(prev => prev ? { ...prev, category_id: categoryId, profession_id: null, profession_name: "—" } : null);
+  };
+
+  const handleChangeProfession = async (pro: Professional, professionId: string) => {
+    const { error } = await supabase.from("professionals").update({ profession_id: professionId || null }).eq("id", pro.id);
+    if (error) { toast({ title: "Erro ao alterar profissão", variant: "destructive" }); return; }
+    await logAction("change_profession", "professional", pro.id, { profession_id: professionId });
+    const prof = professions.find(p => p.id === professionId);
+    toast({ title: "Profissão atualizada!" });
+    fetchPros();
+    if (detailPro?.id === pro.id) setDetailPro(prev => prev ? { ...prev, profession_id: professionId || null, profession_name: prof?.name || "—" } : null);
   };
 
   const toggleVerified = async (pro: Professional) => {
@@ -645,6 +671,34 @@ const AdminPros = () => {
                 </p>
               )}
               {detailPro.bio && <p className="text-sm text-muted-foreground">{detailPro.bio}</p>}
+
+              <div className="pt-2 border-t space-y-2">
+                <p className="text-xs font-bold text-muted-foreground uppercase">Categoria e profissão</p>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <select
+                    value={detailPro.category_id || ""}
+                    onChange={(e) => handleChangeCategory(detailPro, e.target.value)}
+                    className="border rounded-lg px-2 py-1.5 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={detailPro.profession_id || ""}
+                    onChange={(e) => handleChangeProfession(detailPro, e.target.value)}
+                    className="border rounded-lg px-2 py-1.5 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">— Profissão —</option>
+                    {professions
+                      .filter((pr) => pr.category_id === (detailPro.category_id || ""))
+                      .map((pr) => (
+                        <option key={pr.id} value={pr.id}>{pr.name}</option>
+                      ))}
+                  </select>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Alterar categoria ou profissão e salvará automaticamente.</p>
+              </div>
               
               <a href={`/professional/${detailPro.id}`} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">

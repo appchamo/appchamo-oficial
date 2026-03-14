@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Zap, Ticket, CalendarCheck, X } from "lucide-react"; 
+import { Zap, Ticket, CalendarCheck, X, MapPin } from "lucide-react"; 
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -18,6 +18,7 @@ import HomeJobsBanner from "@/components/home/HomeJobsBanner";
 import HomeWelcome from "@/components/home/HomeWelcome";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
+import { toast } from "@/hooks/use-toast";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -50,7 +51,7 @@ const HomeSkeleton = () => (
 );
 
 const Home = () => {
-  const { profile, user } = useAuth();
+  const { profile, user, refreshProfile } = useAuth();
   const { isFreePlan, callsRemaining, loading: subLoading } = useSubscription();
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
   const isRefreshing = useIsRefreshing();
@@ -67,6 +68,10 @@ const Home = () => {
   const [jobCount, setJobCount] = useState(0);
   const [showCoupon, setShowCoupon] = useState(false);
   const [isReady, setIsReady] = useState(false); // ✅ Controle de renderização global
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [locationCity, setLocationCity] = useState("");
+  const [locationState, setLocationState] = useState("");
+  const [locationSaving, setLocationSaving] = useState(false);
 
   useEffect(() => {
     supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => {
@@ -126,12 +131,38 @@ const Home = () => {
   };
   useRefresh(onRefresh);
 
+  const locationLabel = profile?.address_city && profile?.address_state
+    ? `${profile.address_city}, ${profile.address_state}`
+    : profile?.address_city || profile?.address_state || "Definir localização";
+
+  const handleOpenLocation = () => {
+    setLocationCity(profile?.address_city || "");
+    setLocationState(profile?.address_state || "");
+    setLocationOpen(true);
+  };
+
+  const handleSaveLocation = async () => {
+    const city = locationCity.trim();
+    const state = locationState.trim().toUpperCase().slice(0, 2);
+    if (!user?.id) return;
+    setLocationSaving(true);
+    const { error } = await supabase.from("profiles").update({ address_city: city || null, address_state: state || null }).eq("user_id", user.id);
+    setLocationSaving(false);
+    if (error) {
+      toast({ title: "Erro ao salvar localização", variant: "destructive" });
+      return;
+    }
+    await refreshProfile();
+    setLocationOpen(false);
+    toast({ title: "Localização atualizada! Os resultados serão filtrados por essa cidade." });
+  };
+
   const sectionComponents: Record<string, React.ReactNode> = {
     welcome: <HomeWelcome key="welcome" userName={userName} section={getSection("welcome")} />,
     sponsors: <SponsorCarousel key="sponsors" section={getSection("sponsors")} />,
     jobs: <HomeJobsBanner key="jobs" jobCount={jobCount} section={getSection("jobs")} />,
-    search: <HomeSearchBar key="search" section={getSection("search")} />,
-    featured: <FeaturedProfessionals key="featured" section={getSection("featured")} />,
+    search: <HomeSearchBar key={`search-${profile?.address_city}-${profile?.address_state}`} section={getSection("search")} />,
+    featured: <FeaturedProfessionals key={`featured-${profile?.address_city}-${profile?.address_state}`} section={getSection("featured")} />,
     categories: <CategoriesGrid key="categories" section={getSection("categories")} />,
     benefits: <BenefitsPanel key="benefits" section={getSection("benefits")} />,
     tutorials: <TutorialsSection key="tutorials" />
@@ -166,6 +197,17 @@ const Home = () => {
           className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
+          {user && (
+            <button
+              type="button"
+              onClick={handleOpenLocation}
+              className="flex items-center gap-2 w-fit px-3 py-1.5 rounded-full text-xs font-medium bg-muted/80 hover:bg-muted border border-border/80 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span className="truncate max-w-[180px]">{locationLabel}</span>
+            </button>
+          )}
+
           {!subLoading && isFreePlan && profile?.user_type !== "client" && callsRemaining <= 1 &&
           <Link to="/subscriptions" className="flex items-center gap-3 bg-accent border border-primary/20 rounded-xl p-3.5 hover:border-primary/40 transition-all">
               <Zap className="w-5 h-5 text-primary" />
@@ -225,6 +267,60 @@ const Home = () => {
           </footer>
         </main>
       )}
+
+      {/* Modal de localização */}
+      <Dialog open={locationOpen} onOpenChange={setLocationOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-primary" /> Alterar localização
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Defina sua cidade para ver profissionais cadastrados nessa região.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Cidade</label>
+              <input
+                type="text"
+                value={locationCity}
+                onChange={(e) => setLocationCity(e.target.value)}
+                placeholder="Ex: São Paulo"
+                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Estado (UF)</label>
+              <input
+                type="text"
+                value={locationState}
+                onChange={(e) => setLocationState(e.target.value.toUpperCase().slice(0, 2))}
+                placeholder="Ex: SP"
+                maxLength={2}
+                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setLocationOpen(false)}
+              className="flex-1 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveLocation}
+              disabled={locationSaving}
+              className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {locationSaving ? "Salvando…" : "Salvar"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de Cupom */}
       <Dialog open={showCoupon} onOpenChange={setShowCoupon}>

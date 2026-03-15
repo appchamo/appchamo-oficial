@@ -949,15 +949,22 @@ const MessageThread = () => {
         }
 
         const { data: { session: freshSession }, error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr || !freshSession) {
+        if (refreshErr || !freshSession?.access_token) {
           toast({ title: "Sessão expirada. Faça login novamente.", variant: "destructive" });
           setProcessingPayment(false);
           return;
         }
 
         const finalAmount = getFinalAmountWithFee(parseInt(installments), "card");
-        const res = await supabase.functions.invoke("create_payment", {
-          body: {
+        const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create_payment`;
+        const fnRes = await fetch(fnUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${freshSession.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "",
+          },
+          body: JSON.stringify({
             action: "create_service_payment",
             request_id: threadId,
             amount: finalAmount,
@@ -977,11 +984,14 @@ const MessageThread = () => {
               address_number: profile?.address_number || cardForm.addressNumber || "",
               phone: profile?.phone || ""
             }
-          }
+          }),
         });
+        const resData = await fnRes.json().catch(() => ({}));
+        const res = { data: resData, error: !fnRes.ok ? { message: resData?.message || resData?.error } : null };
 
         if (res.error || res.data?.error) {
-          throw new Error(res.data?.error || "Erro ao processar pagamento");
+          if (fnRes.status === 401) throw new Error("Sessão expirada. Faça login novamente e tente o pagamento.");
+          throw new Error(res.data?.message || res.data?.error || res.error?.message || "Erro ao processar pagamento");
         }
       } else if (paymentMethod === "pix") {
         const { data: profile } = await supabase.
@@ -1002,25 +1012,37 @@ const MessageThread = () => {
         }
 
         const { data: { session: freshSession }, error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr || !freshSession) {
+        if (refreshErr || !freshSession?.access_token) {
           toast({ title: "Sessão expirada. Faça login novamente.", variant: "destructive" });
           setProcessingPayment(false);
           return;
         }
 
         const finalAmount = getFinalAmountWithFee(1, "pix");
-        const res = await supabase.functions.invoke("create_payment", {
-          body: {
+        const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create_payment`;
+        const fnRes = await fetch(fnUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${freshSession.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "",
+          },
+          body: JSON.stringify({
             action: "create_service_payment",
             request_id: threadId,
             amount: finalAmount,
-            billing_type: "PIX"
-          }
+            billing_type: "PIX",
+          }),
         });
+        const resData = await fnRes.json().catch(() => ({}));
+        const res = { data: resData, error: !fnRes.ok ? { message: resData?.message || resData?.error || "Erro ao gerar PIX" } : null };
 
         if (res.error || res.data?.error) {
-          const msg = res.data?.error || res.error?.message || "Erro ao gerar PIX";
-          if (String(msg).toLowerCase().includes("jwt") || String(msg).toLowerCase().includes("unauthorized") || res.error?.message?.includes("401")) {
+          const msg = res.data?.message || res.data?.error || res.error?.message || "Erro ao gerar PIX";
+          if (!fnRes.ok && fnRes.status === 401) {
+            throw new Error("Sessão expirada. Faça login novamente e tente o pagamento.");
+          }
+          if (String(msg).toLowerCase().includes("jwt") || String(msg).toLowerCase().includes("unauthorized")) {
             throw new Error("Sessão expirada. Faça login novamente e tente o pagamento.");
           }
           throw new Error(msg);

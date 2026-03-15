@@ -630,23 +630,23 @@ const MessageThread = () => {
   };
 
   const openPayment = async (msg: Message) => {
-    await loadFeeSettings(); 
+    await loadFeeSettings();
     const billing = parseBilling(msg.content);
     if (!billing) return;
     setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id, installments: billing.installments });
-    
-    setClientPassFee(billing.passFee); 
 
+    setClientPassFee(billing.passFee);
     setPaymentMethod(billing.method);
-    setCardStep(false); 
-    setBillingDataStep(false);
-    
+    setCardStep(false);
     setPaymentConfirmed(false);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "", cpf: "" });
     if (!billing.method) setInstallments("1");
     setSelectedCouponId(null);
     setCouponDiscount(null);
-    setPaymentOpen(true);
+
+    // Checar CPF/CNPJ e endereço ANTES de abrir o modal; se faltar, abrir já na etapa "Dados para pagamento"
+    let needBillingStep = false;
+    let initialBillingForm = { cpf: "", cep: "", street: "", neighborhood: "", number: "", city: "", state: "" };
 
     if (userId) {
       const [profileRes, couponsRes] = await Promise.all([
@@ -654,12 +654,13 @@ const MessageThread = () => {
         supabase.from("coupons").select("*").eq("user_id", userId).eq("coupon_type", "discount").eq("used", false).order("created_at", { ascending: false }),
       ]);
       const p = profileRes.data as { cpf?: string; cnpj?: string; address_zip?: string; address_street?: string; address_number?: string; address_neighborhood?: string; address_city?: string; address_state?: string } | null;
-      const hasCpf = !!p?.cpf && String(p.cpf).replace(/\D/g, "").length === 11;
+      const cpfRaw = String(p?.cpf || "").replace(/\D/g, "");
+      const cnpjRaw = String(p?.cnpj || "").replace(/\D/g, "");
+      const hasDoc = (cpfRaw.length === 11) || (cnpjRaw.length === 14);
       const hasAddress = !!(p?.address_zip && p?.address_street && p?.address_number && p?.address_city && p?.address_state);
-      if (!hasCpf || !hasAddress) {
-        setBillingDataStep(true);
-        const cpfRaw = (p?.cpf || "").replace(/\D/g, "");
-        setBillingForm({
+      if (!hasDoc || !hasAddress) {
+        needBillingStep = true;
+        initialBillingForm = {
           cpf: cpfRaw.length === 11 ? cpfRaw : "",
           cep: (p?.address_zip || "").replace(/\D/g, ""),
           street: p?.address_street || "",
@@ -667,11 +668,17 @@ const MessageThread = () => {
           number: p?.address_number || "",
           city: p?.address_city || "",
           state: p?.address_state || "",
-        });
+        };
       }
       const valid = (couponsRes.data || []).filter((c: any) => !c.expires_at || new Date(c.expires_at) > new Date());
       setAvailableCoupons(valid);
+    } else {
+      needBillingStep = true;
     }
+
+    setBillingDataStep(needBillingStep);
+    setBillingForm(initialBillingForm);
+    setPaymentOpen(true);
   };
 
   const applyCoupon = (couponId: string) => {

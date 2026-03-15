@@ -85,16 +85,25 @@ Garanta que o build foi feito com as variáveis do **projeto Supabase de produç
 
 ## 7. Erro 401 "Invalid JWT" ao gerar PIX (app em produção)
 
-Se no site em produção (ex.: appchamo.com) o pagamento PIX retorna **401 Invalid JWT** ou "Sessão expirada":
+Se no site em produção (ex.: appchamo.com) o pagamento PIX retorna **401 Invalid JWT** ou "Sessão expirada", faça **os dois** passos abaixo.
 
-1. **O build de produção** (o que está publicado em appchamo.com) foi gerado com variáveis de ambiente. Essas variáveis vêm do **servidor de deploy** (Vercel, Netlify, etc.), **não** do seu `.env` local.
-2. No painel do **hospedagem** (ex.: Vercel → Project → Settings → Environment Variables), defina:
+### 7.1. Edge Function sem verificação de JWT no gateway (obrigatório)
+
+O gateway do Supabase pode rejeitar o JWT (ex.: login com Apple/Google usa ES256). A função `create_payment` já valida o usuário internamente com `getUser()`. Faça o redeploy da função **sem** verificação de JWT no gateway:
+
+```bash
+supabase functions deploy create_payment --no-verify-jwt
+```
+
+(No `config.toml` do projeto já está `verify_jwt = false` para uso local; em produção o flag `--no-verify-jwt` garante o mesmo comportamento.)
+
+### 7.2. Variáveis de ambiente no deploy do frontend (Vercel etc.)
+
+1. No painel da **hospedagem** (ex.: Vercel → Project → Settings → Environment Variables), defina:
    - `VITE_SUPABASE_URL` = URL do projeto (ex.: `https://xxxx.supabase.co`)
    - `VITE_SUPABASE_PUBLISHABLE_KEY` = **anon key** do Dashboard (Project Settings → API → anon public). Deve começar com `eyJ...`; **não** use chave que comece com `sb_publishable_...`.
-3. **Refaça o deploy** para gerar um novo build com essas variáveis.
-4. Abra o site em uma aba anônima, faça login de novo e tente o PIX.
-
-Se funcionar em `npm run dev` com o `.env` correto e falhar só em produção, o problema é sempre a configuração de env no deploy.
+2. **Refaça o deploy** do site para gerar um novo build com essas variáveis.
+3. Abra o site em uma aba anônima, faça login de novo e tente o PIX.
 
 ---
 

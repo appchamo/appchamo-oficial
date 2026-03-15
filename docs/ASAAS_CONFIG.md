@@ -38,12 +38,16 @@ A URL do sandbox para **chamadas à API** é `api-sandbox.asaas.com`; o site par
 
 ## 4. Webhook (para assinaturas e pagamentos)
 
-O Chamô tem a Edge Function **`asaas_webhook`**, que recebe notificações do Asaas (pagamento confirmado, assinatura ativada, etc.). Se o Asaas retornar **401 Unauthorized** nos detalhes do webhook, é porque a validação do token falhou.
+O Chamô tem a Edge Function **`asaas_webhook`**, que recebe notificações do Asaas (pagamento confirmado, assinatura ativada, etc.). Se o Asaas retornar **401 Unauthorized** nos detalhes do webhook, faça o seguinte.
 
-1. No Asaas: **Integrações** → **Webhooks** (ou **Notificações**).
-2. Cadastre a URL: `https://<SEU_PROJECT_REF>.supabase.co/functions/v1/asaas_webhook`
-3. Marque os eventos que você usa (ex.: PAYMENT_CREATED, PAYMENT_RECEIVED, PAYMENT_CONFIRMED, SUBSCRIPTION_UPDATED).
-4. **Token (AccessToken):**
+1. **Deploy da função sem JWT no gateway** (obrigatório): o Asaas chama a URL sem enviar JWT do Supabase; o gateway rejeita com 401 se a função estiver com verificação de JWT ativa. Faça o deploy assim:
+   ```bash
+   supabase functions deploy asaas_webhook --no-verify-jwt
+   ```
+2. No Asaas: **Integrações** → **Webhooks** (ou **Notificações**).
+3. Cadastre a URL: `https://<SEU_PROJECT_REF>.supabase.co/functions/v1/asaas_webhook`
+4. Marque os eventos que você usa (ex.: PAYMENT_RECEIVED, PAYMENT_CONFIRMED, SUBSCRIPTION_UPDATED).
+5. **Token (AccessToken):**
    - **Se você NÃO configurou** um token no Asaas: não crie o secret `ASAAS_WEBHOOK_TOKEN` no Supabase; a função aceita o webhook sem token.
    - **Se você configurou** um token no Asaas: crie no Supabase o secret **`ASAAS_WEBHOOK_TOKEN`** com **exatamente o mesmo valor**. O Asaas envia no header `asaas-access-token`; se for diferente, a função devolve 401.
 

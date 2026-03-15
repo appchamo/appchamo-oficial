@@ -139,7 +139,26 @@ serve(async (req) => {
     if (!user) throw new Error("Unauthorized");
 
     const body = await req.json();
-    const { request_id, amount } = body;
+    const { action, request_id, amount, payment_id } = body;
+
+    // ===============================
+    // Consultar status do pagamento (polling do frontend)
+    // ===============================
+    if (action === "check_payment_status" && payment_id) {
+      const { data: tx } = await supabase
+        .from("transactions")
+        .select("status, client_id")
+        .eq("asaas_payment_id", payment_id)
+        .eq("client_id", user.id)
+        .maybeSingle();
+
+      return new Response(
+        JSON.stringify({ confirmed: tx?.status === "paid" ?? false }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
 
     if (!request_id || !amount) {
       throw new Error("request_id and amount required");

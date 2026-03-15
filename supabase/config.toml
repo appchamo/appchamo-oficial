@@ -438,3 +438,15 @@ entrypoint = "./functions/create_subscription/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/validate_iap_subscription/index.ts"
+
+# Pagamento PIX/cartão: gateway pode retornar 401 com JWT ES256; a função valida com getUser()
+[functions.create_payment]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/create_payment/index.ts"
+
+# Webhook Asaas: chamado pelo servidor Asaas (sem JWT); a função valida via ASAAS_WEBHOOK_TOKEN
+[functions.asaas_webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/asaas_webhook/index.ts"

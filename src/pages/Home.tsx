@@ -19,6 +19,7 @@ import HomeWelcome from "@/components/home/HomeWelcome";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
+import { normalizeStateToUF } from "@/lib/locationUtils";
 
 // Fallback quando a API do IBGE não responder (ex.: app sem rede, CORS, etc.)
 const BR_STATES_FALLBACK: { sigla: string; nome: string }[] = [
@@ -154,7 +155,9 @@ const Home = () => {
     : profile?.address_city || profile?.address_state || "Definir localização";
 
   const handleOpenLocation = () => {
-    setLocationState(profile?.address_state || "");
+    const stateRaw = profile?.address_state || "";
+    const uf = normalizeStateToUF(stateRaw).toUpperCase() || stateRaw;
+    setLocationState(uf);
     setLocationCity(profile?.address_city || "");
     setLocationOpen(true);
     if (statesList.length === 0) {
@@ -170,9 +173,9 @@ const Home = () => {
         .catch(() => {})
         .finally(() => setLocationLoadingStates(false));
     }
-    if (profile?.address_state) {
+    if (uf) {
       setLocationLoadingCities(true);
-      fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(profile.address_state)}/municipios`)
+      fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios`)
         .then((r) => r.json())
         .then((data: any[]) => {
           if (Array.isArray(data)) setCitiesList(data.map((c) => c.nome).sort((a, b) => a.localeCompare(b)));
@@ -188,7 +191,8 @@ const Home = () => {
     }
   };
 
-  const handleStateChange = (uf: string) => {
+  const handleStateChange = (stateValue: string) => {
+    const uf = normalizeStateToUF(stateValue).toUpperCase() || stateValue;
     setLocationState(uf);
     setLocationCity("");
     if (!uf) {

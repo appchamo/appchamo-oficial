@@ -70,7 +70,7 @@ const readOAuthErrorFromUrl = (): { error: string; description: string } | null 
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { session } = useAuth();
+  const { session, refreshProfile } = useAuth();
   const returnTo = (location.state as { from?: string } | null)?.from;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -142,30 +142,42 @@ const Login = () => {
     }
   };
 
-  /** Após OAuth (Google/Apple) o trigger pode demorar a criar o perfil. Re-tenta várias vezes antes de mandar para signup. */
+  /** Após OAuth (Google/Apple) o trigger pode demorar a criar o perfil. Retry só enquanto não existir perfil; se já existir (mesmo pending_signup), decide na hora. */
   const fetchProfileWithRetry = async (userId: string): Promise<{ profile: any; roles: any[] }> => {
-    const isNative = Capacitor.isNativePlatform();
-    const delays = isNative ? [0, 600, 1500, 3000, 5000] : [0, 400, 1000, 2200]; // web também com retries (evita ir pra signup à toa)
-    let lastProfile: any = null;
-    let lastRoles: any[] = [];
-    for (let attempt = 0; attempt < delays.length; attempt++) {
-      if (attempt > 0) {
-        await new Promise((r) => setTimeout(r, delays[attempt]));
-      }
+    const fetchOne = async () => {
       const [{ data: profile }, { data: roles }] = await Promise.all([
         supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
         supabase.from("user_roles").select("role").eq("user_id", userId),
       ]);
-      lastProfile = profile ?? null;
-      lastRoles = roles ?? [];
-      // Perfil completo = existe e tem user_type final (não pending_signup).
-      const hasCompleteProfile =
-        lastProfile &&
-        lastProfile.user_type &&
-        lastProfile.user_type !== "pending_signup";
-      if (hasCompleteProfile) return { profile: lastProfile, roles: lastRoles };
+      return { profile: profile ?? null, roles: roles ?? [] };
+    };
+
+    // No native, garantir que o cliente Supabase já tem a sessão antes da 1ª requisição (evita perfil null no Android).
+    if (Capacitor.isNativePlatform()) {
+      await supabase.auth.getSession();
     }
-    return { profile: lastProfile, roles: lastRoles };
+    const { profile: firstProfile, roles: firstRoles } = await fetchOne();
+
+    // Se já existe perfil (incl. pending_signup), não precisa retry: trigger já rodou.
+    if (firstProfile) {
+      const hasCompleteProfile =
+        firstProfile.user_type && firstProfile.user_type !== "pending_signup";
+      if (hasCompleteProfile) return { profile: firstProfile, roles: firstRoles };
+      return { profile: firstProfile, roles: firstRoles };
+    }
+
+    // Perfil ainda não existe: trigger pode estar atrasado. Poucos retries com esperas curtas.
+    const delays = [400, 1000, 2000]; // ~3,4s no pior caso
+    for (const delay of delays) {
+      await new Promise((r) => setTimeout(r, delay));
+      const { profile, roles } = await fetchOne();
+      if (profile) {
+        const hasCompleteProfile = profile.user_type && profile.user_type !== "pending_signup";
+        if (hasCompleteProfile) return { profile, roles };
+        return { profile, roles };
+      }
+    }
+    return { profile: null, roles: [] };
   };
 
   const getRedirectPath = (defaultPath: string): string => {
@@ -210,50 +222,26 @@ const Login = () => {
         return;
       }
 
-      // Conta como “incompleto” só se não tem perfil ou perfil sem user_type (cadastro nunca finalizado).
-      // Não exige CPF/telefone para login; quem já tem user_type vai para a Home.
+      // Sem cadastro (sem perfil ou pending_signup): vai para Home como cliente (não manda mais para signup).
       const isProfileIncomplete =
         !profile ||
         !profile.user_type ||
         profile.user_type === "pending_signup";
 
       if (isProfileIncomplete) {
-        const manualLogin = localStorage.getItem("manual_login_intent") === "true";
-        if (manualLogin) {
-          await new Promise((r) => setTimeout(r, 1500));
-          const [{ data: retryProfile }, { data: retryRoles }] = await Promise.all([
-            supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
-            supabase.from("user_roles").select("role").eq("user_id", userId),
-          ]);
-          const retryComplete =
-            retryProfile &&
-            retryProfile.user_type &&
-            retryProfile.user_type !== "pending_signup";
-          if (retryComplete) {
-            const isAdminRetry = (retryRoles ?? []).some((r: any) =>
-              ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)
-            );
-            if (isAdminRetry) {
-              localStorage.removeItem("signup_in_progress");
-              localStorage.removeItem("manual_login_intent");
-              navigate("/admin", { replace: true });
-              return;
-            }
-            localStorage.removeItem("signup_in_progress");
-            localStorage.removeItem("manual_login_intent");
-            navigate(getRedirectPath("/home"), { replace: true });
-            return;
-          }
-        }
-        localStorage.setItem("signup_in_progress", "true");
+        localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        navigate("/signup", { replace: true });
+        await supabase
+          .from("profiles")
+          .update({ user_type: "client" })
+          .eq("user_id", userId);
+        await refreshProfile();
+        navigate(getRedirectPath("/home"), { replace: true });
         return;
       }
 
-      localStorage.removeItem("signup_in_progress"); 
+      localStorage.removeItem("signup_in_progress");
       localStorage.removeItem("manual_login_intent");
-      
       navigate(getRedirectPath("/home"), { replace: true });
       
     } catch (err) {
@@ -334,9 +322,24 @@ const Login = () => {
         }
       });
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+    const runRedirect = (userId: string, email?: string) => {
+      if (isRedirecting) return;
+      checkDeviceLimitAndRedirect(userId, email);
+    };
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirecting) {
-        checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
+        // No Android/Capacitor a sessão pode levar um instante a ser persistida; esperar e usar getSession
+        // evita consultar o perfil com JWT antigo e mandar usuário já cadastrado para o signup.
+        if (Capacitor.isNativePlatform()) {
+          await new Promise((r) => setTimeout(r, 400));
+          const { data: { session: fresh } } = await supabase.auth.getSession();
+          if (fresh?.user) {
+            runRedirect(fresh.user.id, fresh.user.email ?? undefined);
+            return;
+          }
+        }
+        runRedirect(session.user.id, session.user.email ?? undefined);
       }
     });
 

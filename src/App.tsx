@@ -175,11 +175,7 @@ const RedirectLoggedIn = () => {
     );
   }
 
-  const hasCompleteProfile =
-    profile &&
-    profile.user_type &&
-    profile.user_type !== "pending_signup";
-  if (!hasCompleteProfile) return <Navigate to="/signup" replace />;
+  // Logado: vai para Home (não manda mais para signup; login com Google/Apple sem cadastro vira cliente).
   return <Navigate to="/home" replace />;
 };
 

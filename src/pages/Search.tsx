@@ -3,6 +3,7 @@ import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, F
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { normalizeLocation, normalizeStateToUF } from "@/lib/locationUtils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -242,15 +243,15 @@ const Search = () => {
       }
       
       if (filterState) {
-        const pState = (p.state || "").toLowerCase();
-        const fState = filterState.toLowerCase();
-        if (pState !== fState) return false;
+        const pStateNorm = normalizeStateToUF(p.state);
+        const fStateNorm = normalizeStateToUF(filterState);
+        if (pStateNorm !== fStateNorm) return false;
       }
 
       if (filterCity) {
-        const pCity = (p.city || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-        const fCity = filterCity.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-        if (!pCity.includes(fCity)) return false;
+        const pCity = normalizeLocation(p.city);
+        const fCity = normalizeLocation(filterCity);
+        if (!pCity || !pCity.includes(fCity)) return false;
       }
 
       if (filterCategory && p.category_id !== filterCategory) return false;

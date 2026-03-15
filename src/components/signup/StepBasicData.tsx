@@ -233,6 +233,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
   const [validating, setValidating] = useState(false);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
+  const [loadingLocation, setLoadingLocation] = useState(false);
 
   // ✅ Identifica se é login social para esconder senhas
   const isSocialSignup = !!initialData?.email;
@@ -301,6 +302,36 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     setAddressCity(parts[0]);
     if (parts[1]) setAddressState(parts[1]);
     setShowCitySuggestions(false);
+  };
+
+  const handleObterLocalizacao = () => {
+    if (!navigator.geolocation) {
+      toast({ title: "Seu dispositivo não suporta geolocalização.", variant: "destructive" });
+      return;
+    }
+    setLoadingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { reverseGeocode } = await import("@/lib/geocode");
+          const { city, state, street, neighborhood } = await reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+          setAddressCity(city);
+          setAddressState(state);
+          if (street) setAddressStreet(street);
+          if (neighborhood) setAddressNeighborhood(neighborhood);
+          toast({ title: "Endereço preenchido! Confira e informe o número." });
+        } catch (e) {
+          console.error("Reverse geocode:", e);
+          toast({ title: "Não foi possível obter o endereço. Preencha manualmente.", variant: "destructive" });
+        }
+        setLoadingLocation(false);
+      },
+      () => {
+        toast({ title: "Permissão negada ou GPS desligado. Preencha o endereço manualmente.", variant: "destructive" });
+        setLoadingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -509,9 +540,24 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
             </>
           )}
 
-          {/* Endereço: CEP busca cidade, rua e bairro automaticamente; só o número o cliente preenche */}
+          {/* Endereço: CEP ou Obter localização (GPS); número e rua o usuário preenche */}
           <div className="border-t pt-3 mt-2">
-            <p className="text-xs font-semibold text-muted-foreground mb-2">Endereço *</p>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-xs font-semibold text-muted-foreground">Endereço *</p>
+              <button
+                type="button"
+                onClick={handleObterLocalizacao}
+                disabled={loadingLocation}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary text-primary text-xs font-medium hover:bg-primary/10 disabled:opacity-50"
+              >
+                {loadingLocation ? (
+                  <span className="animate-spin w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full" />
+                ) : (
+                  <MapPin className="w-3.5 h-3.5" />
+                )}
+                {loadingLocation ? "Obtendo..." : "Obter localização"}
+              </button>
+            </div>
             <InputRow icon={MapPin} label="CEP">
               <input type="text" value={addressZip} onChange={(e) => handleCepChange(e.target.value)} placeholder="00000-000"
                 className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />

@@ -76,6 +76,45 @@ A validação de CPF/CNPJ do **profissional** usa a mesma **ASAAS_API_KEY**: a E
 
 ---
 
+## 8. Passar o Asaas para produção (estava em sandbox)
+
+Para usar cobranças e assinaturas **reais**:
+
+1. **Conta Asaas produção**  
+   Tenha uma conta em [www.asaas.com](https://www.asaas.com) (não use a do sandbox).
+
+2. **Chave de API de produção**  
+   No painel **www.asaas.com** → Integrações → Gerar nova chave de API. Copie a chave (ela só aparece uma vez).
+
+3. **Secrets no Supabase**  
+   Dashboard do Supabase → **Edge Functions** → **Secrets** (ou Project Settings → Edge Functions):
+   - **`ASAAS_API_KEY`** → troque pelo valor da chave de **produção** (substitui a chave do sandbox).
+   - **`ASAAS_ENV`** → crie ou edite e defina como **`production`** (texto exatamente assim, minúsculo).  
+   Se `ASAAS_ENV` não existir, o app usa sandbox; ao definir `production`, as funções passam a usar `https://api.asaas.com/v3`.
+
+4. **Webhook no Asaas produção**  
+   No painel **www.asaas.com** → Integrações → Webhooks:
+   - URL: `https://<SEU_PROJECT_REF>.supabase.co/functions/v1/asaas_webhook`
+   - Eventos: PAYMENT_CONFIRMED, SUBSCRIPTION_UPDATED (e outros que você usar).
+   - Se configurar um token (AccessToken), crie no Supabase o secret **`ASAAS_WEBHOOK_TOKEN`** com o mesmo valor.
+
+5. **Redeploy das Edge Functions**  
+   Depois de alterar os secrets, faça redeploy das funções que usam Asaas para carregarem as novas variáveis:
+   ```bash
+   supabase functions deploy create_payment
+   supabase functions deploy create_subscription
+   supabase functions deploy asaas_webhook
+   supabase functions deploy admin-manage
+   supabase functions deploy validate-cpf-signup
+   ```
+
+6. **Clientes e assinaturas**  
+   Clientes/assinaturas criados no **sandbox** não existem na API de produção. Usuários que se cadastraram no sandbox terão de passar de novo pela validação de CPF/CNPJ e assinatura em produção (ou você migra manualmente no Asaas se precisar).
+
+Resumo: **`ASAAS_ENV=production`** + **`ASAAS_API_KEY`** da conta produção + webhook em produção + redeploy das funções.
+
+---
+
 ## Links úteis
 
 - [Documentação Asaas – Chaves de API](https://docs.asaas.com/docs/chaves-de-api)

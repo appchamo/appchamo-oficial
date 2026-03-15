@@ -47,6 +47,8 @@
 	<string>O Chamô usa a galeria para você escolher e enviar fotos de perfil e documentos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>O Chamô acessa suas fotos para você enviar documentos e imagens no cadastro.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>O Chamô usa sua localização para mostrar profissionais da sua região.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

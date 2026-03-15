@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, Star, Trash2, Eye, MessageSquare } from "lucide-react";
+import { Search, Star, Trash2, Eye, MessageSquare, MapPin, Pencil, Check } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -20,6 +20,12 @@ interface UserProfile {
   user_type: string;
   address_city: string | null;
   address_state: string | null;
+  address_street: string | null;
+  address_number: string | null;
+  address_neighborhood: string | null;
+  address_zip: string | null;
+  latitude: number | null;
+  longitude: number | null;
   created_at: string;
   professional_id: string | null;
   category_name: string | null;
@@ -45,12 +51,22 @@ const AdminProfiles = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [deleteReviewId, setDeleteReviewId] = useState<string | null>(null);
+  const [editingLocation, setEditingLocation] = useState(false);
+  const [locationForm, setLocationForm] = useState({
+    address_city: "",
+    address_state: "",
+    address_street: "",
+    address_number: "",
+    address_neighborhood: "",
+    address_zip: "",
+  });
+  const [savingLocation, setSavingLocation] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
     const { data: profiles, error } = await supabase
       .from("profiles")
-      .select("id, user_id, full_name, email, avatar_url, user_type, address_city, address_state, created_at")
+      .select("id, user_id, full_name, email, avatar_url, user_type, address_city, address_state, address_street, address_number, address_neighborhood, address_zip, latitude, longitude, created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -106,6 +122,15 @@ const AdminProfiles = () => {
 
   const openProfile = async (user: UserProfile) => {
     setSelectedUser(user);
+    setEditingLocation(false);
+    setLocationForm({
+      address_city: user.address_city ?? "",
+      address_state: user.address_state ?? "",
+      address_street: user.address_street ?? "",
+      address_number: user.address_number ?? "",
+      address_neighborhood: user.address_neighborhood ?? "",
+      address_zip: user.address_zip ?? "",
+    });
     setReviewsLoading(true);
 
     if (user.professional_id) {
@@ -160,6 +185,31 @@ const AdminProfiles = () => {
   };
 
   const typeLabel = (t: string) => t === "company" ? "Empresa" : t === "professional" ? "Profissional" : "Cliente";
+
+  const handleSaveLocation = async () => {
+    if (!selectedUser) return;
+    setSavingLocation(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        address_city: locationForm.address_city || null,
+        address_state: locationForm.address_state || null,
+        address_street: locationForm.address_street || null,
+        address_number: locationForm.address_number || null,
+        address_neighborhood: locationForm.address_neighborhood || null,
+        address_zip: locationForm.address_zip || null,
+      })
+      .eq("user_id", selectedUser.user_id);
+    setSavingLocation(false);
+    if (error) {
+      toast({ title: "Erro ao salvar localização", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Localização atualizada!" });
+    setEditingLocation(false);
+    fetchUsers();
+    setSelectedUser(prev => prev ? { ...prev, ...locationForm } : null);
+  };
 
   return (
     <AdminLayout title="Ver Perfis de Usuários">
@@ -261,12 +311,48 @@ const AdminProfiles = () => {
                   <p className="text-muted-foreground text-xs">Tipo</p>
                   <p className="font-medium text-foreground">{typeLabel(selectedUser.user_type)}</p>
                 </div>
-                {selectedUser.address_city && (
-                  <div>
-                    <p className="text-muted-foreground text-xs">Localização</p>
-                    <p className="font-medium text-foreground">{selectedUser.address_city}{selectedUser.address_state ? `, ${selectedUser.address_state}` : ""}</p>
+                {/* Localização: ver e editar */}
+                <div className="col-span-2">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-muted-foreground text-xs flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5" /> Localização
+                    </p>
+                    {!editingLocation ? (
+                      <button type="button" onClick={() => setEditingLocation(true)} className="text-xs text-primary hover:underline flex items-center gap-1">
+                        <Pencil className="w-3 h-3" /> Editar
+                      </button>
+                    ) : null}
                   </div>
-                )}
+                  {editingLocation ? (
+                    <div className="space-y-2 border rounded-lg p-3 bg-muted/30">
+                      <input placeholder="Cidade" value={locationForm.address_city} onChange={e => setLocationForm(f => ({ ...f, address_city: e.target.value }))} className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
+                      <input placeholder="Estado (UF)" value={locationForm.address_state} onChange={e => setLocationForm(f => ({ ...f, address_state: e.target.value.toUpperCase().slice(0, 2) }))} maxLength={2} className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
+                      <input placeholder="Rua" value={locationForm.address_street} onChange={e => setLocationForm(f => ({ ...f, address_street: e.target.value }))} className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
+                      <input placeholder="Número" value={locationForm.address_number} onChange={e => setLocationForm(f => ({ ...f, address_number: e.target.value }))} className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
+                      <input placeholder="Bairro" value={locationForm.address_neighborhood} onChange={e => setLocationForm(f => ({ ...f, address_neighborhood: e.target.value }))} className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
+                      <input placeholder="CEP" value={locationForm.address_zip} onChange={e => setLocationForm(f => ({ ...f, address_zip: e.target.value }))} className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
+                      <div className="flex gap-2 pt-1">
+                        <button type="button" onClick={() => setEditingLocation(false)} className="px-3 py-1.5 text-sm border rounded-lg hover:bg-muted">Cancelar</button>
+                        <button type="button" onClick={handleSaveLocation} disabled={savingLocation} className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 flex items-center gap-1 disabled:opacity-50">
+                          {savingLocation ? "Salvando..." : <><Check className="w-3.5 h-3.5" /> Salvar</>}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="font-medium text-foreground text-sm">
+                      {selectedUser.address_city || selectedUser.address_state ? (
+                        <>
+                          {[selectedUser.address_street, selectedUser.address_number].filter(Boolean).join(", ")}
+                          {([selectedUser.address_street, selectedUser.address_number].filter(Boolean).length > 0 && (selectedUser.address_neighborhood || selectedUser.address_city)) ? " · " : ""}
+                          {selectedUser.address_neighborhood}
+                          {selectedUser.address_neighborhood && selectedUser.address_city ? " · " : ""}
+                          {selectedUser.address_city}{selectedUser.address_state ? `, ${selectedUser.address_state}` : ""}
+                          {selectedUser.address_zip ? ` — CEP ${selectedUser.address_zip}` : ""}
+                        </>
+                      ) : "—"}
+                    </p>
+                  )}
+                </div>
                 {selectedUser.category_name && (
                   <div>
                     <p className="text-muted-foreground text-xs">Categoria</p>

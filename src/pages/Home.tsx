@@ -20,6 +20,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
 
+// Fallback quando a API do IBGE não responder (ex.: app sem rede, CORS, etc.)
+const BR_STATES_FALLBACK: { sigla: string; nome: string }[] = [
+  { sigla: "AC", nome: "Acre" }, { sigla: "AL", nome: "Alagoas" }, { sigla: "AP", nome: "Amapá" },
+  { sigla: "AM", nome: "Amazonas" }, { sigla: "BA", nome: "Bahia" }, { sigla: "CE", nome: "Ceará" },
+  { sigla: "DF", nome: "Distrito Federal" }, { sigla: "ES", nome: "Espírito Santo" }, { sigla: "GO", nome: "Goiás" },
+  { sigla: "MA", nome: "Maranhão" }, { sigla: "MT", nome: "Mato Grosso" }, { sigla: "MS", nome: "Mato Grosso do Sul" },
+  { sigla: "MG", nome: "Minas Gerais" }, { sigla: "PA", nome: "Pará" }, { sigla: "PB", nome: "Paraíba" },
+  { sigla: "PR", nome: "Paraná" }, { sigla: "PE", nome: "Pernambuco" }, { sigla: "PI", nome: "Piauí" },
+  { sigla: "RJ", nome: "Rio de Janeiro" }, { sigla: "RN", nome: "Rio Grande do Norte" }, { sigla: "RS", nome: "Rio Grande do Sul" },
+  { sigla: "RO", nome: "Rondônia" }, { sigla: "RR", nome: "Roraima" }, { sigla: "SC", nome: "Santa Catarina" },
+  { sigla: "SP", nome: "São Paulo" }, { sigla: "SE", nome: "Sergipe" }, { sigla: "TO", nome: "Tocantins" },
+];
+
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
   <div className="max-w-screen-lg mx-auto px-4 py-5 flex flex-col gap-6 w-full animate-in fade-in duration-500">
@@ -76,6 +89,7 @@ const Home = () => {
   const [locationLoadingCities, setLocationLoadingCities] = useState(false);
   const [locationSaving, setLocationSaving] = useState(false);
   const [locationGettingGPS, setLocationGettingGPS] = useState(false);
+  const [locationLoadingStates, setLocationLoadingStates] = useState(false);
 
   useEffect(() => {
     supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => {
@@ -144,21 +158,30 @@ const Home = () => {
     setLocationCity(profile?.address_city || "");
     setLocationOpen(true);
     if (statesList.length === 0) {
+      setStatesList(BR_STATES_FALLBACK);
+      setLocationLoadingStates(true);
       fetch("https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome")
         .then((r) => r.json())
         .then((data: any[]) => {
-          if (Array.isArray(data)) setStatesList(data.map((s) => ({ sigla: s.sigla, nome: s.nome })));
+          if (Array.isArray(data) && data.length > 0) {
+            setStatesList(data.map((s) => ({ sigla: s.sigla, nome: s.nome })));
+          }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setLocationLoadingStates(false));
     }
     if (profile?.address_state) {
       setLocationLoadingCities(true);
-      fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${profile.address_state}/municipios`)
+      fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(profile.address_state)}/municipios`)
         .then((r) => r.json())
         .then((data: any[]) => {
           if (Array.isArray(data)) setCitiesList(data.map((c) => c.nome).sort((a, b) => a.localeCompare(b)));
+          else setCitiesList([]);
         })
-        .catch(() => setCitiesList([]))
+        .catch(() => {
+          setCitiesList([]);
+          toast({ title: "Não foi possível carregar as cidades. Tente novamente.", variant: "destructive" });
+        })
         .finally(() => setLocationLoadingCities(false));
     } else {
       setCitiesList([]);
@@ -173,12 +196,17 @@ const Home = () => {
       return;
     }
     setLocationLoadingCities(true);
-    fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios`)
+    setCitiesList([]);
+    fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios`)
       .then((r) => r.json())
       .then((data: any[]) => {
         if (Array.isArray(data)) setCitiesList(data.map((c) => c.nome).sort((a, b) => a.localeCompare(b)));
+        else setCitiesList([]);
       })
-      .catch(() => setCitiesList([]))
+      .catch(() => {
+        setCitiesList([]);
+        toast({ title: "Não foi possível carregar as cidades. Verifique a conexão e tente novamente.", variant: "destructive" });
+      })
       .finally(() => setLocationLoadingCities(false));
   };
 
@@ -214,7 +242,7 @@ const Home = () => {
     toast({ title: "Localização atualizada! Os profissionais dessa região serão exibidos." });
   };
 
-  /** Obtém GPS em tempo real e preenche cidade/estado via reverse geocode (Nominatim). */
+  /** Obtém GPS e preenche cidade/estado via reverse geocode (Nominatim). */
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
       toast({ title: "Seu navegador ou dispositivo não suporta geolocalização.", variant: "destructive" });
@@ -226,20 +254,11 @@ const Home = () => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-            { headers: { "Accept-Language": "pt-BR", "User-Agent": "ChamoApp/1.0 (contato@appchamo.com)" } }
-          );
-          const data = await res.json();
-          const addr = data?.address || {};
-          const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || "";
-          const stateRaw = addr["ISO3166-2-lvl4"]?.split("-")[1] || addr.state || "";
-          const state = (stateRaw.length === 2 ? stateRaw : stateRaw.slice(0, 2)).toUpperCase();
+          const { reverseGeocode } = await import("@/lib/geocode");
+          const { city, state } = await reverseGeocode(lat, lng);
           setLocationCity(city);
           setLocationState(state);
           if (user?.id && (city || state)) {
-            setLocationCity(city);
-            setLocationState(state);
             const { error: err } = await supabase.from("profiles").update({
               address_city: city || null,
               address_state: state || null,
@@ -248,17 +267,32 @@ const Home = () => {
             }).eq("user_id", user.id);
             if (!err) {
               await refreshProfile();
+              setLocationGettingGPS(false);
               setLocationOpen(false);
               toast({ title: "Localização definida com base no GPS!" });
+            } else {
+              setLocationGettingGPS(false);
             }
+          } else {
+            setLocationGettingGPS(false);
           }
-        } catch {
-          toast({ title: "Não foi possível obter o endereço. Preencha cidade e estado manualmente.", variant: "destructive" });
+        } catch (e) {
+          console.error("Reverse geocode:", e);
+          toast({
+            title: "Não foi possível obter o endereço",
+            description: "Verifique a conexão ou preencha cidade e estado manualmente.",
+            variant: "destructive",
+          });
+          setLocationGettingGPS(false);
         }
-        setLocationGettingGPS(false);
       },
-      () => {
-        toast({ title: "Não foi possível acessar a localização. Verifique as permissões do app.", variant: "destructive" });
+      (err) => {
+        console.warn("getCurrentPosition error:", err);
+        toast({
+          title: "Localização indisponível",
+          description: "Permissão negada ou GPS desligado. Selecione estado e cidade abaixo.",
+          variant: "destructive",
+        });
         setLocationGettingGPS(false);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -404,7 +438,9 @@ const Home = () => {
                 onChange={(e) => handleStateChange(e.target.value)}
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
               >
-                <option value="">Selecione o estado</option>
+                <option value="">
+                  {locationLoadingStates ? "Carregando estados…" : "Selecione o estado"}
+                </option>
                 {statesList.map((s) => (
                   <option key={s.sigla} value={s.sigla}>{s.nome} ({s.sigla})</option>
                 ))}

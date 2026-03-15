@@ -96,6 +96,13 @@ const MessageThread = () => {
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "", cpf: "" });
   const [cepFetchedAddress, setCepFetchedAddress] = useState<string | null>(null);
   const [searchingCep, setSearchingCep] = useState(false);
+  // Etapa obrigatória antes de PIX/cartão: CPF + endereço (CEP → rua, bairro, número, cidade, estado)
+  const [billingDataStep, setBillingDataStep] = useState(false);
+  const [billingForm, setBillingForm] = useState({
+    cpf: "", cep: "", street: "", neighborhood: "", number: "", city: "", state: "",
+  });
+  const [billingCepLoading, setBillingCepLoading] = useState(false);
+  const [savingBilling, setSavingBilling] = useState(false);
   const [installments, setInstallments] = useState("1");
   const [processingPayment, setProcessingPayment] = useState(false);
   const [clientPassFee, setClientPassFee] = useState(false); 
@@ -632,6 +639,7 @@ const MessageThread = () => {
 
     setPaymentMethod(billing.method);
     setCardStep(false); 
+    setBillingDataStep(false);
     
     setPaymentConfirmed(false);
     setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "", cpf: "" });
@@ -641,14 +649,27 @@ const MessageThread = () => {
     setPaymentOpen(true);
 
     if (userId) {
-      const { data } = await supabase.
-      from("coupons").
-      select("*").
-      eq("user_id", userId).
-      eq("coupon_type", "discount").
-      eq("used", false).
-      order("created_at", { ascending: false });
-      const valid = (data || []).filter((c: any) => !c.expires_at || new Date(c.expires_at) > new Date());
+      const [profileRes, couponsRes] = await Promise.all([
+        supabase.from("profiles").select("cpf, cnpj, address_zip, address_street, address_number, address_neighborhood, address_city, address_state").eq("user_id", userId).single(),
+        supabase.from("coupons").select("*").eq("user_id", userId).eq("coupon_type", "discount").eq("used", false).order("created_at", { ascending: false }),
+      ]);
+      const p = profileRes.data as { cpf?: string; cnpj?: string; address_zip?: string; address_street?: string; address_number?: string; address_neighborhood?: string; address_city?: string; address_state?: string } | null;
+      const hasCpf = !!p?.cpf && String(p.cpf).replace(/\D/g, "").length === 11;
+      const hasAddress = !!(p?.address_zip && p?.address_street && p?.address_number && p?.address_city && p?.address_state);
+      if (!hasCpf || !hasAddress) {
+        setBillingDataStep(true);
+        const cpfRaw = (p?.cpf || "").replace(/\D/g, "");
+        setBillingForm({
+          cpf: cpfRaw.length === 11 ? cpfRaw : "",
+          cep: (p?.address_zip || "").replace(/\D/g, ""),
+          street: p?.address_street || "",
+          neighborhood: p?.address_neighborhood || "",
+          number: p?.address_number || "",
+          city: p?.address_city || "",
+          state: p?.address_state || "",
+        });
+      }
+      const valid = (couponsRes.data || []).filter((c: any) => !c.expires_at || new Date(c.expires_at) > new Date());
       setAvailableCoupons(valid);
     }
   };
@@ -663,6 +684,73 @@ const MessageThread = () => {
   const removeCoupon = () => {
     setSelectedCouponId(null);
     setCouponDiscount(null);
+  };
+
+  const handleBillingCepChange = async (rawCep: string) => {
+    const clean = rawCep.replace(/\D/g, "").slice(0, 8);
+    setBillingForm((f) => ({ ...f, cep: clean }));
+    if (clean.length === 8) {
+      setBillingCepLoading(true);
+      try {
+        const data = await fetchViaCep(clean);
+        if (data) {
+          setBillingForm((f) => ({
+            ...f,
+            street: data.logradouro || f.street,
+            neighborhood: data.bairro || f.neighborhood,
+            city: data.localidade || f.city,
+            state: (data.uf || f.state).toUpperCase(),
+          }));
+        }
+      } finally {
+        setBillingCepLoading(false);
+      }
+    }
+  };
+
+  const handleSaveBillingAndContinue = async () => {
+    const cpfClean = billingForm.cpf.replace(/\D/g, "");
+    if (!validateCpf(billingForm.cpf)) {
+      toast({ title: "CPF obrigatório", description: "Informe um CPF válido (11 dígitos).", variant: "destructive" });
+      return;
+    }
+    if (billingForm.cep.replace(/\D/g, "").length !== 8) {
+      toast({ title: "CEP inválido", description: "Informe um CEP com 8 dígitos.", variant: "destructive" });
+      return;
+    }
+    if (!billingForm.street?.trim()) {
+      toast({ title: "Preencha a rua", variant: "destructive" });
+      return;
+    }
+    if (!billingForm.number?.trim()) {
+      toast({ title: "Preencha o número do endereço", variant: "destructive" });
+      return;
+    }
+    if (!billingForm.city?.trim() || !billingForm.state?.trim()) {
+      toast({ title: "Preencha cidade e estado (busque pelo CEP primeiro)", variant: "destructive" });
+      return;
+    }
+    if (!userId) return;
+    setSavingBilling(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        cpf: cpfClean,
+        address_zip: billingForm.cep.replace(/\D/g, ""),
+        address_street: billingForm.street.trim(),
+        address_number: billingForm.number.trim(),
+        address_neighborhood: billingForm.neighborhood.trim() || null,
+        address_city: billingForm.city.trim(),
+        address_state: billingForm.state.trim().toUpperCase().slice(0, 2),
+      })
+      .eq("user_id", userId);
+    setSavingBilling(false);
+    if (error) {
+      toast({ title: "Erro ao salvar dados", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Dados salvos. Prosseguindo ao pagamento." });
+    setBillingDataStep(false);
   };
 
   const getDiscountedAmount = () => {
@@ -1878,14 +1966,99 @@ const MessageThread = () => {
       </Dialog>
 
       {/* Payment Dialog (Cliente) */}
-      <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
+      <Dialog open={paymentOpen} onOpenChange={(open) => { setPaymentOpen(open); if (!open) setBillingDataStep(false); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{cardStep ? "Dados do cartão" : "Resumo do Pagamento"}</DialogTitle>
+            <DialogTitle>
+              {billingDataStep ? "Dados para pagamento" : cardStep ? "Dados do cartão" : "Resumo do Pagamento"}
+            </DialogTitle>
           </DialogHeader>
+
+          {/* TELA 0: CPF + ENDEREÇO OBRIGATÓRIOS (antes de PIX ou cartão) */}
+          {paymentData && billingDataStep && (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">Preencha CPF e endereço para continuar. O CEP preenche rua, bairro, cidade e estado.</p>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">CPF do titular *</label>
+                <input
+                  value={formatCpf(billingForm.cpf)}
+                  onChange={(e) => setBillingForm((f) => ({ ...f, cpf: e.target.value.replace(/\D/g, "").slice(0, 11) }))}
+                  placeholder="000.000.000-00"
+                  maxLength={14}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                />
+              </div>
+              <div className="relative">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">CEP *</label>
+                <input
+                  value={formatCep(billingForm.cep)}
+                  onChange={(e) => handleBillingCepChange(e.target.value)}
+                  placeholder="00000-000"
+                  maxLength={9}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                />
+                {billingCepLoading && <div className="absolute right-3 top-9 w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Rua *</label>
+                <input
+                  value={billingForm.street}
+                  onChange={(e) => setBillingForm((f) => ({ ...f, street: e.target.value }))}
+                  placeholder="Rua, avenida..."
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Bairro</label>
+                <input
+                  value={billingForm.neighborhood}
+                  onChange={(e) => setBillingForm((f) => ({ ...f, neighborhood: e.target.value }))}
+                  placeholder="Bairro"
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Número *</label>
+                  <input
+                    value={billingForm.number}
+                    onChange={(e) => setBillingForm((f) => ({ ...f, number: e.target.value }))}
+                    placeholder="123"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Cidade *</label>
+                  <input
+                    value={billingForm.city}
+                    onChange={(e) => setBillingForm((f) => ({ ...f, city: e.target.value }))}
+                    placeholder="Cidade"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Estado (UF) *</label>
+                <input
+                  value={billingForm.state}
+                  onChange={(e) => setBillingForm((f) => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }))}
+                  placeholder="MG"
+                  maxLength={2}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <button
+                onClick={handleSaveBillingAndContinue}
+                disabled={savingBilling}
+                className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {savingBilling ? "Salvando..." : "Continuar para o pagamento"}
+              </button>
+            </div>
+          )}
           
           {/* TELA 1: RESUMO E CUPOM */}
-          {paymentData && !cardStep &&
+          {paymentData && !billingDataStep && !cardStep &&
           <div className="space-y-4">
               <div className="text-center p-4 bg-muted/50 rounded-xl relative">
                 {couponDiscount ?
@@ -1984,7 +2157,7 @@ const MessageThread = () => {
           }
 
           {/* TELA 2: FORMULÁRIO DO CARTÃO (Se for cartão) */}
-          {paymentData && cardStep &&
+          {paymentData && !billingDataStep && cardStep &&
           <div className="space-y-4">
               <div className="bg-muted/50 rounded-xl p-3 text-center">
                 <p className="text-xs text-muted-foreground">{paymentData.desc}</p>

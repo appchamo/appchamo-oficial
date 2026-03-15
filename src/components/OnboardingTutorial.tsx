@@ -213,13 +213,15 @@ export function OnboardingTutorial() {
         <div className="absolute inset-0 bg-black/60" onClick={goNext} />
       )}
 
-      {/* Card: for spotlight, position below/above target; for modal, center */}
+      {/* Card: for spotlight, position above target if it's in the bottom half (e.g. bottom nav) so it stays visible */}
       {isSpotlight && spotlightRect ? (
         <div
           className="absolute left-4 right-4 z-10 mx-auto bg-card border rounded-xl shadow-lg p-4 max-w-sm"
-          style={{
-            top: spotlightRect.top + spotlightRect.height + 12,
-          }}
+          style={
+            spotlightRect.top + spotlightRect.height > window.innerHeight * 0.5
+              ? { bottom: window.innerHeight - spotlightRect.top + 12 }
+              : { top: spotlightRect.top + spotlightRect.height + 12 }
+          }
         >
           {Icon && (
             <div className="flex justify-center mb-2">

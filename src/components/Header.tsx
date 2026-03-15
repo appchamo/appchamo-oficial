@@ -164,15 +164,15 @@ const Header = () => {
   return (
     <>
       <header className="sticky top-0 z-30 bg-card/90 backdrop-blur-md border-b border-secondary">
-        <div className="flex items-center justify-between px-4 py-3 max-w-screen-lg mx-auto">
-          <span className="text-lg font-bold text-foreground truncate max-w-[55%]">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 max-w-screen-lg mx-auto min-w-0">
+          <span className="text-lg font-bold text-foreground truncate min-w-0 flex-1">
             {user ? (
               <>{welcomeWord}, <span className="text-primary">{firstName}</span> 👋</>
             ) : (
               <>Explorar <span className="text-primary">Chamô</span></>
             )}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             
             {/* Selo Em Análise (Aparece para perfil pendente ou pagamento aguardando aprovação) */}
             {showPendingBadge && (

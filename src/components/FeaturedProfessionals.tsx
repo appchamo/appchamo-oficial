@@ -4,8 +4,9 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { sameCityState } from "@/lib/locationUtils";
 
-const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
+/** Em telas estreitas (Android pequeno) mostra 1 card por slide para o nome não truncar. */
+const getItemsPerPage = () => (typeof window !== "undefined" && window.innerWidth < 400 ? 1 : 2);
 
 function haversineKm(
   lat1: number, lon1: number,
@@ -51,6 +52,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
+  const [itemsPerPage, setItemsPerPage] = useState(getItemsPerPage);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [userCity, setUserCity] = useState<string | null>(null);
   const [userState, setUserState] = useState<string | null>(null);
@@ -150,10 +152,11 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   }, [professionals, userCoords]);
 
   const pages = useMemo(() => {
+    const n = itemsPerPage;
     const p: Pro[][] = [];
-    for (let i = 0; i < professionalsWithDistance.length; i += ITEMS_PER_PAGE) p.push(professionalsWithDistance.slice(i, i + ITEMS_PER_PAGE));
+    for (let i = 0; i < professionalsWithDistance.length; i += n) p.push(professionalsWithDistance.slice(i, i + n));
     return p;
-  }, [professionalsWithDistance]);
+  }, [professionalsWithDistance, itemsPerPage]);
 
   const displayPages = useMemo(() => {
     if (pages.length <= 1) return pages;
@@ -165,6 +168,12 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   useEffect(() => {
     loadUserCoords();
   }, [loadUserCoords]);
+
+  useEffect(() => {
+    const onResize = () => setItemsPerPage(getItemsPerPage());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     loadPros();

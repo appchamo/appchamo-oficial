@@ -51,22 +51,22 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
     <section>
       <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Categorias"}</h3>
       <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
-      {shown.map((cat, i) => {
+      {shown.map((cat) => {
           const Icon = iconMap[cat.icon_name] || Briefcase;
           return (
             <Link
               key={cat.id}
               to={`/category/${cat.slug}`}
-              className="flex flex-col items-center gap-2 p-3 rounded-2xl bg-card border hover:border-primary/40 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group"
+              className="flex flex-col items-center justify-start gap-2 p-3 min-h-[88px] rounded-2xl bg-card border hover:border-primary/40 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group"
             >
-              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
+              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-200">
                 {cat.icon_url ? (
                   <img src={cat.icon_url} alt={cat.name} className="w-7 h-7 object-contain" />
                 ) : (
                   <Icon className="w-6 h-6 text-primary" />
                 )}
               </div>
-              <span className="text-[11px] font-medium text-foreground text-center leading-tight">
+              <span className="text-[11px] font-medium text-foreground text-center leading-tight line-clamp-2 w-full">
                 {cat.name}
               </span>
             </Link>

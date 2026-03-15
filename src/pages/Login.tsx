@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Smartphone, Home } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -6,7 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
-import { Capacitor } from "@capacitor/core"; 
+import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Loader2 } from "lucide-react"; 
 
@@ -84,10 +85,48 @@ const Login = () => {
   const [deviceLimitHit, setDeviceLimitHit] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [processingOAuth, setProcessingOAuth] = useState(hasOAuthCodeInUrl());
+  const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Limpa flag de "veio do signup por sessão expirada" para não afetar próximo cadastro
   useEffect(() => {
     localStorage.removeItem("manual_login_intent");
+  }, []);
+
+  // Limpar timeout do OAuth ao receber sessão ou ao desmontar (evita travar "Entrando..." no Android)
+  useEffect(() => {
+    if (session?.user && oauthTimeoutRef.current) {
+      clearTimeout(oauthTimeoutRef.current);
+      oauthTimeoutRef.current = null;
+    }
+    return () => {
+      if (oauthTimeoutRef.current) {
+        clearTimeout(oauthTimeoutRef.current);
+        oauthTimeoutRef.current = null;
+      }
+    };
+  }, [session?.user]);
+
+  // No Android: quando o app volta ao primeiro plano (ex.: usuário fechou o navegador sem concluir Google), desbloqueia após 2,5s
+  const appResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const listener = CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (appResumeTimerRef.current) {
+        clearTimeout(appResumeTimerRef.current);
+        appResumeTimerRef.current = null;
+      }
+      if (isActive) {
+        appResumeTimerRef.current = setTimeout(async () => {
+          appResumeTimerRef.current = null;
+          const { data: { session: s } } = await supabase.auth.getSession();
+          if (!s?.user) setLoading(false);
+        }, 2500);
+      }
+    });
+    return () => {
+      if (appResumeTimerRef.current) clearTimeout(appResumeTimerRef.current);
+      listener.then((l) => l.remove());
+    };
   }, []);
 
   // Logo ao montar: se a URL veio com erro do OAuth (ex.: Apple config errada no Supabase), mostrar e limpar
@@ -406,8 +445,17 @@ const Login = () => {
         });
         
         if (error) throw error;
-        if (data?.url) await Browser.open({ url: data.url });
-
+        if (data?.url) {
+          if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
+          // Se o deep link não voltar (Android às vezes não recebe), desbloqueia o botão após 45s
+          oauthTimeoutRef.current = setTimeout(() => {
+            oauthTimeoutRef.current = null;
+            setLoading(false);
+          }, 45000);
+          await Browser.open({ url: data.url });
+        } else {
+          setLoading(false);
+        }
       } else {
         const redirectTo = `${window.location.origin}/login`;
         

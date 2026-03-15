@@ -135,20 +135,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // 1) Sessão inicial. No iOS/Capacitor o storage é async; getSession pode voltar null na 1ª leitura.
+    // Timeout de segurança: no emulador/rede lenta, libera a tela após 10s para não ficar só carregando
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 10000);
+
     const loadInitialSession = async () => {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      if (s) {
-        loadUserData(s);
-        return;
-      }
-      // No native, dar uma segunda chance ao storage (evita "perdeu sessão" ao reabrir o app)
-      if (Capacitor.isNativePlatform()) {
-        await new Promise((r) => setTimeout(r, 300));
-        const { data: { session: s2 } } = await supabase.auth.getSession();
-        loadUserData(s2 ?? null);
-      } else {
-        loadUserData(null);
+      try {
+        const { data: { session: s } } = await supabase.auth.getSession();
+        if (s) {
+          loadUserData(s);
+          return;
+        }
+        if (Capacitor.isNativePlatform()) {
+          await new Promise((r) => setTimeout(r, 300));
+          const { data: { session: s2 } } = await supabase.auth.getSession();
+          loadUserData(s2 ?? null);
+        } else {
+          loadUserData(null);
+        }
+      } catch (e) {
+        console.error("Erro ao carregar sessão inicial:", e);
+        setLoading(false);
       }
     };
     loadInitialSession();
@@ -205,6 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     return () => {
+      clearTimeout(safetyTimeout);
       subscription?.unsubscribe?.();
       if (urlListener) urlListener.then((l: any) => l.remove());
     };

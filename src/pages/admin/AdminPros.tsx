@@ -712,11 +712,14 @@ const AdminPros = () => {
                   
                  {/* Documentos de Identidade (Cadastro inicial) */}
 <div className="space-y-1.5 mb-3">
-  {docs.map((d: any) => (
-    <a key={d.id} href={d.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline">
-      <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
-    </a>
-  ))}
+  {docs.map((d: any) => {
+    const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(d.file_url);
+    return (
+      <a key={d.id} href={urlData.publicUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline">
+        <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+      </a>
+    );
+  })}
 </div>
 
                   {/* Documentos do Plano Business (Cartão CNPJ) */}

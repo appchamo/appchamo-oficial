@@ -284,17 +284,20 @@ const AdminUsers = () => {
             <p className="text-sm text-muted-foreground text-center py-6">Nenhum documento enviado.</p>
           ) : (
             <div className="space-y-3">
-              {docs.map((d: any) => (
-                <a key={d.id} href={d.file_url} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-3 border rounded-xl hover:bg-muted/50 transition-colors">
-                  <FileText className="w-5 h-5 text-primary flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground capitalize">{d.type}</p>
-                    <p className="text-xs text-muted-foreground">Status: {d.status} · {new Date(d.created_at).toLocaleDateString("pt-BR")}</p>
-                  </div>
-                  <Eye className="w-4 h-4 text-muted-foreground" />
-                </a>
-              ))}
+              {docs.map((d: any) => {
+                const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(d.file_url);
+                return (
+                  <a key={d.id} href={urlData.publicUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-3 border rounded-xl hover:bg-muted/50 transition-colors">
+                    <FileText className="w-5 h-5 text-primary flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground capitalize">{d.type}</p>
+                      <p className="text-xs text-muted-foreground">Status: {d.status} · {new Date(d.created_at).toLocaleDateString("pt-BR")}</p>
+                    </div>
+                    <Eye className="w-4 h-4 text-muted-foreground" />
+                  </a>
+                );
+              })}
             </div>
           )}
         </DialogContent>

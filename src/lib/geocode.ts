@@ -1,5 +1,6 @@
 /**
- * Reverse geocode: lat/lng → endereço (Nominatim).
+ * Reverse geocode: lat/lng → endereço.
+ * Usa Nominatim (OpenStreetMap); se falhar, tenta BigDataCloud (fallback, sem chave).
  * Usado na Home (localização) e no cadastro (Obter localização).
  */
 export interface ReverseGeocodeResult {
@@ -12,6 +13,7 @@ export interface ReverseGeocodeResult {
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
 const USER_AGENT = "ChamoApp/1.0 (contato@appchamo.com)";
+const BIGDATACLOUD_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client";
 
 /** Converte nome completo do estado para UF (2 letras) quando possível. */
 function stateToUF(raw: string): string {
@@ -33,7 +35,8 @@ function stateToUF(raw: string): string {
   return map[key] || s.slice(0, 2).toUpperCase();
 }
 
-export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult> {
+/** Nominatim (OpenStreetMap). */
+async function reverseGeocodeNominatim(lat: number, lng: number): Promise<ReverseGeocodeResult> {
   const params = new URLSearchParams({
     lat: String(lat),
     lon: String(lng),
@@ -42,31 +45,43 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
   const res = await fetch(`${NOMINATIM_URL}?${params}`, {
     headers: { "Accept-Language": "pt-BR", "User-Agent": USER_AGENT },
   });
-  if (!res.ok) {
-    throw new Error(`Nominatim: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Nominatim: ${res.status}`);
   const data = await res.json();
   const addr = data?.address || {};
   const city =
-    addr.city ||
-    addr.town ||
-    addr.village ||
-    addr.municipality ||
-    addr.county ||
-    "";
+    addr.city || addr.town || addr.village || addr.municipality || addr.county || "";
   const stateRaw =
     (addr["ISO3166-2-lvl4"] && String(addr["ISO3166-2-lvl4"]).split("-")[1]) ||
-    addr.state ||
-    "";
+    addr.state || "";
   const state = stateToUF(stateRaw);
   const street = addr.road || addr.street || addr.pedestrian || "";
   const neighborhood =
     addr.suburb || addr.neighbourhood || addr.quarter || addr.district || "";
+  return { city, state, street, neighborhood, road: addr.road };
+}
+
+/** Fallback: BigDataCloud (sem API key, uso cliente). */
+async function reverseGeocodeBigDataCloud(lat: number, lng: number): Promise<ReverseGeocodeResult> {
+  const res = await fetch(
+    `${BIGDATACLOUD_URL}?latitude=${lat}&longitude=${lng}&localityLanguage=pt`
+  );
+  if (!res.ok) throw new Error(`BigDataCloud: ${res.status}`);
+  const data = await res.json();
+  const city = data?.city || data?.locality || "";
+  const subdivCode = data?.principalSubdivisionCode || "";
+  const state = subdivCode.includes("-") ? subdivCode.split("-")[1].toUpperCase() : stateToUF(data?.principalSubdivision || "");
   return {
     city,
     state,
-    street,
-    neighborhood,
-    road: addr.road,
+    street: "",
+    neighborhood: "",
   };
+}
+
+export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult> {
+  try {
+    return await reverseGeocodeNominatim(lat, lng);
+  } catch {
+    return await reverseGeocodeBigDataCloud(lat, lng);
+  }
 }

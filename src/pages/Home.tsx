@@ -19,20 +19,7 @@ import HomeWelcome from "@/components/home/HomeWelcome";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
-import { normalizeStateToUF } from "@/lib/locationUtils";
-
-// Fallback quando a API do IBGE não responder (ex.: app sem rede, CORS, etc.)
-const BR_STATES_FALLBACK: { sigla: string; nome: string }[] = [
-  { sigla: "AC", nome: "Acre" }, { sigla: "AL", nome: "Alagoas" }, { sigla: "AP", nome: "Amapá" },
-  { sigla: "AM", nome: "Amazonas" }, { sigla: "BA", nome: "Bahia" }, { sigla: "CE", nome: "Ceará" },
-  { sigla: "DF", nome: "Distrito Federal" }, { sigla: "ES", nome: "Espírito Santo" }, { sigla: "GO", nome: "Goiás" },
-  { sigla: "MA", nome: "Maranhão" }, { sigla: "MT", nome: "Mato Grosso" }, { sigla: "MS", nome: "Mato Grosso do Sul" },
-  { sigla: "MG", nome: "Minas Gerais" }, { sigla: "PA", nome: "Pará" }, { sigla: "PB", nome: "Paraíba" },
-  { sigla: "PR", nome: "Paraná" }, { sigla: "PE", nome: "Pernambuco" }, { sigla: "PI", nome: "Piauí" },
-  { sigla: "RJ", nome: "Rio de Janeiro" }, { sigla: "RN", nome: "Rio Grande do Norte" }, { sigla: "RS", nome: "Rio Grande do Sul" },
-  { sigla: "RO", nome: "Rondônia" }, { sigla: "RR", nome: "Roraima" }, { sigla: "SC", nome: "Santa Catarina" },
-  { sigla: "SP", nome: "São Paulo" }, { sigla: "SE", nome: "Sergipe" }, { sigla: "TO", nome: "Tocantins" },
-];
+import { fetchViaCep } from "@/lib/viacep";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -83,14 +70,11 @@ const Home = () => {
   const [showCoupon, setShowCoupon] = useState(false);
   const [isReady, setIsReady] = useState(false); // ✅ Controle de renderização global
   const [locationOpen, setLocationOpen] = useState(false);
-  const [locationState, setLocationState] = useState(""); // UF (sigla)
+  const [locationCep, setLocationCep] = useState("");
+  const [locationCepLoading, setLocationCepLoading] = useState(false);
   const [locationCity, setLocationCity] = useState("");
-  const [statesList, setStatesList] = useState<{ sigla: string; nome: string }[]>([]);
-  const [citiesList, setCitiesList] = useState<string[]>([]);
-  const [locationLoadingCities, setLocationLoadingCities] = useState(false);
+  const [locationState, setLocationState] = useState("");
   const [locationSaving, setLocationSaving] = useState(false);
-  const [locationGettingGPS, setLocationGettingGPS] = useState(false);
-  const [locationLoadingStates, setLocationLoadingStates] = useState(false);
 
   useEffect(() => {
     supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => {
@@ -155,86 +139,51 @@ const Home = () => {
     : profile?.address_city || profile?.address_state || "Definir localização";
 
   const handleOpenLocation = () => {
-    const stateRaw = profile?.address_state || "";
-    const uf = normalizeStateToUF(stateRaw).toUpperCase() || stateRaw;
-    setLocationState(uf);
+    const zip = (profile?.address_zip || "").replace(/\D/g, "");
+    setLocationCep(zip.length === 8 ? `${zip.slice(0, 5)}-${zip.slice(5)}` : "");
     setLocationCity(profile?.address_city || "");
+    setLocationState((profile?.address_state || "").toUpperCase().slice(0, 2));
     setLocationOpen(true);
-    if (statesList.length === 0) {
-      setStatesList(BR_STATES_FALLBACK);
-      setLocationLoadingStates(true);
-      fetch("https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome")
-        .then((r) => r.json())
-        .then((data: any[]) => {
-          if (Array.isArray(data) && data.length > 0) {
-            setStatesList(data.map((s) => ({ sigla: s.sigla, nome: s.nome })));
+  };
+
+  const handleLocationCepChange = (value: string) => {
+    const raw = value.replace(/\D/g, "").slice(0, 8);
+    setLocationCep(raw.length === 8 ? `${raw.slice(0, 5)}-${raw.slice(5)}` : raw);
+    if (raw.length === 8) {
+      setLocationCepLoading(true);
+      setLocationCity("");
+      setLocationState("");
+      fetchViaCep(raw)
+        .then((data) => {
+          if (data?.localidade) setLocationCity(data.localidade);
+          if (data?.uf) setLocationState(data.uf.toUpperCase());
+          if (!data?.localidade && !data?.uf) {
+            toast({ title: "CEP não encontrado", variant: "destructive" });
           }
         })
-        .catch(() => {})
-        .finally(() => setLocationLoadingStates(false));
-    }
-    if (uf) {
-      setLocationLoadingCities(true);
-      fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios`)
-        .then((r) => r.json())
-        .then((data: any[]) => {
-          if (Array.isArray(data)) setCitiesList(data.map((c) => c.nome).sort((a, b) => a.localeCompare(b)));
-          else setCitiesList([]);
-        })
-        .catch(() => {
-          setCitiesList([]);
-          toast({ title: "Não foi possível carregar as cidades. Tente novamente.", variant: "destructive" });
-        })
-        .finally(() => setLocationLoadingCities(false));
+        .catch(() => toast({ title: "Não foi possível buscar o CEP. Tente novamente.", variant: "destructive" }))
+        .finally(() => setLocationCepLoading(false));
     } else {
-      setCitiesList([]);
+      setLocationCity("");
+      setLocationState("");
     }
   };
 
-  const handleStateChange = (stateValue: string) => {
-    const uf = normalizeStateToUF(stateValue).toUpperCase() || stateValue;
-    setLocationState(uf);
-    setLocationCity("");
-    if (!uf) {
-      setCitiesList([]);
-      return;
-    }
-    setLocationLoadingCities(true);
-    setCitiesList([]);
-    fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios`)
-      .then((r) => r.json())
-      .then((data: any[]) => {
-        if (Array.isArray(data)) setCitiesList(data.map((c) => c.nome).sort((a, b) => a.localeCompare(b)));
-        else setCitiesList([]);
-      })
-      .catch(() => {
-        setCitiesList([]);
-        toast({ title: "Não foi possível carregar as cidades. Verifique a conexão e tente novamente.", variant: "destructive" });
-      })
-      .finally(() => setLocationLoadingCities(false));
-  };
-
-  const handleSaveLocation = async (extra?: { latitude?: number; longitude?: number }) => {
-    const state = locationState.trim().toUpperCase().slice(0, 2);
+  const handleSaveLocation = async () => {
     const city = locationCity.trim();
-    if (!state) {
-      toast({ title: "Selecione o estado", variant: "destructive" });
-      return;
-    }
-    if (!city) {
-      toast({ title: "Selecione a cidade", variant: "destructive" });
+    const state = locationState.trim().toUpperCase().slice(0, 2);
+    if (!city || !state) {
+      toast({ title: "Digite um CEP válido para buscar cidade e estado.", variant: "destructive" });
       return;
     }
     if (!user?.id) return;
     setLocationSaving(true);
-    const payload: { address_city: string | null; address_state: string | null; latitude?: number; longitude?: number } = {
+    const cepClean = locationCep.replace(/\D/g, "");
+    const payload = {
+      address_zip: cepClean.length === 8 ? cepClean : null,
       address_city: city || null,
       address_state: state || null,
     };
-    if (extra?.latitude != null && extra?.longitude != null) {
-      payload.latitude = extra.latitude;
-      payload.longitude = extra.longitude;
-    }
     const { error } = await supabase.from("profiles").update(payload).eq("user_id", user.id);
     setLocationSaving(false);
     if (error) {
@@ -244,63 +193,6 @@ const Home = () => {
     await refreshProfile();
     setLocationOpen(false);
     toast({ title: "Localização atualizada! Os profissionais dessa região serão exibidos." });
-  };
-
-  /** Obtém GPS e preenche cidade/estado via reverse geocode (Nominatim). */
-  const handleUseCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      toast({ title: "Seu navegador ou dispositivo não suporta geolocalização.", variant: "destructive" });
-      return;
-    }
-    setLocationGettingGPS(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        try {
-          const { reverseGeocode } = await import("@/lib/geocode");
-          const { city, state } = await reverseGeocode(lat, lng);
-          setLocationCity(city);
-          setLocationState(state);
-          if (user?.id && (city || state)) {
-            const { error: err } = await supabase.from("profiles").update({
-              address_city: city || null,
-              address_state: state || null,
-              latitude: lat,
-              longitude: lng,
-            }).eq("user_id", user.id);
-            if (!err) {
-              await refreshProfile();
-              setLocationGettingGPS(false);
-              setLocationOpen(false);
-              toast({ title: "Localização definida com base no GPS!" });
-            } else {
-              setLocationGettingGPS(false);
-            }
-          } else {
-            setLocationGettingGPS(false);
-          }
-        } catch (e) {
-          console.error("Reverse geocode:", e);
-          toast({
-            title: "Não foi possível obter o endereço",
-            description: "Verifique a conexão ou preencha cidade e estado manualmente.",
-            variant: "destructive",
-          });
-          setLocationGettingGPS(false);
-        }
-      },
-      (err) => {
-        console.warn("getCurrentPosition error:", err);
-        toast({
-          title: "Localização indisponível",
-          description: "Permissão negada ou GPS desligado. Selecione estado e cidade abaixo.",
-          variant: "destructive",
-        });
-        setLocationGettingGPS(false);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
   };
 
   const sectionComponents: Record<string, React.ReactNode> = {
@@ -414,7 +306,7 @@ const Home = () => {
         </main>
       )}
 
-      {/* Modal de localização */}
+      {/* Modal de localização: CEP → busca automática cidade/estado */}
       <Dialog open={locationOpen} onOpenChange={setLocationOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -423,49 +315,29 @@ const Home = () => {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Selecione estado e cidade para ver profissionais dessa região.
+            Digite seu CEP para buscar sua cidade e estado. Os profissionais dessa região serão exibidos.
           </p>
-          <button
-            type="button"
-            onClick={handleUseCurrentLocation}
-            disabled={locationGettingGPS}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-primary/50 bg-primary/5 text-primary text-sm font-medium hover:bg-primary/10 transition-colors disabled:opacity-50"
-          >
-            {locationGettingGPS ? "Obtendo localização…" : "Usar minha localização agora"}
-          </button>
-          <p className="text-xs text-muted-foreground text-center">ou selecione:</p>
           <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Estado *</label>
-              <select
-                value={locationState}
-                onChange={(e) => handleStateChange(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="">
-                  {locationLoadingStates ? "Carregando estados…" : "Selecione o estado"}
-                </option>
-                {statesList.map((s) => (
-                  <option key={s.sigla} value={s.sigla}>{s.nome} ({s.sigla})</option>
-                ))}
-              </select>
+            <div className="relative">
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">CEP</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={locationCep}
+                onChange={(e) => handleLocationCepChange(e.target.value)}
+                placeholder="00000-000"
+                maxLength={9}
+                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+              />
+              {locationCepLoading && (
+                <div className="absolute right-3 top-9 w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              )}
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Cidade *</label>
-              <select
-                value={locationCity}
-                onChange={(e) => setLocationCity(e.target.value)}
-                disabled={!locationState || locationLoadingCities}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-              >
-                <option value="">
-                  {!locationState ? "Selecione o estado primeiro" : locationLoadingCities ? "Carregando cidades…" : "Selecione a cidade"}
-                </option>
-                {citiesList.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
+            {locationCity && locationState && (
+              <div className="rounded-xl bg-muted/50 px-3 py-2.5 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{locationCity}</span>, {locationState}
+              </div>
+            )}
           </div>
           <div className="flex gap-2 pt-2">
             <button
@@ -477,8 +349,8 @@ const Home = () => {
             </button>
             <button
               type="button"
-              onClick={() => handleSaveLocation()}
-              disabled={locationSaving || !locationState || !locationCity}
+              onClick={handleSaveLocation}
+              disabled={locationSaving || !locationCity || !locationState || locationCepLoading}
               className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
               {locationSaving ? "Salvando…" : "Confirmar"}

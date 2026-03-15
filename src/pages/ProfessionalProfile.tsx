@@ -8,6 +8,7 @@ import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ProductCatalog from "@/components/ProductCatalog";
+import ProfessionalServices from "@/components/ProfessionalServices";
 import ServiceRequestDialog from "@/components/ServiceRequestDialog";
 import AgendaBookingDialog from "@/components/AgendaBookingDialog";
 
@@ -64,6 +65,7 @@ const ProfessionalProfile = () => {
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [professions, setProfessions] = useState<{ id: string; name: string; category_id: string }[]>([]);
   const [savingCategoryProfession, setSavingCategoryProfession] = useState(false);
+  const [planId, setPlanId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -110,6 +112,13 @@ const ProfessionalProfile = () => {
         
         const { data: { user } } = await supabase.auth.getUser();
         if (user && user.id === data.user_id) setIsOwner(true);
+
+        const { data: sub } = await supabase
+          .from("subscriptions")
+          .select("plan_id")
+          .eq("user_id", data.user_id)
+          .maybeSingle();
+        if (sub && (sub as { plan_id: string }).plan_id) setPlanId((sub as { plan_id: string }).plan_id);
 
         if (user && user.id === data.user_id) {
           const [catRes, profRes] = await Promise.all([
@@ -397,8 +406,12 @@ const ProfessionalProfile = () => {
           </div>
         )}
 
-        {/* ✅ Product Catalog - AGORA PUXA CORRETAMENTE SE FOR EMPRESA */}
-        {pro.user_type === "company" && (
+        {/* Serviços (fotos) para Pro e VIP */}
+        {(planId === "pro" || planId === "vip") && (
+          <ProfessionalServices professionalId={pro.id} isOwner={isOwner} />
+        )}
+        {/* Catálogo de produtos para Business (empresa) */}
+        {(pro.user_type === "company" || planId === "business") && (
           <ProductCatalog professionalId={pro.id} isOwner={isOwner} />
         )}
 

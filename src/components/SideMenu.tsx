@@ -1,4 +1,4 @@
-import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LayoutDashboard, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, DollarSign, ScrollText, Calendar, CalendarCheck, ShieldCheck } from "lucide-react";
+import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LayoutDashboard, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, DollarSign, ScrollText, Calendar, CalendarCheck, ShieldCheck, Image } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -38,9 +38,12 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },
                     { icon: ShoppingBag, label: "Catálogo de Produtos", path: "/my-catalog" },
                   ]
-                : canPostJobs
-                ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }]
-                : []),
+                : [
+                    ...(canPostJobs ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }] : []),
+                    ...(plan?.id === "pro" || plan?.id === "vip"
+                      ? [{ icon: Image, label: "Meus Serviços", path: "/my-services" }]
+                      : []),
+                  ]),
               ...(isBusiness
                 ? [
                     { icon: Calendar, label: "Minha agenda", path: "/pro/agenda/calendario" },

@@ -34,6 +34,7 @@ const Jobs = lazy(() => import("./pages/Jobs"));
 const JobDetail = lazy(() => import("./pages/JobDetail"));
 const MyJobPostings = lazy(() => import("./pages/MyJobPostings"));
 const MyCatalog = lazy(() => import("./pages/MyCatalog"));
+const MyServices = lazy(() => import("./pages/MyServices"));
 const ClientRequests = lazy(() => import("./pages/ClientRequests"));
 const ClientDashboard = lazy(() => import("./pages/ClientDashboard"));
 const ProfessionalDashboard = lazy(() => import("./pages/ProfessionalDashboard"));
@@ -158,12 +159,27 @@ const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "
 const SPLASH_SHOWN_KEY = "chamo_splash_shown";
 
 /** No Android, cria o canal "default" logo na abertura do app para push em background aparecer. */
-/** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk, demais → /home */
+/** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk; se perfil incompleto → /signup; senão → /home */
 const RedirectLoggedIn = () => {
-  const { user } = useAuth();
+  const { user, profile, loading } = useAuth();
   const email = (user?.email || "").toLowerCase().trim();
+
   if (email === "admin@appchamo.com") return <Navigate to="/admin" replace />;
   if (email === "suporte@appchamo.com") return <Navigate to="/suporte-desk" replace />;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  const hasCompleteProfile =
+    profile &&
+    profile.user_type &&
+    profile.user_type !== "pending_signup";
+  if (!hasCompleteProfile) return <Navigate to="/signup" replace />;
   return <Navigate to="/home" replace />;
 };
 
@@ -371,6 +387,7 @@ const AppContent = () => {
         <Route path="/jobs/:id/apply" element={<JobApply />} />
         <Route path="/my-jobs" element={<ProtectedRoute><MyJobPostings /></ProtectedRoute>} />
         <Route path="/my-catalog" element={<ProtectedRoute><MyCatalog /></ProtectedRoute>} />
+        <Route path="/my-services" element={<ProtectedRoute><MyServices /></ProtectedRoute>} />
         <Route path="/client" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
         <Route path="/client/requests" element={<ProtectedRoute><ClientRequests /></ProtectedRoute>} />

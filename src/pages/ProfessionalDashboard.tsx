@@ -1,12 +1,14 @@
 import AppLayout from "@/components/AppLayout";
-import { Eye, Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText } from "lucide-react";
+import { Eye, Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText, Image } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useSubscription } from "@/hooks/useSubscription";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 const ProfessionalDashboard = () => {
   const { user, profile } = useAuth();
+  const { plan } = useSubscription();
   const [requestCount, setRequestCount] = useState(0);
   const [proId, setProId] = useState<string | null>(null);
 
@@ -41,6 +43,8 @@ const ProfessionalDashboard = () => {
     { icon: CreditCard, label: "Minha assinatura", description: "Gerencie seu plano", path: "/subscriptions" },
     ...(profile?.user_type === "company" ? [
       { icon: ShoppingBag, label: "Catálogo de Produtos", description: "Gerencie seus produtos e serviços", path: "/my-catalog" },
+    ] : (plan?.id === "pro" || plan?.id === "vip") ? [
+      { icon: Image, label: "Meus Serviços", description: "Fotos dos seus trabalhos no perfil", path: "/my-services" },
     ] : []),
     { icon: FileText, label: "Vagas de Emprego", description: "Publique e gerencie vagas", path: "/my-jobs" },
   ];

@@ -159,7 +159,9 @@ export function OnboardingTutorial() {
   if (!visible) return null;
 
   const isSpotlight = currentStepConfig?.type === "spotlight" && currentStepConfig?.target;
+  const isTornarSeProStep = currentStepConfig?.target === "tornar-se-pro";
   const Icon = currentStepConfig?.icon;
+  const SIDEBAR_WIDTH_PX = 288; // w-72 do SideMenu
 
   const modalContent = (
     <div className="space-y-4 text-center">
@@ -196,7 +198,15 @@ export function OnboardingTutorial() {
       {/* Backdrop - for spotlight we use a cutout; for modal we use full dim */}
       {isSpotlight && spotlightRect ? (
         <>
-          <div className="absolute inset-0 bg-black/60 pointer-events-none" />
+          {/* Overlay: no passo "Tornar-se Profissional" não cobre a barra lateral (w-72) para ela continuar visível */}
+          <div
+            className="absolute top-0 bottom-0 left-0 bg-black/60 pointer-events-none"
+            style={
+              isTornarSeProStep
+                ? { right: SIDEBAR_WIDTH_PX }
+                : { right: 0 }
+            }
+          />
           {/* Cutout: div no tamanho do alvo com borda; a sombra preenche o resto */}
           <div
             className="absolute rounded-xl border-2 border-primary bg-transparent pointer-events-none"

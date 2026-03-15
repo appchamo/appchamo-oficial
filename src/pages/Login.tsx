@@ -158,8 +158,11 @@ const Login = () => {
       ]);
       lastProfile = profile ?? null;
       lastRoles = roles ?? [];
-      // Perfil “completo” = existe e tem user_type (trigger já rodou). CPF/telefone não são obrigatórios para login.
-      const hasCompleteProfile = lastProfile && lastProfile.user_type;
+      // Perfil completo = existe e tem user_type final (não pending_signup).
+      const hasCompleteProfile =
+        lastProfile &&
+        lastProfile.user_type &&
+        lastProfile.user_type !== "pending_signup";
       if (hasCompleteProfile) return { profile: lastProfile, roles: lastRoles };
     }
     return { profile: lastProfile, roles: lastRoles };
@@ -209,7 +212,10 @@ const Login = () => {
 
       // Conta como “incompleto” só se não tem perfil ou perfil sem user_type (cadastro nunca finalizado).
       // Não exige CPF/telefone para login; quem já tem user_type vai para a Home.
-      const isProfileIncomplete = !profile || !profile.user_type;
+      const isProfileIncomplete =
+        !profile ||
+        !profile.user_type ||
+        profile.user_type === "pending_signup";
 
       if (isProfileIncomplete) {
         const manualLogin = localStorage.getItem("manual_login_intent") === "true";
@@ -219,7 +225,10 @@ const Login = () => {
             supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
             supabase.from("user_roles").select("role").eq("user_id", userId),
           ]);
-          const retryComplete = retryProfile && retryProfile.user_type;
+          const retryComplete =
+            retryProfile &&
+            retryProfile.user_type &&
+            retryProfile.user_type !== "pending_signup";
           if (retryComplete) {
             const isAdminRetry = (retryRoles ?? []).some((r: any) =>
               ["super_admin", "finance_admin", "support_admin", "sponsor_admin", "moderator"].includes(r.role)

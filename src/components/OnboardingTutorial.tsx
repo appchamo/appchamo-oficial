@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMenu } from "@/contexts/MenuContext";
 import { Button } from "@/components/ui/button";
-import { Menu, LayoutGrid, Ticket, HelpCircle, Sparkles } from "lucide-react";
+import { Menu, LayoutGrid, Ticket, HelpCircle, Sparkles, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "chamo_onboarding_done";
@@ -106,10 +106,18 @@ export function OnboardingTutorial() {
       finishTutorial();
       return;
     }
-    if (step === 4 || step === 5) closeMenu();
     const next = stepsToShow[currentIndex];
     if (next) setStep(next.id);
-  }, [currentIndex, totalSteps, stepsToShow, finishTutorial, step, closeMenu]);
+  }, [currentIndex, totalSteps, stepsToShow, finishTutorial]);
+
+  const goPrev = useCallback(() => {
+    if (currentIndex <= 1) return;
+    const prev = stepsToShow[currentIndex - 2];
+    if (prev) {
+      setStep(prev.id);
+      if (step === 4) closeMenu();
+    }
+  }, [currentIndex, stepsToShow, step, closeMenu]);
 
   const skip = useCallback(() => {
     finishTutorial();
@@ -124,7 +132,7 @@ export function OnboardingTutorial() {
     setVisible(true);
   }, [user]);
 
-  // Step 4: open menu when entering
+  // Step 4: open menu when entering; keep it open until tutorial ends (close only in finishTutorial/skip or when going back to step 3)
   useEffect(() => {
     if (!visible || step !== 4) return;
     openMenu();
@@ -163,6 +171,7 @@ export function OnboardingTutorial() {
   const Icon = currentStepConfig?.icon;
   const SIDEBAR_WIDTH_PX = 288; // w-72 do SideMenu
 
+  const showBack = currentIndex > 1;
   const modalContent = (
     <div className="space-y-4 text-center">
       {Icon && (
@@ -180,6 +189,15 @@ export function OnboardingTutorial() {
         <Button onClick={goNext} className="w-full">
           {currentIndex >= totalSteps ? "Começar" : "Próximo"}
         </Button>
+        {showBack && (
+          <button
+            type="button"
+            onClick={goPrev}
+            className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="w-4 h-4" /> Voltar
+          </button>
+        )}
         {currentIndex < totalSteps && (
           <button
             type="button"
@@ -250,6 +268,15 @@ export function OnboardingTutorial() {
             <Button onClick={goNext} size="sm">
               {currentIndex >= totalSteps ? "Começar" : "Próximo"}
             </Button>
+            {showBack && (
+              <button
+                type="button"
+                onClick={goPrev}
+                className="flex items-center justify-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Voltar
+              </button>
+            )}
             <button
               type="button"
               onClick={skip}

@@ -948,6 +948,13 @@ const MessageThread = () => {
           return;
         }
 
+        const { data: { session: freshSession }, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr || !freshSession) {
+          toast({ title: "Sessão expirada. Faça login novamente.", variant: "destructive" });
+          setProcessingPayment(false);
+          return;
+        }
+
         const finalAmount = getFinalAmountWithFee(parseInt(installments), "card");
         const res = await supabase.functions.invoke("create_payment", {
           body: {
@@ -994,6 +1001,13 @@ const MessageThread = () => {
           return;
         }
 
+        const { data: { session: freshSession }, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr || !freshSession) {
+          toast({ title: "Sessão expirada. Faça login novamente.", variant: "destructive" });
+          setProcessingPayment(false);
+          return;
+        }
+
         const finalAmount = getFinalAmountWithFee(1, "pix");
         const res = await supabase.functions.invoke("create_payment", {
           body: {
@@ -1005,7 +1019,11 @@ const MessageThread = () => {
         });
 
         if (res.error || res.data?.error) {
-          throw new Error(res.data?.error || "Erro ao gerar PIX");
+          const msg = res.data?.error || res.error?.message || "Erro ao gerar PIX";
+          if (String(msg).toLowerCase().includes("jwt") || String(msg).toLowerCase().includes("unauthorized") || res.error?.message?.includes("401")) {
+            throw new Error("Sessão expirada. Faça login novamente e tente o pagamento.");
+          }
+          throw new Error(msg);
         }
 
         setPixData({

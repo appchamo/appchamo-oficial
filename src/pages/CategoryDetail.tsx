@@ -144,7 +144,16 @@ const CategoryDetail = () => {
       city: locationMap.get(p.user_id)?.address_city || null,
       state: locationMap.get(p.user_id)?.address_state || null,
     }));
-    const filtered = (userCity || userState) ? list.filter(p => sameCityState(userCity, userState, p.city, p.state)) : list;
+    // Só filtra por localização quando o usuário tem cidade/estado definidos.
+    // Profissionais SEM cidade/estado continuam na lista (evita sumir por RLS ou dado não preenchido).
+    const filtered =
+      userCity || userState
+        ? list.filter(
+            (p) =>
+              sameCityState(userCity, userState, p.city, p.state) ||
+              (!(p.city?.trim()) && !(p.state?.trim()))
+          )
+        : list;
     setPros(filtered);
   };
 

@@ -4,10 +4,11 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
 import { useAuth } from "@/hooks/useAuth";
+import { useMenu } from "@/contexts/MenuContext";
 import { supabase } from "@/integrations/supabase/client";
 
 const Header = () => {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const { menuOpen, setMenuOpen } = useMenu();
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -221,6 +222,7 @@ const Header = () => {
               onClick={() => setMenuOpen(true)}
               className="p-2 rounded-lg hover:bg-muted transition-colors"
               aria-label="Abrir menu"
+              data-onboarding="menu-button"
             >
               <Menu className="w-5 h-5 text-foreground" />
             </button>

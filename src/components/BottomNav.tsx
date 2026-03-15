@@ -140,7 +140,7 @@ const BottomNav = () => {
   }, [fetchBadges, debouncedFetchBadges]);
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t safe-area-bottom">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t safe-area-bottom" data-onboarding="bottom-nav">
       <div className="flex items-center justify-around max-w-screen-lg mx-auto h-16">
         {tabs.map((tab) => {
           const isActive = location.pathname === tab.path || location.pathname.startsWith(tab.path + "/");

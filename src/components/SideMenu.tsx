@@ -100,9 +100,15 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
               )}
               {section.items.map((item) => {
                 const isActive = location.pathname === item.path;
+                const isTornarSePro = item.path === "/signup-pro";
                 return (
-                  <Link key={item.path + item.label} to={item.path} onClick={onClose}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium ${isActive ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted"}`}>
+                  <Link
+                    key={item.path + item.label}
+                    to={item.path}
+                    onClick={onClose}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium ${isActive ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted"}`}
+                    {...(isTornarSePro ? { "data-onboarding": "tornar-se-pro" } : {})}
+                  >
                     <item.icon className="w-4 h-4" />
                     {item.label}
                   </Link>

@@ -4,9 +4,8 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { sameCityState } from "@/lib/locationUtils";
 
+const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
-/** Em telas estreitas (Android pequeno) mostra 1 card por slide para o nome não truncar. */
-const getItemsPerPage = () => (typeof window !== "undefined" && window.innerWidth < 400 ? 1 : 2);
 
 function haversineKm(
   lat1: number, lon1: number,
@@ -52,7 +51,6 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
-  const [itemsPerPage, setItemsPerPage] = useState(getItemsPerPage);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [userCity, setUserCity] = useState<string | null>(null);
   const [userState, setUserState] = useState<string | null>(null);
@@ -152,11 +150,10 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   }, [professionals, userCoords]);
 
   const pages = useMemo(() => {
-    const n = itemsPerPage;
     const p: Pro[][] = [];
-    for (let i = 0; i < professionalsWithDistance.length; i += n) p.push(professionalsWithDistance.slice(i, i + n));
+    for (let i = 0; i < professionalsWithDistance.length; i += ITEMS_PER_PAGE) p.push(professionalsWithDistance.slice(i, i + ITEMS_PER_PAGE));
     return p;
-  }, [professionalsWithDistance, itemsPerPage]);
+  }, [professionalsWithDistance]);
 
   const displayPages = useMemo(() => {
     if (pages.length <= 1) return pages;
@@ -168,12 +165,6 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   useEffect(() => {
     loadUserCoords();
   }, [loadUserCoords]);
-
-  useEffect(() => {
-    const onResize = () => setItemsPerPage(getItemsPerPage());
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
 
   useEffect(() => {
     loadPros();
@@ -233,11 +224,11 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     return (
       <div
         key={pro.id}
-        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-3 flex-1 min-w-0"
+        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-3 flex-1 min-w-0 basis-0 overflow-hidden"
       >
-        {/* Foto com "Verificado" na frente (ao lado direito da foto) */}
-        <div className="flex items-center gap-2">
-          <div className="w-14 h-14 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
+        {/* Foto; selo Verificado abaixo da foto para não sair do card no Android */}
+        <div className="flex flex-col gap-1 min-w-0">
+          <div className="w-14 h-14 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden self-start">
             {avatarSrc ? (
               <img src={avatarSrc} alt={pro.full_name} className="w-full h-full object-cover rounded-full" />
             ) : (
@@ -245,19 +236,19 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
             )}
           </div>
           {pro.verified && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-foreground">Verificado</span>
-              <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                <BadgeCheck className="w-3 h-3 text-primary-foreground" />
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="text-[10px] font-semibold text-foreground truncate">Verificado</span>
+              <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                <BadgeCheck className="w-2.5 h-2.5 text-primary-foreground" />
               </div>
             </div>
           )}
         </div>
 
         {/* Nome em baixo da foto */}
-        <p className="font-bold text-foreground truncate">{pro.full_name}</p>
+        <p className="font-bold text-foreground text-sm truncate">{pro.full_name}</p>
         {/* Profissão em baixo do nome */}
-        <p className="text-sm text-muted-foreground truncate -mt-2">{pro.profession_name}</p>
+        <p className="text-xs text-muted-foreground truncate -mt-2">{pro.profession_name}</p>
 
         {/* Avaliações */}
         <div className="flex items-center gap-1">
@@ -316,7 +307,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         {displayPages.map((pagePros, pageIndex) => (
           <div
             key={pageIndex}
-            className="flex gap-3 flex-[0_0_100%] min-w-0 shrink-0 snap-start px-0.5"
+            className="flex gap-3 flex-[0_0_100%] min-w-0 shrink-0 snap-start px-2 box-border"
           >
             {pagePros.map((pro) => renderCard(pro))}
           </div>

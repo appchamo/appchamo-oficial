@@ -119,8 +119,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const userId = sess.user.id;
-      const [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
-      
+      let [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
+
+      if (!isSignOutInProgress && p?.user_type === "pending_signup") {
+        await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", userId);
+        p = { ...p, user_type: "client" } as Profile;
+      }
+
       if (!isSignOutInProgress && p) {
         setProfile(p);
         setRoles(r);

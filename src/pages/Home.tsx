@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Zap, Ticket, CalendarCheck, X, MapPin } from "lucide-react"; 
+import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase } from "lucide-react"; 
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -137,6 +137,19 @@ const Home = () => {
   const locationLabel = profile?.address_city && profile?.address_state
     ? `${profile.address_city}, ${profile.address_state}`
     : profile?.address_city || profile?.address_state || "Definir localização";
+
+  // Novo cliente (Google/Apple sem cadastro): abre o modal de localização para definir cidade/CEP
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("chamo_open_location_modal") !== "1") return;
+      sessionStorage.removeItem("chamo_open_location_modal");
+      const hasLocation = !!(profile?.address_city && profile?.address_state);
+      if (!hasLocation && user?.id) {
+        const t = setTimeout(() => setLocationOpen(true), 600);
+        return () => clearTimeout(t);
+      }
+    } catch (_) {}
+  }, [user?.id, profile?.address_city, profile?.address_state]);
 
   const handleOpenLocation = () => {
     const zip = (profile?.address_zip || "").replace(/\D/g, "");
@@ -297,6 +310,16 @@ const Home = () => {
           })}
 
           <HomeBanners position="bottom" />
+
+          {profile?.user_type === "client" && (
+            <Link
+              to="/signup-pro"
+              className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-semibold text-sm transition-colors"
+            >
+              <Briefcase className="w-5 h-5" />
+              Tornar-se profissional
+            </Link>
+          )}
 
           <footer className="text-center py-6 border-t mt-4">
             <p className="text-xs text-muted-foreground">

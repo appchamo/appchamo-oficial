@@ -106,6 +106,17 @@ const Login = () => {
     };
   }, [session?.user]);
 
+  // Quando o Google/Apple termina e a sessão aparece (ex.: deep link no Android), redireciona para Home na hora
+  const hasRedirectedForSessionRef = useRef(false);
+  useEffect(() => {
+    if (!session?.user || !loading) return;
+    if (hasRedirectedForSessionRef.current) return;
+    hasRedirectedForSessionRef.current = true;
+    setLoading(false);
+    setProcessingOAuth(false);
+    checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
+  }, [session?.user, loading]);
+
   // No Android: quando o app volta ao primeiro plano (ex.: usuário fechou o navegador sem concluir Google), desbloqueia após 2,5s
   const appResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -275,6 +286,7 @@ const Login = () => {
           .update({ user_type: "client" })
           .eq("user_id", userId);
         await refreshProfile();
+        sessionStorage.setItem("chamo_open_location_modal", "1");
         navigate(getRedirectPath("/home"), { replace: true });
         return;
       }

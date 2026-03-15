@@ -57,16 +57,16 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
             <Link
               key={cat.id}
               to={`/category/${cat.slug}`}
-              className="flex flex-col items-center justify-start gap-2 p-3 min-h-[88px] rounded-2xl bg-card border hover:border-primary/40 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group"
+              className="flex flex-col items-center justify-start gap-1.5 p-2.5 min-h-[90px] rounded-2xl bg-card border hover:border-primary/40 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group overflow-hidden"
             >
-              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-200">
+              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-200">
                 {cat.icon_url ? (
-                  <img src={cat.icon_url} alt={cat.name} className="w-7 h-7 object-contain" />
+                  <img src={cat.icon_url} alt={cat.name} className="w-6 h-6 object-contain" />
                 ) : (
-                  <Icon className="w-6 h-6 text-primary" />
+                  <Icon className="w-5 h-5 text-primary" />
                 )}
               </div>
-              <span className="text-[11px] font-medium text-foreground text-center leading-tight line-clamp-2 w-full">
+              <span className="text-[9px] sm:text-[10px] font-medium text-foreground text-center leading-tight line-clamp-3 w-full min-h-[2.25rem] flex items-center justify-center break-words overflow-hidden px-0.5">
                 {cat.name}
               </span>
             </Link>

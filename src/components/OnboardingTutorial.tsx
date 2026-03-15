@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMenu } from "@/contexts/MenuContext";
 import { Button } from "@/components/ui/button";
-import { Menu, LayoutGrid, Ticket, HelpCircle, Sparkles, ArrowLeft } from "lucide-react";
+import { Menu, LayoutGrid, Ticket, HelpCircle, Sparkles, ArrowLeft, Briefcase } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "chamo_onboarding_done";
@@ -77,6 +78,7 @@ function parseBody(text: string) {
 }
 
 export function OnboardingTutorial() {
+  const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { openMenu, closeMenu } = useMenu();
   const [visible, setVisible] = useState(false);
@@ -264,6 +266,21 @@ export function OnboardingTutorial() {
           <p className="text-sm text-muted-foreground text-center mt-1 leading-relaxed">
             {currentStepConfig?.body ? parseBody(currentStepConfig.body) : null}
           </p>
+          {isTornarSeProStep && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full border-primary/40 bg-primary/5 text-primary hover:bg-primary/10 gap-2 mt-2"
+              onClick={() => {
+                closeMenu();
+                finishTutorial();
+                navigate("/signup-pro");
+              }}
+            >
+              <Briefcase className="w-4 h-4" />
+              Tornar-se profissional
+            </Button>
+          )}
           <div className="flex flex-col gap-2 mt-4">
             <Button onClick={goNext} size="sm">
               {currentIndex >= totalSteps ? "Começar" : "Próximo"}

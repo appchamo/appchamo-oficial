@@ -205,8 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const code = urlObj.searchParams.get('code');
           if (code) {
             await Browser.close().catch(() => {});
-            const cleanCode = code.replace(/[^a-zA-Z0-9-]/g, '');
-            await supabase.auth.exchangeCodeForSession(cleanCode);
+            await supabase.auth.exchangeCodeForSession(code);
           }
         } catch (e) {
           console.error("Deep link error:", e);

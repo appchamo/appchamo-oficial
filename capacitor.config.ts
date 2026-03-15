@@ -11,7 +11,9 @@ const config: CapacitorConfig = {
     allowNavigation: [
       'wfxeiuqxzrlnvlopcrwd.supabase.co',
       '*.supabase.co',
-      'accounts.google.com'
+      'accounts.google.com',
+      'app.chamo.com',
+      'appchamo.com'
     ]
   },
   plugins: {

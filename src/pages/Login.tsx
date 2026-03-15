@@ -86,10 +86,41 @@ const Login = () => {
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [processingOAuth, setProcessingOAuth] = useState(hasOAuthCodeInUrl());
   const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Marca que abrimos o browser para OAuth (Google/Apple); evita toast "Demorou muito" quando o timeout é do fluxo social */
+  const oauthBrowserOpenedRef = useRef(false);
+  const lastOAuthUrlRef = useRef<string | null>(null);
+  const hasRedirectedForSessionRef = useRef(false);
+  const exchangeCodeAndRedirectRef = useRef<(url: string) => Promise<void>>(() => Promise.resolve());
 
   // Limpa flag de "veio do signup por sessão expirada" para não afetar próximo cadastro
   useEffect(() => {
     localStorage.removeItem("manual_login_intent");
+  }, []);
+
+  // Mobile com WebView: quando a página carrega com ?code= (voltou do Google no mesmo WebView), troca e vai pra HOME
+  const hasExchangedCodeFromUrlRef = useRef(false);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || hasExchangedCodeFromUrlRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    if (!code) return;
+    hasExchangedCodeFromUrlRef.current = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        window.history.replaceState({}, "", window.location.pathname);
+        if (data?.session?.user && !hasRedirectedForSessionRef.current) {
+          hasRedirectedForSessionRef.current = true;
+          setLoading(false);
+          setProcessingOAuth(false);
+          checkDeviceLimitAndRedirect(data.session.user.id, data.session.user.email ?? undefined);
+        }
+      } catch (e) {
+        console.error("[Login] exchange from URL:", e);
+        hasExchangedCodeFromUrlRef.current = false;
+      }
+    })();
   }, []);
 
   // Limpar timeout do OAuth ao receber sessão ou ao desmontar (evita travar "Entrando..." no Android)
@@ -106,16 +137,43 @@ const Login = () => {
     };
   }, [session?.user]);
 
-  // Quando o Google/Apple termina e a sessão aparece (ex.: deep link no Android/iOS), redireciona na hora
-  const hasRedirectedForSessionRef = useRef(false);
+  // Troca code da URL por sessão e redireciona para HOME (deep link Google/Apple no mobile)
+  const exchangeCodeAndRedirect = async (urlStr: string) => {
+    if (!urlStr?.includes("code=") || lastOAuthUrlRef.current === urlStr) return;
+    lastOAuthUrlRef.current = urlStr;
+    let fixedUrl = urlStr.replace("#", "?");
+    if (fixedUrl.startsWith("com.chamo.app:?")) fixedUrl = fixedUrl.replace("com.chamo.app:?", "com.chamo.app://?");
+    try {
+      const urlObj = new URL(fixedUrl);
+      const code = urlObj.searchParams.get("code");
+      if (!code) return;
+      await Browser.close().catch(() => {});
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) throw error;
+      if (data?.session?.user && !hasRedirectedForSessionRef.current) {
+        hasRedirectedForSessionRef.current = true;
+        oauthBrowserOpenedRef.current = false;
+        setLoading(false);
+        setProcessingOAuth(false);
+        checkDeviceLimitAndRedirect(data.session.user.id, data.session.user.email ?? undefined);
+      }
+    } catch (e) {
+      console.error("[Login] exchangeCodeAndRedirect:", e);
+      lastOAuthUrlRef.current = null;
+    }
+  };
+  exchangeCodeAndRedirectRef.current = exchangeCodeAndRedirect;
+
+  // Quando o Google/Apple termina e a sessão aparece (ex.: deep link), redireciona mesmo que o timeout já tenha desbloqueado a tela
   useEffect(() => {
-    if (!session?.user || !loading) return;
+    if (!session?.user) return;
     if (hasRedirectedForSessionRef.current) return;
     hasRedirectedForSessionRef.current = true;
+    oauthBrowserOpenedRef.current = false;
     setLoading(false);
     setProcessingOAuth(false);
     checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
-  }, [session?.user, loading]);
+  }, [session?.user]);
 
   // Polling no mobile: enquanto loading e não redirecionou, checa getSession a cada 1s (contexto pode atrasar)
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -125,6 +183,7 @@ const Login = () => {
       const { data: { session: s } } = await supabase.auth.getSession();
       if (s?.user && !hasRedirectedForSessionRef.current) {
         hasRedirectedForSessionRef.current = true;
+        oauthBrowserOpenedRef.current = false;
         if (sessionPollRef.current) {
           clearInterval(sessionPollRef.current);
           sessionPollRef.current = null;
@@ -142,18 +201,33 @@ const Login = () => {
     };
   }, [loading]);
 
-  // Timeout de segurança: se ficar em "Entrando..." por mais de 12s (email ou OAuth), desbloqueia
+  // Timeout de segurança: se ficar em "Entrando..." por muito tempo, desbloqueia. OAuth no mobile pode demorar (deep link).
   useEffect(() => {
     if (!loading) return;
     const t = setTimeout(() => {
+      const foiOAuth = oauthBrowserOpenedRef.current;
+      oauthBrowserOpenedRef.current = false;
       setLoading(false);
       setProcessingOAuth(false);
-      toast({ title: "Demorou muito. Tente novamente.", variant: "destructive" });
-    }, 12000);
+      // No fluxo OAuth não mostrar toast agressivo; usuário pode tentar de novo
+      if (!foiOAuth) {
+        toast({ title: "Demorou muito. Tente novamente.", variant: "destructive" });
+      }
+    }, 22000); // 22s para dar tempo do Google/Apple + deep link
     return () => clearTimeout(t);
   }, [loading]);
 
-  // No mobile: quando o app volta ao primeiro plano, checa sessão e desbloqueia (evita travar após Google/Apple)
+  // No mobile: listener do deep link (appUrlOpen) — troca code por sessão e manda pra HOME na hora
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const handler = (data: { url: string }) => data?.url && exchangeCodeAndRedirectRef.current(data.url);
+    let listener: Promise<{ remove: () => void }> | null = null;
+    CapacitorApp.addListener("appUrlOpen", handler).then((l) => { listener = l; });
+    CapacitorApp.getLaunchUrl().then((val) => val?.url && exchangeCodeAndRedirectRef.current(val.url));
+    return () => { listener?.then((l) => l.remove()); };
+  }, []);
+
+  // No mobile: quando o app volta ao primeiro plano, checa URL de launch e sessão na hora (evita ficar "Entrando...")
   const appResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -165,17 +239,19 @@ const Login = () => {
       if (isActive) {
         appResumeTimerRef.current = setTimeout(async () => {
           appResumeTimerRef.current = null;
+          CapacitorApp.getLaunchUrl().then((val) => val?.url && exchangeCodeAndRedirect(val.url));
           const { data: { session: s } } = await supabase.auth.getSession();
-          if (s?.user && loading && !hasRedirectedForSessionRef.current) {
+          if (s?.user && !hasRedirectedForSessionRef.current) {
             hasRedirectedForSessionRef.current = true;
+            oauthBrowserOpenedRef.current = false;
             setLoading(false);
             setProcessingOAuth(false);
             checkDeviceLimitAndRedirect(s.user.id, s.user.email ?? undefined);
-          } else if (!s?.user) {
+          } else if (!s?.user && loading) {
             setLoading(false);
             setProcessingOAuth(false);
           }
-        }, 1500);
+        }, 400);
       }
     });
     return () => {
@@ -491,24 +567,18 @@ const Login = () => {
       localStorage.setItem("manual_login_intent", "true");
 
       if (Capacitor.isNativePlatform()) {
+        // Mesmo fluxo da web: redireciona o WebView para o Google; o retorno vem na mesma aba com ?code= e trocamos e vamos pra HOME
+        const redirectTo = `${window.location.origin}/login`;
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {
-            redirectTo: 'com.chamo.app://',
-            skipBrowserRedirect: true, 
+            redirectTo,
             queryParams: { prompt: 'select_account' },
           }
         });
-        
         if (error) throw error;
         if (data?.url) {
-          if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
-          // Se o deep link não voltar (Android às vezes não recebe), desbloqueia o botão após 45s
-          oauthTimeoutRef.current = setTimeout(() => {
-            oauthTimeoutRef.current = null;
-            setLoading(false);
-          }, 45000);
-          await Browser.open({ url: data.url });
+          window.location.href = data.url;
         } else {
           setLoading(false);
         }

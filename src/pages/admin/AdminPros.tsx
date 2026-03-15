@@ -198,8 +198,15 @@ const AdminPros = () => {
 
   const openDetail = async (pro: Professional) => {
     setDetailPro(pro);
-    const { data } = await supabase.from("professional_documents").select("*").eq("professional_id", pro.id);
-    setDocs(data || []);
+    const { data: list } = await supabase.from("professional_documents").select("*").eq("professional_id", pro.id);
+    const items = list || [];
+    const withUrls = await Promise.all(
+      items.map(async (d: any) => {
+        const { data: signed } = await supabase.storage.from("uploads").createSignedUrl(d.file_url, 3600);
+        return { ...d, viewUrl: signed?.signedUrl ?? "" };
+      })
+    );
+    setDocs(withUrls);
   };
 
   const handleApprove = async () => {
@@ -712,14 +719,17 @@ const AdminPros = () => {
                   
                  {/* Documentos de Identidade (Cadastro inicial) */}
 <div className="space-y-1.5 mb-3">
-  {docs.map((d: any) => {
-    const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(d.file_url);
-    return (
-      <a key={d.id} href={urlData.publicUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline">
-        <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
-      </a>
-    );
-  })}
+  {docs.map((d: any) => (
+    <a
+      key={d.id}
+      href={d.viewUrl || supabase.storage.from("uploads").getPublicUrl(d.file_url).data.publicUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2 text-xs text-primary hover:underline"
+    >
+      <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+    </a>
+  ))}
 </div>
 
                   {/* Documentos do Plano Business (Cartão CNPJ) */}

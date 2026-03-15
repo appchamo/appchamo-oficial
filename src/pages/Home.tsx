@@ -311,7 +311,8 @@ const Home = () => {
 
           <HomeBanners position="bottom" />
 
-          {profile?.user_type === "client" && (
+          {/* Mostra para cliente ou quando perfil ainda não carregou (igual Android no iPhone) */}
+          {profile?.user_type !== "professional" && profile?.user_type !== "company" && (
             <Link
               to="/signup-pro"
               className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-semibold text-sm transition-colors"
@@ -321,7 +322,7 @@ const Home = () => {
             </Link>
           )}
 
-          <footer className="text-center py-6 border-t mt-4">
+          <footer className="text-center py-6 pt-6 pb-24 border-t mt-4">
             <p className="text-xs text-muted-foreground">
               {footerText}
             </p>

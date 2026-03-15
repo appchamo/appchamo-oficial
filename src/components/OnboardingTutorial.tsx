@@ -47,7 +47,7 @@ const stepsConfig = [
     title: "Tornar-se Profissional",
     body: "Quer trabalhar com a gente? Toque em **Tornar-se Profissional** para se cadastrar.",
     icon: null,
-    clientOnly: true,
+    clientOnly: false,
   },
   {
     id: 6,

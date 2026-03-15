@@ -106,7 +106,7 @@ const Login = () => {
     };
   }, [session?.user]);
 
-  // Quando o Google/Apple termina e a sessão aparece (ex.: deep link no Android), redireciona para Home na hora
+  // Quando o Google/Apple termina e a sessão aparece (ex.: deep link no Android/iOS), redireciona na hora
   const hasRedirectedForSessionRef = useRef(false);
   useEffect(() => {
     if (!session?.user || !loading) return;
@@ -117,7 +117,43 @@ const Login = () => {
     checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
   }, [session?.user, loading]);
 
-  // No Android: quando o app volta ao primeiro plano (ex.: usuário fechou o navegador sem concluir Google), desbloqueia após 2,5s
+  // Polling no mobile: enquanto loading e não redirecionou, checa getSession a cada 1s (contexto pode atrasar)
+  const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !loading || hasRedirectedForSessionRef.current) return;
+    sessionPollRef.current = setInterval(async () => {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (s?.user && !hasRedirectedForSessionRef.current) {
+        hasRedirectedForSessionRef.current = true;
+        if (sessionPollRef.current) {
+          clearInterval(sessionPollRef.current);
+          sessionPollRef.current = null;
+        }
+        setLoading(false);
+        setProcessingOAuth(false);
+        checkDeviceLimitAndRedirect(s.user.id, s.user.email ?? undefined);
+      }
+    }, 1000);
+    return () => {
+      if (sessionPollRef.current) {
+        clearInterval(sessionPollRef.current);
+        sessionPollRef.current = null;
+      }
+    };
+  }, [loading]);
+
+  // Timeout de segurança: se ficar em "Entrando..." por mais de 12s (email ou OAuth), desbloqueia
+  useEffect(() => {
+    if (!loading) return;
+    const t = setTimeout(() => {
+      setLoading(false);
+      setProcessingOAuth(false);
+      toast({ title: "Demorou muito. Tente novamente.", variant: "destructive" });
+    }, 12000);
+    return () => clearTimeout(t);
+  }, [loading]);
+
+  // No mobile: quando o app volta ao primeiro plano, checa sessão e desbloqueia (evita travar após Google/Apple)
   const appResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -130,15 +166,23 @@ const Login = () => {
         appResumeTimerRef.current = setTimeout(async () => {
           appResumeTimerRef.current = null;
           const { data: { session: s } } = await supabase.auth.getSession();
-          if (!s?.user) setLoading(false);
-        }, 2500);
+          if (s?.user && loading && !hasRedirectedForSessionRef.current) {
+            hasRedirectedForSessionRef.current = true;
+            setLoading(false);
+            setProcessingOAuth(false);
+            checkDeviceLimitAndRedirect(s.user.id, s.user.email ?? undefined);
+          } else if (!s?.user) {
+            setLoading(false);
+            setProcessingOAuth(false);
+          }
+        }, 1500);
       }
     });
     return () => {
       if (appResumeTimerRef.current) clearTimeout(appResumeTimerRef.current);
       listener.then((l) => l.remove());
     };
-  }, []);
+  }, [loading]);
 
   // Logo ao montar: se a URL veio com erro do OAuth (ex.: Apple config errada no Supabase), mostrar e limpar
   useEffect(() => {

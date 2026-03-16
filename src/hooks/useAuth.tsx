@@ -4,6 +4,7 @@ import type { User, Session } from "@supabase/supabase-js";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
+import { Preferences } from "@capacitor/preferences";
 
 interface Profile {
   id: string;
@@ -64,7 +65,15 @@ export const useAuth = () => useContext(AuthContext);
 let lastProcessedCode: string | null = null;
 let isExchangingOAuth = false;
 const OAUTH_COOLDOWN_MS = 60000; // 1 min — só processa o primeiro callback; ignora segundo se usuário abriu o browser de novo
+const OAUTH_FAILED_CODE_TTL_MS = 300000; // 5 min — não reprocessar código que já falhou (evita loop no iOS)
+export const OAUTH_FAILED_KEY = "chamo_oauth_failed";
 let lastOAuthProcessedAt = 0;
+
+/** Código na URL pode vir com ? ou # no final (ex.: ...code=xxx#); normalizar para comparar/salvar. */
+function normalizeOAuthCode(code: string | null): string | null {
+  if (!code || typeof code !== "string") return null;
+  return code.replace(/[?#\s]+$/g, "").trim() || null;
+}
 
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
@@ -147,10 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Timeout de segurança: no emulador/rede lenta, libera a tela após 10s para não ficar só carregando
-    const safetyTimeout = setTimeout(() => {
-      setLoading(false);
-    }, 10000);
+    const safetyTimeout = setTimeout(() => setLoading(false), 10000);
 
     const loadInitialSession = async () => {
       try {
@@ -171,10 +177,113 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     };
-    loadInitialSession();
 
-    // 2) Listener de mudanças (Google login, Apple, Logout, restauração no iOS, etc)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sess) => {
+    const handleUrl = async (urlStr: string): Promise<boolean> => {
+      if (!urlStr || !urlStr.includes('code=')) return false;
+      let fixedUrl = urlStr.replace('#', '?');
+      if (fixedUrl.startsWith('com.chamo.app:?')) fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
+      let code: string | null = null;
+      try {
+        const urlObj = new URL(fixedUrl);
+        code = urlObj.searchParams.get('code');
+      } catch (_) {
+        const m = urlStr.match(/[?&]code=([^&?#]+)/);
+        code = m ? decodeURIComponent(m[1]) : null;
+      }
+      code = normalizeOAuthCode(code);
+      if (!code) return false;
+      const now = Date.now();
+      if (now - lastOAuthProcessedAt < OAUTH_COOLDOWN_MS) return false;
+      if (lastProcessedCode === code) return false;
+      if (isExchangingOAuth) return false;
+      // No iOS, após falha redirecionamos para /login e getLaunchUrl continua devolvendo a mesma URL → loop. Ignorar código já tentado.
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const { value } = await Preferences.get({ key: OAUTH_FAILED_KEY });
+          if (value) {
+            const { code: failedCode, ts } = JSON.parse(value);
+            const normalizedFailed = normalizeOAuthCode(failedCode);
+            if (normalizedFailed && normalizedFailed === code && now - ts < OAUTH_FAILED_CODE_TTL_MS) return false;
+          }
+        } catch (_) {}
+      }
+      lastProcessedCode = code;
+      lastOAuthProcessedAt = now;
+      isExchangingOAuth = true;
+      let exchangeOk = false;
+      try {
+        await Browser.close().catch(() => {}); // Safari já fechado → "No active window" é esperado, ignorar
+        const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        if (exchangeError) {
+          console.error("[OAuth] exchange error:", exchangeError.message);
+          lastProcessedCode = null;
+          if (Capacitor.isNativePlatform()) {
+            await Preferences.set({ key: OAUTH_FAILED_KEY, value: JSON.stringify({ code: normalizeOAuthCode(code) ?? code, ts: Date.now() }) }).catch(() => {});
+          }
+        } else if (exchangeData?.session) {
+          exchangeOk = true;
+          await Preferences.remove({ key: OAUTH_FAILED_KEY }).catch(() => {});
+        }
+      } catch (e) {
+        console.error("[OAuth] Deep link error:", e);
+        lastProcessedCode = null;
+        if (Capacitor.isNativePlatform()) {
+          await Preferences.set({ key: OAUTH_FAILED_KEY, value: JSON.stringify({ code: normalizeOAuthCode(code) ?? code, ts: Date.now() }) }).catch(() => {});
+        }
+      } finally {
+        isExchangingOAuth = false;
+        if (Capacitor.getPlatform() === 'ios') {
+          const path = window.location.pathname || '';
+          const alreadyOnLogin = path.includes('login');
+          if (exchangeOk) {
+            setTimeout(() => {
+              try {
+                window.location.replace((window.location.origin || '') + '/home');
+              } catch (_) {}
+            }, 1200);
+          } else if (!alreadyOnLogin) {
+            setTimeout(() => {
+              try {
+                window.location.replace((window.location.origin || '') + '/login');
+              } catch (_) {}
+            }, 1200);
+          } else {
+            // Ficamos na Login com loading=true → dispara evento para a tela desbloquear "Entrando..."
+            window.dispatchEvent(new CustomEvent('chamo-oauth-done', { detail: { success: false } }));
+          }
+        }
+      }
+      return exchangeOk;
+    };
+
+    let subscription: { unsubscribe?: () => void } | null = null;
+    let urlListener: any = null;
+
+    const run = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const launch = await CapacitorApp.getLaunchUrl();
+          const url = launch?.url;
+          if (url && url.includes('code=')) {
+            // Pode ser retorno do nosso próprio redirect após login ok (página recarregou em /home).
+            // Se já temos sessão, não trocar o código de novo (evita erro e tela branca).
+            const { data: { session: existing } } = await supabase.auth.getSession();
+            if (existing?.user) {
+              await loadInitialSession();
+              return;
+            }
+            await handleUrl(url);
+            await loadInitialSession();
+            return;
+          }
+        } catch (_) {}
+      }
+      await loadInitialSession();
+    };
+
+    run();
+
+    const { data: { subscription: sub } } = supabase.auth.onAuthStateChange((event, sess) => {
       try {
         console.log("🔐 Auth Event:", event);
         if (event === 'SIGNED_OUT') {
@@ -193,58 +302,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     });
+    subscription = sub;
 
-    // 3) Deep Link Listener (APENAS MOBILE) — um único processamento por code
-    let urlListener: any = null;
     if (Capacitor.isNativePlatform()) {
-      const handleUrl = async (urlStr: string) => {
-        if (!urlStr || !urlStr.includes('code=')) return;
-
-        let fixedUrl = urlStr.replace('#', '?');
-        if (fixedUrl.startsWith('com.chamo.app:?')) {
-          fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
-        }
-
-        let code: string | null = null;
-        try {
-          const urlObj = new URL(fixedUrl);
-          code = urlObj.searchParams.get('code');
-        } catch (_) {
-          const m = urlStr.match(/[?&]code=([^&?#]+)/);
-          code = m ? decodeURIComponent(m[1]) : null;
-        }
-        if (!code) return;
-
-        const now = Date.now();
-        if (now - lastOAuthProcessedAt < OAUTH_COOLDOWN_MS) return;
-        if (lastProcessedCode === code) return;
-        if (isExchangingOAuth) return;
-        lastProcessedCode = code;
-        lastOAuthProcessedAt = now;
-        isExchangingOAuth = true;
-
-        try {
-          await Browser.close().catch(() => {});
-          const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError) {
-            console.error("[OAuth] exchange error:", exchangeError.message);
-            lastProcessedCode = null;
-            return;
-          }
-          if (exchangeData?.session) {
-            // Não faz reload: o onAuthStateChange dispara SIGNED_IN, o contexto atualiza e o Login redireciona via checkDeviceLimitAndRedirect
-            return;
-          }
-        } catch (e) {
-          console.error("[OAuth] Deep link error:", e);
-          lastProcessedCode = null;
-        } finally {
-          isExchangingOAuth = false;
-        }
-      };
-
-      urlListener = CapacitorApp.addListener('appUrlOpen', (data) => handleUrl(data.url));
-      // Não chama getLaunchUrl() aqui — duplica o processamento e causa AbortError no Supabase
+      urlListener = CapacitorApp.addListener('appUrlOpen', (data: { url: string }) => handleUrl(data.url));
     }
 
     return () => {

@@ -11,7 +11,8 @@ const isNative = Capacitor.isNativePlatform();
 // Cache em memória para evitar dezenas de Preferences.get na inicialização (Supabase chama getItem muitas vezes)
 const authStorageCache = new Map<string, string | null>();
 
-// 🛡️ ADAPTADOR NATIVO BLINDADO: Padrão oficial exigido pelo Supabase para Capacitor
+// No app nativo: nunca removemos *-code-verifier do storage. Ao reabrir pelo deep link,
+// o cliente principal chama _removeSession() e apagaria o verifier; sem ele, exchangeCodeForSession falha.
 const capacitorAuthStorage = {
   getItem: async (key: string): Promise<string | null> => {
     const cached = authStorageCache.get(key);
@@ -35,6 +36,7 @@ const capacitorAuthStorage = {
     }
   },
   removeItem: async (key: string): Promise<void> => {
+    if (isNative && key.endsWith('-code-verifier')) return;
     authStorageCache.delete(key);
     try {
       await Preferences.remove({ key });
@@ -46,18 +48,10 @@ const capacitorAuthStorage = {
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    // Usa o HD do celular no Mobile e o LocalStorage normal na Web
     storage: isNative ? capacitorAuthStorage : window.localStorage,
     persistSession: true,
     autoRefreshToken: true,
-    
-    // 🚨 A MÁGICA ESTÁ AQUI: No Mobile DEVE ser false. 
-    // Se for true, o app lê a URL interna (capacitor://) ao abrir, acha que o login falhou e apaga a sessão salva!
-    detectSessionInUrl: !isNative, 
-    
+    detectSessionInUrl: !isNative,
     flowType: 'pkce',
-    
-    // NOTA: Removi o "storageKey" customizado, pois às vezes ele gera conflito com os 
-    // ciclos de atualização internos do Supabase. O padrão é muito mais seguro.
   }
 });

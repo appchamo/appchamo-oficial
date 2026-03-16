@@ -103,15 +103,19 @@ export function OnboardingTutorial() {
     } catch (_) {}
     setVisible(false);
     closeMenu();
+    // Refresh forçado para recarregar a tela e tudo que depende do layout (ex.: após OAuth no iOS)
+    requestAnimationFrame(() => {
+      window.location.reload();
+    });
   }, [closeMenu]);
 
   const goNext = useCallback(() => {
-    // Ao clicar em Próximo/Começar, dispara refresh para a página carregar por trás do modal
-    triggerRefresh();
     if (currentIndex >= totalSteps) {
       finishTutorial();
+      triggerRefresh();
       return;
     }
+    triggerRefresh();
     const next = stepsToShow[currentIndex];
     if (next) setStep(next.id);
   }, [currentIndex, totalSteps, stepsToShow, finishTutorial, triggerRefresh]);
@@ -126,9 +130,8 @@ export function OnboardingTutorial() {
   }, [currentIndex, stepsToShow, step, closeMenu]);
 
   const skip = useCallback(() => {
-    // Pular tutorial: refresh e fecha para a página carregar 100%
-    triggerRefresh();
     finishTutorial();
+    triggerRefresh();
   }, [finishTutorial, triggerRefresh]);
 
   // Show tutorial only when: user logged in and onboarding not done

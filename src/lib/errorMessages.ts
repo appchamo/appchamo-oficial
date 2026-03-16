@@ -19,6 +19,8 @@ export function translateError(msg: string): string {
 
   // RLS / DB
   if (msg.includes("row-level security")) return "Permissão negada. Verifique se você está logado.";
+  if ((msg.toLowerCase().includes("cpf") || msg.toLowerCase().includes("cnpj")) && (msg.includes("unique") || msg.includes("duplicate")))
+    return "CPF ou CNPJ já cadastrado. Verifique o número ou use outro.";
   if (msg.includes("violates unique")) return "Este registro já existe.";
   if (msg.includes("violates foreign key")) return "Referência inválida. Verifique os dados.";
   if (msg.includes("violates not-null")) return "Preencha todos os campos obrigatórios.";

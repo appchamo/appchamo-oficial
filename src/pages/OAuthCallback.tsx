@@ -5,9 +5,9 @@ import { Loader2 } from "lucide-react";
 const APP_SCHEME = "com.chamo.app://oauth";
 
 /**
- * Página ponte para OAuth no Android:
- * Custom Tabs redireciona para /oauth-callback?code=...; esta página redireciona pro app.
- * (No iOS usamos scheme direto no Login, sem passar por aqui.)
+ * Página ponte para OAuth no app (iOS e Android):
+ * Após login com Google/Apple, Supabase redireciona para /oauth-callback?code=...
+ * Esta página redireciona para com.chamo.app://oauth?code=... para abrir o app.
  */
 const OAuthCallback = () => {
   const [searchParams] = useSearchParams();

@@ -8,7 +8,7 @@ import HomeBanners from "@/components/HomeBanners";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
+import { useRefresh, useIsRefreshing, useTriggerRefresh } from "@/contexts/RefreshContext";
 import { Link, useNavigate } from "react-router-dom";
 import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase } from "lucide-react"; 
 import { useState, useEffect } from "react";
@@ -52,10 +52,11 @@ const HomeSkeleton = () => (
 );
 
 const Home = () => {
-  const { profile, user, refreshProfile } = useAuth();
+  const { profile, user, refreshProfile, loading: authLoading } = useAuth();
   const { isFreePlan, callsRemaining, loading: subLoading } = useSubscription();
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
   const isRefreshing = useIsRefreshing();
+  const triggerRefresh = useTriggerRefresh();
   const navigate = useNavigate();
   // Fallback para user_metadata (ex.: OAuth) enquanto o perfil ainda não carregou
   const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
@@ -268,9 +269,12 @@ const Home = () => {
     tutorials: "min-h-[220px]"
   };
 
+  // Só monta o conteúdo (e os fetches) depois da sessão estar pronta — evita getSession() null pós-OAuth
+  const contentReady = !authLoading && isReady;
+
   return (
     <AppLayout>
-      {!isReady ? (
+      {!contentReady ? (
         <HomeSkeleton />
       ) : (
         <main

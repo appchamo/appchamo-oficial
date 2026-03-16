@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Capacitor } from "@capacitor/core";
 import { formatCep, formatCpf, validateCpf } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
+import { translateError } from "@/lib/errorMessages";
 
 interface Message {
   id: string;
@@ -644,8 +645,7 @@ const MessageThread = () => {
     setSelectedCouponId(null);
     setCouponDiscount(null);
 
-    // Checar CPF/CNPJ e endereço ANTES de abrir o modal; se faltar, abrir já na etapa "Dados para pagamento"
-    let needBillingStep = false;
+    // Sempre abrir na etapa "Dados para pagamento" (CPF + endereço) para o usuário poder corrigir ou tentar outro CPF (ex.: após "CPF já cadastrado")
     let initialBillingForm = { cpf: "", cep: "", street: "", neighborhood: "", number: "", city: "", state: "" };
 
     if (userId) {
@@ -655,28 +655,20 @@ const MessageThread = () => {
       ]);
       const p = profileRes.data as { cpf?: string; cnpj?: string; address_zip?: string; address_street?: string; address_number?: string; address_neighborhood?: string; address_city?: string; address_state?: string } | null;
       const cpfRaw = String(p?.cpf || "").replace(/\D/g, "");
-      const cnpjRaw = String(p?.cnpj || "").replace(/\D/g, "");
-      const hasDoc = (cpfRaw.length === 11) || (cnpjRaw.length === 14);
-      const hasAddress = !!(p?.address_zip && p?.address_street && p?.address_number && p?.address_city && p?.address_state);
-      if (!hasDoc || !hasAddress) {
-        needBillingStep = true;
-        initialBillingForm = {
-          cpf: cpfRaw.length === 11 ? cpfRaw : "",
-          cep: (p?.address_zip || "").replace(/\D/g, ""),
-          street: p?.address_street || "",
-          neighborhood: p?.address_neighborhood || "",
-          number: p?.address_number || "",
-          city: p?.address_city || "",
-          state: p?.address_state || "",
-        };
-      }
+      initialBillingForm = {
+        cpf: cpfRaw.length === 11 ? cpfRaw : "",
+        cep: (p?.address_zip || "").replace(/\D/g, ""),
+        street: p?.address_street || "",
+        neighborhood: p?.address_neighborhood || "",
+        number: p?.address_number || "",
+        city: p?.address_city || "",
+        state: p?.address_state || "",
+      };
       const valid = (couponsRes.data || []).filter((c: any) => !c.expires_at || new Date(c.expires_at) > new Date());
       setAvailableCoupons(valid);
-    } else {
-      needBillingStep = true;
     }
 
-    setBillingDataStep(needBillingStep);
+    setBillingDataStep(true);
     setBillingForm(initialBillingForm);
     setPaymentOpen(true);
   };
@@ -753,7 +745,7 @@ const MessageThread = () => {
       .eq("user_id", userId);
     setSavingBilling(false);
     if (error) {
-      toast({ title: "Erro ao salvar dados", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao salvar dados", description: translateError(error.message), variant: "destructive" });
       return;
     }
     toast({ title: "Dados salvos. Prosseguindo ao pagamento." });

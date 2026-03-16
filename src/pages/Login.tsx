@@ -3,12 +3,13 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Smartphone, Home } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, OAUTH_FAILED_KEY } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
+import { Preferences } from "@capacitor/preferences";
 import { Loader2 } from "lucide-react"; 
 
 type LoginError = "email_not_confirmed" | "invalid_login" | "rate_limit" | "generic";
@@ -225,6 +226,19 @@ const Login = () => {
   }, [loading]);
 
   // OAuth return é tratado só no useAuth (appUrlOpen) — listener duplicado aqui causava exchange duas vezes e AbortError
+
+  // useAuth dispara isso quando o exchange falha e já estamos em /login (iOS), para desbloquear "Entrando..."
+  useEffect(() => {
+    const onOAuthDone = (e: CustomEvent<{ success: boolean }>) => {
+      if (e.detail?.success) return;
+      oauthBrowserOpenedRef.current = false;
+      setLoading(false);
+      setProcessingOAuth(false);
+      toast({ title: "Não foi possível concluir o login. Tente novamente.", variant: "destructive" });
+    };
+    window.addEventListener("chamo-oauth-done", onOAuthDone as EventListener);
+    return () => window.removeEventListener("chamo-oauth-done", onOAuthDone as EventListener);
+  }, []);
 
   // No mobile: quando o app volta ao primeiro plano, checa sessão (useAuth já pode ter feito o exchange)
   const appResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -568,11 +582,9 @@ const Login = () => {
       localStorage.setItem("manual_login_intent", "true");
 
       if (Capacitor.isNativePlatform()) {
-        // iOS: scheme direto. Android: URL canônica (igual no Supabase Redirect URLs)
         const isIos = Capacitor.getPlatform() === 'ios';
-        const redirectTo = isIos
-          ? 'com.chamo.app://oauth'
-          : 'https://appchamo.com/oauth-callback';
+        // iOS: scheme direto (sem abrir web). Android: página web.
+        const redirectTo = isIos ? 'com.chamo.app://oauth' : 'https://appchamo.com/oauth-callback';
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {
@@ -583,6 +595,7 @@ const Login = () => {
         });
         if (error) throw error;
         if (data?.url) {
+          await Preferences.remove({ key: OAUTH_FAILED_KEY }).catch(() => {}); // nova tentativa: não bloquear por código que falhou antes
           oauthBrowserOpenedRef.current = true;
           if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
           oauthTimeoutRef.current = setTimeout(() => {
@@ -591,6 +604,7 @@ const Login = () => {
             socialLoginInProgressRef.current = false;
             setLoading(false);
           }, 45000);
+          // Safari/Chrome (não WebView) para não cair no "Acesso bloqueado" do Google.
           await Browser.open({ url: data.url });
           return;
         } else {

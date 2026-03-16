@@ -10,7 +10,7 @@ Use este guia para garantir que o backend, builds e lojas estão prontos para pr
 |------|-------------|---|
 | **Projeto Supabase de produção** | Use o projeto que será definitivo (ou crie em [supabase.com](https://supabase.com)). Não use um projeto “staging” como produção. | ☐ |
 | **Migrations aplicadas** | Todas as migrations em `supabase/migrations/` aplicadas no DB de produção (`supabase db push` ou SQL Editor). | ☐ |
-| **Auth – Redirect URLs** | Supabase Dashboard → Authentication → URL Configuration → **Redirect URLs**: inclua `com.chamo.app://`, `https://appchamo.com/**`, `https://app.chamo.com/**` e a URL exata do seu site se tiver. | ☐ |
+| **Auth – Redirect URLs** | Supabase Dashboard → Authentication → URL Configuration → **Redirect URLs**: inclua **`com.chamo.app://oauth`** (obrigatório para login com Google/Apple no **iPhone**), `com.chamo.app://`, `https://appchamo.com/**`, `https://app.chamo.com/**` e a URL exata do seu site se tiver. | ☐ |
 | **Auth – Site URL** | **Site URL** = URL principal do app (ex.: `https://appchamo.com`). | ☐ |
 | **Edge Functions em produção** | Deploy das funções usadas em prod: `supabase functions deploy validate_iap_subscription`, `complete-signup`, etc. | ☐ |
 | **Secrets** | Dashboard → Edge Functions → Secrets (ou `supabase secrets set`): `APPLE_SHARED_SECRET` para IAP, e qualquer outro (Asaas, OpenAI, etc.) que as funções usem. | ☐ |

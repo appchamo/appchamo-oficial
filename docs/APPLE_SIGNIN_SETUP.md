@@ -94,7 +94,7 @@ Em **Authentication** → **URL Configuration** → **Redirect URLs**, garanta q
 
 - Web (desenvolvimento): `http://localhost:8080/login`, `http://localhost:8080/signup`
 - Web (produção): `https://seu-dominio.com/login`, `https://seu-dominio.com/signup`
-- App (deep link): `com.chamo.app://`, `com.chamo.app://google-auth` (usado também para Apple no app)
+- App (deep link): **`com.chamo.app://oauth`** (usado no **Login** com Google/Apple no app iOS e Android), `com.chamo.app://`, `com.chamo.app://google-auth` (Signup)
 
 Assim, tanto Login quanto Cadastro com Apple vão redirecionar corretamente após o callback do Supabase.
 

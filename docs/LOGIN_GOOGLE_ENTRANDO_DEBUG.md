@@ -48,11 +48,17 @@ O travamento em "Entrando..." significa que o passo 5 ou 6 **não está acontece
 - **Sintoma:** App até pode abrir, mas continua na tela de login ou volta para ela.
 - **Como conferir:** O `catch` em `handleUrl` faz `console.error("Deep link error:", e)`. Ver no Logcat / console se aparece esse erro e a mensagem do Supabase.
 
-### 6. Redirect URL não permitida no Supabase
+### 6. Redirect URL não permitida no Supabase (comum no **iPhone**)
 
 - **O que é:** A URL de redirect (por exemplo `com.chamo.app://oauth` ou `https://appchamo.com/oauth-callback`) não está em **Authentication → URL Configuration → Redirect URLs** no Supabase.
-- **Sintoma:** Supabase pode não redirecionar com `code` ou redirecionar para uma URL de erro. O app não recebe o `code` correto.
-- **Como conferir:** No painel do Supabase, em **Authentication → URL Configuration**, ver a lista de **Redirect URLs** e garantir que estão exatamente as que o app usa (iOS e Android).
+- **Sintoma (iOS):** Depois do login com Google/Apple, o **Safari abre a página web** (appchamo.com) em vez de voltar para o app. O iPhone até mostra o banner "Abrir no app Chamô", mas o redirect não foi para o app.
+- **Causa:** Se `com.chamo.app://oauth` **não** estiver na lista de Redirect URLs, o Supabase ignora esse redirect e manda o usuário para o **Site URL** (ex.: https://appchamo.com), por isso o Safari fica na web.
+- **Como corrigir:**
+  1. Abra o **Supabase Dashboard** do projeto.
+  2. **Authentication** → **URL Configuration** → **Redirect URLs**.
+  3. Adicione exatamente: **`com.chamo.app://oauth`** (sem barra no final).
+  4. Salve. Teste de novo no iPhone: Entrar com Google → depois do login o sistema deve abrir o app.
+- **Como conferir:** Na lista de Redirect URLs deve aparecer `com.chamo.app://oauth` (e também `https://appchamo.com/oauth-callback` para Android).
 
 ---
 

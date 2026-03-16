@@ -8,18 +8,26 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 const isNative = Capacitor.isNativePlatform();
 
+// Cache em memória para evitar dezenas de Preferences.get na inicialização (Supabase chama getItem muitas vezes)
+const authStorageCache = new Map<string, string | null>();
+
 // 🛡️ ADAPTADOR NATIVO BLINDADO: Padrão oficial exigido pelo Supabase para Capacitor
 const capacitorAuthStorage = {
   getItem: async (key: string): Promise<string | null> => {
+    const cached = authStorageCache.get(key);
+    if (cached !== undefined) return cached;
     try {
       const { value } = await Preferences.get({ key });
-      return value ?? null; // Supabase exige estritamente null se não existir (nunca undefined)
+      const out = value ?? null;
+      authStorageCache.set(key, out);
+      return out;
     } catch (error) {
       console.error("Erro ao ler sessão do disco:", error);
       return null;
     }
   },
   setItem: async (key: string, value: string): Promise<void> => {
+    authStorageCache.set(key, value);
     try {
       await Preferences.set({ key, value });
     } catch (error) {
@@ -27,6 +35,7 @@ const capacitorAuthStorage = {
     }
   },
   removeItem: async (key: string): Promise<void> => {
+    authStorageCache.delete(key);
     try {
       await Preferences.remove({ key });
     } catch (error) {

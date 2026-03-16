@@ -21,6 +21,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   const pages = useMemo(() => {
     const p: Sponsor[][] = [];
@@ -37,11 +38,53 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const totalPages = pages.length; // para os dots
 
   const fromCloneToReset = useRef(false);
+  const retryCountRef = useRef(0);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
-    supabase.from("sponsors").select("id, name, niche, link_url, logo_url").eq("active", true).order("sort_order").then(({ data }) => {
-      if (data) setSponsors(data);
-    });
+    setLoaded(false);
+    setSponsors([]);
+    retryCountRef.current = 0;
+    cancelledRef.current = false;
+
+    const fetchSponsors = () => {
+      supabase
+        .from("sponsors")
+        .select("id, name, niche, link_url, logo_url")
+        .eq("active", true)
+        .order("sort_order")
+        .then(({ data, error }) => {
+          if (cancelledRef.current) return;
+          if (error) {
+            if (retryCountRef.current < 2) {
+              retryCountRef.current += 1;
+              const delay = retryCountRef.current === 1 ? 800 : 2000;
+              setTimeout(fetchSponsors, delay);
+              return;
+            }
+            setLoaded(true);
+            return;
+          }
+          if (data && data.length > 0) {
+            setSponsors(data);
+          }
+          setLoaded(true);
+        })
+        .catch(() => {
+          if (cancelledRef.current) return;
+          if (retryCountRef.current < 2) {
+            retryCountRef.current += 1;
+            const delay = retryCountRef.current === 1 ? 800 : 2000;
+            setTimeout(fetchSponsors, delay);
+            return;
+          }
+          setLoaded(true);
+        });
+    };
+
+    // Pequeno atraso na 1ª tentativa para a sessão (pós-OAuth) estabilizar no app nativo
+    const t = setTimeout(fetchSponsors, 400);
+    return () => { cancelledRef.current = true; clearTimeout(t); };
   }, []);
 
   const scrollToPage = useCallback((pageIndex: number) => {
@@ -80,6 +123,18 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
     });
   };
 
+  if (!loaded) {
+    return (
+      <section>
+        <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">{section?.title ?? "Patrocinadores"}</h3>
+        <div className="flex gap-3 overflow-hidden">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="w-[65px] h-[65px] rounded-full bg-muted animate-pulse shrink-0" />
+          ))}
+        </div>
+      </section>
+    );
+  }
   if (sponsors.length === 0) return null;
 
   const title = section?.title ?? "Patrocinadores";

@@ -57,7 +57,10 @@ const Home = () => {
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
   const isRefreshing = useIsRefreshing();
   const navigate = useNavigate();
-  const userName = profile?.full_name?.split(" ")[0] || "Usuário";
+  // Fallback para user_metadata (ex.: OAuth) enquanto o perfil ainda não carregou
+  const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
+  const nameFromAuth = (user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined;
+  const userName = nameFromProfile || nameFromAuth?.trim().split(/\s+/)[0] || "Usuário";
   const [hasUpcomingAppointment, setHasUpcomingAppointment] = useState(false);
   const [appointmentBannerDismissed, setAppointmentBannerDismissed] = useState(() =>
     localStorage.getItem("chamo_appointment_banner_dismissed") === "1"
@@ -122,8 +125,34 @@ const Home = () => {
     return () => clearTimeout(fallback);
   }, [sections]);
 
-  // ✅ Pull-to-refresh: atualiza dados sem dar reload (evita piscada)
+  // ✅ Pós-OAuth: quando o user fica disponível, forçar novo carregamento do layout e dos blocos (sponsors, categorias, featured)
+  const [contentSeed, setContentSeed] = useState(0);
+  useEffect(() => {
+    if (!user?.id) return;
+    const t = setTimeout(() => {
+      refreshLayout();
+      setContentSeed((s) => s + 1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [user?.id]);
+
+  // ✅ Ao entrar na Home (ex.: após login): refresh como se tivesse voltado da Busca / reaberto o app — garante que a página carregue
+  useEffect(() => {
+    const t = setTimeout(() => {
+      refreshLayout();
+      setContentSeed((s) => s + 1);
+      supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => setJobCount(count ?? 0));
+      if (user?.id) {
+        const today = new Date().toISOString().slice(0, 10);
+        supabase.from("agenda_appointments").select("id", { count: "exact", head: true }).eq("client_id", user.id).in("status", ["pending", "confirmed"]).gte("appointment_date", today).then(({ count }) => setHasUpcomingAppointment((count ?? 0) > 0));
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, []);
+
+  // ✅ Pull-to-refresh (e ao fechar tutorial): atualiza layout + força remount das seções (sponsors, featured, categorias) para carregar 100%
   const onRefresh = async () => {
+    setContentSeed((s) => s + 1);
     const minDelay = new Promise(r => setTimeout(r, 400));
     await Promise.all([
       refreshLayout(),
@@ -210,11 +239,11 @@ const Home = () => {
 
   const sectionComponents: Record<string, React.ReactNode> = {
     welcome: <HomeWelcome key="welcome" userName={userName} section={getSection("welcome")} />,
-    sponsors: <SponsorCarousel key="sponsors" section={getSection("sponsors")} />,
+    sponsors: <SponsorCarousel key={`sponsors-${contentSeed}`} section={getSection("sponsors")} />,
     jobs: <HomeJobsBanner key="jobs" jobCount={jobCount} section={getSection("jobs")} />,
     search: <HomeSearchBar key={`search-${profile?.address_city}-${profile?.address_state}`} section={getSection("search")} />,
-    featured: <FeaturedProfessionals key={`featured-${profile?.address_city}-${profile?.address_state}`} section={getSection("featured")} />,
-    categories: <CategoriesGrid key="categories" section={getSection("categories")} />,
+    featured: <FeaturedProfessionals key={`featured-${profile?.address_city}-${profile?.address_state}-${contentSeed}`} section={getSection("featured")} />,
+    categories: <CategoriesGrid key={`categories-${contentSeed}`} section={getSection("categories")} />,
     benefits: <BenefitsPanel key="benefits" section={getSection("benefits")} />,
     tutorials: <TutorialsSection key="tutorials" />
   };

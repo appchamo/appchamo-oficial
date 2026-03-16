@@ -145,7 +145,9 @@ const Header = () => {
   }, [user, playNotificationSound]);
 
   const isPro = profile && profile.user_type !== "client";
-  const firstName = profile?.full_name?.trim().split(/\s+/)[0] || "Usuário";
+  // Fallback para user_metadata (ex.: OAuth) enquanto o perfil ainda não carregou da tabela profiles
+  const displayName = profile?.full_name?.trim() || (user?.user_metadata?.full_name as string | undefined)?.trim() || (user?.user_metadata?.name as string | undefined)?.trim() || "";
+  const firstName = displayName.split(/\s+/)[0] || "Usuário";
   const welcomeWord =
     profile?.gender === "female" ? "Bem-vinda" : profile?.gender === "male" ? "Bem-vindo" : "Bem-vindo(a)";
 

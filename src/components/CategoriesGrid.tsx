@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -33,16 +33,74 @@ interface CategoriesGridProps {
 
 const CategoriesGrid = ({ section }: CategoriesGridProps) => {
   const [categories, setCategories] = useState<Category[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const retryCountRef = useRef(0);
+  const cancelledRef = useRef(false);
   const cols = typeof window !== "undefined" && window.innerWidth >= 640 ? 5 : 4;
   const visibleCount = cols * 2;
 
   useEffect(() => {
-    supabase.from("categories").select("id, name, slug, icon_name, icon_url").eq("active", true).order("sort_order").then(({ data }) => {
-      if (data) setCategories(data);
-    });
+    setLoaded(false);
+    setCategories([]);
+    retryCountRef.current = 0;
+    cancelledRef.current = false;
+
+    const fetchCategories = () => {
+      supabase
+        .from("categories")
+        .select("id, name, slug, icon_name, icon_url")
+        .eq("active", true)
+        .order("sort_order")
+        .then(({ data, error }) => {
+          if (cancelledRef.current) return;
+          if (error) {
+            if (retryCountRef.current < 2) {
+              retryCountRef.current += 1;
+              const delay = retryCountRef.current === 1 ? 800 : 2000;
+              setTimeout(fetchCategories, delay);
+              return;
+            }
+            setLoaded(true);
+            return;
+          }
+          if (data && data.length > 0) {
+            setCategories(data);
+          }
+          setLoaded(true);
+        })
+        .catch(() => {
+          if (cancelledRef.current) return;
+          if (retryCountRef.current < 2) {
+            retryCountRef.current += 1;
+            const delay = retryCountRef.current === 1 ? 800 : 2000;
+            setTimeout(fetchCategories, delay);
+            return;
+          }
+          setLoaded(true);
+        });
+    };
+
+    // Pequeno atraso na 1ª tentativa para a sessão (pós-OAuth) estabilizar no app nativo
+    const t = setTimeout(fetchCategories, 400);
+    return () => { cancelledRef.current = true; clearTimeout(t); };
   }, []);
 
+  if (!loaded) {
+    return (
+      <section>
+        <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Categorias"}</h3>
+        <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="flex flex-col items-center gap-1.5 p-2.5 min-h-[90px] rounded-2xl bg-muted animate-pulse">
+              <div className="w-10 h-10 rounded-xl bg-muted-foreground/20" />
+              <div className="h-3 w-12 rounded bg-muted-foreground/20" />
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
   if (categories.length === 0) return null;
 
   const shown = expanded ? categories : categories.slice(0, visibleCount);

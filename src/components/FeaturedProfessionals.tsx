@@ -51,6 +51,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
+  const [prosLoaded, setProsLoaded] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [userCity, setUserCity] = useState<string | null>(null);
   const [userState, setUserState] = useState<string | null>(null);
@@ -82,6 +83,8 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   }, []);
 
   const loadPros = useCallback(async () => {
+    setProsLoaded(false);
+    try {
     const { data: pros } = await supabase
       .from("professionals")
       .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name)")
@@ -94,6 +97,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
     if (!pros || pros.length === 0) {
       setProfessionals([]);
+      setProsLoaded(true);
       return;
     }
 
@@ -136,6 +140,9 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     const top10 = filtered.slice(0, 10).map(({ _city, _state, ...p }) => p);
 
     setProfessionals(top10);
+    } finally {
+      setProsLoaded(true);
+    }
   }, [userCity, userState]);
 
   const professionalsWithDistance = useMemo(() => {
@@ -210,6 +217,22 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     scrollRef.current.scrollTo({ left, behavior });
   }, [activePage, totalDisplayPages]);
 
+  if (!prosLoaded) {
+    return (
+      <section>
+        <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Profissionais em destaque"}</h3>
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex-shrink-0 w-[140px] rounded-2xl border bg-card p-3 space-y-2">
+              <div className="w-14 h-14 rounded-full bg-muted animate-pulse mx-auto" />
+              <div className="h-3 w-20 rounded bg-muted animate-pulse mx-auto" />
+              <div className="h-3 w-16 rounded bg-muted animate-pulse mx-auto" />
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
   if (professionalsWithDistance.length === 0) return null;
 
   const renderCard = (pro: Pro) => {

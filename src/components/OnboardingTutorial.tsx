@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMenu } from "@/contexts/MenuContext";
+import { useTriggerRefresh } from "@/contexts/RefreshContext";
 import { Button } from "@/components/ui/button";
 import { Menu, LayoutGrid, Ticket, HelpCircle, Sparkles, ArrowLeft, Briefcase } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,7 @@ export function OnboardingTutorial() {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { openMenu, closeMenu } = useMenu();
+  const triggerRefresh = useTriggerRefresh();
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(1);
   const [spotlightRect, setSpotlightRect] = useState<DOMRect | null>(null);
@@ -104,13 +106,15 @@ export function OnboardingTutorial() {
   }, [closeMenu]);
 
   const goNext = useCallback(() => {
+    // Ao clicar em Próximo/Começar, dispara refresh para a página carregar por trás do modal
+    triggerRefresh();
     if (currentIndex >= totalSteps) {
       finishTutorial();
       return;
     }
     const next = stepsToShow[currentIndex];
     if (next) setStep(next.id);
-  }, [currentIndex, totalSteps, stepsToShow, finishTutorial]);
+  }, [currentIndex, totalSteps, stepsToShow, finishTutorial, triggerRefresh]);
 
   const goPrev = useCallback(() => {
     if (currentIndex <= 1) return;
@@ -122,8 +126,10 @@ export function OnboardingTutorial() {
   }, [currentIndex, stepsToShow, step, closeMenu]);
 
   const skip = useCallback(() => {
+    // Pular tutorial: refresh e fecha para a página carregar 100%
+    triggerRefresh();
     finishTutorial();
-  }, [finishTutorial]);
+  }, [finishTutorial, triggerRefresh]);
 
   // Show tutorial only when: user logged in and onboarding not done
   useEffect(() => {

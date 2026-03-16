@@ -195,6 +195,22 @@ const AndroidPushChannelInit = () => {
   return null;
 };
 
+/** No mobile: com sessão ativa, redireciona rotas de auth (/oauth-callback, /login) para /home para nunca ficar preso após OAuth. */
+const OAuthCallbackRedirectGuard = () => {
+  const { session, loading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || loading) return;
+    if (!session?.user) return;
+    const path = location.pathname;
+    if (path === "/oauth-callback" || path === "/login") {
+      navigate("/home", { replace: true });
+    }
+  }, [loading, location.pathname, session?.user, navigate]);
+  return null;
+};
+
 /** Prefetch das páginas mais usadas. Mensagens em segundo plano assim que o usuário entra no app. */
 const RoutePrefetcher = () => {
   useEffect(() => {
@@ -229,6 +245,14 @@ const AppContent = () => {
       setShowCustomSplash(false);
       return;
     }
+    // Usuário já logado (ex.: voltou do OAuth): não mostrar splash, ir direto para o app
+    if (session?.user) {
+      try {
+        sessionStorage.setItem(SPLASH_SHOWN_KEY, "1");
+      } catch (_) {}
+      setShowCustomSplash(false);
+      return;
+    }
     // Só na abertura do app: uma vez por sessão (sessionStorage sobrevive a remounts)
     if (hasShownSplashRef.current) return;
     try {
@@ -256,7 +280,7 @@ const AppContent = () => {
         }
         setSplashConfig(Object.keys(map).length ? map : null);
       });
-  }, [loading]);
+  }, [loading, session?.user]);
 
   const handleSplashFinish = useCallback(async () => {
     setShowCustomSplash(false);
@@ -264,6 +288,14 @@ const AppContent = () => {
       await SplashScreen.hide({ fadeOutDuration: 500 });
     }
   }, []);
+
+  // No mobile: quando pulamos o CustomSplash (usuário já logado), esconder o splash nativo senão a tela "não carrega"
+  useEffect(() => {
+    if (loading || showCustomSplash) return;
+    if (Capacitor.isNativePlatform()) {
+      SplashScreen.hide({ fadeOutDuration: 300 }).catch(() => {});
+    }
+  }, [loading, showCustomSplash]);
 
   if (loading) {
     return (
@@ -355,6 +387,7 @@ const AppContent = () => {
   return (
     <>
       <BackButtonHandler />
+      <OAuthCallbackRedirectGuard />
       <Suspense fallback={<PageFallback />}>
         <Routes>
         <Route path="/" element={session ? <RedirectLoggedIn /> : <Index />} />

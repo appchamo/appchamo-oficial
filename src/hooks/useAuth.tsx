@@ -63,6 +63,8 @@ export const useAuth = () => useContext(AuthContext);
 // 🛡️ Trava para evitar processamento duplicado (AbortError: Lock broken)
 let lastProcessedCode: string | null = null;
 let isExchangingOAuth = false;
+const OAUTH_COOLDOWN_MS = 60000; // 1 min — só processa o primeiro callback; ignora segundo se usuário abriu o browser de novo
+let lastOAuthProcessedAt = 0;
 
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
@@ -103,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return roles.some((r) => String(r).endsWith("_admin"));
   }, [roles]);
 
-  const loadUserData = async (sess: Session | null) => {
+  const loadUserData = (sess: Session | null) => {
     if (isSignOutInProgress) return;
 
     setSession(sess);
@@ -118,26 +120,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    try {
-      const userId = sess.user.id;
-      let [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
+    // Libera a tela assim que temos sessão; perfil e roles carregam em segundo plano (evita tela travada se fetch travar no app nativo)
+    setLoading(false);
 
-      if (!isSignOutInProgress && p?.user_type === "pending_signup") {
-        await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", userId);
-        p = { ...p, user_type: "client" } as Profile;
-      }
+    (async () => {
+      try {
+        const userId = sess.user.id;
+        let [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
 
-      if (!isSignOutInProgress && p) {
-        setProfile(p);
-        setRoles(r);
-        localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
-        localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
+        if (isSignOutInProgress) return;
+        if (p?.user_type === "pending_signup") {
+          await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", userId);
+          p = { ...p, user_type: "client" } as Profile;
+        }
+
+        if (p) {
+          setProfile(p);
+          setRoles(r);
+          localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
+          localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
+        }
+      } catch (e) {
+        console.error("Erro ao carregar dados de auth:", e);
       }
-    } catch (e) {
-      console.error("Erro ao carregar dados de auth:", e);
-    } finally {
-      setLoading(false);
-    }
+    })();
   };
 
   useEffect(() => {
@@ -209,10 +215,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         if (!code) return;
 
-        // Evita processar o mesmo code duas vezes (appUrlOpen + getLaunchUrl ou duplo evento)
+        const now = Date.now();
+        if (now - lastOAuthProcessedAt < OAUTH_COOLDOWN_MS) return;
         if (lastProcessedCode === code) return;
         if (isExchangingOAuth) return;
         lastProcessedCode = code;
+        lastOAuthProcessedAt = now;
         isExchangingOAuth = true;
 
         try {
@@ -224,7 +232,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
           if (exchangeData?.session) {
-            window.location.href = '/home';
+            // Não faz reload: o onAuthStateChange dispara SIGNED_IN, o contexto atualiza e o Login redireciona via checkDeviceLimitAndRedirect
             return;
           }
         } catch (e) {

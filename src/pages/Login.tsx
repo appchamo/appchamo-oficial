@@ -91,11 +91,18 @@ const Login = () => {
   const lastOAuthUrlRef = useRef<string | null>(null);
   const hasRedirectedForSessionRef = useRef(false);
   const exchangeCodeAndRedirectRef = useRef<(url: string) => Promise<void>>(() => Promise.resolve());
+  const socialLoginInProgressRef = useRef(false);
 
-  // Limpa flag de "veio do signup por sessão expirada" para não afetar próximo cadastro
+  // Limpa flag de "veio do signup por sessão expirada" e permite novo toque em "Entrar com Google"
   useEffect(() => {
     localStorage.removeItem("manual_login_intent");
+    socialLoginInProgressRef.current = false;
   }, []);
+
+  // Quando não há sessão, reseta a ref de redirect para que um novo login (ex.: OAuth) possa redirecionar
+  useEffect(() => {
+    if (!session?.user) hasRedirectedForSessionRef.current = false;
+  }, [session?.user]);
 
   // Mobile com WebView: quando a página carrega com ?code= (voltou do Google no mesmo WebView), troca e vai pra HOME
   const hasExchangedCodeFromUrlRef = useRef(false);
@@ -201,19 +208,19 @@ const Login = () => {
     };
   }, [loading]);
 
-  // Timeout de segurança: se ficar em "Entrando..." por muito tempo, desbloqueia. OAuth no mobile pode demorar (deep link).
+  // Timeout de segurança: se ficar em "Entrando..." por muito tempo, desbloqueia. Em OAuth NÃO desbloqueia aos 22s (evita segundo toque e segundo exchange).
   useEffect(() => {
     if (!loading) return;
     const t = setTimeout(() => {
       const foiOAuth = oauthBrowserOpenedRef.current;
       oauthBrowserOpenedRef.current = false;
-      setLoading(false);
-      setProcessingOAuth(false);
-      // No fluxo OAuth não mostrar toast agressivo; usuário pode tentar de novo
       if (!foiOAuth) {
+        setLoading(false);
+        setProcessingOAuth(false);
         toast({ title: "Demorou muito. Tente novamente.", variant: "destructive" });
       }
-    }, 22000); // 22s para dar tempo do Google/Apple + deep link
+      // OAuth: só o timeout de 45s no handleSocialLogin desbloqueia; assim o usuário não reativa o botão aos 22s
+    }, 22000);
     return () => clearTimeout(t);
   }, [loading]);
 
@@ -239,6 +246,7 @@ const Login = () => {
             setProcessingOAuth(false);
             checkDeviceLimitAndRedirect(s.user.id, s.user.email ?? undefined);
           } else if (!s?.user && loading) {
+            socialLoginInProgressRef.current = false;
             setLoading(false);
             setProcessingOAuth(false);
           }
@@ -550,7 +558,6 @@ const Login = () => {
     await checkDeviceLimitAndRedirect(data.user.id, data.user.email ?? undefined);
   };
 
-  const socialLoginInProgressRef = useRef(false);
   const handleSocialLogin = async (provider: "google" | "apple") => {
     if (socialLoginInProgressRef.current) return;
     socialLoginInProgressRef.current = true;
@@ -585,6 +592,7 @@ const Login = () => {
             setLoading(false);
           }, 45000);
           await Browser.open({ url: data.url });
+          return;
         } else {
           setLoading(false);
         }
@@ -608,7 +616,7 @@ const Login = () => {
       toast({ title: "Erro ao logar", description: err.message, variant: "destructive" });
       setLoading(false);
     } finally {
-      socialLoginInProgressRef.current = false;
+      if (!oauthBrowserOpenedRef.current) socialLoginInProgressRef.current = false;
     }
   };
 

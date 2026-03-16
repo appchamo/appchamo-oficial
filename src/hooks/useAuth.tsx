@@ -60,8 +60,9 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-// 🛡️ Trava master fora do componente para evitar processamento duplicado
-let lastProcessedUrl = "";
+// 🛡️ Trava para evitar processamento duplicado (AbortError: Lock broken)
+let lastProcessedCode: string | null = null;
+let isExchangingOAuth = false;
 
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
@@ -187,33 +188,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // 3) Deep Link Listener (APENAS MOBILE)
+    // 3) Deep Link Listener (APENAS MOBILE) — um único processamento por code
     let urlListener: any = null;
     if (Capacitor.isNativePlatform()) {
       const handleUrl = async (urlStr: string) => {
-        if (!urlStr || urlStr === lastProcessedUrl) return;
-        if (!urlStr.includes('code=')) return;
+        if (!urlStr || !urlStr.includes('code=')) return;
 
-        lastProcessedUrl = urlStr;
         let fixedUrl = urlStr.replace('#', '?');
         if (fixedUrl.startsWith('com.chamo.app:?')) {
           fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
         }
 
+        let code: string | null = null;
         try {
           const urlObj = new URL(fixedUrl);
-          const code = urlObj.searchParams.get('code');
-          if (code) {
-            await Browser.close().catch(() => {});
-            await supabase.auth.exchangeCodeForSession(code);
+          code = urlObj.searchParams.get('code');
+        } catch (_) {
+          const m = urlStr.match(/[?&]code=([^&?#]+)/);
+          code = m ? decodeURIComponent(m[1]) : null;
+        }
+        if (!code) return;
+
+        // Evita processar o mesmo code duas vezes (appUrlOpen + getLaunchUrl ou duplo evento)
+        if (lastProcessedCode === code) return;
+        if (isExchangingOAuth) return;
+        lastProcessedCode = code;
+        isExchangingOAuth = true;
+
+        try {
+          await Browser.close().catch(() => {});
+          const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            console.error("[OAuth] exchange error:", exchangeError.message);
+            lastProcessedCode = null;
+            return;
+          }
+          if (exchangeData?.session) {
+            window.location.href = '/home';
+            return;
           }
         } catch (e) {
-          console.error("Deep link error:", e);
+          console.error("[OAuth] Deep link error:", e);
+          lastProcessedCode = null;
+        } finally {
+          isExchangingOAuth = false;
         }
       };
 
       urlListener = CapacitorApp.addListener('appUrlOpen', (data) => handleUrl(data.url));
-      CapacitorApp.getLaunchUrl().then(val => val?.url && handleUrl(val.url));
+      // Não chama getLaunchUrl() aqui — duplica o processamento e causa AbortError no Supabase
     }
 
     return () => {

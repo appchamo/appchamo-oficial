@@ -13,8 +13,8 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        // ✅ Captura o Deep Link e envia para o WebView do Capacitor
+        // Atualiza o intent antes do super para o deep link (OAuth) ser processado pelo bridge
         setIntent(intent);
+        super.onNewIntent(intent);
     }
 }

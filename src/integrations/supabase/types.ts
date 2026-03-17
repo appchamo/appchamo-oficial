@@ -1206,6 +1206,9 @@ export type Database = {
           created_at: string
           id: string
           link_url: string
+          location_city: string | null
+          location_scope: string | null
+          location_state: string | null
           logo_url: string | null
           name: string
           niche: string | null
@@ -1218,6 +1221,9 @@ export type Database = {
           created_at?: string
           id?: string
           link_url?: string
+          location_city?: string | null
+          location_scope?: string | null
+          location_state?: string | null
           logo_url?: string | null
           name: string
           niche?: string | null
@@ -1230,6 +1236,9 @@ export type Database = {
           created_at?: string
           id?: string
           link_url?: string
+          location_city?: string | null
+          location_scope?: string | null
+          location_state?: string | null
           logo_url?: string | null
           name?: string
           niche?: string | null

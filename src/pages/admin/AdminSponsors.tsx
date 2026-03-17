@@ -1,9 +1,10 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Plus, ExternalLink, MoreHorizontal, Eye, Pencil, Trash2, Power, GripVertical } from "lucide-react";
+import { Plus, ExternalLink, MoreHorizontal, Eye, Pencil, Trash2, Power, GripVertical, MapPin } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
+import { ESTADOS_BR, fetchCitiesByState } from "@/lib/brazilLocations";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import {
@@ -23,6 +24,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+type LocationScope = "nationwide" | "state" | "city";
+
 interface Sponsor {
   id: string;
   name: string;
@@ -32,6 +35,9 @@ interface Sponsor {
   active: boolean;
   clicks: number;
   sort_order: number;
+  location_scope: string | null;
+  location_state: string | null;
+  location_city: string | null;
 }
 
 const AdminSponsors = () => {
@@ -40,7 +46,17 @@ const AdminSponsors = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Sponsor | null>(null);
-  const [form, setForm] = useState({ name: "", niche: "", link_url: "", logo_url: "" });
+  const [form, setForm] = useState({
+    name: "",
+    niche: "",
+    link_url: "",
+    logo_url: "",
+    location_scope: "nationwide" as LocationScope,
+    location_state: "",
+    location_city: "",
+  });
+  const [cities, setCities] = useState<string[]>([]);
+  const [loadingCities, setLoadingCities] = useState(false);
 
   const fetchSponsors = async () => {
     const { data, error } = await supabase.from("sponsors").select("*").order("sort_order");
@@ -51,32 +67,66 @@ const AdminSponsors = () => {
 
   useEffect(() => { fetchSponsors(); }, []);
 
+  useEffect(() => {
+    if (form.location_scope !== "state" && form.location_scope !== "city" || !form.location_state) {
+      setCities([]);
+      return;
+    }
+    setLoadingCities(true);
+    fetchCitiesByState(form.location_state).then((list) => {
+      setCities(list);
+      setLoadingCities(false);
+      if (form.location_city && !list.includes(form.location_city)) setForm((f) => ({ ...f, location_city: "" }));
+    }).catch(() => setLoadingCities(false));
+  }, [form.location_scope, form.location_state]);
+
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: "", niche: "", link_url: "", logo_url: "" });
+    setForm({ name: "", niche: "", link_url: "", logo_url: "", location_scope: "nationwide", location_state: "", location_city: "" });
+    setCities([]);
     setDialogOpen(true);
   };
 
   const openEdit = (s: Sponsor) => {
     setEditing(s);
-    setForm({ name: s.name, niche: s.niche || "", link_url: s.link_url, logo_url: s.logo_url || "" });
+    const scope = (s.location_scope === "state" || s.location_scope === "city" ? s.location_scope : "nationwide") as LocationScope;
+    setForm({
+      name: s.name,
+      niche: s.niche || "",
+      link_url: s.link_url,
+      logo_url: s.logo_url || "",
+      location_scope: scope,
+      location_state: s.location_state || "",
+      location_city: s.location_city || "",
+    });
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast({ title: "Nome é obrigatório", variant: "destructive" }); return; }
+    if (form.location_scope === "state" && !form.location_state) {
+      toast({ title: "Selecione o estado", variant: "destructive" }); return;
+    }
+    if (form.location_scope === "city" && (!form.location_state || !form.location_city)) {
+      toast({ title: "Selecione o estado e a cidade", variant: "destructive" }); return;
+    }
+    const payload = {
+      name: form.name,
+      niche: form.niche || null,
+      link_url: form.link_url,
+      logo_url: form.logo_url || null,
+      location_scope: form.location_scope,
+      location_state: form.location_scope === "state" || form.location_scope === "city" ? form.location_state || null : null,
+      location_city: form.location_scope === "city" ? form.location_city || null : null,
+    };
     if (editing) {
-      const { error } = await supabase.from("sponsors").update({
-        name: form.name, niche: form.niche || null, link_url: form.link_url, logo_url: form.logo_url || null,
-      }).eq("id", editing.id);
+      const { error } = await supabase.from("sponsors").update(payload).eq("id", editing.id);
       if (error) { toast({ title: "Erro ao atualizar", description: translateError(error.message), variant: "destructive" }); return; }
       await logAction("update_sponsor", "sponsor", editing.id, { name: form.name });
       toast({ title: "Patrocinador atualizado!" });
     } else {
       const maxOrder = sponsors.length > 0 ? Math.max(...sponsors.map(s => s.sort_order)) + 1 : 1;
-      const { error } = await supabase.from("sponsors").insert({
-        name: form.name, niche: form.niche || null, link_url: form.link_url, logo_url: form.logo_url || null, sort_order: maxOrder,
-      });
+      const { error } = await supabase.from("sponsors").insert({ ...payload, sort_order: maxOrder });
       if (error) { toast({ title: "Erro ao criar", description: translateError(error.message), variant: "destructive" }); return; }
       await logAction("create_sponsor", "sponsor", null, { name: form.name });
       toast({ title: "Patrocinador criado!" });
@@ -142,6 +192,14 @@ const AdminSponsors = () => {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">{s.niche || "Sem nicho"}</p>
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                  <MapPin className="w-3 h-3" />
+                  {!s.location_scope || s.location_scope === "nationwide"
+                    ? "Todo o Brasil"
+                    : s.location_scope === "state"
+                      ? s.location_state || "—"
+                      : [s.location_city, s.location_state].filter(Boolean).join(" - ")}
+                </p>
                 <div className="flex items-center gap-3 mt-1">
                   <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                     <Eye className="w-3 h-3" /> {s.clicks} cliques
@@ -201,6 +259,54 @@ const AdminSponsors = () => {
               <input value={form.link_url} onChange={(e) => setForm((f) => ({ ...f, link_url: e.target.value }))}
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="https://..." />
             </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Onde o patrocinador aparece</label>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="location_scope" checked={form.location_scope === "nationwide"} onChange={() => setForm((f) => ({ ...f, location_scope: "nationwide", location_state: "", location_city: "" }))} className="rounded-full" />
+                  <span className="text-sm">Todo o Brasil</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="location_scope" checked={form.location_scope === "state"} onChange={() => setForm((f) => ({ ...f, location_scope: "state", location_city: "" }))} className="rounded-full" />
+                  <span className="text-sm">Apenas um Estado</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="location_scope" checked={form.location_scope === "city"} onChange={() => setForm((f) => ({ ...f, location_scope: "city" }))} className="rounded-full" />
+                  <span className="text-sm">Apenas uma Cidade</span>
+                </label>
+              </div>
+            </div>
+            {(form.location_scope === "state" || form.location_scope === "city") && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Estado</label>
+                <select
+                  value={form.location_state}
+                  onChange={(e) => setForm((f) => ({ ...f, location_state: e.target.value, location_city: "" }))}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="">Selecione o estado</option>
+                  {ESTADOS_BR.map((st) => (
+                    <option key={st.sigla} value={st.sigla}>{st.nome} ({st.sigla})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {form.location_scope === "city" && form.location_state && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cidade</label>
+                <select
+                  value={form.location_city}
+                  onChange={(e) => setForm((f) => ({ ...f, location_city: e.target.value }))}
+                  disabled={loadingCities}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="">{loadingCities ? "Carregando cidades..." : "Selecione a cidade"}</option>
+                  {cities.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button onClick={handleSave} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
               {editing ? "Salvar alterações" : "Criar patrocinador"}
             </button>

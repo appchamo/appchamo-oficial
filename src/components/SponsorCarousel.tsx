@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { normalizeLocation } from "@/lib/locationUtils";
 
 const ITEMS_PER_PAGE = 4;
 const AUTO_ADVANCE_MS = 6000;
@@ -10,6 +11,29 @@ interface Sponsor {
   niche: string | null;
   link_url: string;
   logo_url: string | null;
+  location_scope: string | null;
+  location_state: string | null;
+  location_city: string | null;
+}
+
+function sponsorMatchesLocation(
+  s: Sponsor,
+  userState: string | null,
+  userCity: string | null
+): boolean {
+  const scope = s.location_scope || "nationwide";
+  if (scope === "nationwide") return true;
+  if (!userState) return false;
+  const sponsorState = (s.location_state || "").trim().toUpperCase();
+  const uState = (userState || "").trim().toUpperCase();
+  if (sponsorState !== uState) return false;
+  if (scope === "state") return true;
+  if (scope === "city") {
+    const sponsorCity = normalizeLocation(s.location_city || "");
+    const uCity = normalizeLocation(userCity || "");
+    return !!sponsorCity && !!uCity && sponsorCity === uCity;
+  }
+  return false;
 }
 
 interface SponsorCarouselProps {
@@ -20,8 +44,14 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [allSponsors, setAllSponsors] = useState<Sponsor[]>([]);
+  const [userState, setUserState] = useState<string | null>(null);
+  const [userCity, setUserCity] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  const sponsors = useMemo(() => {
+    return allSponsors.filter((s) => sponsorMatchesLocation(s, userState, userCity));
+  }, [allSponsors, userState, userCity]);
 
   const pages = useMemo(() => {
     const p: Sponsor[][] = [];
@@ -50,7 +80,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
     const fetchSponsors = () => {
       supabase
         .from("sponsors")
-        .select("id, name, niche, link_url, logo_url")
+        .select("id, name, niche, link_url, logo_url, location_scope, location_state, location_city")
         .eq("active", true)
         .order("sort_order")
         .then(({ data, error }) => {
@@ -66,7 +96,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
             return;
           }
           if (data && data.length > 0) {
-            setSponsors(data);
+            setAllSponsors(data as Sponsor[]);
           }
           setLoaded(true);
         })
@@ -82,9 +112,27 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         });
     };
 
-    // Pequeno atraso na 1ª tentativa para a sessão (pós-OAuth) estabilizar no app nativo
     const t = setTimeout(fetchSponsors, 400);
     return () => { cancelledRef.current = true; clearTimeout(t); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user || cancelled) return;
+      supabase
+        .from("profiles")
+        .select("address_state, address_city")
+        .eq("user_id", user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!cancelled && data) {
+            setUserState(data.address_state || null);
+            setUserCity(data.address_city || null);
+          }
+        });
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const scrollToPage = useCallback((pageIndex: number) => {

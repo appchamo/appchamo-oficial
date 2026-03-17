@@ -44,9 +44,13 @@ export const usePush = (userId?: string) => {
           const { token } = await FirebaseMessaging.getToken();
           console.log('📲 [Push] Token gerado:', token);
 
-          // Salva no Supabase atrelado ao usuário
+          // Salva no Supabase atrelado ao usuário (device_id sempre preenchido para não criar linhas duplicadas)
           if (token) {
-            const deviceId = localStorage.getItem("chamo_device_id");
+            let deviceId = localStorage.getItem("chamo_device_id");
+            if (!deviceId) {
+              deviceId = crypto.randomUUID();
+              localStorage.setItem("chamo_device_id", deviceId);
+            }
             const platform = Capacitor.getPlatform();
             const deviceName = platform === 'ios' ? 'iPhone App' : platform === 'android' ? 'Android App' : 'App';
 

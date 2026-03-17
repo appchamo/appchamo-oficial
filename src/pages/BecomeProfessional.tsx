@@ -66,6 +66,8 @@ const BecomeProfessional = () => {
     avatarUrl: string;
     categoryId?: string;
     professionId?: string;
+    experience?: string;
+    services?: string[];
     bio?: string;
   }) => {
     console.log("🚀 HANDLE PROFILE NEXT EXECUTANDO");
@@ -104,6 +106,8 @@ const BecomeProfessional = () => {
             profile_status: "approved",
             category_id: profileData.categoryId || null,
             profession_id: profileData.professionId || null,
+            experience: profileData.experience || null,
+            services: profileData.services?.length ? profileData.services : null,
             bio: profileData.bio || null,
           } as any)
           .select("id")

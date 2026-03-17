@@ -140,6 +140,12 @@ const MessageThread = () => {
   const [pixPolling, setPixPolling] = useState(false);
   const [pixCopied, setPixCopied] = useState(false);
   const pixIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Parâmetros do pagamento PIX em andamento; usados ao confirmar (polling ou realtime). */
+  const pixConfirmParamsRef = useRef<{
+    threadId: string; userId: string; chatProUserId: string; finalAmount: number;
+    couponDiscount: { type: string; value: number } | null; selectedCouponId: string | null;
+    paymentDataAmount: string;
+  } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -348,6 +354,56 @@ const MessageThread = () => {
       if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
     };
   }, []);
+
+  // Realtime: quando o webhook Asaas atualiza transaction para paid, fechar modal PIX e abrir avaliação na hora
+  useEffect(() => {
+    if (!pixOpen || !pixData?.paymentId) return;
+    const paymentId = pixData.paymentId;
+    const channel = supabase
+      .channel(`pix-payment-${paymentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "transactions",
+          filter: `asaas_payment_id=eq.${paymentId}`,
+        },
+        async (payload: { new: { status?: string } }) => {
+          if (payload.new?.status !== "completed") return;
+          const params = pixConfirmParamsRef.current;
+          if (!params) return;
+          if (pixIntervalRef.current) {
+            clearInterval(pixIntervalRef.current);
+            pixIntervalRef.current = null;
+          }
+          setPixPolling(false);
+          const discountNote = params.couponDiscount
+            ? `\nDesconto: ${params.couponDiscount.type === "percentage" ? `${params.couponDiscount.value}%` : `R$ ${params.couponDiscount.value.toFixed(2).replace(".", ",")}`}`
+            : "";
+          const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${params.finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX`;
+          await supabase.from("chat_messages").insert({
+            request_id: params.threadId,
+            sender_id: params.userId,
+            content: confirmContent,
+          });
+          if (params.selectedCouponId) {
+            await supabase.from("coupons").update({ used: true } as any).eq("id", params.selectedCouponId);
+          }
+          await sendNotification(params.userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${params.finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
+          if (params.chatProUserId) await sendNotification(params.chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${params.finalAmount.toFixed(2).replace(".", ",")}!`);
+          await awardPostPaymentCoupon(parseFloat(params.paymentDataAmount));
+          toast({ title: "Pagamento PIX confirmado!" });
+          setPixOpen(false);
+          setRatingOpen(true);
+          pixConfirmParamsRef.current = null;
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [pixOpen, pixData?.paymentId]);
 
   useEffect(() => {
     const state = location.state as { showAgendaModal?: "cancel" | "reschedule" } | null;
@@ -1052,6 +1108,15 @@ const MessageThread = () => {
           copyPaste: res.data.pix_copy_paste,
           paymentId: res.data.payment_id
         });
+        pixConfirmParamsRef.current = {
+          threadId: threadId!,
+          userId: userId!,
+          chatProUserId: chatProUserId || "",
+          finalAmount,
+          couponDiscount,
+          selectedCouponId,
+          paymentDataAmount: paymentData.amount,
+        };
         setProcessingPayment(false);
         setPaymentOpen(false);
         setPixOpen(true);
@@ -1066,7 +1131,9 @@ const MessageThread = () => {
             });
             if (check.data?.confirmed) {
               if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
+              pixIntervalRef.current = null;
               setPixPolling(false);
+              pixConfirmParamsRef.current = null;
 
               const discountNote = couponDiscount ?
               `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
@@ -1084,19 +1151,18 @@ const MessageThread = () => {
               }
 
               await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
-              await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
+              if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
 
               await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
               toast({ title: "Pagamento PIX confirmado!" });
               setPixOpen(false);
-              
               setRatingOpen(true);
             }
           } catch (err) {
             console.error("PIX polling error:", err);
           }
-        }, 5000); 
+        }, 3000); 
 
         return; 
       } else {

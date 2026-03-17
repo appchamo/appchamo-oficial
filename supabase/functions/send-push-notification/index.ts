@@ -58,10 +58,20 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: deviceError.message }), { status: 500 })
     }
 
-    const devicesList = (devices || []).filter((d: { push_token: string }) => Boolean(d.push_token))
+    const withToken = (devices || []).filter((d: { push_token: string }) => Boolean(d.push_token))
+    const seen = new Set<string>()
+    const devicesList = withToken.filter((d: { push_token: string }) => {
+      const t = d.push_token
+      if (seen.has(t)) return false
+      seen.add(t)
+      return true
+    })
     if (devicesList.length === 0) {
       console.log(`⚠️ Nenhum token encontrado para o usuário ${record.user_id}. O app já pediu permissão e salvou em user_devices?`);
       return new Response(JSON.stringify({ ok: false, reason: "Token não encontrado" }), { status: 200 })
+    }
+    if (withToken.length > devicesList.length) {
+      console.log(`📌 Tokens duplicados ignorados: ${withToken.length} linhas → ${devicesList.length} envios únicos`)
     }
 
     // 3b. Som do painel admin (só usado no Android, em primeiro plano)
@@ -72,7 +82,7 @@ serve(async (req) => {
       .maybeSingle()
     const notificationSoundUrl = (soundRow?.value as string)?.trim() || ''
 
-    console.log("📱 Dispositivos encontrados:", devicesList.length, "Preparando envio para o Firebase...");
+    console.log("📱 Dispositivos únicos:", devicesList.length, "Preparando envio para o Firebase...");
 
     // 4. Access token do Google (jose = compatível com Deno; evita erro do google-auth-library/jws)
     const accessToken = await getGoogleAccessToken(

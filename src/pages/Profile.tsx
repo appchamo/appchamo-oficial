@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -33,6 +33,8 @@ const Profile = () => {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [experience, setExperience] = useState("");
+  const [services, setServices] = useState<string[]>([""]);
   const [bio, setBio] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -42,7 +44,7 @@ const Profile = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
-  const [proData, setProData] = useState<{ id: string; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
+  const [proData, setProData] = useState<{ id: string; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
 
   useEffect(() => {
     if (!user || !profile) return;
@@ -53,7 +55,7 @@ const Profile = () => {
       const loadPro = async () => {
         const { data } = await supabase
           .from("professionals")
-          .select("id, bio, rating, total_services, total_reviews, verified, availability_status, categories(name)")
+          .select("id, experience, services, bio, rating, total_services, total_reviews, verified, availability_status, categories(name)")
           .eq("user_id", user.id)
           .maybeSingle();
         if (data) {
@@ -62,6 +64,8 @@ const Profile = () => {
             category_name: (data.categories as any)?.name || "Sem categoria",
             availability_status: data.availability_status || "available"
           });
+          setExperience(data.experience || "");
+          setServices((data.services && data.services.length) ? data.services : [""]);
           setBio(data.bio || "");
         }
       };
@@ -82,7 +86,12 @@ const Profile = () => {
     const { error } = await supabase.from("profiles").update({ full_name: name, phone }).eq("user_id", user.id);
     if (error) { toast({ title: "Erro ao salvar", variant: "destructive" }); return; }
     if (proData) {
-      await supabase.from("professionals").update({ bio }).eq("id", proData.id);
+      const servicesFiltered = services.map(s => s.trim()).filter(Boolean);
+      await supabase.from("professionals").update({
+        experience: experience.trim() || null,
+        services: servicesFiltered.length ? servicesFiltered : null,
+        bio: bio.trim() || null,
+      }).eq("id", proData.id);
     }
     await refreshProfile();
     toast({ title: "Perfil salvo!" });
@@ -209,18 +218,57 @@ const Profile = () => {
           )}
 
           {(proData || editing) && (
-            <div className="mt-3 pt-3 border-t">
+            <div className="mt-3 pt-3 border-t space-y-4">
               {editing ? (
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Bio / Sobre</label>
-                  <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Conte sobre você e seus serviços..." className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
-                </div>
-              ) : proData?.bio ? (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Sobre</p>
-                  <p className="text-sm text-foreground leading-relaxed">{proData.bio}</p>
-                </div>
-              ) : null}
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Experiência</label>
+                    <textarea value={experience} onChange={(e) => setExperience(e.target.value)} rows={2} placeholder="Ex: Mais de 20 anos no mercado..." className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Serviços</label>
+                    <div className="space-y-2">
+                      {services.map((s, i) => (
+                        <div key={i} className="flex gap-2">
+                          <input value={s} onChange={(e) => { const v = [...services]; v[i] = e.target.value; setServices(v); }} placeholder={`Serviço ${i + 1}`} className="flex-1 border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                          <button type="button" onClick={() => setServices(services.filter((_, j) => j !== i).length ? services.filter((_, j) => j !== i) : [""])} className="p-2 rounded-lg border text-muted-foreground hover:bg-muted" aria-label="Remover"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => setServices([...services, ""])} className="flex items-center gap-1.5 text-xs text-primary font-medium"><Plus className="w-3.5 h-3.5" /> Adicionar serviço</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Sobre</label>
+                    <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Conte sobre você..." className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  {proData?.experience && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Experiência</p>
+                      <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{proData.experience}</p>
+                    </div>
+                  )}
+                  {proData?.services && proData.services.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Serviços</p>
+                      <ul className="text-sm text-foreground list-disc list-inside space-y-0.5">
+                        {proData.services.map((s, i) => <li key={i}>{s}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {proData?.bio && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Sobre</p>
+                      <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{proData.bio}</p>
+                    </div>
+                  )}
+                  {!proData?.experience && !(proData?.services?.length) && !proData?.bio && (
+                    <p className="text-sm text-muted-foreground">Nenhuma informação de perfil preenchida. Clique em Editar para adicionar.</p>
+                  )}
+                </>
+              )}
             </div>
           )}
 

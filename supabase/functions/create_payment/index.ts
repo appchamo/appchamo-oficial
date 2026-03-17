@@ -153,7 +153,7 @@ serve(async (req) => {
         .maybeSingle();
 
       return new Response(
-        JSON.stringify({ confirmed: tx?.status === "paid" ?? false }),
+        JSON.stringify({ confirmed: tx?.status === "completed" ?? false }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }

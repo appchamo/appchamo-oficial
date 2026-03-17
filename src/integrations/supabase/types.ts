@@ -682,10 +682,12 @@ export type Database = {
           bonus_calls: number
           category_id: string | null
           created_at: string
+          experience: string | null
           id: string
           profession_id: string | null
           profile_status: string
           rating: number
+          services: string[] | null
           total_reviews: number
           total_services: number
           updated_at: string
@@ -700,10 +702,12 @@ export type Database = {
           bonus_calls?: number
           category_id?: string | null
           created_at?: string
+          experience?: string | null
           id?: string
           profession_id?: string | null
           profile_status?: string
           rating?: number
+          services?: string[] | null
           total_reviews?: number
           total_services?: number
           updated_at?: string
@@ -718,10 +722,12 @@ export type Database = {
           bonus_calls?: number
           category_id?: string | null
           created_at?: string
+          experience?: string | null
           id?: string
           profession_id?: string | null
           profile_status?: string
           rating?: number
+          services?: string[] | null
           total_reviews?: number
           total_services?: number
           updated_at?: string

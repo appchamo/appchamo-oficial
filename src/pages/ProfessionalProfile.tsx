@@ -14,6 +14,8 @@ import AgendaBookingDialog from "@/components/AgendaBookingDialog";
 
 interface ProData {
   id: string;
+  experience: string | null;
+  services: string[] | null;
   bio: string | null;
   rating: number;
   total_services: number;
@@ -71,7 +73,7 @@ const ProfessionalProfile = () => {
     const load = async () => {
       const { data } = await supabase
         .from("professionals")
-        .select("id, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled")
+        .select("id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled")
         .eq("id", id!)
         .maybeSingle();
         
@@ -398,11 +400,31 @@ const ProfessionalProfile = () => {
           )}
         </div>
 
-        {/* Bio */}
-        {pro.bio && (
-          <div className="bg-card border rounded-2xl p-5 shadow-card mb-4">
-            <h2 className="font-semibold text-foreground mb-2">Sobre</h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">{pro.bio}</p>
+        {/* Experiência, Serviços e Sobre */}
+        {(pro.experience || (pro.services && pro.services.length > 0) || pro.bio) && (
+          <div className="bg-card border rounded-2xl p-5 shadow-card mb-4 space-y-4">
+            {pro.experience && (
+              <div>
+                <h2 className="font-semibold text-foreground mb-2">Experiência</h2>
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{pro.experience}</p>
+              </div>
+            )}
+            {pro.services && pro.services.length > 0 && (
+              <div>
+                <h2 className="font-semibold text-foreground mb-2">Serviços</h2>
+                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                  {pro.services.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {pro.bio && (
+              <div>
+                <h2 className="font-semibold text-foreground mb-2">Sobre</h2>
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{pro.bio}</p>
+              </div>
+            )}
           </div>
         )}
 

@@ -50,8 +50,9 @@ const Signup = () => {
     avatarUrl: string;
     categoryId?: string;
     professionId?: string;
+    experience?: string;
+    services?: string[];
     bio?: string;
-    services?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);

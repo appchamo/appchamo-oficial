@@ -1,11 +1,20 @@
 import { useState, useEffect } from "react";
-import { Camera, ChevronDown } from "lucide-react";
+import { Camera, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import ImageCropUpload from "@/components/ImageCropUpload";
 
+export interface StepProfileData {
+  avatarUrl: string;
+  categoryId?: string;
+  professionId?: string;
+  experience?: string;
+  services?: string[];
+  bio?: string;
+}
+
 interface Props {
   accountType: "client" | "professional";
-  onNext: (data: { avatarUrl: string; categoryId?: string; professionId?: string; bio?: string; services?: string }) => void;
+  onNext: (data: StepProfileData) => void;
   onBack: () => void;
 }
 
@@ -26,8 +35,9 @@ const StepProfile = ({ accountType, onNext, onBack }: Props) => {
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [categoryId, setCategoryId] = useState("");
   const [professionId, setProfessionId] = useState("");
+  const [experience, setExperience] = useState("");
+  const [services, setServices] = useState<string[]>([""]);
   const [bio, setBio] = useState("");
-  const [services, setServices] = useState("");
 
   useEffect(() => {
     if (accountType === "professional") {
@@ -51,12 +61,14 @@ const StepProfile = ({ accountType, onNext, onBack }: Props) => {
     }
     setAvatarError(false);
     if (accountType === "professional" && !categoryId) return;
+    const servicesFiltered = accountType === "professional" ? services.filter(s => s.trim()) : undefined;
     onNext({
       avatarUrl,
       categoryId: accountType === "professional" ? categoryId : undefined,
       professionId: accountType === "professional" && professionId ? professionId : undefined,
-      bio: accountType === "professional" ? bio : undefined,
-      services: accountType === "professional" ? services : undefined,
+      experience: accountType === "professional" ? experience.trim() || undefined : undefined,
+      services: servicesFiltered?.length ? servicesFiltered : undefined,
+      bio: accountType === "professional" ? bio.trim() || undefined : undefined,
     });
   };
 
@@ -130,14 +142,33 @@ const StepProfile = ({ accountType, onNext, onBack }: Props) => {
               )}
 
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Biografia</label>
-                <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Conte um pouco sobre você e sua experiência..."
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Experiência</label>
+                <textarea value={experience} onChange={(e) => setExperience(e.target.value)} rows={2} placeholder="Ex: Mais de 20 anos no mercado, funilaria e pintura..."
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Serviços prestados (opcional)</label>
-                <textarea value={services} onChange={(e) => setServices(e.target.value)} rows={2} placeholder="Ex: Pintura, Elétrica, Hidráulica..."
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Serviços que você oferece</label>
+                <p className="text-[11px] text-muted-foreground mb-1.5">Adicione um serviço por linha. Use o botão + para mais.</p>
+                <div className="space-y-2">
+                  {services.map((s, i) => (
+                    <div key={i} className="flex gap-2">
+                      <input value={s} onChange={(e) => { const v = [...services]; v[i] = e.target.value; setServices(v); }}
+                        placeholder={`Serviço ${i + 1}`} className="flex-1 border rounded-xl px-3 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                      <button type="button" onClick={() => { const v = services.filter((_, j) => j !== i); setServices(v.length ? v : [""]); }} className="p-2 rounded-lg border text-muted-foreground hover:bg-muted" aria-label="Remover">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setServices([...services, ""])} className="flex items-center gap-1.5 text-xs text-primary font-medium">
+                    <Plus className="w-3.5 h-3.5" /> Adicionar outro serviço
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Sobre</label>
+                <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Conte um pouco sobre você..."
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
               </div>
             </>

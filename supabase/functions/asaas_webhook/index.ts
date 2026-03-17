@@ -31,13 +31,14 @@ serve(async (req) => {
     if (event === "PAYMENT_RECEIVED" || event === "PAYMENT_CONFIRMED") {
       const payment = body.payment;
 
-      // 1. Lógica Antiga: Atualiza pagamentos avulsos (se existirem na tabela transactions)
-      await supabase
+      // 1. Atualiza pagamentos avulsos (transactions só aceita pending|completed|cancelled|refunded)
+      const { error: updErr } = await supabase
         .from("transactions")
-        .update({ status: "paid" })
+        .update({ status: "completed" })
         .eq("asaas_payment_id", payment.id);
 
-      console.log("Transaction updated to PAID:", payment.id);
+      if (updErr) console.error("Transaction update error:", updErr);
+      else console.log("Transaction updated to completed:", payment.id);
 
       // 2. NOVA MÁGICA: Se o pagamento for de uma ASSINATURA, libera o plano na hora!
       if (payment.subscription) {

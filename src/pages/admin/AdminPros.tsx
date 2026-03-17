@@ -16,6 +16,8 @@ interface Professional {
   user_id: string;
   category_id: string | null;
   profession_id: string | null;
+  experience: string | null;
+  services: string[] | null;
   bio: string | null;
   rating: number;
   total_services: number;
@@ -677,7 +679,9 @@ const AdminPros = () => {
                   <MapPin className="w-3 h-3" /> {[detailPro.city, detailPro.state].filter(Boolean).join(", ")}
                 </p>
               )}
-              {detailPro.bio && <p className="text-sm text-muted-foreground">{detailPro.bio}</p>}
+              {detailPro.experience && <p className="text-sm text-muted-foreground"><strong>Experiência:</strong> {detailPro.experience}</p>}
+              {detailPro.services && detailPro.services.length > 0 && <p className="text-sm text-muted-foreground"><strong>Serviços:</strong> {detailPro.services.join(", ")}</p>}
+              {detailPro.bio && <p className="text-sm text-muted-foreground"><strong>Sobre:</strong> {detailPro.bio}</p>}
 
               <div className="pt-2 border-t space-y-2">
                 <p className="text-xs font-bold text-muted-foreground uppercase">Categoria e profissão</p>

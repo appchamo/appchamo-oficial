@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS "public"."professional_services" (
 ALTER TABLE "public"."professional_services" ENABLE ROW LEVEL SECURITY;
 
 -- Ver: qualquer um pode ver serviços de profissional ativo e aprovado
+DROP POLICY IF EXISTS "Anyone can view services of active professional" ON "public"."professional_services";
 CREATE POLICY "Anyone can view services of active professional"
   ON "public"."professional_services" FOR SELECT
   USING (
@@ -26,6 +27,7 @@ CREATE POLICY "Anyone can view services of active professional"
   );
 
 -- Dono pode inserir
+DROP POLICY IF EXISTS "Owner can insert services" ON "public"."professional_services";
 CREATE POLICY "Owner can insert services"
   ON "public"."professional_services" FOR INSERT
   WITH CHECK (
@@ -37,6 +39,7 @@ CREATE POLICY "Owner can insert services"
   );
 
 -- Dono pode atualizar
+DROP POLICY IF EXISTS "Owner can update own services" ON "public"."professional_services";
 CREATE POLICY "Owner can update own services"
   ON "public"."professional_services" FOR UPDATE
   USING (
@@ -48,6 +51,7 @@ CREATE POLICY "Owner can update own services"
   );
 
 -- Dono pode deletar
+DROP POLICY IF EXISTS "Owner can delete own services" ON "public"."professional_services";
 CREATE POLICY "Owner can delete own services"
   ON "public"."professional_services" FOR DELETE
   USING (

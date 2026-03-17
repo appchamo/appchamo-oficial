@@ -136,6 +136,8 @@ Deno.serve(async (req) => {
         profile_status: profileStatus,
         category_id: profileData?.categoryId || null,
         profession_id: profileData?.professionId || null,
+        experience: profileData?.experience || null,
+        services: profileData?.services?.length ? profileData.services : null,
         bio: profileData?.bio || null,
       }, { onConflict: 'user_id' });
 

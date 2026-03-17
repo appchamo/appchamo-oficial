@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useTriggerRefresh } from "@/contexts/RefreshContext";
 
-const PULL_THRESHOLD = 60;
-const MAX_PULL = 100;
+const PULL_THRESHOLD = 72;
+const MAX_PULL = 140;
 const INDICATOR_SIZE = 44;
+/** Distância que a tela fica puxada enquanto roda o refresh */
+const REFRESH_OFFSET = 56;
 
 interface PullToRefreshProps {
   children: React.ReactNode;
@@ -18,6 +20,7 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
   const triggerRefresh = useTriggerRefresh();
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [useTransition, setUseTransition] = useState(false);
   const startY = useRef(0);
   const pullDistanceRef = useRef(0);
   const refreshingRef = useRef(false);
@@ -39,6 +42,7 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
 
     const onTouchStart = (e: TouchEvent) => {
       startY.current = e.touches[0].clientY;
+      setUseTransition(false);
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -48,13 +52,14 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
       const currentY = e.touches[0].clientY;
       const diff = currentY - startY.current;
       if (diff > 0) {
-        const distance = Math.min(diff * 0.55, MAX_PULL);
+        const distance = Math.min(diff * 0.5, MAX_PULL);
         setPullDistance(distance);
-        if (distance > 8) e.preventDefault();
+        if (distance > 6) e.preventDefault();
       }
     };
 
     const onTouchEnd = async () => {
+      setUseTransition(true);
       if (refreshingRef.current) return;
       const distance = pullDistanceRef.current;
       if (distance >= PULL_THRESHOLD) {
@@ -100,37 +105,43 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
 
   const progress = Math.min(pullDistance / PULL_THRESHOLD, 1);
   const rotation = progress * 360;
-  const showIndicator = pullDistance > 0 || refreshing;
+  const contentOffset = refreshing ? REFRESH_OFFSET : pullDistance;
+  const showIndicator = contentOffset > 0;
 
   return (
-    <>
+    <div className="flex flex-col min-h-0">
+      {/* Faixa que cresce ao puxar – a tela “arrasta” porque o conteúdo desce junto */}
       <div
-        className="fixed left-0 right-0 z-50 flex items-center justify-center pointer-events-none transition-[opacity,transform] duration-200"
+        className="flex-shrink-0 flex items-center justify-center overflow-hidden"
         style={{
-          top: `calc(env(safe-area-inset-top, 0px) + ${refreshing ? 24 : Math.min(pullDistance * 0.4, 36)}px)`,
-          opacity: showIndicator ? 1 : 0,
-          transform: `translateY(${showIndicator ? 0 : -10}px)`,
+          height: contentOffset,
+          minHeight: 0,
+          background: "var(--background)",
+          transition: useTransition ? "height 0.25s ease-out" : "none",
         }}
       >
         <div
-          className="rounded-full bg-card border-2 border-border shadow-lg flex items-center justify-center flex-shrink-0"
+          className="flex items-center justify-center flex-shrink-0 transition-[opacity,transform] duration-150"
           style={{
             width: INDICATOR_SIZE,
             height: INDICATOR_SIZE,
-            boxShadow: "0 4px 14px rgba(0,0,0,0.15)",
+            opacity: showIndicator ? 1 : 0,
+            transform: `translateY(${showIndicator ? 0 : -8}px)`,
           }}
         >
-          {refreshing ? (
-            <Loader2 className="w-6 h-6 animate-spin text-primary" />
-          ) : (
-            <RefreshCw
-              className="w-5 h-5 text-primary transition-transform duration-150"
-              style={{ transform: `rotate(${rotation}deg)` }}
-            />
-          )}
+          <div className="rounded-full bg-card border-2 border-border shadow-lg flex items-center justify-center w-full h-full">
+            {refreshing ? (
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            ) : (
+              <RefreshCw
+                className="w-5 h-5 text-primary transition-transform duration-150"
+                style={{ transform: `rotate(${rotation}deg)` }}
+              />
+            )}
+          </div>
         </div>
       </div>
       {children}
-    </>
+    </div>
   );
 }

@@ -15,14 +15,23 @@ export const ESTADOS_BR: { sigla: string; nome: string }[] = [
 export async function fetchCitiesByState(uf: string): Promise<string[]> {
   if (!uf || uf.length !== 2) return [];
   const normalizedUf = uf.trim().toUpperCase();
-  try {
-    const { supabase } = await import("@/integrations/supabase/client");
-    const { data, error } = await supabase.functions.invoke<{ cities?: string[] }>("cities-by-state", {
-      body: { uf: normalizedUf },
-    });
-    if (!error && Array.isArray(data?.cities)) return data.cities;
-  } catch {
-    // Fallback: chamada direta ao IBGE (pode falhar por CORS no app nativo)
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (supabaseUrl && anonKey) {
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/cities-by-state`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({ uf: normalizedUf }),
+      });
+      const data = (await res.json()) as { cities?: string[] };
+      if (Array.isArray(data?.cities)) return data.cities;
+    } catch {
+      // segue para fallback
+    }
   }
   try {
     const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(normalizedUf)}/municipios`;

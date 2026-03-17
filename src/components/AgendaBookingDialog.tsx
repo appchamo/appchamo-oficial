@@ -38,6 +38,8 @@ interface AvailabilityRule {
   end_time: string;
   slot_interval_minutes: number;
   capacity: number;
+  break_start_time?: string | null;
+  break_end_time?: string | null;
 }
 
 interface AvailabilityBlock {
@@ -122,7 +124,7 @@ export default function AgendaBookingDialog({
   const loadConfigForAtendente = async (atendenteId: string | null): Promise<void> => {
     if (!professionalId) return;
     const svcQ = supabase.from("agenda_services").select("id, name, duration_minutes, active").eq("professional_id", professionalId).eq("active", true).order("name");
-    const rlsQ = supabase.from("agenda_availability_rules").select("id, weekday, start_time, end_time, slot_interval_minutes, capacity").eq("professional_id", professionalId);
+    const rlsQ = supabase.from("agenda_availability_rules").select("id, weekday, start_time, end_time, slot_interval_minutes, capacity, break_start_time, break_end_time").eq("professional_id", professionalId);
     const blkQ = supabase.from("agenda_availability_blocks").select("id, block_date, start_time, end_time").eq("professional_id", professionalId).gte("block_date", format(startOfToday(), "yyyy-MM-dd"));
     if (atendenteId === null) {
       svcQ.is("atendente_id", null);
@@ -182,8 +184,12 @@ export default function AgendaBookingDialog({
       for (const rule of dayRules) {
         const startMin = timeToMinutes(rule.start_time);
         const endMin = timeToMinutes(rule.end_time);
+        const breakStart = rule.break_start_time ? timeToMinutes(rule.break_start_time.slice(0, 5)) : null;
+        const breakEnd = rule.break_end_time ? timeToMinutes(rule.break_end_time.slice(0, 5)) : null;
         const interval = rule.slot_interval_minutes || 30;
         for (let m = startMin; m + totalDurationMinutes <= endMin; m += interval) {
+          const slotEndMin = m + totalDurationMinutes;
+          if (breakStart != null && breakEnd != null && m < breakEnd && slotEndMin > breakStart) continue;
           const slotTime = minutesToTime(m);
           const current = slotSet.get(slotTime) ?? 0;
           slotSet.set(slotTime, Math.max(current, rule.capacity));

@@ -53,8 +53,8 @@ export default function ProAgenda() {
   const [editAtendenteDesc, setEditAtendenteDesc] = useState("");
   const [editAtendentePhotoUrl, setEditAtendentePhotoUrl] = useState<string | null>(null);
 
-  const [services, setServices] = useState<{ id: string; name: string; duration_minutes: number; active: boolean }[]>([]);
-  const [rules, setRules] = useState<{ id: string; weekday: number; start_time: string; end_time: string; slot_interval_minutes: number; capacity: number }[]>([]);
+  const [services, setServices] = useState<{ id: string; name: string; duration_minutes: number; duration_display?: string; duration_unit?: "min" | "h"; active: boolean }[]>([]);
+  const [rules, setRules] = useState<{ id: string; weekday: number; start_time: string; end_time: string; slot_interval_minutes: number; slot_display?: string; slot_unit?: "min" | "h"; capacity: number; break_start_time?: string | null; break_end_time?: string | null }[]>([]);
   const [blocks, setBlocks] = useState<{ id: string; block_date: string; start_time: string; end_time: string; reason: string | null }[]>([]);
 
   const isBusiness = plan?.id === "business";
@@ -90,7 +90,7 @@ export default function ProAgenda() {
 
   const loadConfigForAtendente = useCallback(async (proId: string, atendenteId: string | null) => {
     const baseSvc = supabase.from("agenda_services").select("id, name, duration_minutes, active").eq("professional_id", proId).order("created_at");
-    const baseRls = supabase.from("agenda_availability_rules").select("id, weekday, start_time, end_time, slot_interval_minutes, capacity").eq("professional_id", proId);
+    const baseRls = supabase.from("agenda_availability_rules").select("id, weekday, start_time, end_time, slot_interval_minutes, capacity, break_start_time, break_end_time").eq("professional_id", proId);
     const baseBlk = supabase.from("agenda_availability_blocks").select("id, block_date, start_time, end_time, reason").eq("professional_id", proId).gte("block_date", new Date().toISOString().slice(0, 10)).order("block_date");
     let svcQuery = baseSvc;
     let rlsQuery = baseRls;
@@ -107,13 +107,13 @@ export default function ProAgenda() {
     const [svcRes, rlsRes, blkRes] = await Promise.all([svcQuery, rlsQuery, blkQuery]);
     if (svcRes.error && svcRes.error.message?.includes("atendente_id")) {
       const [a, b, c] = await Promise.all([baseSvc, baseRls, baseBlk]);
-      setServices((a.data as any[]) || []);
-      setRules((b.data as any[]) || []);
+      setServices(((a.data as any[]) || []).map((s: any) => ({ ...s, duration_display: String(s.duration_minutes ?? 30), duration_unit: "min" })));
+      setRules(((b.data as any[]) || []).map((r: any) => ({ ...r, slot_display: String(r.slot_interval_minutes ?? 30), slot_unit: "min", break_start_time: r.break_start_time ?? null, break_end_time: r.break_end_time ?? null })));
       setBlocks((c.data as any[]) || []);
       return;
     }
-    setServices((svcRes.data as any[]) || []);
-    setRules((rlsRes.data as any[]) || []);
+    setServices(((svcRes.data as any[]) || []).map((s: any) => ({ ...s, duration_display: String(s.duration_minutes ?? 30), duration_unit: "min" })));
+    setRules(((rlsRes.data as any[]) || []).map((r: any) => ({ ...r, slot_display: String(r.slot_interval_minutes ?? 30), slot_unit: "min", break_start_time: r.break_start_time ?? null, break_end_time: r.break_end_time ?? null })));
     setBlocks((blkRes.data as any[]) || []);
   }, []);
 
@@ -188,14 +188,23 @@ export default function ProAgenda() {
     } else toast({ title: "Erro ao remover", variant: "destructive" });
   };
 
-  const addService = () => setServices((p) => [...p, { id: "", name: "", duration_minutes: 30, active: true }]);
+  const addService = () => setServices((p) => [...p, { id: "", name: "", duration_minutes: 30, duration_display: "30", duration_unit: "min", active: true }]);
   const updateService = (idx: number, field: string, value: string | number | boolean) => {
     setServices((p) => p.map((s, i) => (i === idx ? { ...s, [field]: value } : s)));
+  };
+  const parseDurationMinutes = (s: typeof services[0]): number => {
+    const unit = s?.duration_unit ?? "min";
+    const raw = (s?.duration_display ?? String(s?.duration_minutes ?? 30)).replace(",", ".").trim();
+    if (unit === "h") {
+      const h = parseFloat(raw) || 0;
+      return Math.round(h * 60);
+    }
+    return parseInt(raw.replace(/\D/g, ""), 10) || 0;
   };
   const saveService = async (idx: number) => {
     const s = services[idx];
     const name = String(s?.name ?? "").trim();
-    const duration = Number(s?.duration_minutes);
+    const duration = parseDurationMinutes(s);
     if (!professionalId) {
       toast({ title: "Perfil profissional não encontrado", variant: "destructive" });
       return;
@@ -203,7 +212,7 @@ export default function ProAgenda() {
     if (!name || !(duration >= 1 && duration <= 480)) {
       toast({
         title: "Nome e duração obrigatórios",
-        description: "Preencha o nome e uma duração entre 1 e 480 minutos.",
+        description: "Preencha o nome e uma duração entre 1 min e 8 h (480 min).",
         variant: "destructive",
       });
       return;
@@ -236,15 +245,35 @@ export default function ProAgenda() {
     if (!error) setServices((p) => p.filter((s) => s.id !== id));
   };
 
-  const addRule = () => setRules((p) => [...p, { id: "", weekday: 1, start_time: "09:00", end_time: "18:00", slot_interval_minutes: 30, capacity: 1 }]);
-  const updateRule = (idx: number, field: string, value: string | number) => {
+  const addRule = () => setRules((p) => [...p, { id: "", weekday: 1, start_time: "09:00", end_time: "18:00", slot_interval_minutes: 30, slot_display: "30", slot_unit: "min", capacity: 1, break_start_time: null, break_end_time: null }]);
+  const updateRule = (idx: number, field: string, value: string | number | null) => {
     setRules((p) => p.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  };
+  const parseSlotIntervalMinutes = (r: typeof rules[0]): number => {
+    const unit = r?.slot_unit ?? "min";
+    const raw = (r?.slot_display ?? String(r?.slot_interval_minutes ?? 30)).replace(",", ".").trim();
+    if (unit === "h") {
+      const h = parseFloat(raw) || 0;
+      return Math.round(h * 60);
+    }
+    return parseInt(raw.replace(/\D/g, ""), 10) || 30;
   };
   const saveRule = async (idx: number) => {
     const r = rules[idx];
     if (!professionalId) return;
+    const slotInterval = Math.min(120, Math.max(15, parseSlotIntervalMinutes(r)));
     setSaving(true);
-    const payload = { professional_id: professionalId, atendente_id: selectedAtendenteId, weekday: r.weekday, start_time: r.start_time, end_time: r.end_time, slot_interval_minutes: r.slot_interval_minutes, capacity: r.capacity };
+    const payload = {
+      professional_id: professionalId,
+      atendente_id: selectedAtendenteId,
+      weekday: r.weekday,
+      start_time: r.start_time,
+      end_time: r.end_time,
+      slot_interval_minutes: slotInterval,
+      capacity: r.capacity,
+      break_start_time: r.break_start_time || null,
+      break_end_time: r.break_end_time || null,
+    };
     if (r.id) {
       const { error } = await supabase.from("agenda_availability_rules").update(payload).eq("id", r.id);
       if (error) toast({ title: "Erro ao atualizar regra", variant: "destructive" });
@@ -398,9 +427,36 @@ export default function ProAgenda() {
                 <Label className="text-xs">Nome</Label>
                 <Input value={s.name} onChange={(e) => updateService(idx, "name", e.target.value)} placeholder="Ex: Consulta" className="rounded-lg mt-0.5" />
               </div>
-              <div className="w-24">
-                <Label className="text-xs">Min</Label>
-                <Input type="number" min={5} max={480} value={s.duration_minutes} onChange={(e) => updateService(idx, "duration_minutes", parseInt(e.target.value, 10) || 30)} className="rounded-lg mt-0.5" />
+              <div className="w-28">
+                <Label className="text-xs">Duração</Label>
+                <div className="flex rounded-lg border bg-background overflow-hidden mt-0.5">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={s.duration_unit === "h" ? "Ex: 1,5" : "Ex: 30"}
+                    value={s.duration_display ?? String(s.duration_minutes)}
+                    onChange={(e) => updateService(idx, "duration_display", e.target.value)}
+                    className="rounded-r-none border-0 w-14 text-center"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const min = parseDurationMinutes(s);
+                      const unit = s.duration_unit ?? "min";
+                      if (unit === "min") {
+                        updateService(idx, "duration_unit", "h");
+                        updateService(idx, "duration_display", min ? String(Math.round((min / 60) * 10) / 10) : "");
+                      } else {
+                        updateService(idx, "duration_unit", "min");
+                        updateService(idx, "duration_display", min ? String(min) : "");
+                      }
+                    }}
+                    className="px-2 py-1.5 text-[11px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 border-l shrink-0"
+                    title="Clique para alternar entre Min e Horas"
+                  >
+                    {s.duration_unit === "h" ? "h" : "min"}
+                  </button>
+                </div>
               </div>
               <Button size="sm" variant="outline" onClick={() => saveService(idx)} disabled={saving} className="rounded-lg">Salvar</Button>
               <Button size="sm" variant="ghost" className="text-destructive rounded-lg" onClick={() => deleteService(s.id, idx)}><Trash2 className="w-4 h-4" /></Button>
@@ -430,13 +486,48 @@ export default function ProAgenda() {
                 <Label className="text-xs">Fim</Label>
                 <Input type="time" value={r.end_time} onChange={(e) => updateRule(idx, "end_time", e.target.value)} className="rounded-lg mt-0.5" />
               </div>
-              <div className="w-20">
+              <div className="w-28">
                 <Label className="text-xs">Intervalo</Label>
-                <Input type="number" min={15} max={120} value={r.slot_interval_minutes} onChange={(e) => updateRule(idx, "slot_interval_minutes", parseInt(e.target.value, 10) || 30)} className="rounded-lg mt-0.5" />
+                <div className="flex rounded-lg border bg-background overflow-hidden mt-0.5">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={r.slot_unit === "h" ? "0,5" : "30"}
+                    value={r.slot_display ?? String(r.slot_interval_minutes)}
+                    onChange={(e) => updateRule(idx, "slot_display", e.target.value)}
+                    className="rounded-r-none border-0 w-14 text-center"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const min = parseSlotIntervalMinutes(r);
+                      const unit = r.slot_unit ?? "min";
+                      if (unit === "min") {
+                        updateRule(idx, "slot_unit", "h");
+                        updateRule(idx, "slot_display", min ? String(Math.round((min / 60) * 10) / 10) : "");
+                      } else {
+                        updateRule(idx, "slot_unit", "min");
+                        updateRule(idx, "slot_display", min ? String(min) : "");
+                      }
+                    }}
+                    className="px-2 py-1.5 text-[11px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 border-l shrink-0"
+                    title="Clique para alternar entre Min e Horas"
+                  >
+                    {r.slot_unit === "h" ? "h" : "min"}
+                  </button>
+                </div>
               </div>
               <div className="w-16">
-                <Label className="text-xs">Cap.</Label>
+                <Label className="text-xs" title="Número de vagas por horário">Vagas</Label>
                 <Input type="number" min={1} max={50} value={r.capacity} onChange={(e) => updateRule(idx, "capacity", parseInt(e.target.value, 10) || 1)} className="rounded-lg mt-0.5" />
+              </div>
+              <div className="w-24">
+                <Label className="text-xs" title="Ex.: horário de almoço">Fechar (início)</Label>
+                <Input type="time" value={(r.break_start_time ?? "").toString().slice(0, 5)} onChange={(e) => updateRule(idx, "break_start_time", e.target.value || null)} className="rounded-lg mt-0.5" />
+              </div>
+              <div className="w-24">
+                <Label className="text-xs">Fechar (fim)</Label>
+                <Input type="time" value={(r.break_end_time ?? "").toString().slice(0, 5)} onChange={(e) => updateRule(idx, "break_end_time", e.target.value || null)} className="rounded-lg mt-0.5" />
               </div>
               <Button size="sm" variant="outline" onClick={() => saveRule(idx)} disabled={saving} className="rounded-lg"><Save className="w-3 h-3" /></Button>
               <Button size="sm" variant="ghost" className="text-destructive rounded-lg" onClick={() => deleteRule(r.id, idx)}><Trash2 className="w-4 h-4" /></Button>

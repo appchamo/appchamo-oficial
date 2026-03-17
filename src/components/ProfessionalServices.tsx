@@ -100,11 +100,15 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
   return (
     <div className="bg-card border rounded-2xl p-5 shadow-card mb-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Briefcase className="w-4 h-4 text-primary" />
+        {isOwner ? (
+          <div className="flex items-center gap-2">
+            <Briefcase className="w-4 h-4 text-primary" />
+            <h2 className="font-semibold text-foreground">Serviços</h2>
+            <span className="text-xs text-muted-foreground">{items.length}/{MAX_SERVICES}</span>
+          </div>
+        ) : (
           <h2 className="font-semibold text-foreground">Serviços</h2>
-          <span className="text-xs text-muted-foreground">{items.length}/{MAX_SERVICES}</span>
-        </div>
+        )}
         {isOwner && !showForm && items.length < MAX_SERVICES && (
           <button
             onClick={() => { resetForm(); setShowForm(true); }}

@@ -15,10 +15,12 @@ export const ESTADOS_BR: { sigla: string; nome: string }[] = [
 export async function fetchCitiesByState(uf: string): Promise<string[]> {
   if (!uf || uf.length !== 2) return [];
   try {
-    const res = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios`);
+    const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios`;
+    const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
     if (!res.ok) return [];
     const data = await res.json();
-    const names = (data as { nome: string }[]).map((c) => c.nome);
+    if (!Array.isArray(data)) return [];
+    const names = (data as { nome?: string }[]).map((c) => c.nome ?? "").filter(Boolean);
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, "pt-BR"));
   } catch {
     return [];

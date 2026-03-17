@@ -1,9 +1,10 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, Navigation } from "lucide-react";
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, ChevronDown } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation, normalizeStateToUF } from "@/lib/locationUtils";
+import { fetchCitiesByState } from "@/lib/brazilLocations";
 import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -19,7 +20,6 @@ function searchMatchesPro(q: string, target: string, cat: string, prof: string):
   return false;
 }
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 
 interface Pro {
@@ -75,7 +75,6 @@ const Search = () => {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
-  const [filterRadius, setFilterRadius] = useState<number>(100);
 
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterProfession, setFilterProfession] = useState<string>("");
@@ -87,8 +86,8 @@ const Search = () => {
   const [statesList, setStatesList] = useState<{ sigla: string; nome: string }[]>(ESTADOS_BR_FALLBACK);
   const [filterCity, setFilterCity] = useState<string>("");
   const [allCities, setAllCities] = useState<string[]>([]);
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-  const [showCityDropdown, setShowCityDropdown] = useState(false);
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [showStateList, setShowStateList] = useState(false);
 
   const PAGE_SIZE = 7;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -109,23 +108,28 @@ const Search = () => {
     fetchStates();
   }, []);
 
+  const loadCitiesForState = useCallback((uf: string) => {
+    if (!uf || uf.length !== 2) {
+      setAllCities([]);
+      setLoadingCities(false);
+      return;
+    }
+    setLoadingCities(true);
+    setAllCities([]);
+    fetchCitiesByState(uf)
+      .then((names) => setAllCities(names))
+      .catch(() => setAllCities([]))
+      .finally(() => setLoadingCities(false));
+  }, []);
+
   useEffect(() => {
-    const fetchCities = async () => {
-      if (!filterState) {
-        setAllCities([]);
-        return;
-      }
-      try {
-        const res = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${filterState}/municipios`);
-        const data = await res.json();
-        const cityNames = data.map((c: any) => c.nome);
-        setAllCities(Array.from(new Set(cityNames)));
-      } catch (error) {
-        console.error("Erro ao buscar cidades do IBGE:", error);
-      }
-    };
-    fetchCities();
-  }, [filterState]);
+    if (!filterState) {
+      setAllCities([]);
+      setLoadingCities(false);
+      return;
+    }
+    loadCitiesForState(filterState);
+  }, [filterState, loadCitiesForState]);
 
   const loadUserLocation = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -266,7 +270,7 @@ const Search = () => {
       if (filterCity) {
         const pCity = normalizeLocation(p.city);
         const fCity = normalizeLocation(filterCity);
-        if (!pCity || !pCity.includes(fCity)) return false;
+        if (!pCity || pCity !== fCity) return false;
       }
 
       if (filterCategory && p.category_id !== filterCategory) return false;
@@ -274,12 +278,10 @@ const Search = () => {
       if (filterMinRating > 0 && p.rating < filterMinRating) return false;
       if (filterVerified && !p.verified) return false;
       
-      if (p.distance !== undefined && p.distance > filterRadius) return false;
-      
       return true;
     });
 
-    // 3. Ordena: 1) significado mais buscado (pintor casa, estética beleza), 2) verificados, 3) rating, 4) distância
+    // 3. Ordena: 1) significado mais buscado, 2) verificados, 3) rating, 4) distância (se tiver coords)
     const q = search.trim();
     result.sort((a, b) => {
       const aPrimary = isPrimaryMatch(q, a.category_name, a.profession_name);
@@ -292,37 +294,17 @@ const Search = () => {
     });
 
     return result;
-  }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, filterRadius, userCoords]);
+  }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, userCoords]);
 
   // Reset paginação quando filtros ou busca mudam
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, filterRadius]);
+  }, [search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified]);
 
   const prosToShow = filteredAndSorted.slice(0, visibleCount);
   const hasMore = visibleCount < filteredAndSorted.length;
 
-  const handleCityInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setFilterCity(val);
-
-    if (val.length >= 2) {
-      const normalizedInput = val.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      const matches = allCities.filter(c => 
-        c.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalizedInput)
-      ).slice(0, 5);
-      
-      setCitySuggestions(matches);
-      setShowCityDropdown(true);
-    } else {
-      setShowCityDropdown(false);
-    }
-  };
-
-  const handleCitySelect = (cityName: string) => {
-    setFilterCity(cityName);
-    setShowCityDropdown(false);
-  };
+  const stateLabel = filterState ? statesList.find((s) => s.sigla === filterState)?.nome + " (" + filterState + ")" : "Selecione o Estado";
 
   return (
     <AppLayout>
@@ -343,7 +325,7 @@ const Search = () => {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-bold text-foreground">Explorar</h1>
           
-          <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+          <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) setShowStateList(false); }}>
             <SheetTrigger asChild>
               <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-card hover:bg-muted transition-colors text-xs font-semibold">
                 <SlidersHorizontal className="w-3.5 h-3.5" /> Filtros
@@ -353,70 +335,69 @@ const Search = () => {
               <SheetHeader><SheetTitle>Filtrar</SheetTitle></SheetHeader>
               <div className="py-6 space-y-6">
                 
-                <div>
+                <div className="relative">
                   <label className="text-sm font-bold flex items-center gap-2 mb-3">
                     <MapPin className="w-4 h-4 text-primary" /> Estado
                   </label>
-                  <select
-                    value={filterState}
-                    onChange={(e) => {
-                      setFilterState(e.target.value);
-                      setFilterCity(""); 
-                      setCitySuggestions([]);
-                    }}
-                    className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                  <button
+                    type="button"
+                    onClick={() => setShowStateList((v) => !v)}
+                    className="w-full p-3 rounded-xl border bg-background text-sm text-left flex items-center justify-between gap-2 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                   >
-                    <option value="">Selecione o Estado</option>
-                    {statesList.map(s => (
-                      <option key={s.sigla} value={s.sigla}>{s.nome} ({s.sigla})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="relative">
-                  <label className="text-sm font-bold flex items-center gap-2 mb-3">
-                    <MapPin className="w-4 h-4 text-primary" /> Cidade
-                  </label>
-                  <input
-                    type="text"
-                    value={filterCity}
-                    onChange={handleCityInputChange}
-                    onFocus={() => { if (citySuggestions.length > 0) setShowCityDropdown(true) }}
-                    placeholder={filterState ? "Ex: Patrocínio" : "Selecione um estado primeiro"}
-                    disabled={!filterState} 
-                    className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none disabled:opacity-50 disabled:bg-muted"
-                  />
-                  {showCityDropdown && citySuggestions.length > 0 && (
-                    <ul className="absolute z-50 w-full bg-card border rounded-xl mt-1 shadow-lg max-h-48 overflow-y-auto">
-                      {citySuggestions.map((city, idx) => (
+                    <span className={filterState ? "text-foreground" : "text-muted-foreground"}>{stateLabel}</span>
+                    <ChevronDown className={`w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform ${showStateList ? "rotate-180" : ""}`} />
+                  </button>
+                  {showStateList && (
+                    <ul className="absolute z-50 w-full mt-1 bg-card border rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                      <li
+                        onClick={() => { setFilterState(""); setFilterCity(""); setShowStateList(false); }}
+                        className="px-4 py-3 text-sm text-muted-foreground hover:bg-muted cursor-pointer border-b active:bg-muted"
+                      >
+                        Selecione o Estado
+                      </li>
+                      {statesList.map((s) => (
                         <li
-                          key={idx}
-                          onMouseDown={() => handleCitySelect(city)}
-                          className="px-4 py-3 text-sm font-medium hover:bg-muted cursor-pointer transition-colors border-b last:border-0"
+                          key={s.sigla}
+                          onClick={() => {
+                            setFilterState(s.sigla);
+                            setFilterCity("");
+                            setShowStateList(false);
+                          }}
+                          className="px-4 py-3 text-sm font-medium hover:bg-muted cursor-pointer border-b last:border-0 active:bg-muted"
                         >
-                          {city}
+                          {s.nome} ({s.sigla})
                         </li>
                       ))}
                     </ul>
                   )}
                 </div>
 
-                {userCoords && (
-                  <div>
-                    <div className="flex justify-between items-center mb-3">
-                      <label className="text-sm font-bold flex items-center gap-2">
-                        <Navigation className="w-4 h-4 text-primary" /> Distância máxima
-                      </label>
-                      <span className="text-xs font-bold text-primary">{filterRadius} km</span>
-                    </div>
-                    <Slider 
-                      value={[filterRadius]} 
-                      onValueChange={([v]) => setFilterRadius(v)} 
-                      max={150} 
-                      step={5} 
-                      className="py-4"
-                    />
-                    <p className="text-[10px] text-muted-foreground">Mostrando profissionais em até {filterRadius}km de você.</p>
+                {filterState && (
+                  <div className="animate-in fade-in slide-in-from-top-1">
+                    <label className="text-sm font-bold flex items-center gap-2 mb-3">
+                      <MapPin className="w-4 h-4 text-primary" /> Cidade
+                    </label>
+                    {loadingCities ? (
+                      <div className="w-full p-3 rounded-xl border bg-muted/30 text-muted-foreground text-sm">Carregando cidades...</div>
+                    ) : allCities.length === 0 ? (
+                      <div className="flex flex-col gap-2">
+                        <p className="text-sm text-muted-foreground">Não foi possível carregar as cidades.</p>
+                        <button type="button" onClick={() => loadCitiesForState(filterState)} className="w-full p-3 rounded-xl border border-primary bg-primary/10 text-primary text-sm font-medium">
+                          Tentar novamente
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={filterCity}
+                        onChange={(e) => setFilterCity(e.target.value)}
+                        className="w-full p-3 rounded-xl border bg-background text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                      >
+                        <option value="">Todas as cidades</option>
+                        {allCities.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 )}
 
@@ -463,9 +444,9 @@ const Search = () => {
                     setFilterProfession(""); 
                     setFilterMinRating(0); 
                     setFilterVerified(false); 
-                    setFilterRadius(100); 
                     setFilterState(userState || ""); 
                     setFilterCity(userCity || ""); 
+                    setShowStateList(false);
                   }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>
                   <button onClick={() => setIsSheetOpen(false)} className="py-3 text-sm font-bold text-white bg-primary rounded-xl">Aplicar</button>
                 </div>

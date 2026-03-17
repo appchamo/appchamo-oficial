@@ -172,31 +172,30 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
                   </div>
                 )}
               </div>
-              {(s.title || isOwner) && (
+              {/* No perfil público: só a foto (sem título nem botões). Dono vê título e botões. */}
+              {isOwner && (
                 <div className="p-2 flex items-center justify-between gap-2">
                   {s.title ? (
                     <p className="text-xs font-medium text-foreground line-clamp-2 flex-1 min-w-0">{s.title}</p>
                   ) : (
                     <span className="text-xs text-muted-foreground flex-1">Sem título</span>
                   )}
-                  {isOwner && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        onClick={() => handleEdit(s)}
-                        className="p-1.5 rounded-lg border hover:bg-muted transition-colors"
-                        aria-label="Editar"
-                      >
-                        <Pencil className="w-3 h-3 text-muted-foreground" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(s.id)}
-                        className="p-1.5 rounded-lg border text-destructive hover:bg-destructive/10 transition-colors"
-                        aria-label="Remover"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => handleEdit(s)}
+                      className="p-1.5 rounded-lg border hover:bg-muted transition-colors"
+                      aria-label="Editar"
+                    >
+                      <Pencil className="w-3 h-3 text-muted-foreground" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(s.id)}
+                      className="p-1.5 rounded-lg border text-destructive hover:bg-destructive/10 transition-colors"
+                      aria-label="Remover"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

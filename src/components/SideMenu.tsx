@@ -36,13 +36,12 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
               ...(profile?.user_type === "company"
                 ? [
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },
-                    { icon: ShoppingBag, label: "Catálogo de Produtos", path: "/my-catalog" },
+                    ...(isBusiness ? [{ icon: ShoppingBag, label: "Catálogo de Produtos", path: "/my-catalog" }] : []),
+                    ...(plan?.id === "vip" || plan?.id === "pro" ? [{ icon: Image, label: "Serviços", path: "/my-services" }] : []),
                   ]
                 : [
                     ...(canPostJobs ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }] : []),
-                    ...(plan?.id === "pro" || plan?.id === "vip"
-                      ? [{ icon: Image, label: "Meus Serviços", path: "/my-services" }]
-                      : []),
+                    ...(plan?.id === "pro" || plan?.id === "vip" ? [{ icon: Image, label: "Serviços", path: "/my-services" }] : []),
                   ]),
               ...(isBusiness
                 ? [

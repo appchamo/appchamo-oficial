@@ -41,11 +41,11 @@ const ProfessionalDashboard = () => {
     { icon: Pencil, label: "Editar perfil", description: "Atualize suas informações", path: "/profile" },
     { icon: DollarSign, label: "Financeiro", description: "Relatório de faturamento", path: "/pro/financeiro" },
     { icon: CreditCard, label: "Minha assinatura", description: "Gerencie seu plano", path: "/subscriptions" },
-    ...(profile?.user_type === "company" ? [
-      { icon: ShoppingBag, label: "Catálogo de Produtos", description: "Gerencie seus produtos e serviços", path: "/my-catalog" },
-    ] : (plan?.id === "pro" || plan?.id === "vip") ? [
-      { icon: Image, label: "Meus Serviços", description: "Fotos dos seus trabalhos no perfil", path: "/my-services" },
-    ] : []),
+    ...(plan?.id === "business" && profile?.user_type === "company"
+      ? [{ icon: ShoppingBag, label: "Catálogo de Produtos", description: "Gerencie seus produtos e serviços", path: "/my-catalog" }]
+      : (plan?.id === "pro" || plan?.id === "vip")
+        ? [{ icon: Image, label: "Serviços", description: "Fotos dos seus trabalhos no perfil", path: "/my-services" }]
+        : []),
     { icon: FileText, label: "Vagas de Emprego", description: "Publique e gerencie vagas", path: "/my-jobs" },
   ];
 

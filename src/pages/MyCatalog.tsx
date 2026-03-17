@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { useAuth } from "@/hooks/useAuth";
+import { useSubscription } from "@/hooks/useSubscription";
 
 interface Product {
   id: string;
@@ -18,6 +19,7 @@ interface Product {
 
 const MyCatalog = () => {
   const { user } = useAuth();
+  const { plan, loading: planLoading } = useSubscription();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [proId, setProId] = useState<string | null>(null);
@@ -96,6 +98,21 @@ const MyCatalog = () => {
           <ArrowLeft className="w-4 h-4" /> Painel Profissional
         </Link>
 
+        {planLoading ? (
+          <div className="flex justify-center py-12">
+            <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : plan?.id !== "business" ? (
+          <div className="bg-card border rounded-2xl p-8 text-center">
+            <Package className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
+            <h2 className="font-semibold text-foreground mb-1">Catálogo de Produtos</h2>
+            <p className="text-sm text-muted-foreground mb-4">Disponível apenas no plano Business.</p>
+            <Link to="/subscriptions" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+              Ver planos
+            </Link>
+          </div>
+        ) : (
+        <>
         <div className="flex items-center justify-between mb-5">
           <div>
             <h1 className="text-xl font-bold text-foreground">Meu Catálogo</h1>
@@ -201,6 +218,8 @@ const MyCatalog = () => {
               </div>
             ))}
           </div>
+        )}
+        </>
         )}
       </main>
     </AppLayout>

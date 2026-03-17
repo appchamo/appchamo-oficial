@@ -30,10 +30,10 @@ export default class ErrorBoundary extends Component<Props, State> {
             <p className="text-sm text-muted-foreground">
               Ocorreu um erro ao processar o login ou esta página. Tente novamente ou volte ao início.
             </p>
-            {import.meta.env.DEV && this.state.error && (
+            {this.state.error && (
               <details className="text-left w-full">
-                <summary className="text-xs text-muted-foreground cursor-pointer">Detalhes do erro (dev)</summary>
-                <pre className="mt-2 p-2 rounded bg-muted text-xs overflow-auto max-h-24">
+                <summary className="text-xs text-muted-foreground cursor-pointer">Ver detalhes do erro</summary>
+                <pre className="mt-2 p-2 rounded bg-muted text-xs overflow-auto max-h-32 break-all">
                   {this.state.error.message}
                 </pre>
               </details>

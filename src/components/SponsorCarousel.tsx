@@ -73,39 +73,60 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
 
   useEffect(() => {
     setLoaded(false);
-    setSponsors([]);
+    setAllSponsors([]);
     retryCountRef.current = 0;
     cancelledRef.current = false;
 
-    const fetchSponsors = () => {
+    const fetchSponsors = (withLocation = true) => {
+      const select = withLocation
+        ? "id, name, niche, link_url, logo_url, location_scope, location_state, location_city"
+        : "id, name, niche, link_url, logo_url";
       supabase
         .from("sponsors")
-        .select("id, name, niche, link_url, logo_url, location_scope, location_state, location_city")
+        .select(select)
         .eq("active", true)
         .order("sort_order")
         .then(({ data, error }) => {
           if (cancelledRef.current) return;
           if (error) {
+            if (withLocation) {
+              fetchSponsors(false);
+              return;
+            }
             if (retryCountRef.current < 2) {
               retryCountRef.current += 1;
               const delay = retryCountRef.current === 1 ? 800 : 2000;
-              setTimeout(fetchSponsors, delay);
+              setTimeout(() => fetchSponsors(false), delay);
               return;
             }
             setLoaded(true);
             return;
           }
           if (data && data.length > 0) {
-            setAllSponsors(data as Sponsor[]);
+            const list = (data as any[]).map((r) => ({
+              id: r.id,
+              name: r.name,
+              niche: r.niche,
+              link_url: r.link_url,
+              logo_url: r.logo_url,
+              location_scope: r.location_scope ?? "nationwide",
+              location_state: r.location_state ?? null,
+              location_city: r.location_city ?? null,
+            }));
+            setAllSponsors(list as Sponsor[]);
           }
           setLoaded(true);
         })
         .catch(() => {
           if (cancelledRef.current) return;
+          if (withLocation) {
+            fetchSponsors(false);
+            return;
+          }
           if (retryCountRef.current < 2) {
             retryCountRef.current += 1;
             const delay = retryCountRef.current === 1 ? 800 : 2000;
-            setTimeout(fetchSponsors, delay);
+            setTimeout(() => fetchSponsors(false), delay);
             return;
           }
           setLoaded(true);
@@ -118,20 +139,21 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
 
   useEffect(() => {
     let cancelled = false;
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user || cancelled) return;
-      supabase
-        .from("profiles")
-        .select("address_state, address_city")
-        .eq("user_id", user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (!cancelled && data) {
-            setUserState(data.address_state || null);
-            setUserCity(data.address_city || null);
-          }
-        });
-    });
+    supabase.auth.getUser()
+      .then(({ data: { user } }) => {
+        if (!user || cancelled) return;
+        return supabase
+          .from("profiles")
+          .select("address_state, address_city")
+          .eq("user_id", user.id)
+          .maybeSingle();
+      })
+      .then((res) => {
+        if (cancelled || !res?.data) return;
+        setUserState(res.data.address_state || null);
+        setUserCity(res.data.address_city || null);
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 

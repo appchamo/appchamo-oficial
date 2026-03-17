@@ -377,7 +377,7 @@ const ProfessionalProfile = () => {
 
           {!isOwner && pro.availability_status !== "unavailable" && (
             <div className="mt-5 flex flex-col gap-2">
-              {pro.user_type === "company" && pro.agenda_enabled && (
+              {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
                 <button
                   onClick={() => setAgendaDialogOpen(true)}
                   className="w-full py-3 rounded-xl border-2 border-primary text-primary font-bold text-sm hover:bg-primary/10 transition-colors flex items-center justify-center gap-2"
@@ -488,7 +488,7 @@ const ProfessionalProfile = () => {
               professionalId={pro.id}
               professionalName={pro.full_name}
             />
-            {pro.user_type === "company" && pro.agenda_enabled && (
+            {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
               <AgendaBookingDialog
                 open={agendaDialogOpen}
                 onOpenChange={setAgendaDialogOpen}

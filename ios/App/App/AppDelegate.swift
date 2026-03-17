@@ -11,6 +11,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // ✅ Badge zerado ao abrir o app (evita "1" ao instalar ou antes de logar)
+        application.applicationIconBadgeNumber = 0
+
         // ✅ Inicializa o Firebase
         FirebaseApp.configure()
         

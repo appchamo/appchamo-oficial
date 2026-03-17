@@ -1,9 +1,10 @@
 import AppLayout from "@/components/AppLayout";
-import { Bell, Check } from "lucide-react";
+import { Bell } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import { syncAppIconBadge } from "@/lib/appBadge";
 
 interface Notification {
   id: string;
@@ -38,6 +39,8 @@ const Notifications = () => {
     if (unread.length > 0) {
       await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false).neq("type", "chat");
     }
+    // Zera o badge do ícone do app (iOS/Android) ao abrir a tela de notificações
+    syncAppIconBadge(0);
   };
 
   useEffect(() => {

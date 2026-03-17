@@ -15,6 +15,7 @@ import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { Capacitor } from "@capacitor/core";
 import { CheckCircle2, Star, Loader2 } from "lucide-react";
+import { syncAppIconBadge } from "@/lib/appBadge";
 
 // Lazy pages – carregam sob demanda para navegação mais rápida
 const Index = lazy(() => import("./pages/Index"));
@@ -192,6 +193,28 @@ const AndroidPushChannelInit = () => {
       }).catch(() => {});
     });
   }, []);
+  return null;
+};
+
+/** No app nativo: ao iniciar, zera o badge logo (evita "1" que vem por padrão ao instalar). Depois a contagem certa é reposta pelo BottomNav ou mantida 0 quando deslogado. */
+const AppIconBadgeResetOnLaunch = () => {
+  const didReset = useRef(false);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || didReset.current) return;
+    didReset.current = true;
+    syncAppIconBadge(0);
+  }, []);
+  return null;
+};
+
+/** No app nativo: quando não há usuário logado, zera o badge do ícone (evita "1" antes de login ou em vários dispositivos). */
+const AppIconBadgeClearWhenLoggedOut = () => {
+  const { session, loading } = useAuth();
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || loading) return;
+    if (session?.user) return;
+    syncAppIconBadge(0);
+  }, [loading, session?.user]);
   return null;
 };
 
@@ -480,6 +503,8 @@ const App = () => {
             <RefreshProvider>
               <ScrollToTop />
               <AdminRedirectGuard />
+              <AppIconBadgeResetOnLaunch />
+              <AppIconBadgeClearWhenLoggedOut />
               <NotificationOpenHandler />
               <AndroidPushChannelInit />
               <RoutePrefetcher />

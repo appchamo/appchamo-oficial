@@ -74,7 +74,16 @@ serve(async (req) => {
       console.log(`📌 Tokens duplicados ignorados: ${withToken.length} linhas → ${devicesList.length} envios únicos`)
     }
 
-    // 3b. Som do painel admin (só usado no Android, em primeiro plano)
+    // 3b. Contagem de notificações não lidas (excl. chat) para o badge do ícone no iOS
+    const { count: badgeCount } = await supabaseAdmin
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', record.user_id)
+      .eq('read', false)
+      .neq('type', 'chat')
+    const badge = Math.min(Math.max(0, badgeCount ?? 0), 99)
+
+    // 3c. Som do painel admin (só usado no Android, em primeiro plano)
     const { data: soundRow } = await supabaseAdmin
       .from('platform_settings')
       .select('value')
@@ -82,7 +91,7 @@ serve(async (req) => {
       .maybeSingle()
     const notificationSoundUrl = (soundRow?.value as string)?.trim() || ''
 
-    console.log("📱 Dispositivos únicos:", devicesList.length, "Preparando envio para o Firebase...");
+    console.log("📱 Dispositivos únicos:", devicesList.length, "Badge:", badge, "Preparando envio para o Firebase...");
 
     // 4. Access token do Google (jose = compatível com Deno; evita erro do google-auth-library/jws)
     const accessToken = await getGoogleAccessToken(
@@ -116,13 +125,13 @@ serve(async (req) => {
       }
 
       if (isIos) {
-        // iOS: sem "sound" no payload; só a Notification Service Extension adiciona o som (evita som padrão + chamo)
+        // iOS: badge = contagem real de não lidas (o app zera ao abrir Notificações)
         message.apns = {
           headers: { "apns-push-type": "alert" },
           payload: {
             aps: {
               alert: { title, body },
-              badge: 1,
+              badge,
               "mutable-content": 1,
             }
           }

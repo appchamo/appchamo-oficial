@@ -1,7 +1,10 @@
 import { Home, Search, MessageSquare, Bell, User } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState, useCallback, useRef } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
+import { syncAppIconBadge } from "@/lib/appBadge";
 
 const tabs = [
   { icon: Home, label: "Início", path: "/home" },
@@ -102,7 +105,9 @@ const BottomNav = () => {
         totalUnread = counts.reduce((a, b) => a + b, 0);
       }
 
-      setBadges({ chat: totalUnread, notifications: notifCount || 0 });
+      const notifCountFinal = notifCount || 0;
+      setBadges({ chat: totalUnread, notifications: notifCountFinal });
+      syncAppIconBadge(notifCountFinal);
     } catch (err) {
       console.error("Erro no fetchBadges:", err);
     } finally {
@@ -133,9 +138,19 @@ const BottomNav = () => {
       .on("postgres_changes", { event: "*", schema: "public", table: "service_requests" }, debouncedFetchBadges)
       .subscribe();
 
+    // Ao voltar ao app (abrir de novo ou sair do background), re-sincroniza o badge do ícone
+    let appStateListener: { remove: () => void } | null = null;
+    const listenerPromise = Capacitor.isNativePlatform()
+      ? CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+          if (isActive) fetchBadges();
+        }).then((listener) => { appStateListener = listener; return listener; })
+      : null;
+
     return () => {
       supabase.removeChannel(channel);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (appStateListener) appStateListener.remove();
+      else listenerPromise?.then((l) => l.remove());
     };
   }, [fetchBadges, debouncedFetchBadges]);
 

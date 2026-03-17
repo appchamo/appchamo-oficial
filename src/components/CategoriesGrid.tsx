@@ -136,7 +136,7 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
           onClick={() => setExpanded(!expanded)}
           className="w-full mt-3 py-2.5 rounded-xl border text-sm font-medium text-primary hover:bg-accent transition-colors"
         >
-          {expanded ? "Ver menos" : `Ver mais (${categories.length - visibleCount})`}
+          {expanded ? "Ver menos" : "Ver mais"}
         </button>
       )}
     </section>

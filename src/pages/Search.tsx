@@ -1,9 +1,23 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, X, MapPin, Filter, CheckCircle2, Navigation } from "lucide-react";
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, Navigation } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation, normalizeStateToUF } from "@/lib/locationUtils";
+import { SEARCH_ALIASES } from "@/lib/searchAliases";
+
+const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+function searchMatchesPro(q: string, target: string, cat: string, prof: string): boolean {
+  if (target.includes(q)) return true;
+  const aliasKeys = Object.keys(SEARCH_ALIASES).filter((key) => q.includes(norm(key)) || norm(key).includes(q));
+  for (const key of aliasKeys) {
+    for (const term of SEARCH_ALIASES[key]) {
+      if (cat.includes(term) || prof.includes(term) || target.includes(term)) return true;
+    }
+  }
+  return false;
+}
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -75,6 +89,9 @@ const Search = () => {
   const [allCities, setAllCities] = useState<string[]>([]);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCityDropdown, setShowCityDropdown] = useState(false);
+
+  const PAGE_SIZE = 7;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   useEffect(() => {
     const fetchStates = async () => {
@@ -230,16 +247,14 @@ const Search = () => {
       return { ...p, distance };
     });
 
-    // 2. Aplica os filtros
+    // 2. Aplica os filtros (busca com sinônimos: eletricista, aula de ingles → escola de idiomas, etc.)
     let result = prosWithDistance.filter((p) => {
-      const q = search.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const q = norm(search.trim());
       if (q) {
-        const target = `${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase();
-        
-        if (!target.includes(q)) return false;
+        const target = norm(`${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`);
+        const cat = norm(p.category_name);
+        const prof = norm(p.profession_name);
+        if (!searchMatchesPro(q, target, cat, prof)) return false;
       }
       
       if (filterState) {
@@ -264,13 +279,24 @@ const Search = () => {
       return true;
     });
 
-    // 3. Ordena por distância se o usuário estiver com GPS ativo
-    if (userCoords) {
-      result.sort((a, b) => (a.distance || 999) - (b.distance || 999));
-    }
+    // 3. Ordena: primeiro verificados, depois maior rating; se tiver GPS, desempata por distância
+    result.sort((a, b) => {
+      if (a.verified !== b.verified) return a.verified ? -1 : 1;
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      if (userCoords && a.distance !== undefined && b.distance !== undefined) return (a.distance || 999) - (b.distance || 999);
+      return 0;
+    });
 
     return result;
   }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, filterRadius, userCoords]);
+
+  // Reset paginação quando filtros ou busca mudam
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, filterRadius]);
+
+  const prosToShow = filteredAndSorted.slice(0, visibleCount);
+  const hasMore = visibleCount < filteredAndSorted.length;
 
   const handleCityInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -449,8 +475,9 @@ const Search = () => {
               {[1,2,3,4].map(i => <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />)}
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {filteredAndSorted.map((pro) => (
+            {prosToShow.map((pro) => (
               <Link key={pro.id} to={`/professional/${pro.id}`} className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group">
                 <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
                   {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : pro.full_name[0]}
@@ -476,6 +503,17 @@ const Search = () => {
               </Link>
             ))}
           </div>
+          {hasMore && (
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                className="px-6 py-3 rounded-xl border-2 border-primary text-primary font-semibold text-sm hover:bg-primary/10 transition-colors"
+              >
+                Ver mais
+              </button>
+            </div>
+          )}
+          </>
         )}
       </main>
     </AppLayout>

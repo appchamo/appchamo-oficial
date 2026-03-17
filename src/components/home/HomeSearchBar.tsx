@@ -3,34 +3,60 @@ import { Link, useNavigate } from "react-router-dom";
 import { Search, Star, BadgeCheck, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { fuzzyMatch } from "@/lib/fuzzyMatch";
 import { sameCityState } from "@/lib/locationUtils";
+import { SEARCH_ALIASES } from "@/lib/searchAliases";
+
+/** Normaliza para busca: minúsculo, sem acentos */
+const norm = (s: string) =>
+  s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
 interface SearchResult {
   id: string;
-  type: "professional" | "category" | "profession";
+  type: "professional";
   label: string;
   sublabel: string;
   avatar_url?: string | null;
   rating?: number;
   verified?: boolean;
   link: string;
+  /** Para matching por categoria/profissão */
+  category_name: string;
+  profession_name: string;
 }
 
 interface HomeSearchBarProps {
   section?: { title?: string; subtitle?: string };
 }
 
+/** Verifica se a query dá match no profissional (nome, categoria, profissão ou sinônimos) */
+function professionalMatchesQuery(query: string, pro: SearchResult): boolean {
+  const q = norm(query);
+  if (!q) return false;
+  const name = norm(pro.label);
+  const cat = norm(pro.category_name);
+  const prof = norm(pro.profession_name);
+  const fullText = `${name} ${cat} ${prof}`;
+  if (fullText.includes(q)) return true;
+  const aliasKeys = Object.keys(SEARCH_ALIASES).filter((key) => q.includes(norm(key)) || norm(key).includes(q));
+  for (const key of aliasKeys) {
+    const terms = SEARCH_ALIASES[key];
+    for (const term of terms) {
+      if (cat.includes(term) || prof.includes(term) || fullText.includes(term)) return true;
+    }
+  }
+  return false;
+}
+
 const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [allItems, setAllItems] = useState<SearchResult[]>([]);
+  const [professionals, setProfessionals] = useState<SearchResult[]>([]);
   const [showResults, setShowResults] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   const placeholder = section?.title || "Buscar profissional ou serviço...";
-  const hint = section?.subtitle || "Ex: eletricista, encanador, designer...";
+  const hint = section?.subtitle || "Ex: eletricista, encanador, escola de idiomas...";
 
   useEffect(() => {
     const load = async () => {
@@ -42,57 +68,55 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
         if (data?.address_state) userState = data.address_state;
       }
 
-      const [prosRes, catsRes, profsRes] = await Promise.all([
-        supabase
-          .from("professionals")
-          .select("id, rating, verified, user_id, categories(name)")
-          .eq("active", true)
-          .eq("profile_status", "approved")
-          .order("rating", { ascending: false }),
-        supabase.from("categories").select("id, name, slug").eq("active", true).order("sort_order"),
-        supabase.from("professions").select("id, name, category_id, categories:category_id(name, slug)").eq("active", true),
-      ]);
-
-      const items: SearchResult[] = [];
-
-      (catsRes.data || []).forEach(c => {
-        items.push({ id: c.id, type: "category", label: c.name, sublabel: "Categoria", link: `/category/${c.slug}` });
-      });
-
-      (profsRes.data || []).forEach((p: any) => {
-        const catSlug = p.categories?.slug;
-        items.push({
-          id: p.id, type: "profession", label: p.name,
-          sublabel: p.categories?.name || "Profissão",
-          link: catSlug ? `/category/${catSlug}` : "/categories",
-        });
-      });
+      const prosRes = await supabase
+        .from("professionals")
+        .select("id, rating, verified, user_id, categories(name), professions:profession_id(name)")
+        .eq("active", true)
+        .eq("profile_status", "approved")
+        .order("rating", { ascending: false });
 
       const pros = prosRes.data || [];
-      if (pros.length > 0) {
-        const userIds = pros.map(p => p.user_id);
-        const [profilesPublic, profilesLocation] = await Promise.all([
-          supabase.from("profiles_public").select("user_id, full_name, avatar_url").in("user_id", userIds),
-          supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
-        ]);
-        const profileMap = new Map((profilesPublic.data || []).map(p => [p.user_id, p]));
-        const locationMap = new Map((profilesLocation.data || []).map(p => [p.user_id, p]));
-        const prosToShow = (userCity || userState)
-          ? pros.filter(p => sameCityState(userCity, userState, locationMap.get(p.user_id)?.address_city ?? null, locationMap.get(p.user_id)?.address_state ?? null))
-          : pros;
-        prosToShow.forEach(p => {
-          items.push({
-            id: p.id, type: "professional",
-            label: profileMap.get(p.user_id)?.full_name || "Profissional",
-            sublabel: (p.categories as any)?.name || "—",
-            avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
-            rating: p.rating, verified: p.verified,
-            link: `/professional/${p.id}`,
-          });
-        });
+      if (pros.length === 0) {
+        setProfessionals([]);
+        return;
       }
 
-      setAllItems(items);
+      const userIds = pros.map((p) => p.user_id);
+      const [profilesPublic, profilesLocation] = await Promise.all([
+        supabase.from("profiles_public").select("user_id, full_name, avatar_url").in("user_id", userIds),
+        supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
+      ]);
+      const profileMap = new Map((profilesPublic.data || []).map((p) => [p.user_id, p]));
+      const locationMap = new Map((profilesLocation.data || []).map((p) => [p.user_id, p]));
+      const prosToShow = (userCity || userState)
+        ? pros.filter((p) =>
+            sameCityState(
+              userCity,
+              userState,
+              locationMap.get(p.user_id)?.address_city ?? null,
+              locationMap.get(p.user_id)?.address_state ?? null
+            )
+          )
+        : pros;
+
+      const items: SearchResult[] = prosToShow.map((p) => {
+        const categoryName = (p.categories as any)?.name || "";
+        const professionName = (p.professions as any)?.name || "";
+        return {
+          id: p.id,
+          type: "professional" as const,
+          label: profileMap.get(p.user_id)?.full_name || "Profissional",
+          sublabel: [categoryName, professionName].filter(Boolean).join(" · ") || "—",
+          avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
+          rating: p.rating,
+          verified: p.verified,
+          link: `/professional/${p.id}`,
+          category_name: categoryName,
+          profession_name: professionName,
+        };
+      });
+
+      setProfessionals(items);
     };
     load();
   }, [user?.id]);
@@ -106,13 +130,13 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
   }, []);
 
   const filtered = searchQuery.trim()
-    ? allItems.filter(item => fuzzyMatch(searchQuery.trim(), `${item.label} ${item.sublabel}`))
+    ? professionals.filter((item) => professionalMatchesQuery(searchQuery.trim(), item))
     : [];
 
-  // Sort: categories first, then professions, then professionals
-  const sorted = filtered.sort((a, b) => {
-    const order = { category: 0, profession: 1, professional: 2 };
-    return (order[a.type] || 2) - (order[b.type] || 2);
+  // Ordenar: primeiro verificados, depois maior rating
+  const sorted = [...filtered].sort((a, b) => {
+    if (a.verified !== b.verified) return a.verified ? -1 : 1;
+    return (b.rating ?? 0) - (a.rating ?? 0);
   });
 
   const handleSearchSubmit = () => {
@@ -123,17 +147,25 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
   return (
     <div ref={searchRef} className="relative">
       <div className="flex items-center gap-3 border-2 border-primary/20 rounded-2xl px-4 py-3.5 bg-card hover:border-primary/40 transition-all shadow-sm">
-        <div onClick={handleSearchSubmit}
-          className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center cursor-pointer hover:bg-primary/20 transition-colors">
+        <div
+          onClick={handleSearchSubmit}
+          className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center cursor-pointer hover:bg-primary/20 transition-colors"
+        >
           <Search className="w-5 h-5 text-primary" />
         </div>
         <div className="flex-1">
-          <input type="text" value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setShowResults(true); }}
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setShowResults(true);
+            }}
             onFocus={() => searchQuery.trim() && setShowResults(true)}
             onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()}
             placeholder={placeholder}
-            className="w-full bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+            className="w-full bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+          />
           <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>
         </div>
         {searchQuery && (
@@ -147,26 +179,26 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
         <div className="absolute left-0 right-0 top-full mt-1 bg-card border-2 border-primary/20 rounded-2xl shadow-lg z-30 max-h-80 overflow-y-auto">
           {sorted.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground">
-              Nenhum resultado para "{searchQuery}"
+              Nenhum profissional encontrado para &quot;{searchQuery}&quot;
             </div>
           ) : (
             <div className="p-2 flex flex-col gap-1">
               {sorted.slice(0, 8).map((item) => {
-                const typeLabel = item.type === "category" ? "📂" : item.type === "profession" ? "🔧" : "";
-                const initials = item.label.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+                const initials = item.label.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
                 return (
-                  <Link key={`${item.type}-${item.id}`} to={item.link}
+                  <Link
+                    key={item.id}
+                    to={item.link}
                     onClick={() => setShowResults(false)}
-                    className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-accent transition-colors">
-                    {item.type === "professional" ? (
-                      <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground overflow-hidden flex-shrink-0">
-                        {item.avatar_url ? <img src={item.avatar_url} alt={item.label} className="w-full h-full object-cover" /> : initials}
-                      </div>
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-base flex-shrink-0">
-                        {typeLabel}
-                      </div>
-                    )}
+                    className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-accent transition-colors"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground overflow-hidden flex-shrink-0">
+                      {item.avatar_url ? (
+                        <img src={item.avatar_url} alt={item.label} className="w-full h-full object-cover" />
+                      ) : (
+                        initials
+                      )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1">
                         <p className="text-sm font-medium text-foreground truncate">{item.label}</p>

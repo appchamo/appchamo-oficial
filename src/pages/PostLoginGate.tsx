@@ -5,16 +5,10 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
-/**
- * Tela intermediária pós-login (Apple/Google/E-mail).
- * Objetivo: segurar a navegação para /home até o usuário tocar em "Continuar",
- * e dar tempo do Supabase (sessão/token) estabilizar no iOS após OAuth.
- */
 export default function PostLoginGate() {
   const navigate = useNavigate();
   const { session, loading } = useAuth();
-  const [open, setOpen] = useState(false);
-  const [warmingUp, setWarmingUp] = useState(true);
+  const [checking, setChecking] = useState(true);
 
   const firstName = useMemo(() => {
     const full = (session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name) as string | undefined;
@@ -34,62 +28,49 @@ export default function PostLoginGate() {
     let cancelled = false;
     (async () => {
       try {
-        // "Warm up" do auth: garante sessão e, se necessário, refresh
-        const { data: { session: s } } = await supabase.auth.getSession();
-        if (!s?.access_token) {
-          await supabase.auth.refreshSession().catch(() => {});
+        const email = (session.user.email || "").toLowerCase().trim();
+        if (!email) {
+          navigate("/signup", { replace: true });
+          return;
         }
-        // Pequeno delay para o PostgREST do iOS estabilizar headers após OAuth
-        await new Promise((r) => setTimeout(r, 800));
+
+        // Verifica se já existe cadastro com esse e-mail
+        const { data: existingByEmail, error } = await supabase
+          .from("profiles")
+          .select("id")
+          .ilike("email", email)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        if (error) {
+          // Erro raro: volta para login para tentar de novo
+          navigate("/login", { replace: true });
+          return;
+        }
+
+        if (!existingByEmail) {
+          // Não existe perfil com esse e-mail → fluxo de cadastro
+          navigate("/signup", { replace: true });
+          return;
+        }
+
+        // Já existe cadastro → Home
+        navigate("/home", { replace: true });
       } finally {
-        if (!cancelled) {
-          setWarmingUp(false);
-          setOpen(true);
-        }
+        if (!cancelled) setChecking(false);
       }
     })();
     return () => { cancelled = true; };
   }, [session?.user]);
 
-  const goHome = () => {
-    try {
-      sessionStorage.setItem("chamo_oauth_just_landed", "1");
-      localStorage.setItem("chamo_oauth_just_landed", "1");
-    } catch (_) {}
-    navigate("/home", { replace: true });
-  };
-
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
-        {warmingUp && (
-          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin text-primary" />
-            Preparando sua conta…
-          </div>
-        )}
-
-        <Dialog open={open} onOpenChange={() => {}}>
-          <DialogContent
-            className="max-w-sm text-center"
-            onPointerDownOutside={(e) => e.preventDefault()}
-            onEscapeKeyDown={(e) => e.preventDefault()}
-          >
-            <DialogHeader>
-              <DialogTitle className="text-center">Seja bem-vindo, {firstName}!</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground py-2">
-              Vamos carregar sua Home com tudo certinho.
-            </p>
-            <button
-              type="button"
-              onClick={goHome}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-            >
-              Continuar
-            </button>
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+          {checking ? "Verificando seu cadastro…" : "Redirecionando…"}
+        </div>
       </div>
     </div>
   );

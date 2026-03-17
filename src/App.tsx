@@ -164,7 +164,7 @@ const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "
 const SPLASH_SHOWN_KEY = "chamo_splash_shown";
 
 /** No Android, cria o canal "default" logo na abertura do app para push em background aparecer. */
-/** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk; se perfil incompleto → /signup; senão → /home */
+/** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk; demais → /post-login (decisão Home vs Signup) */
 const RedirectLoggedIn = () => {
   const { user, profile, loading } = useAuth();
   const email = (user?.email || "").toLowerCase().trim();
@@ -180,8 +180,8 @@ const RedirectLoggedIn = () => {
     );
   }
 
-  // Logado: vai para Home (não manda mais para signup; login com Google/Apple sem cadastro vira cliente).
-  return <Navigate to="/home" replace />;
+  // Logado (não-admin/suporte): delega decisão para PostLoginGate (/post-login)
+  return <Navigate to="/post-login" replace />;
 };
 
 const AndroidPushChannelInit = () => {
@@ -221,7 +221,7 @@ const AppIconBadgeClearWhenLoggedOut = () => {
   return null;
 };
 
-/** No mobile: com sessão ativa, redireciona rotas de auth (/oauth-callback, /login) para /home para nunca ficar preso após OAuth. */
+/** No mobile: com sessão ativa, redireciona rotas de auth (/oauth-callback, /login) para /post-login para nunca ficar preso após OAuth. */
 const OAuthCallbackRedirectGuard = () => {
   const { session, loading } = useAuth();
   const location = useLocation();
@@ -231,7 +231,7 @@ const OAuthCallbackRedirectGuard = () => {
     if (!session?.user) return;
     const path = location.pathname;
     if (path === "/oauth-callback" || path === "/login") {
-      navigate("/home", { replace: true });
+      navigate("/post-login", { replace: true });
     }
   }, [loading, location.pathname, session?.user, navigate]);
   return null;

@@ -274,7 +274,7 @@ const MessageThread = () => {
 
         const { data: appSingle } = await supabase
           .from("agenda_appointments")
-          .select("id, status, service_id, appointment_date, start_time, end_time, client_id, professional_id, agenda_services(name, duration_minutes)")
+          .select("id, status, service_id, appointment_date, start_time, end_time, client_id, professional_id, atendente_id, agenda_services(name, duration_minutes)")
           .eq("chat_request_id", threadId)
           .order("start_time", { ascending: true })
           .limit(1)
@@ -2543,6 +2543,7 @@ const MessageThread = () => {
           serviceId={appointment.service_id}
           durationMinutes={appointment.agenda_services?.duration_minutes ?? 30}
           clientId={appointment.client_id}
+          atendenteId={appointment.atendente_id ?? null}
           onRescheduled={async (newDate, newStart, newEnd) => {
             if (!threadId || !userId) return;
             setAppointment((a) => (a ? { ...a, appointment_date: newDate, start_time: newStart, end_time: newEnd } : null));

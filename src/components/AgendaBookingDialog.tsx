@@ -312,9 +312,11 @@ export default function AgendaBookingDialog({
       toast({ title: "Agendamento enviado! Aguarde a confirmação." });
       navigate(`/messages/${requestId}`);
     } catch (err: unknown) {
+      const msg = err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : "";
+      const isSlotTaken = msg.includes("duplicate") || msg.includes("unique") || (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23505");
       toast({
-        title: "Erro ao agendar",
-        description: err instanceof Error ? err.message : "Tente novamente.",
+        title: isSlotTaken ? "Horário indisponível" : "Erro ao agendar",
+        description: isSlotTaken ? "Este horário já foi reservado. Escolha outro." : (err instanceof Error ? err.message : "Tente novamente."),
         variant: "destructive",
       });
     }

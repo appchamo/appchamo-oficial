@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing, useTriggerRefresh } from "@/contexts/RefreshContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase } from "lucide-react"; 
+import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase, Loader2 } from "lucide-react"; 
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -168,6 +168,8 @@ const Home = () => {
     ? `${profile.address_city}, ${profile.address_state}`
     : profile?.address_city || profile?.address_state || "Definir localização";
 
+  const welcomeWord = profile?.gender === "female" ? "Bem-vinda" : profile?.gender === "male" ? "Bem-vindo" : "Bem-vindo(a)";
+
   // Novo cliente (Google/Apple sem cadastro): abre o modal de localização para definir cidade/CEP
   useEffect(() => {
     try {
@@ -277,19 +279,34 @@ const Home = () => {
       {!contentReady ? (
         <HomeSkeleton />
       ) : (
-        <main
-          className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
-          style={{ opacity: isRefreshing ? 0.7 : 1 }}
-        >
-          {user && (
-            <button
-              type="button"
-              onClick={handleOpenLocation}
-              className="flex items-center gap-2 w-fit px-3 py-1.5 rounded-full text-xs font-medium bg-muted/80 hover:bg-muted border border-border/80 text-muted-foreground hover:text-foreground transition-colors"
+        <main className="relative max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500">
+          {/* Overlay de refresh: tela home desfocada + spinner (evita tela preta após tutorial) */}
+          {isRefreshing && (
+            <div
+              className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm transition-opacity duration-200"
+              aria-busy="true"
+              aria-label="Atualizando"
             >
-              <MapPin className="w-3.5 h-3.5" />
-              <span className="truncate max-w-[180px]">{locationLabel}</span>
-            </button>
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="w-10 h-10 text-primary animate-spin" />
+                <span className="text-sm text-muted-foreground">Atualizando...</span>
+              </div>
+            </div>
+          )}
+          {user && (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-base font-semibold text-foreground">
+                {welcomeWord}, <span className="text-primary">{userName}</span> 👋
+              </p>
+              <button
+                type="button"
+                onClick={handleOpenLocation}
+                className="flex items-center gap-2 w-fit px-3 py-1.5 rounded-full text-xs font-medium bg-muted/80 hover:bg-muted border border-border/80 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span className="truncate max-w-[180px]">{locationLabel}</span>
+              </button>
+            </div>
           )}
 
           {!subLoading && isFreePlan && profile?.user_type !== "client" && callsRemaining <= 1 &&

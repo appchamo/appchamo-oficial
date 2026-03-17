@@ -33,6 +33,8 @@ interface AgendaRescheduleDialogProps {
   serviceId: string;
   durationMinutes: number;
   clientId: string;
+  /** Mesmo atendente do agendamento; usado para não contar outros atendentes ao calcular vagas. */
+  atendenteId?: string | null;
   onRescheduled: (newDate: string, newStart: string, newEnd: string) => void;
 }
 
@@ -44,6 +46,7 @@ export default function AgendaRescheduleDialog({
   serviceId,
   durationMinutes,
   clientId,
+  atendenteId = null,
   onRescheduled,
 }: AgendaRescheduleDialogProps) {
   const [rules, setRules] = useState<{ weekday: number; start_time: string; end_time: string; slot_interval_minutes: number; capacity: number; break_start_time?: string | null; break_end_time?: string | null }[]>([]);
@@ -64,19 +67,25 @@ export default function AgendaRescheduleDialog({
     setSlots([]);
     const load = async () => {
       setLoading(true);
+      const rlsQ = supabase.from("agenda_availability_rules").select("weekday, start_time, end_time, slot_interval_minutes, capacity, break_start_time, break_end_time").eq("professional_id", professionalId);
+      const blkQ = supabase.from("agenda_availability_blocks").select("block_date, start_time, end_time").eq("professional_id", professionalId).gte("block_date", format(today, "yyyy-MM-dd"));
+      if (atendenteId === null || atendenteId === undefined) {
+        rlsQ.is("atendente_id", null);
+        blkQ.is("atendente_id", null);
+      } else {
+        rlsQ.eq("atendente_id", atendenteId);
+        blkQ.eq("atendente_id", atendenteId);
+      }
       const [
         { data: rls },
         { data: blk },
-      ] = await Promise.all([
-        supabase.from("agenda_availability_rules").select("weekday, start_time, end_time, slot_interval_minutes, capacity, break_start_time, break_end_time").eq("professional_id", professionalId),
-        supabase.from("agenda_availability_blocks").select("block_date, start_time, end_time").eq("professional_id", professionalId).gte("block_date", format(today, "yyyy-MM-dd")),
-      ]);
+      ] = await Promise.all([rlsQ, blkQ]);
       setRules((rls as any[]) || []);
       setBlocks((blk as any[]) || []);
       setLoading(false);
     };
     load();
-  }, [open, professionalId]);
+  }, [open, professionalId, atendenteId]);
 
   const isDateDisabled = (date: Date) => {
     if (isBefore(date, today)) return true;
@@ -119,22 +128,29 @@ export default function AgendaRescheduleDialog({
           if (slotMin < blkEnd && slotEndMin > blkStart) slotSet.delete(slotTime);
         }
       }
-      const { data: existing } = await supabase
+      let existingQ = supabase
         .from("agenda_appointments")
-        .select("start_time")
+        .select("start_time, end_time")
         .eq("professional_id", professionalId)
         .eq("appointment_date", dateStr)
         .in("status", ["pending", "confirmed", "done"])
         .neq("id", appointmentId);
-      const countBySlot = new Map<string, number>();
-      for (const row of existing || []) {
-        const t = (row as { start_time: string }).start_time;
-        countBySlot.set(t, (countBySlot.get(t) ?? 0) + 1);
+      if (atendenteId === null || atendenteId === undefined) {
+        existingQ = existingQ.is("atendente_id", null);
+      } else {
+        existingQ = existingQ.eq("atendente_id", atendenteId);
       }
+      const { data: existing } = await existingQ;
+      const existingRanges = (existing || []).map((r: { start_time: string; end_time: string }) => ({
+        start: timeToMinutes(r.start_time),
+        end: timeToMinutes((r.end_time || "").slice(0, 5) || r.end_time),
+      }));
       const available: string[] = [];
       for (const [slotTime, capacity] of slotSet.entries()) {
-        const count = countBySlot.get(slotTime) ?? 0;
-        if (count < capacity) available.push(slotTime);
+        const slotMin = timeToMinutes(slotTime);
+        const slotEndMin = slotMin + durationMinutes;
+        const overlappingCount = existingRanges.filter((range) => range.start < slotEndMin && range.end > slotMin).length;
+        if (overlappingCount < capacity) available.push(slotTime);
       }
       available.sort();
       setSlots(available);

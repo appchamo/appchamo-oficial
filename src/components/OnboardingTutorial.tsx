@@ -103,10 +103,7 @@ export function OnboardingTutorial() {
     } catch (_) {}
     setVisible(false);
     closeMenu();
-    // Refresh forçado para recarregar a tela e tudo que depende do layout (ex.: após OAuth no iOS)
-    requestAnimationFrame(() => {
-      window.location.reload();
-    });
+    // Não fazemos mais reload completo (evita tela preta ~5s). O triggerRefresh() no goNext/skip chama o refresh da Home.
   }, [closeMenu]);
 
   const goNext = useCallback(() => {

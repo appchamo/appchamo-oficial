@@ -11,11 +11,21 @@ export const ESTADOS_BR: { sigla: string; nome: string }[] = [
   { sigla: "SP", nome: "São Paulo" }, { sigla: "SE", nome: "Sergipe" }, { sigla: "TO", nome: "Tocantins" },
 ].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
-/** Busca todas as cidades de um estado (UF) no IBGE */
+/** Busca todas as cidades de um estado (UF). Usa Edge Function (proxy IBGE) para evitar CORS no app. */
 export async function fetchCitiesByState(uf: string): Promise<string[]> {
   if (!uf || uf.length !== 2) return [];
+  const normalizedUf = uf.trim().toUpperCase();
   try {
-    const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios`;
+    const { supabase } = await import("@/integrations/supabase/client");
+    const { data, error } = await supabase.functions.invoke<{ cities?: string[] }>("cities-by-state", {
+      body: { uf: normalizedUf },
+    });
+    if (!error && Array.isArray(data?.cities)) return data.cities;
+  } catch {
+    // Fallback: chamada direta ao IBGE (pode falhar por CORS no app nativo)
+  }
+  try {
+    const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(normalizedUf)}/municipios`;
     const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
     if (!res.ok) return [];
     const data = await res.json();

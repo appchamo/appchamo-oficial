@@ -10,6 +10,8 @@ interface RefreshContextValue {
 
 const RefreshContext = createContext<RefreshContextValue | null>(null);
 
+const REFRESH_TIMEOUT_MS = 12_000;
+
 export function RefreshProvider({ children }: { children: ReactNode }) {
   const handlerRef = useRef<RefreshHandler | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -22,7 +24,15 @@ export function RefreshProvider({ children }: { children: ReactNode }) {
     if (handlerRef.current) {
       setIsRefreshing(true);
       try {
-        await Promise.resolve(handlerRef.current());
+        const timeoutPromise = new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("refresh_timeout")), REFRESH_TIMEOUT_MS)
+        );
+        await Promise.race([
+          Promise.resolve(handlerRef.current()),
+          timeoutPromise,
+        ]);
+      } catch {
+        // Timeout ou erro: libera a tela para não travar em "Atualizando..."
       } finally {
         setIsRefreshing(false);
       }

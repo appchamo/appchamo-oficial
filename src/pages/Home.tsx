@@ -9,9 +9,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing, useTriggerRefresh } from "@/contexts/RefreshContext";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase, Loader2 } from "lucide-react"; 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
 import HomeJobsBanner from "@/components/home/HomeJobsBanner";
@@ -53,6 +53,7 @@ const HomeSkeleton = () => (
 
 const Home = () => {
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
+  const location = useLocation();
   const { isFreePlan, callsRemaining, loading: subLoading } = useSubscription();
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
   const isRefreshing = useIsRefreshing();
@@ -95,24 +96,54 @@ const Home = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (!user?.id) return;
+  const fetchUpcomingAppointments = useCallback(async (): Promise<boolean> => {
+    if (!user?.id) return false;
     const today = new Date().toISOString().slice(0, 10);
-    supabase
+    const base = { status: ["pending", "confirmed"] as const, date: today };
+
+    const asClient = supabase
       .from("agenda_appointments")
       .select("id", { count: "exact", head: true })
       .eq("client_id", user.id)
-      .in("status", ["pending", "confirmed"])
-      .gte("appointment_date", today)
-      .then(({ count }) => {
-        const has = (count ?? 0) > 0;
-        setHasUpcomingAppointment(has);
-        if (!has) {
-          localStorage.removeItem("chamo_appointment_banner_dismissed");
-          setAppointmentBannerDismissed(false);
-        }
-      });
+      .in("status", base.status)
+      .gte("appointment_date", base.date);
+
+    const { data: proRow } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+    const asPro = proRow?.id
+      ? supabase
+          .from("agenda_appointments")
+          .select("id", { count: "exact", head: true })
+          .eq("professional_id", proRow.id)
+          .in("status", base.status)
+          .gte("appointment_date", base.date)
+      : null;
+
+    const [clientRes, proRes] = await Promise.all([
+      asClient,
+      asPro ? asPro : Promise.resolve({ count: 0 }),
+    ]);
+    const clientCount = clientRes.count ?? 0;
+    const proCount = (proRes as { count?: number })?.count ?? 0;
+    const has = clientCount > 0 || proCount > 0;
+    setHasUpcomingAppointment(has);
+    if (!has) {
+      localStorage.removeItem("chamo_appointment_banner_dismissed");
+      setAppointmentBannerDismissed(false);
+    }
+    return has;
   }, [user?.id]);
+
+  useEffect(() => {
+    fetchUpcomingAppointments();
+  }, [fetchUpcomingAppointments]);
+
+  // Ao voltar para a Home (ex.: após cancelar um agendamento), revalida e mostra o alerta de novo se ainda houver agendamentos
+  useEffect(() => {
+    if (location.pathname !== "/home" || !user?.id) return;
+    fetchUpcomingAppointments().then((has) => {
+      if (has) setAppointmentBannerDismissed(false);
+    });
+  }, [location.pathname, user?.id, fetchUpcomingAppointments]);
 
   // ✅ 2. TRANSIÇÃO SUAVE: Espera o layout carregar para liberar a tela (com ou sem login)
   useEffect(() => {
@@ -126,29 +157,26 @@ const Home = () => {
     return () => clearTimeout(fallback);
   }, [sections]);
 
-  // ✅ Pós-OAuth: quando o user fica disponível, forçar novo carregamento do layout e dos blocos (sponsors, categorias, featured)
+  // ✅ Pós-OAuth / ao entrar na Home: um único refresh após a sessão estabilizar (evita remontar 2x e travar loading)
   const [contentSeed, setContentSeed] = useState(0);
-  useEffect(() => {
-    if (!user?.id) return;
-    const t = setTimeout(() => {
-      refreshLayout();
-      setContentSeed((s) => s + 1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [user?.id]);
-
-  // ✅ Ao entrar na Home (ex.: após login): refresh como se tivesse voltado da Busca / reaberto o app — garante que a página carregue
   useEffect(() => {
     const t = setTimeout(() => {
       refreshLayout();
       setContentSeed((s) => s + 1);
       supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => setJobCount(count ?? 0));
-      if (user?.id) {
-        const today = new Date().toISOString().slice(0, 10);
-        supabase.from("agenda_appointments").select("id", { count: "exact", head: true }).eq("client_id", user.id).in("status", ["pending", "confirmed"]).gte("appointment_date", today).then(({ count }) => setHasUpcomingAppointment((count ?? 0) > 0));
-      }
-    }, 350);
+      if (user?.id) fetchUpcomingAppointments();
+    }, 450);
     return () => clearTimeout(t);
+  }, [user?.id]);
+
+  // ✅ Refresh forçado após OAuth (igual ao fluxo do tutorial): sempre recarrega uma vez para sessão/layout estabilizarem, tutorial aparecer e conteúdo carregar 100%
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("chamo_oauth_just_landed") !== "1") return;
+      sessionStorage.removeItem("chamo_oauth_just_landed");
+      const t = setTimeout(() => window.location.reload(), 1200);
+      return () => clearTimeout(t);
+    } catch (_) {}
   }, []);
 
   // ✅ Pull-to-refresh (e ao fechar tutorial): atualiza layout + força remount das seções (sponsors, featured, categorias) para carregar 100%
@@ -158,7 +186,7 @@ const Home = () => {
     await Promise.all([
       refreshLayout(),
       supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => setJobCount(count ?? 0)),
-      user?.id ? supabase.from("agenda_appointments").select("id", { count: "exact", head: true }).eq("client_id", user.id).in("status", ["pending", "confirmed"]).gte("appointment_date", new Date().toISOString().slice(0, 10)).then(({ count }) => setHasUpcomingAppointment((count ?? 0) > 0)) : Promise.resolve(),
+      user?.id ? fetchUpcomingAppointments() : Promise.resolve(),
     ]);
     await minDelay;
   };
@@ -245,7 +273,7 @@ const Home = () => {
     sponsors: <SponsorCarousel key={`sponsors-${contentSeed}`} section={getSection("sponsors")} />,
     jobs: <HomeJobsBanner key="jobs" jobCount={jobCount} section={getSection("jobs")} />,
     search: <HomeSearchBar key={`search-${profile?.address_city}-${profile?.address_state}`} section={getSection("search")} />,
-    featured: <FeaturedProfessionals key={`featured-${profile?.address_city}-${profile?.address_state}-${contentSeed}`} section={getSection("featured")} />,
+    featured: <FeaturedProfessionals key={`featured-${contentSeed}`} section={getSection("featured")} />,
     categories: <CategoriesGrid key={`categories-${contentSeed}`} section={getSection("categories")} />,
     benefits: <BenefitsPanel key="benefits" section={getSection("benefits")} />,
     tutorials: <TutorialsSection key="tutorials" />
@@ -279,20 +307,10 @@ const Home = () => {
       {!contentReady ? (
         <HomeSkeleton />
       ) : (
-        <main className="relative max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500">
-          {/* Overlay de refresh: tela home desfocada + spinner (evita tela preta após tutorial) */}
-          {isRefreshing && (
-            <div
-              className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm transition-opacity duration-200"
-              aria-busy="true"
-              aria-label="Atualizando"
-            >
-              <div className="flex flex-col items-center gap-3">
-                <Loader2 className="w-10 h-10 text-primary animate-spin" />
-                <span className="text-sm text-muted-foreground">Atualizando...</span>
-              </div>
-            </div>
-          )}
+        <main
+          className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
+          style={{ opacity: isRefreshing ? 0.7 : 1 }}
+        >
           {user && (
             <div className="flex flex-col gap-1.5">
               <p className="text-base font-semibold text-foreground">
@@ -335,7 +353,11 @@ const Home = () => {
               >
                 <X className="w-4 h-4" />
               </button>
-              <Link to="/meus-agendamentos" className="flex items-center gap-3 flex-1 min-w-0 pr-6" onClick={() => { setAppointmentBannerDismissed(true); localStorage.setItem("chamo_appointment_banner_dismissed", "1"); }}>
+              <Link
+                to={profile?.user_type === "professional" || profile?.user_type === "company" ? "/pro/agenda/calendario" : "/meus-agendamentos"}
+                className="flex items-center gap-3 flex-1 min-w-0 pr-6"
+                onClick={() => { setAppointmentBannerDismissed(true); localStorage.setItem("chamo_appointment_banner_dismissed", "1"); }}
+              >
                 <CalendarCheck className="w-5 h-5 text-primary flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground">Você tem agendamento</p>

@@ -92,6 +92,7 @@ export default function AgendaBookingDialog({
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [slots, setSlots] = useState<string[]>([]);
+  const [occupiedSlots, setOccupiedSlots] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
   useEffect(() => {
@@ -170,6 +171,7 @@ export default function AgendaBookingDialog({
   useEffect(() => {
     if (step !== "time" || !selectedDate || selectedServices.length === 0 || !professionalId) {
       setSlots([]);
+      setOccupiedSlots([]);
       return;
     }
     const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -225,14 +227,18 @@ export default function AgendaBookingDialog({
       }));
 
       const available: string[] = [];
+      const occupied: string[] = [];
       for (const [slotTime, capacity] of slotSet.entries()) {
         const slotMin = timeToMinutes(slotTime);
         const slotEndMin = slotMin + totalDurationMinutes;
         const overlappingCount = existingRanges.filter((range) => range.start < slotEndMin && range.end > slotMin).length;
         if (overlappingCount < capacity) available.push(slotTime);
+        else occupied.push(slotTime);
       }
       available.sort();
+      occupied.sort();
       setSlots(available);
+      setOccupiedSlots(occupied);
       setLoadingSlots(false);
     };
     loadSlots();
@@ -489,20 +495,27 @@ export default function AgendaBookingDialog({
               <div className="flex justify-center py-6">
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
-            ) : slots.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Nenhum horário disponível neste dia.</p>
+            ) : (slots.length === 0 && occupiedSlots.length === 0) ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Nenhum horário neste dia.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {slots.map((slot) => (
-                  <Button
-                    key={slot}
-                    variant={selectedSlot === slot ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setSelectedSlot(slot)}
-                  >
-                    {slot}
-                  </Button>
-                ))}
+                {[...slots, ...occupiedSlots]
+                  .sort()
+                  .map((slot) => {
+                    const isOccupied = occupiedSlots.includes(slot);
+                    return (
+                      <Button
+                        key={slot}
+                        variant={isOccupied ? "outline" : selectedSlot === slot ? "default" : "outline"}
+                        size="sm"
+                        disabled={isOccupied}
+                        onClick={() => !isOccupied && setSelectedSlot(slot)}
+                        className={isOccupied ? "border-destructive/50 bg-destructive/10 text-destructive cursor-not-allowed" : ""}
+                      >
+                        {slot}
+                      </Button>
+                    );
+                  })}
               </div>
             )}
             <div className="flex gap-2 mt-4">

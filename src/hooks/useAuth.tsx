@@ -236,6 +236,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const path = window.location.pathname || '';
           const alreadyOnLogin = path.includes('login');
           if (exchangeOk) {
+            try {
+              sessionStorage.setItem('chamo_oauth_just_landed', '1');
+            } catch (_) {}
             setTimeout(() => {
               try {
                 window.location.replace((window.location.origin || '') + '/home');

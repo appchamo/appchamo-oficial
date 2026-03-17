@@ -100,10 +100,14 @@ export function OnboardingTutorial() {
   const finishTutorial = useCallback(() => {
     try {
       localStorage.setItem(STORAGE_KEY, "1");
+      sessionStorage.removeItem("chamo_oauth_just_landed");
     } catch (_) {}
     setVisible(false);
     closeMenu();
-    // Não fazemos mais reload completo (evita tela preta ~5s). O triggerRefresh() no goNext/skip chama o refresh da Home.
+    // Reload para recarregar a tela e tudo que depende do layout (ex.: após OAuth no iOS)
+    requestAnimationFrame(() => {
+      window.location.reload();
+    });
   }, [closeMenu]);
 
   const goNext = useCallback(() => {

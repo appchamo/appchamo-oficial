@@ -414,18 +414,34 @@ const Login = () => {
       if (isProfileIncomplete) {
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-        await supabase
-          .from("profiles")
-          .update({ user_type: "client" })
-          .eq("user_id", userId);
+        if (!profile) {
+          const { data: authUser } = await supabase.auth.getUser();
+          const u = authUser?.user;
+          await supabase.from("profiles").upsert(
+            {
+              user_id: userId,
+              email: u?.email ?? "",
+              full_name: u?.user_metadata?.full_name ?? "",
+              user_type: "client",
+            },
+            { onConflict: "user_id" }
+          );
+        } else {
+          await supabase
+            .from("profiles")
+            .update({ user_type: "client" })
+            .eq("user_id", userId);
+        }
         await refreshProfile();
         sessionStorage.setItem("chamo_open_location_modal", "1");
+        sessionStorage.setItem("chamo_oauth_just_landed", "1");
         navigate(getRedirectPath("/home"), { replace: true });
         return;
       }
 
       localStorage.removeItem("signup_in_progress");
       localStorage.removeItem("manual_login_intent");
+      sessionStorage.setItem("chamo_oauth_just_landed", "1");
       navigate(getRedirectPath("/home"), { replace: true });
       
     } catch (err) {
@@ -590,7 +606,9 @@ const Login = () => {
           options: {
             redirectTo,
             skipBrowserRedirect: true,
-            queryParams: { prompt: 'select_account' },
+            queryParams: provider === 'apple'
+              ? { scope: 'name email' }
+              : { prompt: 'select_account' },
           }
         });
         if (error) throw error;
@@ -617,7 +635,9 @@ const Login = () => {
           provider,
           options: {
             redirectTo,
-            queryParams: { prompt: 'select_account' },
+            queryParams: provider === 'apple'
+              ? { scope: 'name email' }
+              : { prompt: 'select_account' },
           }
         });
 

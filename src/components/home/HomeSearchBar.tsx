@@ -4,7 +4,7 @@ import { Search, Star, BadgeCheck, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { sameCityState } from "@/lib/locationUtils";
-import { SEARCH_ALIASES } from "@/lib/searchAliases";
+import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
 
 /** Normaliza para busca: minúsculo, sem acentos */
 const norm = (s: string) =>
@@ -133,8 +133,12 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
     ? professionals.filter((item) => professionalMatchesQuery(searchQuery.trim(), item))
     : [];
 
-  // Ordenar: primeiro verificados, depois maior rating
+  // Ordenar: 1) significado mais buscado (ex.: pintor de casa, estética beleza), 2) verificados, 3) maior rating
+  const query = searchQuery.trim();
   const sorted = [...filtered].sort((a, b) => {
+    const aPrimary = isPrimaryMatch(query, a.category_name, a.profession_name);
+    const bPrimary = isPrimaryMatch(query, b.category_name, b.profession_name);
+    if (aPrimary !== bPrimary) return aPrimary ? -1 : 1;
     if (a.verified !== b.verified) return a.verified ? -1 : 1;
     return (b.rating ?? 0) - (a.rating ?? 0);
   });

@@ -190,3 +190,51 @@ export const SEARCH_ALIASES: Record<string, string[]> = {
   foto: ["foto", "fotografia", "fotografo"],
   filmagem: ["filmagem", "video", "producao"],
 };
+
+const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+/**
+ * Termos "mais buscados" por chave de busca: profissionais que tenham algum destes na categoria/profissão
+ * aparecem primeiro (ex.: pintor de casa antes de pintura automotiva; estética beleza antes de estética automotiva).
+ */
+export const SEARCH_PRIMARY: Record<string, string[]> = {
+  pintor: ["construcao", "reforma", "pintor"],
+  pint: ["construcao", "reforma", "pintor"],
+  pintura: ["construcao", "reforma", "pintor", "pintura residencial", "pintura predial"],
+  estetica: ["beleza", "barbearia", "cabeleireiro", "manicure", "unha", "maquiagem"],
+  estet: ["beleza", "barbearia", "cabeleireiro", "manicure", "unha", "maquiagem"],
+  mecanico: ["mecanico", "mecanica", "automotivo"],
+  funilaria: ["funilaria", "funileiro", "automotivo"],
+  "pintura automotiva": ["automotivo", "funilaria", "estetica automotiva"],
+  eletricista: ["eletricista", "eletrica", "automacao"],
+  encanador: ["encanador", "encanamento", "hidraulica"],
+  pedreiro: ["pedreiro", "construcao", "reforma", "alvenaria"],
+  ingles: ["ingles", "idiomas", "escola de idiomas"],
+  idiomas: ["idiomas", "escola de idiomas"],
+  designer: ["design", "designer", "design grafico"],
+};
+
+/** Retorna palavras-chave de "significado mais buscado" para a query; se a categoria/profissão do pro contiver alguma, ele sobe na lista */
+export function getPrimaryKeywords(query: string): string[] {
+  const q = norm(query.trim());
+  if (!q) return [];
+  const keys = Object.keys(SEARCH_PRIMARY).filter((key) => q.includes(norm(key)) || norm(key).includes(q));
+  const set = new Set<string>();
+  for (const key of keys) {
+    for (const kw of SEARCH_PRIMARY[key]) set.add(kw);
+  }
+  return Array.from(set);
+}
+
+/** True se o profissional é do "significado mais buscado" para essa query (ex.: pintor de casa, estética beleza) */
+export function isPrimaryMatch(query: string, categoryName: string, professionName: string): boolean {
+  const keywords = getPrimaryKeywords(query);
+  if (keywords.length === 0) return false;
+  const cat = norm(categoryName);
+  const prof = norm(professionName);
+  const combined = `${cat} ${prof}`;
+  for (const kw of keywords) {
+    if (combined.includes(kw)) return true;
+  }
+  return false;
+}

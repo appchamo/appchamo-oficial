@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation, normalizeStateToUF } from "@/lib/locationUtils";
-import { SEARCH_ALIASES } from "@/lib/searchAliases";
+import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -279,8 +279,12 @@ const Search = () => {
       return true;
     });
 
-    // 3. Ordena: primeiro verificados, depois maior rating; se tiver GPS, desempata por distância
+    // 3. Ordena: 1) significado mais buscado (pintor casa, estética beleza), 2) verificados, 3) rating, 4) distância
+    const q = search.trim();
     result.sort((a, b) => {
+      const aPrimary = isPrimaryMatch(q, a.category_name, a.profession_name);
+      const bPrimary = isPrimaryMatch(q, b.category_name, b.profession_name);
+      if (aPrimary !== bPrimary) return aPrimary ? -1 : 1;
       if (a.verified !== b.verified) return a.verified ? -1 : 1;
       if (b.rating !== a.rating) return b.rating - a.rating;
       if (userCoords && a.distance !== undefined && b.distance !== undefined) return (a.distance || 999) - (b.distance || 999);

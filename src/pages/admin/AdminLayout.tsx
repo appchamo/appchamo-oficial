@@ -16,7 +16,7 @@ interface SectionConfig {
 const DEFAULT_SECTIONS: SectionConfig[] = [
   { id: "welcome", label: "Bem-vindo", visible: true, order: 0, title: "Bem-vindo, {nome} 👋", subtitle: "Encontre o profissional ideal perto de você" },
   { id: "sponsors", label: "Patrocinadores", visible: true, order: 1, title: "Patrocinadores", subtitle: "Patrocinado" },
-  { id: "jobs", label: "Vagas de Emprego", visible: true, order: 2, title: "🔥 {count} vaga(s) de emprego disponíveis", subtitle: "Confira as oportunidades na sua região" },
+  { id: "jobs", label: "Vagas de Emprego", visible: true, order: 2, title: "{count} vaga(s) de emprego disponíveis", subtitle: "Confira as oportunidades na sua região" },
   { id: "search", label: "Lupa de Pesquisa", visible: true, order: 3, title: "Buscar profissional ou serviço...", subtitle: "Ex: eletricista, encanador, designer..." },
   { id: "featured", label: "Profissionais em Destaque", visible: true, order: 4, title: "Profissionais em destaque" },
   { id: "categories", label: "Categorias", visible: true, order: 5, title: "Categorias" },

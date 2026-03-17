@@ -101,6 +101,7 @@ export function OnboardingTutorial() {
     try {
       localStorage.setItem(STORAGE_KEY, "1");
       sessionStorage.removeItem("chamo_oauth_just_landed");
+      localStorage.removeItem("chamo_oauth_just_landed");
     } catch (_) {}
     setVisible(false);
     closeMenu();

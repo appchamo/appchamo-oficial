@@ -152,12 +152,34 @@ serve(async (req) => {
         .eq("client_id", user.id)
         .maybeSingle();
 
-      return new Response(
-        JSON.stringify({ confirmed: tx?.status === "completed" ?? false }),
-        {
+      // Já confirmado no nosso banco
+      if (tx?.status === "completed") {
+        return new Response(JSON.stringify({ confirmed: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Fallback: se webhook falhar/atrasar, consulta direto no Asaas
+      try {
+        const payment = await asaasRequest(`/payments/${payment_id}`, "GET");
+        const status = String(payment?.status || "").toUpperCase();
+        const paid = status === "RECEIVED" || status === "CONFIRMED";
+        if (paid) {
+          await supabase
+            .from("transactions")
+            .update({ status: "completed" })
+            .eq("asaas_payment_id", payment_id)
+            .eq("client_id", user.id);
         }
-      );
+        return new Response(JSON.stringify({ confirmed: paid }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (_) {
+        // Se o Asaas estiver indisponível, não trava o app: só mantém confirmado=false
+        return new Response(JSON.stringify({ confirmed: false }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     if (!request_id || !amount) {

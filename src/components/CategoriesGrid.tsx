@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { diagLog, hardReloadOnce } from "@/lib/diag";
 import {
   Hammer, Home, Scissors, HeartPulse, Car, Monitor,
   Camera, BriefcaseBusiness, Tractor, Truck, PawPrint, Briefcase,
@@ -47,6 +48,13 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
     cancelledRef.current = false;
 
     const fetchCategories = () => {
+      diagLog("info", "categories", "fetch start");
+      const watchdog = setTimeout(() => {
+        if (!cancelledRef.current && !loaded) {
+          diagLog("warn", "categories", "fetch timeout (no response)", { ms: 8000 });
+          hardReloadOnce("categories_timeout");
+        }
+      }, 8000);
       supabase
         .from("categories")
         .select("id, name, slug, icon_name, icon_url")
@@ -54,7 +62,9 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
         .order("sort_order")
         .then(({ data, error }) => {
           if (cancelledRef.current) return;
+          clearTimeout(watchdog);
           if (error) {
+            diagLog("error", "categories", "fetch error", { message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint });
             if (retryCountRef.current < 2) {
               retryCountRef.current += 1;
               const delay = retryCountRef.current === 1 ? 800 : 2000;
@@ -64,13 +74,16 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
             setLoaded(true);
             return;
           }
+          diagLog("info", "categories", "fetch ok", { count: data?.length ?? 0 });
           if (data && data.length > 0) {
             setCategories(data);
           }
           setLoaded(true);
         })
-        .catch(() => {
+        .catch((e) => {
           if (cancelledRef.current) return;
+          clearTimeout(watchdog);
+          diagLog("error", "categories", "fetch threw", { error: String(e) });
           if (retryCountRef.current < 2) {
             retryCountRef.current += 1;
             const delay = retryCountRef.current === 1 ? 800 : 2000;

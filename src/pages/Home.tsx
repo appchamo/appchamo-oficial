@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
 import { fetchViaCep } from "@/lib/viacep";
+import { diagLog } from "@/lib/diag";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -74,12 +75,20 @@ const Home = () => {
   const [jobCount, setJobCount] = useState(0);
   const [showCoupon, setShowCoupon] = useState(false);
   const [isReady, setIsReady] = useState(false); // ✅ Controle de renderização global
+  const [contentSeed, setContentSeed] = useState(0);
   const [locationOpen, setLocationOpen] = useState(false);
   const [locationCep, setLocationCep] = useState("");
   const [locationCepLoading, setLocationCepLoading] = useState(false);
   const [locationCity, setLocationCity] = useState("");
   const [locationState, setLocationState] = useState("");
   const [locationSaving, setLocationSaving] = useState(false);
+
+  // Observação: no iOS pós-OAuth, supabase.auth.getSession() pode travar.
+  // O hard reload 1x após SIGNED_IN (em useAuth) resolve de forma confiável.
+
+  useEffect(() => {
+    diagLog("info", "home", "render state", { authLoading, isReady, userId: user?.id ?? null });
+  }, [authLoading, isReady, user?.id]);
 
   useEffect(() => {
     supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => {
@@ -158,7 +167,6 @@ const Home = () => {
   }, [sections]);
 
   // ✅ Pós-OAuth / ao entrar na Home: um único refresh após a sessão estabilizar (evita remontar 2x e travar loading)
-  const [contentSeed, setContentSeed] = useState(0);
   useEffect(() => {
     const t = setTimeout(() => {
       refreshLayout();
@@ -168,16 +176,6 @@ const Home = () => {
     }, 450);
     return () => clearTimeout(t);
   }, [user?.id]);
-
-  // ✅ Refresh forçado após OAuth (igual ao fluxo do tutorial): sempre recarrega uma vez para sessão/layout estabilizarem, tutorial aparecer e conteúdo carregar 100%
-  useEffect(() => {
-    try {
-      if (sessionStorage.getItem("chamo_oauth_just_landed") !== "1") return;
-      sessionStorage.removeItem("chamo_oauth_just_landed");
-      const t = setTimeout(() => window.location.reload(), 1200);
-      return () => clearTimeout(t);
-    } catch (_) {}
-  }, []);
 
   // ✅ Pull-to-refresh (e ao fechar tutorial): atualiza layout + força remount das seções (sponsors, featured, categorias) para carregar 100%
   const onRefresh = async () => {

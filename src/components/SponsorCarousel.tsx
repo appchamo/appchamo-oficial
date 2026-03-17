@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation } from "@/lib/locationUtils";
+import { diagLog, hardReloadOnce } from "@/lib/diag";
 
 const ITEMS_PER_PAGE = 4;
 const AUTO_ADVANCE_MS = 6000;
@@ -82,6 +83,13 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
       const select = withLocation
         ? "id, name, niche, link_url, logo_url, location_scope, location_state, location_city"
         : "id, name, niche, link_url, logo_url";
+      diagLog("info", "sponsors", "fetch start", { withLocation });
+      const watchdog = setTimeout(() => {
+        if (!cancelledRef.current && !loaded) {
+          diagLog("warn", "sponsors", "fetch timeout (no response)", { ms: 8000, withLocation });
+          hardReloadOnce(`sponsors_timeout_${withLocation ? "withLocation" : "noLocation"}`);
+        }
+      }, 8000);
       supabase
         .from("sponsors")
         .select(select)
@@ -89,7 +97,9 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         .order("sort_order")
         .then(({ data, error }) => {
           if (cancelledRef.current) return;
+          clearTimeout(watchdog);
           if (error) {
+            diagLog("error", "sponsors", "fetch error", { withLocation, message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint });
             if (withLocation) {
               fetchSponsors(false);
               return;
@@ -103,6 +113,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
             setLoaded(true);
             return;
           }
+          diagLog("info", "sponsors", "fetch ok", { count: data?.length ?? 0, withLocation });
           if (data && data.length > 0) {
             const list = (data as any[]).map((r) => ({
               id: r.id,
@@ -118,8 +129,10 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
           }
           setLoaded(true);
         })
-        .catch(() => {
+        .catch((e) => {
           if (cancelledRef.current) return;
+          clearTimeout(watchdog);
+          diagLog("error", "sponsors", "fetch threw", { withLocation, error: String(e) });
           if (withLocation) {
             fetchSponsors(false);
             return;
@@ -151,6 +164,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
       })
       .then((res) => {
         if (cancelled || !res?.data) return;
+        diagLog("info", "sponsors", "user location loaded", { state: res.data.address_state || null, city: res.data.address_city || null });
         setUserState(res.data.address_state || null);
         setUserCity(res.data.address_city || null);
       })

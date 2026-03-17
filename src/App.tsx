@@ -16,6 +16,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import { Capacitor } from "@capacitor/core";
 import { CheckCircle2, Star, Loader2 } from "lucide-react";
 import { syncAppIconBadge } from "@/lib/appBadge";
+import { diagLog, diagEnabled } from "@/lib/diag";
 
 // Lazy pages – carregam sob demanda para navegação mais rápida
 const Index = lazy(() => import("./pages/Index"));
@@ -24,6 +25,8 @@ const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
+const PostLoginGate = lazy(() => import("./pages/PostLoginGate"));
+const HardReload = lazy(() => import("./pages/HardReload"));
 const Search = lazy(() => import("./pages/Search"));
 const Categories = lazy(() => import("./pages/Categories"));
 const CategoryDetail = lazy(() => import("./pages/CategoryDetail"));
@@ -264,6 +267,19 @@ const AppContent = () => {
   const hasShownSplashRef = useRef(false);
 
   useEffect(() => {
+    if (!diagEnabled()) return;
+    const onErr = (e: ErrorEvent) => diagLog("error", "window.error", e.message || "error", { filename: e.filename, lineno: e.lineno, colno: e.colno });
+    const onRej = (e: PromiseRejectionEvent) => diagLog("error", "window.unhandledrejection", "unhandledrejection", { reason: String((e as any).reason ?? "") });
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    diagLog("info", "app", "diagnóstico ligado", { path: window.location.pathname, search: window.location.search });
+    return () => {
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+  }, []);
+
+  useEffect(() => {
     if (loading) {
       setShowCustomSplash(false);
       return;
@@ -416,6 +432,8 @@ const AppContent = () => {
         <Route path="/" element={session ? <RedirectLoggedIn /> : <Index />} />
         <Route path="/login" element={<Login />} />
         <Route path="/oauth-callback" element={<OAuthCallback />} />
+        <Route path="/post-login" element={<PostLoginGate />} />
+        <Route path="/hard-reload" element={<HardReload />} />
         <Route path="/terms-of-use" element={<TermsOfUse />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/exclusao-de-conta" element={<ExclusaoDeConta />} />

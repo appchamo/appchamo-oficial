@@ -223,6 +223,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else if (exchangeData?.session) {
           exchangeOk = true;
           await Preferences.remove({ key: OAUTH_FAILED_KEY }).catch(() => {});
+          // Marca pós-OAuth para a Home forçar carregamento (inclui caso de usuário sem perfil ainda)
+          try {
+            sessionStorage.setItem("chamo_oauth_just_landed", "1");
+            localStorage.setItem("chamo_oauth_just_landed", "1");
+            // iOS: esta flag aciona um único hard reload após SIGNED_IN (evita piscar em loops)
+            localStorage.setItem("chamo_force_hard_reload", "1");
+          } catch (_) {}
         }
       } catch (e) {
         console.error("[OAuth] Deep link error:", e);
@@ -236,14 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const path = window.location.pathname || '';
           const alreadyOnLogin = path.includes('login');
           if (exchangeOk) {
-            try {
-              sessionStorage.setItem('chamo_oauth_just_landed', '1');
-            } catch (_) {}
-            setTimeout(() => {
-              try {
-                window.location.replace((window.location.origin || '') + '/home');
-              } catch (_) {}
-            }, 1200);
+            // Igual ao Google: não navegar daqui; a página de Login reage a session?.user e chama checkDeviceLimitAndRedirect → navigate("/home") com a flag
           } else if (!alreadyOnLogin) {
             setTimeout(() => {
               try {
@@ -251,7 +251,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } catch (_) {}
             }, 1200);
           } else {
-            // Ficamos na Login com loading=true → dispara evento para a tela desbloquear "Entrando..."
             window.dispatchEvent(new CustomEvent('chamo-oauth-done', { detail: { success: false } }));
           }
         }
@@ -299,6 +298,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false);
         } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           loadUserData(sess ?? null);
+
+          // iOS pós-OAuth (Apple/Google via deep link): faz hard reload APENAS quando uma flag mandar.
+          // Isso evita piscar em loops e impede reloads em logins normais.
+          if (event === "SIGNED_IN" && Capacitor.getPlatform() === "ios") {
+            try {
+              // O SIGNED_IN pode chegar antes da flag ser gravada (race do exchange). Por isso rechecamos após um pequeno delay.
+              const doneKey = "chamo_ios_post_oauth_hard_reload_done";
+              if (localStorage.getItem(doneKey) === "1") return;
+              localStorage.setItem(doneKey, "1");
+
+              const tryHardReload = () => {
+                try {
+                  const flagKey = "chamo_force_hard_reload";
+                  const should =
+                    localStorage.getItem(flagKey) === "1" ||
+                    localStorage.getItem("chamo_oauth_just_landed") === "1" ||
+                    sessionStorage.getItem("chamo_oauth_just_landed") === "1";
+                  if (!should) {
+                    // Não era OAuth: libera para futuros logins
+                    localStorage.removeItem(doneKey);
+                    return;
+                  }
+                  localStorage.removeItem(flagKey);
+                  const origin = window.location.origin || "";
+                  window.location.replace(origin + "/hard-reload?to=%2Fhome");
+                } catch (_) {
+                  try { localStorage.removeItem(doneKey); } catch (_) {}
+                }
+              };
+
+              // 1) tentativa imediata (caso a flag já exista)
+              tryHardReload();
+              // 2) tentativa curta depois (cobre corrida onde SIGNED_IN vem antes da flag)
+              setTimeout(tryHardReload, 350);
+            } catch (_) {}
+          }
         }
       } catch (e) {
         console.error("Erro no listener de auth:", e);

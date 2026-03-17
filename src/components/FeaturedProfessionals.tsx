@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { sameCityState } from "@/lib/locationUtils";
+import { diagLog, hardReloadOnce } from "@/lib/diag";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
@@ -68,6 +69,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         .single();
       if (data?.address_city) setUserCity(data.address_city);
       if (data?.address_state) setUserState(data.address_state);
+      diagLog("info", "featured", "user location", { city: data?.address_city ?? null, state: data?.address_state ?? null, hasCoords: data?.latitude != null && data?.longitude != null });
       if (data?.latitude != null && data?.longitude != null) {
         setUserCoords({ lat: data.latitude, lng: data.longitude });
         return;
@@ -86,7 +88,12 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const loadPros = useCallback(async () => {
     setProsLoaded(false);
     try {
-    const { data: pros } = await supabase
+    diagLog("info", "featured", "pros fetch start");
+    const watchdog = setTimeout(() => {
+      diagLog("warn", "featured", "pros fetch timeout (no response)", { ms: 8000 });
+      hardReloadOnce("featured_pros_timeout");
+    }, 8000);
+    const { data: pros, error: prosErr } = await supabase
       .from("professionals")
       .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name)")
       .eq("active", true)
@@ -95,8 +102,13 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       .eq("verified", true)
       .order("rating", { ascending: false })
       .limit(80);
+    clearTimeout(watchdog);
+    if (prosErr) {
+      diagLog("error", "featured", "pros fetch error", { message: prosErr.message, code: (prosErr as any).code, details: (prosErr as any).details, hint: (prosErr as any).hint });
+    }
 
     if (!pros || pros.length === 0) {
+      diagLog("warn", "featured", "no pros returned");
       setProfessionals([]);
       setProsLoaded(true);
       return;
@@ -108,6 +120,8 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
       supabase.from("profiles").select("user_id, latitude, longitude, address_city, address_state").in("user_id", userIds),
     ]);
+    if (profilesRes.error) diagLog("error", "featured", "profiles_public error", { message: profilesRes.error.message, code: (profilesRes.error as any).code });
+    if (locationsRes.error) diagLog("error", "featured", "profiles (location) error", { message: locationsRes.error.message, code: (locationsRes.error as any).code });
 
     const profileMap = new Map(
       ((profilesRes.data || []) as { user_id: string; full_name: string; avatar_url: string | null }[]).map((p) => [p.user_id, p])
@@ -140,6 +154,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       : withLocation;
     const top10 = filtered.slice(0, 10).map(({ _city, _state, ...p }) => p);
 
+    diagLog("info", "featured", "pros computed", { total: pros.length, filtered: filtered.length, shown: top10.length });
     setProfessionals(top10);
     } finally {
       setProsLoaded(true);

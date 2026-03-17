@@ -384,6 +384,23 @@ const Login = () => {
         return;
       }
 
+      // 1) Verifica se já existe cadastro com esse e-mail na tabela de perfis
+      if (authEmail) {
+        const { data: existingByEmail } = await supabase
+          .from("profiles")
+          .select("id")
+          .ilike("email", authEmail)
+          .maybeSingle();
+
+        if (!existingByEmail) {
+          // Não existe perfil com esse e-mail → fluxo de cadastro
+          localStorage.removeItem("signup_in_progress");
+          localStorage.removeItem("manual_login_intent");
+          navigate("/signup", { replace: true });
+          return;
+        }
+      }
+
       const { profile, roles } = await fetchProfileWithRetry(userId);
 
       const profileEmail = (profile?.email || "").toLowerCase().trim();
@@ -405,7 +422,9 @@ const Login = () => {
         return;
       }
 
-      // Sem cadastro (sem perfil ou pending_signup): vai para Home como cliente (não manda mais para signup).
+      // Sem cadastro (sem perfil ou pending_signup):
+      // - se NÃO existir perfil ainda → manda para o fluxo de cadastro (Signup)
+      // - se já existir perfil porém incompleto/pending_signup → ajusta para client e segue para Home
       const isProfileIncomplete =
         !profile ||
         !profile.user_type ||
@@ -414,35 +433,32 @@ const Login = () => {
       if (isProfileIncomplete) {
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
+
+        // Novo usuário social (Google/Apple) sem cadastro: vai para Signup
         if (!profile) {
-          const { data: authUser } = await supabase.auth.getUser();
-          const u = authUser?.user;
-          await supabase.from("profiles").upsert(
-            {
-              user_id: userId,
-              email: u?.email ?? "",
-              full_name: u?.user_metadata?.full_name ?? "",
-              user_type: "client",
-            },
-            { onConflict: "user_id" }
-          );
-        } else {
-          await supabase
-            .from("profiles")
-            .update({ user_type: "client" })
-            .eq("user_id", userId);
+          navigate("/signup", { replace: true });
+          return;
         }
+
+        // Já existe perfil mas está incompleto/pending_signup: ajusta user_type e segue
+        await supabase
+          .from("profiles")
+          .update({ user_type: "client" })
+          .eq("user_id", userId);
+
         await refreshProfile();
         sessionStorage.setItem("chamo_open_location_modal", "1");
         sessionStorage.setItem("chamo_oauth_just_landed", "1");
-        navigate(getRedirectPath("/home"), { replace: true });
+        localStorage.setItem("chamo_oauth_just_landed", "1");
+        navigate(getRedirectPath("/post-login"), { replace: true });
         return;
       }
 
       localStorage.removeItem("signup_in_progress");
       localStorage.removeItem("manual_login_intent");
       sessionStorage.setItem("chamo_oauth_just_landed", "1");
-      navigate(getRedirectPath("/home"), { replace: true });
+      localStorage.setItem("chamo_oauth_just_landed", "1");
+      navigate(getRedirectPath("/post-login"), { replace: true });
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);

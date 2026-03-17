@@ -1,5 +1,6 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRefresh } from "@/contexts/RefreshContext";
 import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -69,9 +70,9 @@ const ProfessionalProfile = () => {
   const [savingCategoryProfession, setSavingCategoryProfession] = useState(false);
   const [planId, setPlanId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase
+  const loadProfile = useCallback(async () => {
+    if (!id) return;
+    const { data } = await supabase
         .from("professionals")
         .select("id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled")
         .eq("id", id!)
@@ -155,10 +156,14 @@ const ProfessionalProfile = () => {
           })));
         }
       }
-      setLoading(false);
-    };
-    if (id) load();
+    setLoading(false);
   }, [id]);
+
+  useRefresh(loadProfile);
+
+  useEffect(() => {
+    if (id) loadProfile();
+  }, [id, loadProfile]);
 
   // Realtime: listen for availability_status changes on this professional
   useEffect(() => {

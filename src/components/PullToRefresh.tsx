@@ -107,26 +107,30 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
   const rotation = progress * 360;
   const contentOffset = refreshing ? REFRESH_OFFSET : pullDistance;
   const showIndicator = contentOffset > 0;
+  const indicatorOpacity = showIndicator ? Math.min(1, progress * 2) : 0;
 
   return (
-    <div className="flex flex-col min-h-0">
-      {/* Faixa que cresce ao puxar – a tela “arrasta” porque o conteúdo desce junto */}
+    <>
+      {/* Faixa fixa por cima de tudo – aparece ao puxar com fade-in */}
       <div
-        className="flex-shrink-0 flex items-center justify-center overflow-hidden"
+        className="fixed left-0 right-0 flex items-center justify-center z-[100] overflow-hidden"
         style={{
+          top: 0,
           height: contentOffset,
           minHeight: 0,
           background: "var(--background)",
           transition: useTransition ? "height 0.25s ease-out" : "none",
+          pointerEvents: "none",
         }}
       >
         <div
-          className="flex items-center justify-center flex-shrink-0 transition-[opacity,transform] duration-150"
+          className="flex items-center justify-center flex-shrink-0"
           style={{
             width: INDICATOR_SIZE,
             height: INDICATOR_SIZE,
-            opacity: showIndicator ? 1 : 0,
+            opacity: indicatorOpacity,
             transform: `translateY(${showIndicator ? 0 : -8}px)`,
+            transition: useTransition ? "opacity 0.2s ease-out, transform 0.2s ease-out" : "none",
           }}
         >
           <div className="rounded-full bg-card border-2 border-border shadow-lg flex items-center justify-center w-full h-full">
@@ -141,7 +145,15 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
           </div>
         </div>
       </div>
-      {children}
-    </div>
+      {/* Conteúdo desce quando puxa */}
+      <div
+        style={{
+          marginTop: contentOffset,
+          transition: useTransition ? "margin-top 0.25s ease-out" : "none",
+        }}
+      >
+        {children}
+      </div>
+    </>
   );
 }

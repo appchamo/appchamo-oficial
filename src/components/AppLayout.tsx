@@ -17,6 +17,8 @@ const MemoizedBottomNav = memo(BottomNav);
 const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
   const location = useLocation();
   const isHome = location.pathname === "/home";
+  const isProProfile = /^\/pro\/[^/]+$/.test(location.pathname) || /^\/professional\/[^/]+$/.test(location.pathname);
+  const usePullToRefresh = isHome || isProProfile;
 
   const mainContent = (
     <main
@@ -31,7 +33,7 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
     <MenuProvider>
       <div className={`min-h-[100dvh] pb-20 flex flex-col ${isHome ? "bg-secondary" : "bg-background"}`}>
         {showHeader && <MemoizedHeader />}
-        {isHome ? <PullToRefresh>{mainContent}</PullToRefresh> : mainContent}
+        {usePullToRefresh ? <PullToRefresh>{mainContent}</PullToRefresh> : mainContent}
         <MemoizedBottomNav />
         <OnboardingTutorial />
       </div>

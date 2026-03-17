@@ -68,6 +68,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const totalPages = pages.length; // para os dots
 
   const fromCloneToReset = useRef(false);
+  const isScrollFromUser = useRef(false);
   const retryCountRef = useRef(0);
   const cancelledRef = useRef(false);
 
@@ -160,14 +161,27 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const scrollToPage = useCallback((pageIndex: number) => {
     if (!scrollRef.current || totalPages === 0) return;
     const page = Math.max(0, Math.min(pageIndex, totalPages - 1));
+    isScrollFromUser.current = false;
     setActivePage(page);
     const left = page * scrollRef.current.clientWidth;
     scrollRef.current.scrollTo({ left, behavior: "smooth" });
   }, [totalPages]);
 
+  const syncPageFromScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || totalDisplayPages === 0) return;
+    const width = el.clientWidth;
+    const scrollLeft = el.scrollLeft;
+    const pageIndex = Math.round(scrollLeft / width);
+    const clamped = Math.max(0, Math.min(pageIndex, totalDisplayPages - 1));
+    isScrollFromUser.current = true;
+    setActivePage(clamped);
+  }, [totalDisplayPages]);
+
   useEffect(() => {
     if (isPaused || totalDisplayPages <= 1) return;
     const interval = setInterval(() => {
+      isScrollFromUser.current = false;
       setActivePage((p) => {
         const next = (p + 1) % totalDisplayPages;
         if (p === totalDisplayPages - 1 && next === 0) fromCloneToReset.current = true;
@@ -179,11 +193,33 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
 
   useEffect(() => {
     if (!scrollRef.current || totalDisplayPages === 0) return;
+    if (isScrollFromUser.current) {
+      isScrollFromUser.current = false;
+      return;
+    }
     const left = activePage * scrollRef.current.clientWidth;
     const behavior = activePage === 0 && fromCloneToReset.current ? "auto" : "smooth";
     if (fromCloneToReset.current) fromCloneToReset.current = false;
     scrollRef.current.scrollTo({ left, behavior });
   }, [activePage, totalDisplayPages]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || totalDisplayPages <= 1) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        syncPageFromScroll();
+        raf = 0;
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [totalDisplayPages, syncPageFromScroll]);
 
   const handleClick = (sponsor: Sponsor) => {
     window.open(sponsor.link_url, "_blank");
@@ -226,6 +262,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
           <div
             key={pageIndex}
             className="flex gap-[14px] flex-[0_0_100%] min-w-0 shrink-0 snap-start justify-evenly items-stretch px-0.5"
+            style={{ scrollSnapStop: "always" }}
           >
             {pageSponsors.map((sponsor) => (
               <button

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Camera, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ImageCropUpload from "@/components/ImageCropUpload";
 
@@ -57,10 +58,18 @@ const StepProfile = ({ accountType, onNext, onBack }: Props) => {
   const handleNext = () => {
     if (!avatarUrl) {
       setAvatarError(true);
+      toast({
+        title: "Foto de perfil obrigatória",
+        description: "Toque no ícone laranja abaixo da foto, escolha uma imagem e confirme o recorte para enviar.",
+        variant: "destructive",
+      });
       return;
     }
     setAvatarError(false);
-    if (accountType === "professional" && !categoryId) return;
+    if (accountType === "professional" && !categoryId) {
+      toast({ title: "Selecione sua categoria / área.", variant: "destructive" });
+      return;
+    }
     const servicesFiltered = accountType === "professional" ? services.filter(s => s.trim()) : undefined;
     onNext({
       avatarUrl,
@@ -175,13 +184,12 @@ const StepProfile = ({ accountType, onNext, onBack }: Props) => {
           )}
 
           <div className="flex gap-2 pt-1">
-            <button onClick={onBack}
+            <button type="button" onClick={onBack}
               className="flex-1 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors">
               Voltar
             </button>
-            <button onClick={handleNext}
-              disabled={(accountType === "professional" && !categoryId) || !avatarUrl}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
+            <button type="button" onClick={handleNext}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
               Finalizar ✓
             </button>
           </div>

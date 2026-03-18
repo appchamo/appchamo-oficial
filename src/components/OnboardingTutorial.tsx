@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMenu } from "@/contexts/MenuContext";
-import { useTriggerRefresh } from "@/contexts/RefreshContext";
 import { Button } from "@/components/ui/button";
 import { Menu, LayoutGrid, Ticket, HelpCircle, Sparkles, ArrowLeft, Briefcase } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -82,7 +81,6 @@ export function OnboardingTutorial() {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { openMenu, closeMenu } = useMenu();
-  const triggerRefresh = useTriggerRefresh();
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(1);
   const [spotlightRect, setSpotlightRect] = useState<DOMRect | null>(null);
@@ -102,25 +100,20 @@ export function OnboardingTutorial() {
       localStorage.setItem(STORAGE_KEY, "1");
       sessionStorage.removeItem("chamo_oauth_just_landed");
       localStorage.removeItem("chamo_oauth_just_landed");
+      window.dispatchEvent(new CustomEvent("chamo-tutorial-dismissed"));
     } catch (_) {}
     setVisible(false);
     closeMenu();
-    // Reload para recarregar a tela e tudo que depende do layout (ex.: após OAuth no iOS)
-    requestAnimationFrame(() => {
-      window.location.reload();
-    });
   }, [closeMenu]);
 
   const goNext = useCallback(() => {
     if (currentIndex >= totalSteps) {
       finishTutorial();
-      triggerRefresh();
       return;
     }
-    triggerRefresh();
     const next = stepsToShow[currentIndex];
     if (next) setStep(next.id);
-  }, [currentIndex, totalSteps, stepsToShow, finishTutorial, triggerRefresh]);
+  }, [currentIndex, totalSteps, stepsToShow, finishTutorial]);
 
   const goPrev = useCallback(() => {
     if (currentIndex <= 1) return;
@@ -133,8 +126,7 @@ export function OnboardingTutorial() {
 
   const skip = useCallback(() => {
     finishTutorial();
-    triggerRefresh();
-  }, [finishTutorial, triggerRefresh]);
+  }, [finishTutorial]);
 
   // Show tutorial only when: user logged in and onboarding not done
   useEffect(() => {

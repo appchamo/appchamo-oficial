@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
+import { Capacitor } from "@capacitor/core";
 import {
   Hammer, Home, Scissors, HeartPulse, Car, Monitor,
   Camera, BriefcaseBusiness, Tractor, Truck, PawPrint, Briefcase,
@@ -38,6 +39,7 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
   const [expanded, setExpanded] = useState(false);
   const retryCountRef = useRef(0);
   const cancelledRef = useRef(false);
+  const hangRetryRef = useRef(0);
   const cols = typeof window !== "undefined" && window.innerWidth >= 640 ? 5 : 4;
   const visibleCount = cols * 2;
 
@@ -45,16 +47,26 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
     setLoaded(false);
     setCategories([]);
     retryCountRef.current = 0;
+    hangRetryRef.current = 0;
     cancelledRef.current = false;
 
     const fetchCategories = () => {
       diagLog("info", "categories", "fetch start");
+      let aborted = false;
+      const timeoutMs = Capacitor.isNativePlatform() ? 22_000 : 12_000;
       const watchdog = setTimeout(() => {
-        if (!cancelledRef.current && !loaded) {
-          diagLog("warn", "categories", "fetch timeout (no response)", { ms: 8000 });
-          hardReloadOnce("categories_timeout");
+        if (cancelledRef.current || aborted) return;
+        aborted = true;
+        diagLog("warn", "categories", "fetch timeout — nova tentativa", { ms: timeoutMs });
+        hardReloadOnce("categories_timeout");
+        hangRetryRef.current += 1;
+        if (hangRetryRef.current <= 6) {
+          setTimeout(fetchCategories, 1_600);
+        } else {
+          hangRetryRef.current = 0;
+          setLoaded(true);
         }
-      }, 8000);
+      }, timeoutMs);
       supabase
         .from("categories")
         .select("id, name, slug, icon_name, icon_url")
@@ -62,7 +74,10 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
         .order("sort_order")
         .then(({ data, error }) => {
           if (cancelledRef.current) return;
+          if (aborted) return;
+          aborted = true;
           clearTimeout(watchdog);
+          hangRetryRef.current = 0;
           if (error) {
             diagLog("error", "categories", "fetch error", { message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint });
             if (retryCountRef.current < 2) {
@@ -82,6 +97,8 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
         })
         .catch((e) => {
           if (cancelledRef.current) return;
+          if (aborted) return;
+          aborted = true;
           clearTimeout(watchdog);
           diagLog("error", "categories", "fetch threw", { error: String(e) });
           if (retryCountRef.current < 2) {

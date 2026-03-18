@@ -158,44 +158,87 @@ const Messages = () => {
     const { data: allProfiles } = await supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", usersToFetch);
     const profileMap = new Map((allProfiles || []).map(p => [p.user_id, p]));
 
-    // O Promise.all agora só roda para no máximo 7 itens, tornando o app super rápido
-    const enriched: Thread[] = await Promise.all(unique.map(async (req: any) => {
-      const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
-      
-      if (statusData.is_deleted) return null as any;
-
-      const isClient = req.client_id === user.id;
-      const targetUserId = isClient ? proUserIdMap.get(req.professional_id) : req.client_id;
-      const profile = targetUserId ? profileMap.get(targetUserId) : null;
-      
-      const otherName = profile?.full_name || (isClient ? "Profissional" : "Cliente");
-      const otherAvatar = profile?.avatar_url || null;
-
-      const { data: lastMsg } = await supabase.from("chat_messages").select("content, created_at").eq("request_id", req.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-
-      const lastRead = statusData.last_read_at;
-      let unreadCount = 0;
-      if (lastRead) {
-        const { count } = await supabase.from("chat_messages").select("*", { count: "exact", head: true }).eq("request_id", req.id).neq("sender_id", user.id).gt("created_at", lastRead);
-        unreadCount = count || 0;
-      } else {
-        const { count } = await supabase.from("chat_messages").select("*", { count: "exact", head: true }).eq("request_id", req.id).neq("sender_id", user.id);
-        unreadCount = count || 0;
+    /** 1 RPC em vez de até 3×N requests por thread (última msg + não lidas) */
+    type Sum = { lastMessage: string | null; lastMessageTime: string | null; unreadCount: number };
+    const summaryByReq = new Map<string, Sum>();
+    const { data: sums, error: rpcErr } = await supabase.rpc("get_chat_thread_summaries", {
+      _request_ids: threadIds,
+      _user_id: user.id,
+    });
+    if (!rpcErr && Array.isArray(sums)) {
+      for (const row of sums as {
+        request_id: string;
+        last_message: string | null;
+        last_message_at: string | null;
+        unread_count: number | string;
+      }[]) {
+        summaryByReq.set(row.request_id, {
+          lastMessage: row.last_message ?? null,
+          lastMessageTime: row.last_message_at ?? null,
+          unreadCount: Number(row.unread_count) || 0,
+        });
       }
+    } else {
+      for (const req of unique) {
+        const st = statusMap.get(req.id) || {};
+        const { data: lastMsg } = await supabase
+          .from("chat_messages")
+          .select("content, created_at")
+          .eq("request_id", req.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        let unreadCount = 0;
+        if (st.last_read_at) {
+          const { count } = await supabase
+            .from("chat_messages")
+            .select("*", { count: "exact", head: true })
+            .eq("request_id", req.id)
+            .neq("sender_id", user.id)
+            .gt("created_at", st.last_read_at);
+          unreadCount = count || 0;
+        } else {
+          const { count } = await supabase
+            .from("chat_messages")
+            .select("*", { count: "exact", head: true })
+            .eq("request_id", req.id)
+            .neq("sender_id", user.id);
+          unreadCount = count || 0;
+        }
+        summaryByReq.set(req.id, {
+          lastMessage: lastMsg?.content ?? null,
+          lastMessageTime: lastMsg?.created_at ?? null,
+          unreadCount,
+        });
+      }
+    }
 
-      return {
-        ...req,
-        otherName,
-        otherAvatar,
-        lastMessage: lastMsg?.content || null,
-        lastMessageTime: lastMsg?.created_at || req.updated_at,
-        unreadCount,
-        is_archived: statusData.is_archived,
-        manual_unread: statusData.manual_unread
-      };
-    }));
+    const enriched: Thread[] = unique
+      .map((req: any) => {
+        const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
+        if (statusData.is_deleted) return null as any;
+        const isClient = req.client_id === user.id;
+        const targetUserId = isClient ? proUserIdMap.get(req.professional_id) : req.client_id;
+        const profile = targetUserId ? profileMap.get(targetUserId) : null;
+        const sum = summaryByReq.get(req.id);
+        return {
+          ...req,
+          otherName: profile?.full_name || (isClient ? "Profissional" : "Cliente"),
+          otherAvatar: profile?.avatar_url || null,
+          lastMessage: sum?.lastMessage ?? null,
+          lastMessageTime: sum?.lastMessageTime || req.updated_at,
+          unreadCount: sum?.unreadCount ?? 0,
+          is_archived: statusData.is_archived,
+          manual_unread: statusData.manual_unread,
+        };
+      })
+      .filter((t) => t !== null) as Thread[];
 
-    const finalThreads = enriched.filter(t => t !== null).sort((a, b) => new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime());
+    const finalThreads = enriched.sort(
+      (a, b) =>
+        new Date(b.lastMessageTime || b.updated_at).getTime() -
+        new Date(a.lastMessageTime || a.updated_at).getTime()
+    );
     setThreads(finalThreads);
     if (!isBackgroundUpdate) setLoading(false);
   }, [page]); // Adicionado `page` como dependência para carregar mais quando mudar

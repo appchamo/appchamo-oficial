@@ -7,8 +7,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatCpf, validateCpf } from "@/lib/formatters";
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
+import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 
-type Step = "cpf" | "documents" | "profile";
+type Step = "cpf" | "doc-notice" | "documents" | "profile";
 
 const BecomeProfessional = () => {
   const navigate = useNavigate();
@@ -28,7 +29,7 @@ const BecomeProfessional = () => {
       return;
     }
     if (profile && step === null) {
-      setStep(needsCpf ? "cpf" : "documents");
+      setStep(needsCpf ? "cpf" : "doc-notice");
     }
   }, [profile, navigate, needsCpf, step]);
 
@@ -50,7 +51,7 @@ const BecomeProfessional = () => {
       if (error) throw error;
       await refreshProfile();
       setCameFromCpfStep(true);
-      setStep("documents");
+      setStep("doc-notice");
     } catch (err: any) {
       toast({ title: "Erro", description: err?.message || "Não foi possível salvar o CPF.", variant: "destructive" });
     }
@@ -103,7 +104,7 @@ const BecomeProfessional = () => {
           .from("professionals")
           .insert({
             user_id: user.id,
-            profile_status: "approved",
+            profile_status: "pending",
             category_id: profileData.categoryId || null,
             profession_id: profileData.professionId || null,
             experience: profileData.experience || null,
@@ -193,6 +194,26 @@ const BecomeProfessional = () => {
 
   return (
     <>
+      {step === "doc-notice" && (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
+          <div className="w-full max-w-sm text-center mb-4">
+            <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
+            <p className="text-sm text-muted-foreground">Tornar-se profissional</p>
+            <button type="button" onClick={() => navigate("/home")} className="text-xs text-primary mt-1 hover:underline">
+              ← Voltar ao início
+            </button>
+          </div>
+          <DocumentsNoticeModal
+            open
+            onContinue={() => setStep("documents")}
+            onBack={() => {
+              if (cameFromCpfStep) setStep("cpf");
+              else navigate("/home");
+            }}
+          />
+        </div>
+      )}
+
       {step === "cpf" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
           <div className="w-full max-w-sm">
@@ -234,7 +255,7 @@ const BecomeProfessional = () => {
         <StepDocuments
           documentType="cpf"
           onNext={handleDocumentsNext}
-          onBack={() => (cameFromCpfStep ? setStep("cpf") : navigate("/home"))}
+          onBack={() => setStep("doc-notice")}
         />
       )}
 

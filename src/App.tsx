@@ -164,10 +164,27 @@ const SPLASH_KEYS = ["splash_logo_url", "splash_bg_color", "splash_animation", "
 const SPLASH_SHOWN_KEY = "chamo_splash_shown";
 
 /** No Android, cria o canal "default" logo na abertura do app para push em background aparecer. */
-/** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk; demais → /post-login (decisão Home vs Signup) */
+/** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk; demais → /home */
 const RedirectLoggedIn = () => {
   const { user, profile, loading } = useAuth();
   const email = (user?.email || "").toLowerCase().trim();
+  const [signupInProgress, setSignupInProgress] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("signup_in_progress") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setSignupInProgress(localStorage.getItem("signup_in_progress") === "true");
+    } catch {
+      // ignore
+    }
+  }, []);
 
   if (email === "admin@appchamo.com") return <Navigate to="/admin" replace />;
   if (email === "suporte@appchamo.com") return <Navigate to="/suporte-desk" replace />;
@@ -180,8 +197,16 @@ const RedirectLoggedIn = () => {
     );
   }
 
-  // Logado (não-admin/suporte): delega decisão para PostLoginGate (/post-login)
-  return <Navigate to="/post-login" replace />;
+  // Se o social foi iniciado a partir do fluxo de cadastro, respeitar esse fluxo:
+  // mesmo logado, o usuário deve voltar para o Signup para completar dados.
+  if (signupInProgress) {
+    return <Navigate to="/signup" replace />;
+  }
+
+  // Logado (não-admin/suporte): só entra na Home se o cadastro estiver completo.
+  // profile ainda não carregado deve cair no gate.
+  if (!profile) return <Navigate to="/post-login" replace />;
+  return <Navigate to="/home" replace />;
 };
 
 const AndroidPushChannelInit = () => {
@@ -221,17 +246,26 @@ const AppIconBadgeClearWhenLoggedOut = () => {
   return null;
 };
 
-/** No mobile: com sessão ativa, redireciona rotas de auth (/oauth-callback, /login) para /post-login para nunca ficar preso após OAuth. */
+/** No mobile: com sessão ativa, redireciona rotas de auth (/oauth-callback, /login).
+ * - Se fluxo veio de "Cadastrar" (signup_in_progress): volta para /signup.
+ * - Caso contrário: manda para /home.
+ */
 const OAuthCallbackRedirectGuard = () => {
   const { session, loading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || loading) return;
-    if (!session?.user) return;
+    if (!session?.user) return; 
     const path = location.pathname;
     if (path === "/oauth-callback" || path === "/login") {
-      navigate("/post-login", { replace: true });
+      let fromSignup = false;
+      try {
+        fromSignup = localStorage.getItem("signup_in_progress") === "true";
+      } catch {
+        fromSignup = false;
+      }
+      navigate(fromSignup ? "/signup" : "/home", { replace: true });
     }
   }, [loading, location.pathname, session?.user, navigate]);
   return null;

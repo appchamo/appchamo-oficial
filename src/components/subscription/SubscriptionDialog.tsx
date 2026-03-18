@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { formatCpf, validateCpf } from "@/lib/formatters";
+import { formatCpf, formatCep, validateCpf } from "@/lib/formatters";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, ShieldCheck, CreditCard, Building2, Clock, Upload, Check } from "lucide-react";
@@ -31,6 +31,26 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [searchingCep, setSearchingCep] = useState(false);
   const [showFullAddress, setShowFullAddress] = useState(false);
+  /** CEP + nº exigidos pelo Asaas; muitos usuários não têm no perfil */
+  const [billingCep, setBillingCep] = useState("");
+  const [billingAddressNumber, setBillingAddressNumber] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setBillingCep("");
+    setBillingAddressNumber("");
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) return;
+      const { data: p } = await supabase
+        .from("profiles")
+        .select("address_zip, address_number")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (p?.address_zip) setBillingCep(formatCep(String(p.address_zip).replace(/\D/g, "")));
+      if (p?.address_number) setBillingAddressNumber(p.address_number);
+    })();
+  }, [isOpen]);
 
   // Busca de Endereço Automática via CEP
   const handleCepChange = async (value: string) => {
@@ -85,6 +105,26 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
 
     if (cardForm.number.replace(/\s/g, "").length < 16) {
       toast({ title: "Cartão inválido", description: "Verifique o número do cartão.", variant: "destructive" });
+      return;
+    }
+
+    const postalDigits =
+      planId === "business"
+        ? businessData.cep.replace(/\D/g, "")
+        : billingCep.replace(/\D/g, "") || "";
+    const addrNum =
+      planId === "business"
+        ? businessData.number.trim()
+        : billingAddressNumber.trim();
+    if (postalDigits.length !== 8 || !addrNum) {
+      toast({
+        title: "Endereço de cobrança",
+        description:
+          planId === "business"
+            ? "Preencha CEP e número do endereço na seção empresa."
+            : "Informe CEP (8 dígitos) e número (ex.: 123, S/N) — exigido pela operadora do cartão.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -151,8 +191,8 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
           ccv: cardForm.cvv,
           email: profileData?.email || user.email,
           cpfCnpj: cpfDigits || profileData?.cnpj?.replace(/\D/g, "") || profileData?.cpf?.replace(/\D/g, "") || "",
-          postalCode: profileData?.address_zip || "",
-          addressNumber: profileData?.address_number || "",
+          postalCode: postalDigits,
+          addressNumber: addrNum,
           phone: profileData?.phone || "",
           cnpjBusiness: businessData.cnpj,
           addressBusiness: fullAddress,
@@ -161,7 +201,11 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
-      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no processamento do pagamento Asaas.");
+      const apiErr = res.data?.error;
+      if (res.error || apiErr) {
+        const msg = typeof apiErr === "string" ? apiErr : apiErr ? JSON.stringify(apiErr) : res.error?.message;
+        throw new Error(msg || "Erro no processamento do pagamento Asaas.");
+      }
 
       if (finalStatus === "ACTIVE") {
         toast({ title: "Plano Ativado!", description: "Seu pagamento foi processado com sucesso." });
@@ -253,66 +297,122 @@ export default function SubscriptionDialog({ isOpen, onClose, planId, onSuccess 
             </div>
           )}
 
-          <div className="space-y-3">
+          <form
+            autoComplete="on"
+            className="space-y-3"
+            onSubmit={(e) => e.preventDefault()}
+          >
             <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CreditCard className="w-3 h-3" /> Dados do Cartão</p>
             <div>
-              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CPF do titular *</label>
+              <label htmlFor="sub-card-cpf" className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CPF do titular *</label>
               <input
+                id="sub-card-cpf"
                 placeholder="000.000.000-00"
                 value={cardForm.cpf}
                 maxLength={14}
+                autoComplete="off"
                 className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all"
                 onChange={e => setCardForm({ ...cardForm, cpf: formatCpf(e.target.value) })}
               />
             </div>
             <div>
-              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Nome no cartão</label>
-              <input 
-                placeholder="NOME COMPLETO" 
+              <label htmlFor="sub-cc-name" className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Nome no cartão</label>
+              <input
+                id="sub-cc-name"
+                name="cc-name"
+                placeholder="NOME COMPLETO"
                 value={cardForm.name}
-                className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary uppercase transition-all" 
-                onChange={e => setCardForm({...cardForm, name: e.target.value.toUpperCase()})} 
+                autoComplete="cc-name"
+                className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary uppercase transition-all"
+                onChange={e => setCardForm({ ...cardForm, name: e.target.value.toUpperCase() })}
               />
             </div>
-            
+
             <div>
-              <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Número do cartão</label>
+              <label htmlFor="sub-cc-number" className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Número do cartão</label>
               <div className="relative">
-                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input 
-                  placeholder="0000 0000 0000 0000" 
+                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <input
+                  id="sub-cc-number"
+                  name="cc-number"
+                  placeholder="0000 0000 0000 0000"
                   value={cardForm.number}
                   maxLength={19}
-                  className="w-full p-3 pl-9 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all" 
-                  onChange={e => setCardForm({...cardForm, number: formatCardNumber(e.target.value)})} 
+                  inputMode="numeric"
+                  autoComplete="cc-number"
+                  className="w-full p-3 pl-9 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all"
+                  onChange={e => setCardForm({ ...cardForm, number: formatCardNumber(e.target.value) })}
                 />
               </div>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Validade</label>
-                <input 
-                  placeholder="MM/AA" 
+                <label htmlFor="sub-cc-exp" className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Validade</label>
+                <input
+                  id="sub-cc-exp"
+                  name="cc-exp"
+                  placeholder="MM/AA"
                   value={cardForm.expiry}
                   maxLength={5}
-                  className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all text-center" 
-                  onChange={e => setCardForm({...cardForm, expiry: formatExpiry(e.target.value)})} 
+                  inputMode="numeric"
+                  autoComplete="cc-exp"
+                  className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all text-center"
+                  onChange={e => setCardForm({ ...cardForm, expiry: formatExpiry(e.target.value) })}
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CVV</label>
-                <input 
-                  placeholder="123" 
+                <label htmlFor="sub-cc-csc" className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CVV</label>
+                <input
+                  id="sub-cc-csc"
+                  name="cc-csc"
+                  placeholder="123"
                   value={cardForm.cvv}
                   maxLength={4}
                   type="password"
-                  className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all text-center" 
-                  onChange={e => setCardForm({...cardForm, cvv: formatCVV(e.target.value)})} 
+                  inputMode="numeric"
+                  autoComplete="cc-csc"
+                  className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono transition-all text-center"
+                  onChange={e => setCardForm({ ...cardForm, cvv: formatCVV(e.target.value) })}
                 />
               </div>
             </div>
-          </div>
+          </form>
+
+          {planId !== "business" && (
+            <div className="space-y-2 pt-3 border-t border-border">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">Endereço de cobrança</p>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                CEP e número são obrigatórios para a operadora do cartão (Asaas). Preencha se ainda não estão no seu perfil.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="sub-billing-cep" className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">CEP *</label>
+                  <input
+                    id="sub-billing-cep"
+                    value={billingCep}
+                    onChange={(e) => setBillingCep(formatCep(e.target.value))}
+                    placeholder="00000-000"
+                    maxLength={9}
+                    inputMode="numeric"
+                    autoComplete="postal-code"
+                    className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="sub-billing-num" className="text-xs font-semibold text-muted-foreground ml-1 mb-1 block">Número *</label>
+                  <input
+                    id="sub-billing-num"
+                    value={billingAddressNumber}
+                    onChange={(e) => setBillingAddressNumber(e.target.value)}
+                    placeholder="Ex.: 120"
+                    autoComplete="address-line2"
+                    className="w-full p-3 border rounded-xl bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           <button 
             onClick={handleSubscribe} 

@@ -1,10 +1,24 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
+
+const withTimeout = async <T,>(p: Promise<T>, ms: number, tag: string) => {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((_, reject) => {
+        t = setTimeout(() => reject(new Error(`${tag}_timeout_${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (t) clearTimeout(t);
+  }
+};
 
 interface Profile {
   id: string;
@@ -135,12 +149,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const userId = sess.user.id;
-        let [p, r] = await Promise.all([fetchProfile(userId), fetchRoles(userId)]);
+        const email = (sess.user.email || "").toLowerCase().trim();
+        const fullName = (sess.user.user_metadata?.full_name || sess.user.user_metadata?.name || "") as string;
+        // iOS pós-OAuth pode travar chamadas; se não conseguirmos confirmar o profile rápido, deslogamos (não permite auto-login sem cadastro)
+        let p: Profile | null = null;
+        let r: AppRole[] = [];
+        try {
+          [p, r] = await Promise.all([
+            withTimeout(fetchProfile(userId), 4000, "fetchProfile"),
+            withTimeout(fetchRoles(userId), 4000, "fetchRoles"),
+          ]);
+        } catch (_) {
+          p = null;
+          r = [];
+        }
 
         if (isSignOutInProgress) return;
-        if (p?.user_type === "pending_signup") {
-          await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", userId);
-          p = { ...p, user_type: "client" } as Profile;
+        // Se a sessão chegou antes do trigger inserir o profile (corrida comum pós-OAuth),
+        // não deslogar: o gate (`/post-login`) fará retry até o profile aparecer.
+        if (!p) {
+          setProfile(null);
+          setRoles([]);
+          localStorage.removeItem("chamo_cached_profile");
+          localStorage.removeItem("chamo_cached_roles");
+          return;
         }
 
         if (p) {
@@ -229,6 +261,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.setItem("chamo_oauth_just_landed", "1");
             // iOS: esta flag aciona um único hard reload após SIGNED_IN (evita piscar em loops)
             localStorage.setItem("chamo_force_hard_reload", "1");
+            // Apple às vezes não dispara SIGNED_IN como o Google; garante janela p/reload na Home (Featured)
+            if (Capacitor.isNativePlatform()) {
+              sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
+              sessionStorage.removeItem("chamo_featured_reload_after_oauth");
+            }
           } catch (_) {}
         }
       } catch (e) {
@@ -295,9 +332,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setRoles([]);
           localStorage.removeItem("chamo_cached_profile");
           localStorage.removeItem("chamo_cached_roles");
+          try {
+            sessionStorage.removeItem("chamo_featured_reload_after_oauth");
+          } catch (_) {}
           setLoading(false);
         } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           loadUserData(sess ?? null);
+
+          // Evita hard-reload por “hang” nos 2 min após login (iOS reprocessaria oauth?code= e trava).
+          if (event === "SIGNED_IN" && Capacitor.isNativePlatform()) {
+            try {
+              sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
+            } catch (_) {}
+          }
 
           // iOS pós-OAuth (Apple/Google via deep link): faz hard reload APENAS quando uma flag mandar.
           // Isso evita piscar em loops e impede reloads em logins normais.
@@ -308,6 +355,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (localStorage.getItem(doneKey) === "1") return;
               localStorage.setItem(doneKey, "1");
 
+              const clearOAuthReloadFlags = () => {
+                try {
+                  localStorage.removeItem("chamo_force_hard_reload");
+                  localStorage.removeItem("chamo_oauth_just_landed");
+                  sessionStorage.removeItem("chamo_oauth_just_landed");
+                  localStorage.removeItem(doneKey);
+                } catch (_) {}
+              };
+
               const tryHardReload = () => {
                 try {
                   const flagKey = "chamo_force_hard_reload";
@@ -316,8 +372,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     localStorage.getItem("chamo_oauth_just_landed") === "1" ||
                     sessionStorage.getItem("chamo_oauth_just_landed") === "1";
                   if (!should) {
-                    // Não era OAuth: libera para futuros logins
                     localStorage.removeItem(doneKey);
+                    return;
+                  }
+                  // Já está na Home (ou fluxo pós-login em SPA): NUNCA dar hard reload —
+                  // o timer de 350ms disparava depois que o usuário já via o tutorial e parecia "bug ao pular".
+                  const p = (window.location.pathname || "").toLowerCase();
+                  if (
+                    p === "/home" ||
+                    p.startsWith("/home/") ||
+                    p === "/post-login" ||
+                    p === "/signup" ||
+                    p === "/complete-signup"
+                  ) {
+                    clearOAuthReloadFlags();
                     return;
                   }
                   localStorage.removeItem(flagKey);
@@ -328,9 +396,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
               };
 
-              // 1) tentativa imediata (caso a flag já exista)
               tryHardReload();
-              // 2) tentativa curta depois (cobre corrida onde SIGNED_IN vem antes da flag)
               setTimeout(tryHardReload, 350);
             } catch (_) {}
           }

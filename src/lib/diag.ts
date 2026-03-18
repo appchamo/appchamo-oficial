@@ -70,6 +70,14 @@ export function diagClear() {
 export function hardReloadOnce(reason: string) {
   if (typeof window === "undefined") return;
   try {
+    // Logo após login social, o WebView ainda “engasga” e o primeiro fetch pode dar timeout
+    // sem ser bug real. Hard reload nessa hora reprocessa o deep link oauth?code= e quebra tudo.
+    const graceUntil = parseInt(sessionStorage.getItem("chamo_hang_reload_grace_until") || "0", 10);
+    if (Date.now() < graceUntil) {
+      diagLog("warn", "hard-reload", "ignorado (período pós-login — aguardando estabilizar)", { reason });
+      return;
+    }
+
     // Evita loops
     const k = "chamo_hard_reload_on_hang_done";
     if (localStorage.getItem(k) === "1") return;

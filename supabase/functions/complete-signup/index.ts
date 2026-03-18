@@ -125,15 +125,11 @@ Deno.serve(async (req) => {
       .update({ user_type: accountType })
       .eq("user_id", userId);
 
-    // 🔥 5. Fluxo de Profissional
+    // 🔥 5. Fluxo de Profissional (sempre em análise até aprovação no admin; plano só depois)
     if (accountType === "professional") {
-      const needsAnalysis = planId === "vip" || planId === "business";
-      const profileStatus = needsAnalysis ? "pending" : "approved";
-
-      // Usando insert ou upsert para profissionais para evitar erro de duplicidade se ele recomeçar o cadastro
       const { error: proError } = await supabase.from("professionals").upsert({
         user_id: userId,
-        profile_status: profileStatus,
+        profile_status: "pending",
         category_id: profileData?.categoryId || null,
         profession_id: profileData?.professionId || null,
         experience: profileData?.experience || null,
@@ -210,9 +206,9 @@ Deno.serve(async (req) => {
       await supabase.from("notifications").insert({
         user_id: adminRow.user_id,
         title: "Novo cadastro",
-        message: "Um usuário acabou de se cadastrar. Confira em Usuários.",
+        message: "Novo cadastro. Profissionais em análise: Admin → Profissionais.",
         type: "admin",
-        link: "/admin/users",
+        link: "/admin/pros",
       });
     }
 

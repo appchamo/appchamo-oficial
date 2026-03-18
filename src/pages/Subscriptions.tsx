@@ -9,7 +9,7 @@ import { useIAP } from "@/hooks/useIAP";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { formatCpf, validateCpf } from "@/lib/formatters";
+import { formatCpf, formatCep, validateCpf } from "@/lib/formatters";
 import { getProductIdForPlan } from "@/lib/iap-config";
 
 const planDetails = [
@@ -90,6 +90,7 @@ const Subscriptions = () => {
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", address: "", cpf: "" });
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
+  const [proStatusLoaded, setProStatusLoaded] = useState(false);
   
   // Estado para armazenar os benefícios dinâmicos vindos do banco de dados
   const [planFeaturesDb, setPlanFeaturesDb] = useState<Record<string, string[]>>({});
@@ -107,6 +108,23 @@ const Subscriptions = () => {
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [searchingCep, setSearchingCep] = useState(false);
   const [showFullAddress, setShowFullAddress] = useState(false);
+  const [billingCep, setBillingCep] = useState("");
+  const [billingAddressNumber, setBillingAddressNumber] = useState("");
+
+  useEffect(() => {
+    if (!paymentOpen || !user?.id) return;
+    setBillingCep("");
+    setBillingAddressNumber("");
+    (async () => {
+      const { data: p } = await supabase
+        .from("profiles")
+        .select("address_zip, address_number")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (p?.address_zip) setBillingCep(formatCep(String(p.address_zip).replace(/\D/g, "")));
+      if (p?.address_number) setBillingAddressNumber(p.address_number);
+    })();
+  }, [paymentOpen, user?.id]);
 
   // Função que busca o endereço automaticamente via API
   const handleCepChange = async (value: string) => {
@@ -147,17 +165,19 @@ const Subscriptions = () => {
   const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setProStatusLoaded(true);
+      return;
+    }
     const load = async () => {
-      // 1. Busca o status do profissional
+      setProStatusLoaded(false);
       const { data: pro } = await supabase
         .from("professionals")
         .select("profile_status")
         .eq("user_id", user.id)
         .maybeSingle();
-      if (pro) setProStatus(pro.profile_status);
+      setProStatus(pro?.profile_status ?? null);
 
-      // 2. ✅ Busca os benefícios dinâmicos dos planos no banco de dados
       const { data: plansData } = await supabase.from("plans").select("id, features");
       if (plansData) {
         const feats: Record<string, string[]> = {};
@@ -168,6 +188,7 @@ const Subscriptions = () => {
         });
         setPlanFeaturesDb(feats);
       }
+      setProStatusLoaded(true);
     };
     load();
   }, [user]);
@@ -198,26 +219,36 @@ const Subscriptions = () => {
     );
   }
 
-  if (proStatus === "pending") {
+  const isProOrCompany =
+    profile && (profile.user_type === "professional" || profile.user_type === "company");
+  if (isProOrCompany && !proStatusLoaded) {
     return (
       <AppLayout>
-        <main className="max-w-screen-lg mx-auto px-4 py-12 text-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center">
-              <Clock className="w-7 h-7 text-amber-600" />
-            </div>
-            <h2 className="text-lg font-bold text-foreground">Perfil em análise</h2>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              Seu perfil profissional ainda está sendo analisado. Você poderá escolher um plano assim que a análise for concluída.
-            </p>
-            <Link to="/home" className="text-primary text-sm mt-2 hover:underline">Voltar ao início</Link>
-          </div>
+        <main className="max-w-screen-lg mx-auto px-4 py-16 flex justify-center">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         </main>
       </AppLayout>
     );
   }
 
+  /** Aprovação interna no admin (Profissionais → Aprovar cadastro), distinta do Asaas */
+  const cadastroInternoLiberado =
+    profile?.user_type === "company" || proStatus === "approved";
+
   const handleSelectPlan = (planId: string) => {
+    if (
+      profile?.user_type === "professional" &&
+      !cadastroInternoLiberado &&
+      planId !== "free"
+    ) {
+      toast({
+        title: "Cadastro em análise",
+        description:
+          "Os planos pagos ficam disponíveis após a aprovação interna da equipe Chamô.",
+        variant: "destructive",
+      });
+      return;
+    }
     // No iOS usamos IAP para todos os planos pagos (incluindo Business); na web Business vai para checkout
     if (planId === "business" && !useIAPOnIOS) {
       navigate("/checkout/business");
@@ -288,6 +319,14 @@ const Subscriptions = () => {
 
   const handlePaymentSubmit = async () => {
     if (!selectedPlanId) return;
+    if (profile?.user_type === "professional" && !cadastroInternoLiberado && selectedPlanId !== "free") {
+      toast({
+        title: "Cadastro em análise",
+        description: "Aguarde a aprovação interna para contratar planos pagos.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) {
       toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
       return;
@@ -308,7 +347,27 @@ const Subscriptions = () => {
       toast({ title: "Número do cartão inválido", variant: "destructive" });
       return;
     }
-    
+
+    const postalDigits =
+      selectedPlanId === "business"
+        ? businessData.cep.replace(/\D/g, "")
+        : billingCep.replace(/\D/g, "");
+    const addrNum =
+      selectedPlanId === "business"
+        ? businessData.number.trim()
+        : billingAddressNumber.trim();
+    if (postalDigits.length !== 8 || !addrNum) {
+      toast({
+        title: "Endereço de cobrança",
+        description:
+          selectedPlanId === "business"
+            ? "Preencha CEP e número na seção empresa."
+            : "Informe CEP (8 dígitos) e número do endereço (exigido pelo Asaas).",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setProcessing(true);
     try {
       let proofUrl = "";
@@ -371,10 +430,10 @@ const Subscriptions = () => {
           expiryMonth: expiryParts[0],
           expiryYear: `20${expiryParts[1]}`,
           ccv: cardForm.cvv,
-          email: profileData?.email || "",
+          email: profileData?.email || session.user.email || "",
           cpfCnpj: cpfCnpjValue,
-          postalCode: profileData?.address_zip || "",
-          addressNumber: profileData?.address_number || "",
+          postalCode: postalDigits,
+          addressNumber: addrNum,
           phone: profileData?.phone || "",
           cnpjBusiness: businessData.cnpj,
           addressBusiness: fullAddress,
@@ -383,7 +442,11 @@ const Subscriptions = () => {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
-      if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro no processamento do pagamento.");
+      const apiErr = res.data?.error;
+      if (res.error || apiErr) {
+        const msg = typeof apiErr === "string" ? apiErr : apiErr ? JSON.stringify(apiErr) : res.error?.message;
+        throw new Error(msg || "Erro no processamento do pagamento.");
+      }
 
       if (finalStatus === "ACTIVE") {
         toast({ title: "Plano Pro Ativado!", description: "Seu pagamento foi processado e o plano já está liberado." });
@@ -402,6 +465,14 @@ const Subscriptions = () => {
 
   const handleIAPPurchase = async () => {
     if (!selectedPlanId || selectedPlanId === "free" || !user) return;
+    if (profile?.user_type === "professional" && !cadastroInternoLiberado) {
+      toast({
+        title: "Cadastro em análise",
+        description: "Aguarde a aprovação interna para contratar planos pagos.",
+        variant: "destructive",
+      });
+      return;
+    }
     const planId = selectedPlanId as "pro" | "vip" | "business";
     if (selectedPlanId === "business" && (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile)) {
       toast({ title: "CNPJ, CEP, Número e Comprovante são obrigatórios para o plano Business.", variant: "destructive" });
@@ -515,6 +586,11 @@ const Subscriptions = () => {
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId);
 
+  const plansVisiveis =
+    profile?.user_type === "professional" && !cadastroInternoLiberado
+      ? plans.filter((p) => p.id === "free")
+      : plans;
+
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
@@ -523,6 +599,19 @@ const Subscriptions = () => {
         </Link>
         <h1 className="text-xl font-bold text-foreground mb-1">Planos</h1>
         <p className="text-sm text-muted-foreground mb-5">Escolha o plano ideal para crescer na Chamô</p>
+
+        {profile?.user_type === "professional" && !cadastroInternoLiberado && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-5">
+            <p className="text-sm font-medium text-foreground flex items-start gap-2">
+              <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                Seu cadastro profissional está em <strong>análise interna</strong>. Você pode usar o plano{" "}
+                <strong>Free</strong> com as chamadas incluídas. Os planos pagos (Pro, VIP, Business) aparecerão
+                após a equipe aprovar seu cadastro no painel administrativo.
+              </span>
+            </p>
+          </div>
+        )}
 
         {isFreePlan && (
           <div className="bg-accent border border-primary/20 rounded-xl p-4 mb-5">
@@ -540,14 +629,14 @@ const Subscriptions = () => {
             <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
             <p className="text-sm text-muted-foreground">Carregando planos...</p>
           </div>
-        ) : plans.length === 0 ? (
+        ) : plansVisiveis.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
             <p className="text-sm text-muted-foreground">Não foi possível carregar os planos.</p>
             <Link to="/home" className="text-primary text-sm font-medium hover:underline">Voltar ao início</Link>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {plans.map((p) => {
+            {plansVisiveis.map((p) => {
               const details = planDetails.find((d) => d.id === p.id);
               if (!details) return null;
               const isCurrent = currentPlan?.id === p.id;
@@ -834,31 +923,63 @@ const Subscriptions = () => {
                   </div>
                 )}
 
-                <div className="space-y-3">
+                <form autoComplete="on" className="space-y-3" onSubmit={(e) => e.preventDefault()}>
                   <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CreditCard className="w-3 h-3" /> Dados do Cartão</p>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">CPF do titular *</label>
-                    <input value={cardForm.cpf} onChange={(e) => setCardForm(f => ({ ...f, cpf: formatCpf(e.target.value) }))} placeholder="000.000.000-00" maxLength={14} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                    <label htmlFor="plans-card-cpf" className="text-xs font-medium text-muted-foreground mb-1 block">CPF do titular *</label>
+                    <input id="plans-card-cpf" value={cardForm.cpf} onChange={(e) => setCardForm(f => ({ ...f, cpf: formatCpf(e.target.value) }))} placeholder="000.000.000-00" maxLength={14} autoComplete="off" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
-                    <input value={cardForm.number} onChange={(e) => setCardForm(f => ({ ...f, number: formatCardNumber(e.target.value) }))} placeholder="0000 0000 0000 0000" maxLength={19} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                    <label htmlFor="plans-cc-name" className="text-xs font-medium text-muted-foreground mb-1 block">Nome no cartão</label>
+                    <input id="plans-cc-name" name="cc-name" value={cardForm.name} onChange={(e) => setCardForm(f => ({ ...f, name: e.target.value.toUpperCase() }))} placeholder="NOME COMPLETO" autoComplete="cc-name" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Nome no cartão</label>
-                    <input value={cardForm.name} onChange={(e) => setCardForm(f => ({ ...f, name: e.target.value.toUpperCase() }))} placeholder="NOME COMPLETO" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
+                    <label htmlFor="plans-cc-number" className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
+                    <input id="plans-cc-number" name="cc-number" value={cardForm.number} onChange={(e) => setCardForm(f => ({ ...f, number: formatCardNumber(e.target.value) }))} placeholder="0000 0000 0000 0000" maxLength={19} inputMode="numeric" autoComplete="cc-number" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Validade</label>
-                      <input value={cardForm.expiry} onChange={(e) => setCardForm(f => ({ ...f, expiry: formatExpiry(e.target.value) }))} placeholder="MM/AA" maxLength={5} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                      <label htmlFor="plans-cc-exp" className="text-xs font-medium text-muted-foreground mb-1 block">Validade</label>
+                      <input id="plans-cc-exp" name="cc-exp" value={cardForm.expiry} onChange={(e) => setCardForm(f => ({ ...f, expiry: formatExpiry(e.target.value) }))} placeholder="MM/AA" maxLength={5} inputMode="numeric" autoComplete="cc-exp" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
-                      <input value={cardForm.cvv} onChange={(e) => setCardForm(f => ({ ...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4) }))} placeholder="123" maxLength={4} type="password" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                      <label htmlFor="plans-cc-csc" className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
+                      <input id="plans-cc-csc" name="cc-csc" value={cardForm.cvv} onChange={(e) => setCardForm(f => ({ ...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4) }))} placeholder="123" maxLength={4} type="password" inputMode="numeric" autoComplete="cc-csc" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
                     </div>
                   </div>
-                </div>
+                </form>
+
+                {selectedPlanId !== "business" && (
+                  <div className="space-y-2 pt-2 border-t border-border">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase">Endereço de cobrança</p>
+                    <p className="text-[11px] text-muted-foreground">Obrigatório para o Asaas processar o cartão.</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="subs-billing-cep" className="text-xs font-medium text-muted-foreground mb-1 block">CEP *</label>
+                        <input
+                          id="subs-billing-cep"
+                          value={billingCep}
+                          onChange={(e) => setBillingCep(formatCep(e.target.value))}
+                          placeholder="00000-000"
+                          maxLength={9}
+                          inputMode="numeric"
+                          autoComplete="postal-code"
+                          className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="subs-billing-num" className="text-xs font-medium text-muted-foreground mb-1 block">Número *</label>
+                        <input
+                          id="subs-billing-num"
+                          value={billingAddressNumber}
+                          onChange={(e) => setBillingAddressNumber(e.target.value)}
+                          placeholder="Ex.: 120"
+                          className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <button onClick={handlePaymentSubmit} disabled={processing} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                   {processing ? <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</> : <><Lock className="w-4 h-4" /> Assinar Plano</>}

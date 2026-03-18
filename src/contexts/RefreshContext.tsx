@@ -37,7 +37,8 @@ export function RefreshProvider({ children }: { children: ReactNode }) {
         setIsRefreshing(false);
       }
     } else {
-      window.location.reload();
+      // Nunca dar reload completo aqui: no iOS isso gera tela branca/preta por vários segundos.
+      // Ex.: tutorial "Pular" antes do Home registrar o handler de pull-to-refresh.
     }
   }, []);
 

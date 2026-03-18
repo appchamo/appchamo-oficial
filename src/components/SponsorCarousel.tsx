@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation } from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
+import { Capacitor } from "@capacitor/core";
 
 const ITEMS_PER_PAGE = 4;
 const AUTO_ADVANCE_MS = 6000;
@@ -72,11 +73,13 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const isScrollFromUser = useRef(false);
   const retryCountRef = useRef(0);
   const cancelledRef = useRef(false);
+  const sponsorHangRetryRef = useRef(0);
 
   useEffect(() => {
     setLoaded(false);
     setAllSponsors([]);
     retryCountRef.current = 0;
+    sponsorHangRetryRef.current = 0;
     cancelledRef.current = false;
 
     const fetchSponsors = (withLocation = true) => {
@@ -84,12 +87,21 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         ? "id, name, niche, link_url, logo_url, location_scope, location_state, location_city"
         : "id, name, niche, link_url, logo_url";
       diagLog("info", "sponsors", "fetch start", { withLocation });
+      let aborted = false;
+      const timeoutMs = Capacitor.isNativePlatform() ? 22_000 : 12_000;
       const watchdog = setTimeout(() => {
-        if (!cancelledRef.current && !loaded) {
-          diagLog("warn", "sponsors", "fetch timeout (no response)", { ms: 8000, withLocation });
-          hardReloadOnce(`sponsors_timeout_${withLocation ? "withLocation" : "noLocation"}`);
+        if (cancelledRef.current || aborted) return;
+        aborted = true;
+        diagLog("warn", "sponsors", "fetch timeout — nova tentativa", { ms: timeoutMs, withLocation });
+        hardReloadOnce(`sponsors_timeout_${withLocation ? "withLocation" : "noLocation"}`);
+        sponsorHangRetryRef.current += 1;
+        if (sponsorHangRetryRef.current <= 6) {
+          setTimeout(() => fetchSponsors(withLocation), 1_600);
+        } else {
+          sponsorHangRetryRef.current = 0;
+          setLoaded(true);
         }
-      }, 8000);
+      }, timeoutMs);
       supabase
         .from("sponsors")
         .select(select)
@@ -97,7 +109,10 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         .order("sort_order")
         .then(({ data, error }) => {
           if (cancelledRef.current) return;
+          if (aborted) return;
+          aborted = true;
           clearTimeout(watchdog);
+          sponsorHangRetryRef.current = 0;
           if (error) {
             diagLog("error", "sponsors", "fetch error", { withLocation, message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint });
             if (withLocation) {
@@ -131,6 +146,8 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         })
         .catch((e) => {
           if (cancelledRef.current) return;
+          if (aborted) return;
+          aborted = true;
           clearTimeout(watchdog);
           diagLog("error", "sponsors", "fetch threw", { withLocation, error: String(e) });
           if (withLocation) {

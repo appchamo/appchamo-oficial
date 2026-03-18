@@ -76,7 +76,11 @@ const Header = () => {
         .select("profile_status")
         .eq("user_id", user.id)
         .maybeSingle();
-      if (pro) setProStatus(pro.profile_status);
+      if (profile.user_type === "professional") {
+        setProStatus(pro?.profile_status ?? "pending");
+      } else {
+        setProStatus(pro?.profile_status ?? null);
+      }
 
       // 2. Pega os dados da assinatura
       const { data: sub } = await supabase

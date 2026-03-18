@@ -2,7 +2,9 @@ import AppLayout from "@/components/AppLayout";
 import { DollarSign, TrendingUp, Calendar, Landmark, FileText, AlertTriangle, Save, Loader2, Info } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
@@ -34,6 +36,7 @@ interface FiscalData {
   fiscal_address_zip: string;
   charge_interest_to_client: boolean;
   anticipation_enabled: boolean;
+  fiscal_registration_completed_at?: string | null;
 }
 
 const emptyFiscal = (proId: string): FiscalData => ({
@@ -89,7 +92,51 @@ const FiscalTab = ({ proId, userDoc }: { proId: string; userDoc: string | null }
   };
 
   const handleSave = async () => {
-    // Validate document matches profile CPF/CNPJ
+    const t = (s: string) => s.trim();
+    if (!t(fiscal.fiscal_name)) {
+      toast({ title: "Nome / Razão Social é obrigatório", variant: "destructive" });
+      return;
+    }
+    if (!t(fiscal.fiscal_email) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fiscal.fiscal_email.trim())) {
+      toast({ title: "E-mail para NF inválido", variant: "destructive" });
+      return;
+    }
+    if (!t(fiscal.fiscal_document)) {
+      toast({ title: "CPF/CNPJ na nota fiscal é obrigatório", variant: "destructive" });
+      return;
+    }
+    if (fiscal.payment_method === "pix") {
+      if (!t(fiscal.pix_key)) {
+        toast({ title: "Informe sua chave PIX", variant: "destructive" });
+        return;
+      }
+      if (fiscal.pix_key_type === "cpf" && !validateCpf(fiscal.pix_key)) {
+        toast({ title: "Chave PIX (CPF) inválida", variant: "destructive" });
+        return;
+      }
+      if (fiscal.pix_key_type === "cnpj" && !validateCnpj(fiscal.pix_key)) {
+        toast({ title: "Chave PIX (CNPJ) inválida", variant: "destructive" });
+        return;
+      }
+    } else {
+      if (!t(fiscal.bank_name) || !t(fiscal.bank_agency) || !t(fiscal.bank_account)) {
+        toast({ title: "Preencha banco, agência e conta para recebimento TED", variant: "destructive" });
+        return;
+      }
+    }
+    if (!t(fiscal.fiscal_address_street) || !t(fiscal.fiscal_address_number)) {
+      toast({ title: "Endereço: rua e número são obrigatórios", variant: "destructive" });
+      return;
+    }
+    if (!t(fiscal.fiscal_address_neighborhood) || !t(fiscal.fiscal_address_city) || !t(fiscal.fiscal_address_state)) {
+      toast({ title: "Preencha bairro, cidade e UF", variant: "destructive" });
+      return;
+    }
+    const cepOk = fiscal.fiscal_address_zip.replace(/\D/g, "");
+    if (cepOk.length !== 8) {
+      toast({ title: "CEP fiscal deve ter 8 dígitos", variant: "destructive" });
+      return;
+    }
     if (userDoc && fiscal.fiscal_document) {
       const cleanDoc = fiscal.fiscal_document.replace(/\D/g, "");
       const cleanUser = userDoc.replace(/\D/g, "");
@@ -99,18 +146,39 @@ const FiscalTab = ({ proId, userDoc }: { proId: string; userDoc: string | null }
       }
     }
     setSaving(true);
-    const payload: any = { ...fiscal, professional_id: proId };
+    const completedAt = new Date().toISOString();
+    const payload: any = {
+      ...fiscal,
+      professional_id: proId,
+      fiscal_registration_completed_at: completedAt,
+    };
     delete payload.id;
     delete payload.created_at;
     delete payload.updated_at;
 
     if (fiscal.id) {
-      await supabase.from("professional_fiscal_data").update(payload).eq("id", fiscal.id);
+      const { error } = await supabase.from("professional_fiscal_data").update(payload).eq("id", fiscal.id);
+      if (error) {
+        toast({ title: error.message || "Erro ao salvar", variant: "destructive" });
+        setSaving(false);
+        return;
+      }
+      setFiscal((prev) => ({ ...prev, ...payload, id: fiscal.id, fiscal_registration_completed_at: completedAt }));
     } else {
-      const { data } = await supabase.from("professional_fiscal_data").insert(payload).select("id").single();
-      if (data) setFiscal(prev => ({ ...prev, id: data.id }));
+      const { data, error } = await supabase.from("professional_fiscal_data").insert(payload).select("id").single();
+      if (error) {
+        toast({ title: error.message || "Erro ao salvar", variant: "destructive" });
+        setSaving(false);
+        return;
+      }
+      if (data) setFiscal((prev) => ({ ...prev, ...payload, id: data.id }));
     }
-    toast({ title: "Dados fiscais salvos!" });
+    try {
+      window.dispatchEvent(new CustomEvent("chamo-fiscal-complete"));
+    } catch {
+      // ignore
+    }
+    toast({ title: "Dados fiscais salvos!", description: "Cadastro fiscal concluído." });
     setSaving(false);
   };
 
@@ -187,15 +255,15 @@ const FiscalTab = ({ proId, userDoc }: { proId: string; userDoc: string | null }
       <div className="bg-card border rounded-xl p-4 space-y-3">
         <h2 className="font-semibold text-foreground text-sm flex items-center gap-2"><FileText className="w-4 h-4" />Dados para Nota Fiscal</h2>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nome / Razão Social</label>
-            <input value={fiscal.fiscal_name} onChange={e => set("fiscal_name", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">CPF / CNPJ</label>
+          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nome / Razão Social *</label>
+            <input value={fiscal.fiscal_name} onChange={e => set("fiscal_name", e.target.value)} className={inputCls} required /></div>
+          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">CPF / CNPJ *</label>
             <input value={fiscal.fiscal_document} onChange={e => {
               const raw = e.target.value.replace(/\D/g, "");
               set("fiscal_document", raw.length <= 11 ? formatCpf(e.target.value) : formatCnpj(e.target.value));
             }} className={inputCls} maxLength={18} placeholder={userDoc || ""} /></div>
         </div>
-        <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email para NF</label>
+        <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">E-mail para NF *</label>
           <input type="email" value={fiscal.fiscal_email} onChange={e => set("fiscal_email", e.target.value)} className={inputCls} /></div>
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2"><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Rua</label>
@@ -206,8 +274,8 @@ const FiscalTab = ({ proId, userDoc }: { proId: string; userDoc: string | null }
         <div className="grid grid-cols-2 gap-3">
           <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Bairro</label>
             <input value={fiscal.fiscal_address_neighborhood} onChange={e => set("fiscal_address_neighborhood", e.target.value)} className={inputCls} /></div>
-          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Complemento</label>
-            <input value={fiscal.fiscal_address_complement} onChange={e => set("fiscal_address_complement", e.target.value)} className={inputCls} /></div>
+          <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Complemento (opcional)</label>
+            <input value={fiscal.fiscal_address_complement} onChange={e => set("fiscal_address_complement", e.target.value)} className={inputCls} placeholder="Apto, bloco…" /></div>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cidade</label>
@@ -550,9 +618,23 @@ const TransactionsTab = ({ proId }: { proId: string }) => {
 // === Main Component ===
 
 
+const TAXAS_SEEN_KEY = "chamo_financeiro_taxas_seen";
+
 const ProfessionalFinancial = () => {
   const { user, profile } = useAuth();
   const [proId, setProId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const initialTab =
+    tabParam === "transactions" || tabParam === "fees" || tabParam === "fiscal" ? tabParam : "fiscal";
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const [taxasSeen, setTaxasSeen] = useState(() => {
+    try {
+      return localStorage.getItem(TAXAS_SEEN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     if (!user) return;
@@ -560,7 +642,29 @@ const ProfessionalFinancial = () => {
       .then(({ data }) => { if (data) setProId(data.id); });
   }, [user]);
 
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "fiscal" || t === "transactions" || t === "fees") setActiveTab(t);
+  }, [searchParams]);
+
   const userDoc = profile?.cpf || profile?.cnpj || null;
+
+  const onTabChange = (v: string) => {
+    setActiveTab(v);
+    setSearchParams(v === "fiscal" ? {} : { tab: v }, { replace: true });
+    if (v === "fees") {
+      try {
+        localStorage.setItem(TAXAS_SEEN_KEY, "1");
+      } catch {
+        // ignore
+      }
+      setTaxasSeen(true);
+    }
+  };
+
+  const highlightTaxas = !taxasSeen;
+  const tabBase =
+    "rounded-lg px-2 py-2.5 text-xs font-semibold border-2 transition-all data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary data-[state=inactive]:border-primary/25 data-[state=inactive]:bg-card data-[state=inactive]:text-foreground shadow-sm";
 
   if (!proId) return (
     <AppLayout>
@@ -572,11 +676,28 @@ const ProfessionalFinancial = () => {
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         <h1 className="text-xl font-bold text-foreground mb-5">Financeiro</h1>
-        <Tabs defaultValue="fiscal">
-          <TabsList className="mb-4 w-full grid grid-cols-3">
-            <TabsTrigger value="fiscal"><FileText className="w-3.5 h-3.5 mr-1" />Cadastro Fiscal</TabsTrigger>
-            <TabsTrigger value="transactions"><DollarSign className="w-3.5 h-3.5 mr-1" />Extrato</TabsTrigger>
-            <TabsTrigger value="fees"><TrendingUp className="w-3.5 h-3.5 mr-1" />Taxas</TabsTrigger>
+        <Tabs value={activeTab} onValueChange={onTabChange} className="w-full">
+          <TabsList className="mb-4 w-full h-auto p-1.5 bg-muted/60 rounded-xl grid grid-cols-3 gap-1.5 border border-primary/20">
+            <TabsTrigger value="fiscal" className={tabBase}>
+              <FileText className="w-3.5 h-3.5 mr-1 shrink-0" />
+              Cadastro Fiscal
+            </TabsTrigger>
+            <TabsTrigger value="transactions" className={tabBase}>
+              <DollarSign className="w-3.5 h-3.5 mr-1 shrink-0" />
+              Extrato
+            </TabsTrigger>
+            <TabsTrigger
+              value="fees"
+              className={cn(
+                tabBase,
+                highlightTaxas &&
+                  activeTab !== "fees" &&
+                  "bg-destructive text-destructive-foreground border-destructive shadow-md animate-pulse data-[state=inactive]:bg-destructive data-[state=inactive]:text-destructive-foreground data-[state=inactive]:border-destructive"
+              )}
+            >
+              <TrendingUp className="w-3.5 h-3.5 mr-1 shrink-0" />
+              Taxas
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="fiscal"><FiscalTab proId={proId} userDoc={userDoc} /></TabsContent>
           <TabsContent value="transactions"><TransactionsTab proId={proId} /></TabsContent>

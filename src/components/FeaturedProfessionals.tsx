@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { sameCityState } from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
+import { Capacitor } from "@capacitor/core";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
@@ -58,6 +59,9 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const [userState, setUserState] = useState<string | null>(null);
   const fromCloneToReset = useRef(false);
   const isScrollFromUser = useRef(false);
+  /** Evita aplicar resultado de fetch antigo após timeout + retry */
+  const loadGenRef = useRef(0);
+  const hangRetryRef = useRef(0);
 
   const loadUserCoords = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -86,29 +90,87 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   }, []);
 
   const loadPros = useCallback(async () => {
+    loadGenRef.current += 1;
+    const gen = loadGenRef.current;
     setProsLoaded(false);
-    try {
-    diagLog("info", "featured", "pros fetch start");
+
+    const timeoutMs = Capacitor.isNativePlatform() ? 22_000 : 14_000;
+
     const watchdog = setTimeout(() => {
-      diagLog("warn", "featured", "pros fetch timeout (no response)", { ms: 8000 });
+      if (loadGenRef.current !== gen) return;
+      diagLog("warn", "featured", "pros fetch timeout — nova tentativa", {
+        ms: timeoutMs,
+        attempt: hangRetryRef.current + 1,
+      });
       hardReloadOnce("featured_pros_timeout");
-    }, 8000);
-    const { data: pros, error: prosErr } = await supabase
-      .from("professionals")
-      .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name)")
-      .eq("active", true)
-      .eq("profile_status", "approved")
-      .neq("availability_status", "unavailable")
-      .eq("verified", true)
-      .order("rating", { ascending: false })
-      .limit(80);
-    clearTimeout(watchdog);
-    if (prosErr) {
-      diagLog("error", "featured", "pros fetch error", { message: prosErr.message, code: (prosErr as any).code, details: (prosErr as any).details, hint: (prosErr as any).hint });
-    }
+      hangRetryRef.current += 1;
+      loadGenRef.current += 1;
+      if (hangRetryRef.current <= 6) {
+        setTimeout(() => loadPros(), 1_600);
+      } else {
+        hangRetryRef.current = 0;
+        setProfessionals([]);
+        setProsLoaded(true);
+      }
+    }, timeoutMs);
+
+    try {
+      diagLog("info", "featured", "pros fetch start");
+      // iOS: 1× reload completo no primeiro fetch após OAuth (WebView costuma estabilizar na 2ª carga)
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const graceUntil = parseInt(sessionStorage.getItem("chamo_hang_reload_grace_until") || "0", 10);
+          const postOAuthWarmup = Date.now() < graceUntil;
+          // Apple: nem sempre preenche a mesma sequência de eventos que o Google; landing ainda indica retorno OAuth
+          const oauthJustLanded = sessionStorage.getItem("chamo_oauth_just_landed") === "1";
+          if (
+            (postOAuthWarmup || oauthJustLanded) &&
+            sessionStorage.getItem("chamo_featured_reload_after_oauth") !== "1"
+          ) {
+            sessionStorage.setItem("chamo_featured_reload_after_oauth", "1");
+            clearTimeout(watchdog);
+            diagLog("info", "featured", "reload completo (gatilho: pros fetch start, pós-OAuth Google/Apple 1×)");
+            window.location.reload();
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      const { data: pros, error: prosErr } = await supabase
+        .from("professionals")
+        .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name)")
+        .eq("active", true)
+        .eq("profile_status", "approved")
+        .neq("availability_status", "unavailable")
+        .eq("verified", true)
+        .order("rating", { ascending: false })
+        .limit(80);
+      clearTimeout(watchdog);
+      if (loadGenRef.current !== gen) return;
+
+      if (prosErr) {
+        diagLog("error", "featured", "pros fetch error", {
+          message: prosErr.message,
+          code: (prosErr as any).code,
+          details: (prosErr as any).details,
+          hint: (prosErr as any).hint,
+        });
+        hangRetryRef.current += 1;
+        loadGenRef.current += 1;
+        if (hangRetryRef.current <= 4) {
+          setTimeout(() => loadPros(), 1_200);
+        } else {
+          hangRetryRef.current = 0;
+          setProfessionals([]);
+          setProsLoaded(true);
+        }
+        return;
+      }
 
     if (!pros || pros.length === 0) {
       diagLog("warn", "featured", "no pros returned");
+      hangRetryRef.current = 0;
       setProfessionals([]);
       setProsLoaded(true);
       return;
@@ -116,10 +178,23 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
     const userIds = pros.map((p) => p.user_id);
 
-    const [profilesRes, locationsRes] = await Promise.all([
-      supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
-      supabase.from("profiles").select("user_id, latitude, longitude, address_city, address_state").in("user_id", userIds),
-    ]);
+    let profilesRes: { data: unknown[] | null; error: unknown };
+    let locationsRes: { data: unknown[] | null; error: unknown };
+    try {
+      const pair = await Promise.race([
+        Promise.all([
+          supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
+          supabase.from("profiles").select("user_id, latitude, longitude, address_city, address_state").in("user_id", userIds),
+        ]),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("featured_secondary_timeout")), 16_000)),
+      ]);
+      [profilesRes, locationsRes] = pair;
+    } catch {
+      diagLog("warn", "featured", "secondary queries timeout — usando lista mínima");
+      profilesRes = { data: [], error: null };
+      locationsRes = { data: [], error: null };
+    }
+    if (loadGenRef.current !== gen) return;
     if (profilesRes.error) diagLog("error", "featured", "profiles_public error", { message: profilesRes.error.message, code: (profilesRes.error as any).code });
     if (locationsRes.error) diagLog("error", "featured", "profiles (location) error", { message: locationsRes.error.message, code: (locationsRes.error as any).code });
 
@@ -155,9 +230,27 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     const top10 = filtered.slice(0, 10).map(({ _city, _state, ...p }) => p);
 
     diagLog("info", "featured", "pros computed", { total: pros.length, filtered: filtered.length, shown: top10.length });
+    if (loadGenRef.current !== gen) return;
+    hangRetryRef.current = 0;
     setProfessionals(top10);
+    } catch (e) {
+      clearTimeout(watchdog);
+      if (loadGenRef.current === gen) {
+        diagLog("error", "featured", "pros load threw", { e: String(e) });
+        hangRetryRef.current += 1;
+        loadGenRef.current += 1;
+        if (hangRetryRef.current <= 4) {
+          setTimeout(() => loadPros(), 1_200);
+        } else {
+          hangRetryRef.current = 0;
+          setProfessionals([]);
+          setProsLoaded(true);
+        }
+      }
     } finally {
-      setProsLoaded(true);
+      if (loadGenRef.current === gen) {
+        setProsLoaded(true);
+      }
     }
   }, [userCity, userState]);
 

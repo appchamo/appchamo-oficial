@@ -388,11 +388,11 @@ const Login = () => {
       if (authEmail) {
         const { data: existingByEmail } = await supabase
           .from("profiles")
-          .select("id")
+          .select("id, user_type")
           .ilike("email", authEmail)
           .maybeSingle();
 
-        if (!existingByEmail) {
+        if (!existingByEmail || !existingByEmail.user_type || existingByEmail.user_type === "pending_signup") {
           // Não existe perfil com esse e-mail → fluxo de cadastro
           localStorage.removeItem("signup_in_progress");
           localStorage.removeItem("manual_login_intent");
@@ -422,9 +422,7 @@ const Login = () => {
         return;
       }
 
-      // Sem cadastro (sem perfil ou pending_signup):
-      // - se NÃO existir perfil ainda → manda para o fluxo de cadastro (Signup)
-      // - se já existir perfil porém incompleto/pending_signup → ajusta para client e segue para Home
+      // Sem cadastro (sem perfil ou pending_signup): manda para o fluxo de cadastro (Signup)
       const isProfileIncomplete =
         !profile ||
         !profile.user_type ||
@@ -434,23 +432,7 @@ const Login = () => {
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
 
-        // Novo usuário social (Google/Apple) sem cadastro: vai para Signup
-        if (!profile) {
-          navigate("/signup", { replace: true });
-          return;
-        }
-
-        // Já existe perfil mas está incompleto/pending_signup: ajusta user_type e segue
-        await supabase
-          .from("profiles")
-          .update({ user_type: "client" })
-          .eq("user_id", userId);
-
-        await refreshProfile();
-        sessionStorage.setItem("chamo_open_location_modal", "1");
-        sessionStorage.setItem("chamo_oauth_just_landed", "1");
-        localStorage.setItem("chamo_oauth_just_landed", "1");
-        navigate(getRedirectPath("/post-login"), { replace: true });
+        navigate("/signup", { replace: true });
         return;
       }
 

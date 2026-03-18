@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Mail, Lock, User, Phone, FileText, MapPin, Search, Calendar, ScrollText, CheckCircle2, UserCircle } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { Mail, Lock, User, Phone, FileText, MapPin, Calendar, ScrollText, CheckCircle2, UserCircle } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Capacitor } from "@capacitor/core";
 
 type AccountType = "client" | "professional";
 
@@ -40,6 +40,10 @@ interface Props {
 import { formatCpf, formatCnpj, formatPhone } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
 
+const TermsDialogFromAdmin = lazy(() =>
+  import("./SignupTermsModals").then((m) => ({ default: m.TermsDialogFromAdmin }))
+);
+
 const InputRow = ({ icon: Icon, label, children }: { icon: any; label: string; children: React.ReactNode }) => (
   <div>
     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{label}</label>
@@ -50,166 +54,15 @@ const InputRow = ({ icon: Icon, label, children }: { icon: any; label: string; c
   </div>
 );
 
-/** Modal de um único termo (Uso ou Privacidade): texto rolável; só habilita "Aceitar" quando rolar até o fim. */
-const TermsScrollModal = ({
-  open,
-  onClose,
-  onAccept,
-  title,
-  content,
-  loading,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onAccept: () => void;
-  title: string;
-  content: string;
-  loading: boolean;
-}) => {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [scrolledToBottom, setScrolledToBottom] = useState(false);
-
-  const checkScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const isAtBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 30;
-    setScrolledToBottom(isAtBottom);
-  }, []);
-
-  useEffect(() => {
-    if (!open) setScrolledToBottom(false);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || loading || !content) return;
-    const t = setTimeout(() => checkScroll(), 100);
-    return () => clearTimeout(t);
-  }, [open, loading, content, checkScroll]);
-
-  const handleAcceptClick = () => {
-    if (!scrolledToBottom) {
-      toast({ title: "Leia por completo os termos antes de aceitar.", variant: "destructive" });
-      return;
-    }
-    onAccept();
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-        {loading ? (
-          <div className="text-center py-8 text-muted-foreground text-sm">Carregando...</div>
-        ) : (
-          <>
-            <div
-              ref={scrollRef}
-              onScroll={checkScroll}
-              className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto border rounded-xl px-3 py-3 text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap"
-            >
-              {content || "Nenhum texto cadastrado."}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">Arraste até o final para habilitar o botão Aceitar.</p>
-            <button
-              onClick={handleAcceptClick}
-              className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-colors mt-2 ${
-                scrolledToBottom
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                  : "bg-muted text-muted-foreground cursor-not-allowed"
-              }`}
-            >
-              Aceitar
-            </button>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-type TermsVariant = "client" | "professional";
-
-const TermsDialogFromAdmin = ({ open, onClose, onAccept, variant = "client" }: { open: boolean; onClose: () => void; onAccept: () => void; variant?: TermsVariant }) => {
-  const [termsOfUse, setTermsOfUse] = useState("");
-  const [privacyPolicy, setPrivacyPolicy] = useState("");
-  const [loadingTerms, setLoadingTerms] = useState(true);
-  const [step, setStep] = useState<"use" | "privacy" | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const isPro = variant === "professional";
-    const keys = isPro ? ["terms_of_use_professional", "privacy_policy_professional"] : ["terms_of_use", "privacy_policy"];
-    setStep("use");
-    setTermsOfUse("");
-    setPrivacyPolicy("");
-    setLoadingTerms(true);
-    supabase
-      .from("platform_settings")
-      .select("key, value")
-      .in("key", keys)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("Erro ao carregar termos (platform_settings):", error);
-          setLoadingTerms(false);
-          return;
-        }
-        if (data && data.length > 0) {
-          const parseVal = (v: unknown): string => {
-            if (v == null) return "";
-            if (typeof v === "string") return v;
-            const str = JSON.stringify(v);
-            return str.replace(/^"|"$/g, "");
-          };
-          for (const s of data) {
-            const val = parseVal(s.value);
-            if (s.key === (isPro ? "terms_of_use_professional" : "terms_of_use")) setTermsOfUse(val);
-            if (s.key === (isPro ? "privacy_policy_professional" : "privacy_policy")) setPrivacyPolicy(val);
-          }
-        }
-        setLoadingTerms(false);
-      });
-  }, [open, variant]);
-
-  const handleAcceptUse = () => {
-    if (privacyPolicy && privacyPolicy.trim()) {
-      setStep("privacy");
-    } else {
-      onAccept();
-      onClose();
-    }
-  };
-
-  const handleAcceptPrivacy = () => {
-    onAccept();
-    onClose();
-  };
-
-  const openUse = open && step === "use";
-  const openPrivacy = open && step === "privacy";
-
-  return (
-    <>
-      <TermsScrollModal
-        open={openUse}
-        onClose={onClose}
-        onAccept={handleAcceptUse}
-        title="Termos de Uso"
-        content={termsOfUse}
-        loading={loadingTerms}
-      />
-      <TermsScrollModal
-        open={openPrivacy}
-        onClose={onClose}
-        onAccept={handleAcceptPrivacy}
-        title="Política de Privacidade (LGPD)"
-        content={privacyPolicy}
-        loading={false}
-      />
-    </>
-  );
-};
-
 const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
+  /** iOS WebView: evita travar junto com SIGNED_IN + primeiro paint pesado */
+  const [nativeFormReady, setNativeFormReady] = useState(() => !Capacitor.isNativePlatform());
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    setNativeFormReady(false);
+    const t = window.setTimeout(() => setNativeFormReady(true), 600);
+    return () => clearTimeout(t);
+  }, []);
   const [name, setName] = useState(initialData?.name || ""); // ✅ Preenche se vier do Google
   const [email, setEmail] = useState(initialData?.email || ""); // ✅ Preenche se vier do Google
   const [phone, setPhone] = useState("");
@@ -226,6 +79,8 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
   const [addressState, setAddressState] = useState("");
   const [addressCountry, setAddressCountry] = useState("Brasil");
   const [birthDate, setBirthDate] = useState("");
+  /** Nativo: exibição DD/MM/AAAA */
+  const [birthDateBr, setBirthDateBr] = useState("");
   const [gender, setGender] = useState<BasicData["gender"]>(initialData?.gender ?? "prefer_not_say");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
@@ -233,9 +88,32 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
   const [validating, setValidating] = useState(false);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
+  const citySuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ✅ Identifica se é login social para esconder senhas
   const isSocialSignup = !!initialData?.email;
+
+  const formatBirthBrInput = (raw: string) => {
+    const d = raw.replace(/\D/g, "").slice(0, 8);
+    if (d.length <= 2) return d;
+    if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`;
+    return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4, 8)}`;
+  };
+  const brBirthToIso = (br: string): string | null => {
+    const p = br.trim().split("/");
+    if (p.length !== 3) return null;
+    const dd = p[0].padStart(2, "0").slice(-2);
+    const mm = p[1].padStart(2, "0").slice(-2);
+    const yyyy = p[2].slice(0, 4);
+    if (dd.length !== 2 || mm.length !== 2 || yyyy.length !== 4) return null;
+    const day = parseInt(dd, 10);
+    const month = parseInt(mm, 10);
+    const year = parseInt(yyyy, 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const dt = new Date(year, month - 1, day);
+    if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) return null;
+    return `${year}-${mm}-${dd}`;
+  };
 
   const isUnderage = (dateStr: string) => {
     if (!dateStr) return false;
@@ -268,19 +146,36 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     setLoadingCep(false);
   }, []);
 
-  // City autocomplete via IBGE API
-  const fetchCitySuggestions = useCallback(async (query: string) => {
-    if (query.length < 3) { setCitySuggestions([]); return; }
+  /**
+   * Evita travar o app (especialmente iOS): a API do IBGE retorna ~5,5 mil municípios de uma vez.
+   * Usamos busca por UF quando o estado tem 2 letras + debounce; senão só cidade manual (CEP já preenche).
+   */
+  const fetchCitySuggestions = useCallback(async (query: string, uf: string) => {
+    const u = (uf || "").trim().toUpperCase();
+    if (query.length < 2 || u.length !== 2) {
+      setCitySuggestions([]);
+      setShowCitySuggestions(false);
+      return;
+    }
     try {
-      const res = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/municipios?orderBy=nome`);
+      const res = await fetch(
+        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${u}/municipios?orderBy=nome`
+      );
       const data = await res.json();
+      if (!Array.isArray(data)) {
+        setCitySuggestions([]);
+        return;
+      }
+      const q = query.toLowerCase().trim();
       const filtered = data
-        .map((c: any) => `${c.nome} - ${c.microrregiao?.mesorregiao?.UF?.sigla || ""}`)
-        .filter((name: string) => name.toLowerCase().startsWith(query.toLowerCase()))
-        .slice(0, 5);
+        .map((c: { nome?: string }) => `${c.nome} - ${u}`)
+        .filter((name: string) => name.toLowerCase().includes(q))
+        .slice(0, 8);
       setCitySuggestions(filtered);
       setShowCitySuggestions(filtered.length > 0);
-    } catch { setCitySuggestions([]); }
+    } catch {
+      setCitySuggestions([]);
+    }
   }, []);
 
   // ✅ APENAS ESTA FUNÇÃO FOI AJUSTADA PARA APLICAR A MÁSCARA VISUAL 00000-000
@@ -293,7 +188,10 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
 
   const handleCityChange = (val: string) => {
     setAddressCity(val);
-    fetchCitySuggestions(val);
+    if (citySuggestTimer.current) clearTimeout(citySuggestTimer.current);
+    citySuggestTimer.current = setTimeout(() => {
+      fetchCitySuggestions(val, addressState);
+    }, 350);
   };
 
   const selectCity = (city: string) => {
@@ -301,19 +199,50 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     setAddressCity(parts[0]);
     if (parts[1]) setAddressState(parts[1]);
     setShowCitySuggestions(false);
+    setCitySuggestions([]);
   };
+
+  useEffect(() => {
+    return () => {
+      if (citySuggestTimer.current) clearTimeout(citySuggestTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !initialData?.birthDate) return;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(initialData.birthDate.trim());
+    if (m) setBirthDateBr(`${m[3]}/${m[2]}/${m[1]}`);
+  }, [initialData?.birthDate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // ✅ Validação ajustada: Senha só é obrigatória se NÃO for social
-    if (!name || !email || (!isSocialSignup && !password) || !phone || !birthDate) { 
-      toast({ title: "Preencha todos os campos obrigatórios." }); 
-      return; 
+    const birthOk = Capacitor.isNativePlatform() ? birthDateBr.replace(/\D/g, "").length >= 8 : !!birthDate;
+    if (!name || !email || (!isSocialSignup && !password) || !phone || !birthOk) {
+      toast({ title: "Preencha todos os campos obrigatórios." });
+      return;
+    }
+    const birthIso = Capacitor.isNativePlatform()
+      ? brBirthToIso(birthDateBr) || ""
+      : birthDate.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthIso)) {
+      toast({
+        title: "Data de nascimento",
+        description: Capacitor.isNativePlatform()
+          ? "Use dia, mês e ano completos (DD/MM/AAAA)."
+          : "Data inválida.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (new Date(birthIso).toString() === "Invalid Date") {
+      toast({ title: "Data de nascimento inválida.", variant: "destructive" });
+      return;
     }
     
     if (!addressCity || !addressState) { toast({ title: "Informe pelo menos sua cidade e estado." }); return; }
-    if (isUnderage(birthDate)) { toast({ title: "Você precisa ter 18 anos ou mais para se cadastrar.", variant: "destructive" }); return; }
+    if (isUnderage(birthIso)) { toast({ title: "Você precisa ter 18 anos ou mais para se cadastrar.", variant: "destructive" }); return; }
     if (!termsAccepted) { toast({ title: "Aceite os termos de uso para continuar." }); return; }
     
     // ✅ Validação de senha condicional
@@ -353,7 +282,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
         onNext({
           name, email, phone: phone.replace(/\D/g, ""),
           document: docClean, documentType,
-          password, birthDate, gender,
+          password, birthDate: birthIso, gender,
           addressZip: addressZip.replace(/\D/g, ""),
           addressStreet, addressNumber, addressComplement,
           addressNeighborhood, addressCity, addressState,
@@ -368,7 +297,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     onNext({
       name, email, phone: phone.replace(/\D/g, ""),
       document: docClean, documentType,
-      password, birthDate, gender,
+      password, birthDate: birthIso, gender,
       addressZip: addressZip.replace(/\D/g, ""),
       addressStreet, addressNumber, addressComplement,
       addressNeighborhood, addressCity, addressState,
@@ -376,6 +305,16 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     });
   };
 
+
+  if (!nativeFormReady) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-8">
+        <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
+        <p className="text-sm text-muted-foreground mb-4 text-center">Preparando formulário…</p>
+        <div className="w-9 h-9 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
@@ -385,7 +324,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
           <p className="text-sm text-muted-foreground">
             Etapa 1 de {accountType === "professional" ? "3" : "2"} · <strong>Dados pessoais</strong>
           </p>
-          <button onClick={onBack} className="text-xs text-primary mt-1 hover:underline">← Alterar tipo de conta</button>
+          <button type="button" onClick={onBack} className="text-xs text-primary mt-1 hover:underline">← Alterar tipo de conta</button>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-5 shadow-card space-y-3">
@@ -406,13 +345,32 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
           </InputRow>
 
           <InputRow icon={Calendar} label="Data de nascimento *">
-            <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)}
-              max={new Date().toISOString().split("T")[0]}
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+            {Capacitor.isNativePlatform() ? (
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="DD/MM/AAAA"
+                value={birthDateBr}
+                onChange={(e) => setBirthDateBr(formatBirthBrInput(e.target.value))}
+                maxLength={10}
+                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+              />
+            ) : (
+              <input
+                type="date"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                max={new Date().toISOString().split("T")[0]}
+                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+              />
+            )}
           </InputRow>
-          {birthDate && isUnderage(birthDate) && (
+          {(() => {
+            const iso = Capacitor.isNativePlatform() ? brBirthToIso(birthDateBr) : birthDate;
+            return iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && isUnderage(iso) ? (
             <p className="text-xs text-destructive font-medium px-1">Você precisa ter 18 anos ou mais para se cadastrar.</p>
-          )}
+            ) : null;
+          })()}
 
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Sexo</label>
@@ -520,6 +478,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
             <div className="space-y-2 mt-2">
               <div className="relative">
                 <label className="text-xs text-muted-foreground block mb-1">Cidade *</label>
+                <p className="text-[10px] text-muted-foreground mb-1">Preencha o estado (UF) antes para sugestões de cidade.</p>
                 <input value={addressCity} onChange={(e) => handleCityChange(e.target.value)} placeholder="Sua cidade"
                   onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
                   onFocus={() => citySuggestions.length > 0 && setShowCitySuggestions(true)}
@@ -607,7 +566,25 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
         </form>
       </div>
 
-      <TermsDialogFromAdmin open={termsOpen} onClose={() => setTermsOpen(false)} onAccept={() => { setTermsAccepted(true); setTermsOpen(false); }} variant={accountType} />
+      {termsOpen && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-[100] bg-background/90 flex items-center justify-center">
+              <div className="w-9 h-9 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          }
+        >
+          <TermsDialogFromAdmin
+            open={termsOpen}
+            onClose={() => setTermsOpen(false)}
+            onAccept={() => {
+              setTermsAccepted(true);
+              setTermsOpen(false);
+            }}
+            variant={accountType}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

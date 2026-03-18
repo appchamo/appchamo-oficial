@@ -161,35 +161,62 @@ const BusinessCheckout = () => {
               <h2 className="text-sm font-bold text-foreground">Dados do Cartão</h2>
             </div>
 
-            <div className="space-y-3">
-              <input 
-                placeholder="NOME NO CARTÃO" 
-                value={cardForm.name}
-                onChange={e => setCardForm({...cardForm, name: e.target.value.toUpperCase()})}
-                className="w-full p-3.5 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary/20 text-sm uppercase" 
-              />
-              <input 
-                placeholder="0000 0000 0000 0000" 
-                value={cardForm.number}
-                onChange={e => setCardForm({...cardForm, number: formatCardNumber(e.target.value)})}
-                className="w-full p-3.5 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary/20 text-sm font-mono" 
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <input 
-                  placeholder="MM/AA" 
-                  value={cardForm.expiry}
-                  onChange={e => setCardForm({...cardForm, expiry: formatExpiry(e.target.value)})}
-                  className="p-3.5 border rounded-xl bg-background outline-none text-center text-sm" 
-                />
-                <input 
-                  placeholder="CVV" 
-                  value={cardForm.cvv}
-                  onChange={e => setCardForm({...cardForm, cvv: formatCVV(e.target.value)})}
-                  type="password"
-                  className="p-3.5 border rounded-xl bg-background outline-none text-center text-sm" 
+            <form autoComplete="on" className="space-y-3" onSubmit={(e) => e.preventDefault()}>
+              <div>
+                <label htmlFor="biz-cc-name" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">Nome no cartão</label>
+                <input
+                  id="biz-cc-name"
+                  name="cc-name"
+                  placeholder="NOME NO CARTÃO"
+                  value={cardForm.name}
+                  onChange={(e) => setCardForm({ ...cardForm, name: e.target.value.toUpperCase() })}
+                  autoComplete="cc-name"
+                  className="w-full p-3.5 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary/20 text-sm uppercase"
                 />
               </div>
-            </div>
+              <div>
+                <label htmlFor="biz-cc-number" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">Número</label>
+                <input
+                  id="biz-cc-number"
+                  name="cc-number"
+                  placeholder="0000 0000 0000 0000"
+                  value={cardForm.number}
+                  onChange={(e) => setCardForm({ ...cardForm, number: formatCardNumber(e.target.value) })}
+                  inputMode="numeric"
+                  autoComplete="cc-number"
+                  className="w-full p-3.5 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary/20 text-sm font-mono"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="biz-cc-exp" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">Validade</label>
+                  <input
+                    id="biz-cc-exp"
+                    name="cc-exp"
+                    placeholder="MM/AA"
+                    value={cardForm.expiry}
+                    onChange={(e) => setCardForm({ ...cardForm, expiry: formatExpiry(e.target.value) })}
+                    inputMode="numeric"
+                    autoComplete="cc-exp"
+                    className="w-full p-3.5 border rounded-xl bg-background outline-none text-center text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="biz-cc-csc" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">CVV</label>
+                  <input
+                    id="biz-cc-csc"
+                    name="cc-csc"
+                    placeholder="CVV"
+                    value={cardForm.cvv}
+                    onChange={(e) => setCardForm({ ...cardForm, cvv: formatCVV(e.target.value) })}
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="cc-csc"
+                    className="w-full p-3.5 border rounded-xl bg-background outline-none text-center text-sm"
+                  />
+                </div>
+              </div>
+            </form>
           </section>
 
           <button 

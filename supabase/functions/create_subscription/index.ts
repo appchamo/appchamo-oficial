@@ -42,8 +42,8 @@ serve(async (req) => {
       ccv,
       email,
       cpfCnpj,
-      postalCode,
-      addressNumber,
+      postalCode: bodyPostal,
+      addressNumber: bodyAddrNum,
       userId,
       planId,
       phone,
@@ -79,29 +79,68 @@ serve(async (req) => {
       );
     }
 
+    const jsonHeaders = {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    };
+
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    const { data: profileRow } = await supabaseAdmin
+      .from("profiles")
+      .select("address_zip, address_number, phone, email, asaas_customer_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const postalCode =
+      String(bodyPostal ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 8) ||
+      String(profileRow?.address_zip ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 8);
+    const addressNumber =
+      String(bodyAddrNum ?? "").trim() ||
+      String(profileRow?.address_number ?? "").trim();
+    const phoneEffective =
+      String(phone ?? "").replace(/\D/g, "") ||
+      String(profileRow?.phone ?? "").replace(/\D/g, "");
+    const emailEffective =
+      String(email ?? "").trim() ||
+      String(profileRow?.email ?? "").trim() ||
+      String(user.email ?? "").trim();
+
     // ===============================
     // 🔎 Validação básica
     // ===============================
-    if (
-      !value ||
-      !holderName ||
-      !number ||
-      !expiryMonth ||
-      !expiryYear ||
-      !ccv ||
-      !email ||
-      !cpfCnpj ||
-      !postalCode ||
-      !addressNumber ||
-      !userId ||
-      !planId
-    ) {
+    const missing: string[] = [];
+    if (!value) missing.push("value");
+    if (!holderName) missing.push("holderName");
+    if (!number || String(number).replace(/\s/g, "").length < 13) missing.push("number");
+    if (!expiryMonth) missing.push("expiryMonth");
+    if (!expiryYear) missing.push("expiryYear");
+    if (!ccv) missing.push("ccv");
+    if (!emailEffective) missing.push("email");
+    if (!cpfCnpj || String(cpfCnpj).replace(/\D/g, "").length < 11) missing.push("cpfCnpj");
+    if (!postalCode || postalCode.length !== 8) missing.push("postalCode");
+    if (!addressNumber) missing.push("addressNumber");
+    if (!userId) missing.push("userId");
+    if (!planId) missing.push("planId");
+
+    if (missing.length > 0) {
+      const hint =
+        missing.includes("postalCode") || missing.includes("addressNumber")
+          ? " Informe CEP (8 dígitos) e número do endereço no perfil ou no formulário de assinatura."
+          : "";
       return new Response(
-        JSON.stringify({ error: "Missing required fields" }),
-        {
-          status: 400,
-          headers: { "Access-Control-Allow-Origin": "*" },
-        }
+        JSON.stringify({
+          error: `Dados incompletos para o pagamento.${hint}`,
+          missing,
+        }),
+        { status: 400, headers: jsonHeaders }
       );
     }
 
@@ -115,24 +154,12 @@ serve(async (req) => {
       );
     }
 
-    // ===============================
-    // 🧠 Supabase Admin Client
-    // ===============================
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = supabaseAdmin;
 
     // ===============================
     // 1️⃣ Verificar se já existe customer
     // ===============================
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("asaas_customer_id")
-      .eq("user_id", userId)
-      .single();
-
-    let customerId = profile?.asaas_customer_id;
+    let customerId = profileRow?.asaas_customer_id;
 
     // Se NÃO existir → cria
     if (!customerId) {
@@ -146,10 +173,10 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             name: holderName,
-            email: email,
-            cpfCnpj: cpfCnpj,
-            postalCode: postalCode,
-            addressNumber: addressNumber,
+            email: emailEffective,
+            cpfCnpj: String(cpfCnpj).replace(/\D/g, ""),
+            postalCode,
+            addressNumber,
           }),
         }
       );
@@ -176,7 +203,7 @@ serve(async (req) => {
     // 2️⃣ Criar assinatura com Lógica Inteligente
     // ===============================
     const skipAnalysisEmail = "testes@appchamo.com";
-    const skipAnalysis = email?.toLowerCase() === skipAnalysisEmail;
+    const skipAnalysis = emailEffective.toLowerCase() === skipAnalysisEmail;
 
     let nextDueDate: string;
     let initialStatus: string;
@@ -219,11 +246,11 @@ serve(async (req) => {
           },
           creditCardHolderInfo: {
             name: holderName,
-            email: email,
-            cpfCnpj: cpfCnpj,
-            postalCode: postalCode,
-            addressNumber: addressNumber,
-            phone: phone,
+            email: emailEffective,
+            cpfCnpj: String(cpfCnpj).replace(/\D/g, ""),
+            postalCode,
+            addressNumber,
+            phone: phoneEffective || undefined,
           },
         }),
       }

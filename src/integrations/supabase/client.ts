@@ -11,6 +11,10 @@ const isNative = Capacitor.isNativePlatform();
 // Cache em memória para evitar dezenas de Preferences.get na inicialização (Supabase chama getItem muitas vezes)
 const authStorageCache = new Map<string, string | null>();
 
+// Key padrão do supabase-js v2: sb-<project-ref>-auth-token
+const PROJECT_REF = (SUPABASE_URL || "").replace(/^https?:\/\//, "").split(".")[0] || "";
+const AUTH_TOKEN_KEY = PROJECT_REF ? `sb-${PROJECT_REF}-auth-token` : "";
+
 // No app nativo: nunca removemos *-code-verifier do storage. Ao reabrir pelo deep link,
 // o cliente principal chama _removeSession() e apagaria o verifier; sem ele, exchangeCodeForSession falha.
 const capacitorAuthStorage = {
@@ -55,3 +59,14 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     flowType: 'pkce',
   }
 });
+
+/** Limpa sessão persistida no iOS/Android (Preferences + cache em memória). */
+export async function hardClearNativeAuthSession() {
+  if (!isNative) return;
+  try {
+    authStorageCache.clear();
+    if (AUTH_TOKEN_KEY) {
+      await Preferences.remove({ key: AUTH_TOKEN_KEY }).catch(() => {});
+    }
+  } catch (_) {}
+}

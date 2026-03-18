@@ -749,11 +749,14 @@ const AdminPros = () => {
                 </div>
               )}
 
-              {detailPro.profile_status === "pending" && detailPro.plan_id === "free" && (
+              {detailPro.profile_status === "pending" && (
                 <div className="space-y-3 pt-2 border-t">
+                  <p className="text-[10px] text-muted-foreground">
+                    Aprovação interna (equipe). Libera planos pagos no app; é independente da aprovação de assinatura no Asaas.
+                  </p>
                   <div className="flex gap-2">
                     <button onClick={handleApprove} className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1">
-                      <CheckCircle className="w-4 h-4" /> Aprovar Cadastro Livre
+                      <CheckCircle className="w-4 h-4" /> Aprovar cadastro
                     </button>
                     <button onClick={handleReject} className="flex-1 py-2 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors flex items-center justify-center gap-1">
                       <XCircle className="w-4 h-4" /> Reprovar Cadastro

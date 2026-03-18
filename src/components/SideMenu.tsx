@@ -2,6 +2,7 @@ import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefc
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
+import { cn } from "@/lib/utils";
 
 interface SideMenuProps {
   isOpen: boolean;
@@ -103,15 +104,23 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
               {section.items.map((item) => {
                 const isActive = location.pathname === item.path;
                 const isTornarSePro = item.path === "/signup-pro";
+                const isFinanceiro = item.path === "/pro/financeiro";
                 return (
                   <Link
                     key={item.path + item.label}
                     to={item.path}
                     onClick={onClose}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium ${isActive ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted"}`}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium",
+                      isActive && !isFinanceiro && "bg-accent text-accent-foreground",
+                      !isActive && !isFinanceiro && "text-foreground hover:bg-muted",
+                      isFinanceiro &&
+                        "border-2 border-primary/60 bg-primary/12 text-primary font-semibold shadow-sm hover:bg-primary/18",
+                      isFinanceiro && isActive && "ring-2 ring-primary/30"
+                    )}
                     {...(isTornarSePro ? { "data-onboarding": "tornar-se-pro" } : {})}
                   >
-                    <item.icon className="w-4 h-4" />
+                    <item.icon className={cn("w-4 h-4", isFinanceiro && "text-primary")} />
                     {item.label}
                   </Link>
                 );

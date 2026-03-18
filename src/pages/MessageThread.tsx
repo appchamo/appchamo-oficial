@@ -2276,53 +2276,77 @@ const MessageThread = () => {
               </div>
 
               <div className="space-y-3">
+              <form autoComplete="on" className="space-y-3" onSubmit={(e) => e.preventDefault()}>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
+                  <label htmlFor="msg-cc-name" className="text-xs font-medium text-muted-foreground mb-1 block">Nome no cartão</label>
                   <input
-                  value={cardForm.number}
-                  onChange={(e) => setCardForm((f) => ({ ...f, number: formatCardNumber(e.target.value) }))}
-                  placeholder="0000 0000 0000 0000"
-                  maxLength={19}
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                    id="msg-cc-name"
+                    name="cc-name"
+                    value={cardForm.name}
+                    onChange={(e) => setCardForm((f) => ({ ...f, name: e.target.value.toUpperCase() }))}
+                    placeholder="NOME COMPLETO"
+                    autoComplete="cc-name"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase"
+                  />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Nome no cartão</label>
+                  <label htmlFor="msg-cc-number" className="text-xs font-medium text-muted-foreground mb-1 block">Número do cartão</label>
                   <input
-                  value={cardForm.name}
-                  onChange={(e) => setCardForm((f) => ({ ...f, name: e.target.value.toUpperCase() }))}
-                  placeholder="NOME COMPLETO"
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 uppercase" />
+                    id="msg-cc-number"
+                    name="cc-number"
+                    value={cardForm.number}
+                    onChange={(e) => setCardForm((f) => ({ ...f, number: formatCardNumber(e.target.value) }))}
+                    placeholder="0000 0000 0000 0000"
+                    maxLength={19}
+                    inputMode="numeric"
+                    autoComplete="cc-number"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                  />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">CPF do titular *</label>
+                  <label htmlFor="msg-card-cpf" className="text-xs font-medium text-muted-foreground mb-1 block">CPF do titular *</label>
                   <input
-                  value={cardForm.cpf}
-                  onChange={(e) => setCardForm((f) => ({ ...f, cpf: formatCpf(e.target.value) }))}
-                  placeholder="000.000.000-00"
-                  maxLength={14}
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                    id="msg-card-cpf"
+                    value={cardForm.cpf}
+                    onChange={(e) => setCardForm((f) => ({ ...f, cpf: formatCpf(e.target.value) }))}
+                    placeholder="000.000.000-00"
+                    maxLength={14}
+                    autoComplete="off"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Validade</label>
+                    <label htmlFor="msg-cc-exp" className="text-xs font-medium text-muted-foreground mb-1 block">Validade</label>
                     <input
-                    value={cardForm.expiry}
-                    onChange={(e) => setCardForm((f) => ({ ...f, expiry: formatExpiry(e.target.value) }))}
-                    placeholder="MM/AA"
-                    maxLength={5}
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                      id="msg-cc-exp"
+                      name="cc-exp"
+                      value={cardForm.expiry}
+                      onChange={(e) => setCardForm((f) => ({ ...f, expiry: formatExpiry(e.target.value) }))}
+                      placeholder="MM/AA"
+                      maxLength={5}
+                      inputMode="numeric"
+                      autoComplete="cc-exp"
+                      className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                    />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
+                    <label htmlFor="msg-cc-csc" className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
                     <input
-                    value={cardForm.cvv}
-                    onChange={(e) => setCardForm((f) => ({ ...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                    placeholder="123"
-                    maxLength={4}
-                    type="password"
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono" />
+                      id="msg-cc-csc"
+                      name="cc-csc"
+                      value={cardForm.cvv}
+                      onChange={(e) => setCardForm((f) => ({ ...f, cvv: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                      placeholder="123"
+                      maxLength={4}
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="cc-csc"
+                      className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                    />
                   </div>
                 </div>
+              </form>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Parcelas</label>
                   <select

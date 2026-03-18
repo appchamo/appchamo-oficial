@@ -73,6 +73,24 @@ const Profile = () => {
     }
   }, [user, profile]);
 
+  // Sempre que o usuário abrir/atualizar o Perfil, marcamos se o cadastro está incompleto.
+  useEffect(() => {
+    if (!profile) return;
+    const fullName = (profile.full_name || "").trim();
+    const phoneValue = (profile.phone || "").trim();
+    const cpfValue = (profile.cpf || "").trim();
+    const cnpjValue = (profile.cnpj || "").trim();
+    const missingName = !fullName;
+    const missingPhone = !phoneValue;
+    const missingDoc = profile.user_type === "company" && !cpfValue && !cnpjValue;
+    const needsCompletion = missingName || missingPhone || missingDoc;
+    try {
+      localStorage.setItem("chamo_profile_needs_completion", needsCompletion ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [profile]);
+
   const handleAvatarUpload = async (url: string) => {
     if (!user) return;
     const { error } = await supabase.from("profiles").update({ avatar_url: url }).eq("user_id", user.id);
@@ -217,7 +235,8 @@ const Profile = () => {
             </div>
           )}
 
-          {(proData || editing) && (
+          {/* Bloco de experiência/serviços/sobre: só aparece para profissional/empresa */}
+          {(profile.user_type === "professional" || profile.user_type === "company") && (proData || editing) && (
             <div className="mt-3 pt-3 border-t space-y-4">
               {editing ? (
                 <>

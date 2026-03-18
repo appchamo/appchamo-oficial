@@ -10,13 +10,19 @@ import StepAccountType from "@/components/signup/StepAccountType";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
-import StepPlanSelect from "@/components/signup/StepPlanSelect";
-import SubscriptionDialog from "@/components/subscription/SubscriptionDialog";
+import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser"; 
 
 type AccountType = "client" | "professional";
-type Step = "method-choice" | "type" | "basic" | "documents" | "profile" | "plan" | "awaiting-email";
+type Step =
+  | "method-choice"
+  | "type"
+  | "basic"
+  | "document-notice"
+  | "documents"
+  | "profile"
+  | "awaiting-email";
 
 const friendlyError = (msg: string, status?: number) => {
   if (status === 429 || /429|too many|rate limit|rate_limit/i.test(msg))
@@ -46,19 +52,9 @@ const Signup = () => {
   const [step, setStep] = useState<Step>("method-choice");
   const [basicData, setBasicData] = useState<BasicData | null>(null);
   const [docFiles, setDocFiles] = useState<File[]>([]);
-  const [profileData, setProfileData] = useState<{
-    avatarUrl: string;
-    categoryId?: string;
-    professionId?: string;
-    experience?: string;
-    services?: string[];
-    bio?: string;
-  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
   const [showVerifyEmailModal, setShowVerifyEmailModal] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>("free");
-  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
   const didAdvanceFromOAuth = useRef(false);
@@ -175,13 +171,8 @@ const Signup = () => {
     const isComplete = profile?.cpf || profile?.phone;
     if (isComplete) {
       localStorage.removeItem("signup_in_progress");
-      supabase.auth.signOut();
-      toast({
-        title: "Já tem cadastro",
-        description: "Faça login com sua conta.",
-        variant: "destructive",
-      });
-      navigate("/login");
+      // Já existe cadastro completo para esse e-mail → levar direto para a Home (mantendo sessão)
+      navigate("/home", { replace: true });
       return;
     }
 
@@ -241,6 +232,37 @@ const Signup = () => {
     }
   };
 
+  // Caso especial: o app pode ter deslogado um OAuth "sem cadastro" e salvo prefill
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("chamo_signup_prefill");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { name?: string; email?: string };
+      localStorage.removeItem("chamo_signup_prefill");
+      if (!parsed?.email && !parsed?.name) return;
+      setBasicData((prev) => prev ?? ({
+        name: parsed.name || "",
+        email: (parsed.email || "").toLowerCase().trim(),
+        password: "",
+        phone: "",
+        document: "",
+        documentType: "cpf",
+        birthDate: "",
+        gender: "prefer_not_say",
+        addressZip: "",
+        addressStreet: "",
+        addressNumber: "",
+        addressComplement: "",
+        addressNeighborhood: "",
+        addressCity: "",
+        addressState: "",
+        addressCountry: "Brasil",
+      } as any));
+      // Vai para o fluxo de cadastro normalmente
+      if (step === "method-choice") setStep("type");
+    } catch (_) {}
+  }, []);
+
   const handleTypeSelect = (type: AccountType) => {
     setAccountType(type);
     setStep("basic");
@@ -265,7 +287,7 @@ const Signup = () => {
         }
       }
       setBasicData(data);
-      if (accountType === "professional") setStep("documents");
+      if (accountType === "professional") setStep("document-notice");
       else setStep("profile");
     } catch (error) {
       toast({ title: "Erro de verificação", variant: "destructive" });
@@ -280,25 +302,18 @@ const Signup = () => {
   };
 
   const handleProfileNext = (data: any) => {
-    setProfileData(data);
-    if (accountType === "professional") setStep("plan");
-    else doSignup(data, "free");
-  };
-
-  const handlePlanSelect = async (planId: string) => {
-    if (!profileData) return;
-    setSelectedPlanId(planId);
-    doSignup(profileData, planId);
-  };
-
-  const handleSubscriptionSuccess = () => {
-    setIsSubscriptionOpen(false);
-    localStorage.removeItem("signup_in_progress"); 
-    setCouponPopup(true); 
+    doSignup(data, "free");
   };
 
   const doSignup = async (pData: any, planId: string) => {
-    if (!basicData) return;
+    if (!basicData) {
+      toast({
+        title: "Dados incompletos",
+        description: "Volte à etapa anterior e preencha os dados pessoais novamente.",
+        variant: "destructive",
+      });
+      return;
+    }
     setLoading(true);
     try {
       let userId = createdUserId;
@@ -381,9 +396,7 @@ const Signup = () => {
       setLoading(false);
       localStorage.removeItem("signup_in_progress");
 
-      if (accountType === "professional" && planId !== "free") {
-        setIsSubscriptionOpen(true);
-      } else if (signedUpWithEmail) {
+      if (signedUpWithEmail) {
         // Cadastro por e-mail: exige confirmação → modal e depois ir para login
         setShowVerifyEmailModal(true);
       } else {
@@ -421,7 +434,7 @@ const Signup = () => {
 
   return (
     <>
-      {loading && step !== "basic" && (
+      {loading && step !== "basic" && step !== "document-notice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
           <div className="text-center">
             <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
@@ -495,12 +508,25 @@ const Signup = () => {
 
       {!loading && step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
       {!loading && step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep(createdUserId ? "method-choice" : "type")} initialData={basicData || undefined} />}
-      {!loading && step === "documents" && <StepDocuments documentType={basicData?.documentType || "cpf"} onNext={handleDocumentsNext} onBack={() => setStep("basic")} />}
+      {!loading && step === "document-notice" && (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-8">
+          <h1 className="text-2xl font-extrabold text-gradient mb-2">Chamô</h1>
+          <p className="text-sm text-muted-foreground mb-4">Cadastro profissional</p>
+          <DocumentsNoticeModal
+            open
+            onContinue={() => setStep("documents")}
+            onBack={() => setStep("basic")}
+          />
+        </div>
+      )}
+      {!loading && step === "documents" && (
+        <StepDocuments
+          documentType={basicData?.documentType || "cpf"}
+          onNext={handleDocumentsNext}
+          onBack={() => setStep(accountType === "professional" ? "document-notice" : "basic")}
+        />
+      )}
       {!loading && step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
-      {!loading && step === "plan" && <StepPlanSelect onSelect={handlePlanSelect} onBack={() => setStep("profile")} />}
-
-      <SubscriptionDialog isOpen={isSubscriptionOpen} onClose={() => setIsSubscriptionOpen(false)} planId={selectedPlanId} onSuccess={handleSubscriptionSuccess} />
-
       {(!loading && step !== "method-choice" && step !== "awaiting-email") && (
         <p className="text-center text-xs text-muted-foreground mt-8">
           Já tem uma conta?{" "}

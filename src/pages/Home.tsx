@@ -8,9 +8,9 @@ import HomeBanners from "@/components/HomeBanners";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { useRefresh, useIsRefreshing, useTriggerRefresh } from "@/contexts/RefreshContext";
+import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase, Loader2 } from "lucide-react"; 
+import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark } from "lucide-react"; 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -21,6 +21,7 @@ import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
 import { fetchViaCep } from "@/lib/viacep";
 import { diagLog } from "@/lib/diag";
+import { Capacitor } from "@capacitor/core";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -52,13 +53,57 @@ const HomeSkeleton = () => (
   </div>
 );
 
+/** No iOS: não monta Sponsors/Featured/Categories até a fila do Supabase esvaziar pós-OAuth (evita 9+ requests paralelos travados). */
+function HomeHeavyPlaceholder({ kind, title }: { kind: "sponsors" | "featured" | "categories"; title: string }) {
+  if (kind === "sponsors") {
+    return (
+      <section className="min-h-[160px]">
+        <h3 className="font-semibold text-foreground mb-3 px-1">{title}</h3>
+        <div className="flex gap-4 justify-start overflow-hidden pb-2">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="w-[72px] h-[72px] rounded-full bg-muted animate-pulse flex-shrink-0" />
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground px-1 mt-1">Carregando…</p>
+      </section>
+    );
+  }
+  if (kind === "featured") {
+    return (
+      <section className="min-h-[250px]">
+        <h3 className="font-semibold text-foreground mb-3 px-1">{title}</h3>
+        <div className="flex gap-3 overflow-hidden">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex-shrink-0 w-[140px] rounded-2xl border bg-card p-3 space-y-2">
+              <div className="w-14 h-14 rounded-full bg-muted animate-pulse mx-auto" />
+              <div className="h-3 w-20 rounded bg-muted animate-pulse mx-auto" />
+              <div className="h-3 w-16 rounded bg-muted animate-pulse mx-auto" />
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground px-1 mt-2">Carregando profissionais…</p>
+      </section>
+    );
+  }
+  return (
+    <section className="min-h-[200px]">
+      <h3 className="font-semibold text-foreground mb-3 px-1">{title}</h3>
+      <div className="grid grid-cols-4 gap-3">
+        {[...Array(8)].map((_, i) => (
+          <div key={i} className="aspect-square rounded-xl bg-muted animate-pulse" />
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground px-1 mt-2">Carregando categorias…</p>
+    </section>
+  );
+}
+
 const Home = () => {
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
   const location = useLocation();
   const { isFreePlan, callsRemaining, loading: subLoading } = useSubscription();
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
   const isRefreshing = useIsRefreshing();
-  const triggerRefresh = useTriggerRefresh();
   const navigate = useNavigate();
   // Fallback para user_metadata (ex.: OAuth) enquanto o perfil ainda não carregou
   const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
@@ -72,6 +117,45 @@ const Home = () => {
   // ✅ ATIVAÇÃO DO PUSH: Registra o token assim que o perfil carregar
   usePush(profile?.user_id || profile?.id); 
 
+  const [needsFiscalSetup, setNeedsFiscalSetup] = useState(false);
+
+  const checkFiscalSetup = useCallback(async () => {
+    if (!user?.id || profile?.user_type === "client") {
+      setNeedsFiscalSetup(false);
+      return;
+    }
+    try {
+      const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+      if (!pro?.id) {
+        setNeedsFiscalSetup(false);
+        return;
+      }
+      const { data: fd, error } = await supabase
+        .from("professional_fiscal_data")
+        .select("fiscal_registration_completed_at")
+        .eq("professional_id", pro.id)
+        .maybeSingle();
+      if (error) {
+        setNeedsFiscalSetup(false);
+        return;
+      }
+      setNeedsFiscalSetup(!fd?.fiscal_registration_completed_at);
+    } catch {
+      setNeedsFiscalSetup(false);
+    }
+  }, [user?.id, profile?.user_type]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => void checkFiscalSetup(), 500);
+    return () => clearTimeout(t);
+  }, [checkFiscalSetup]);
+
+  useEffect(() => {
+    const h = () => void checkFiscalSetup();
+    window.addEventListener("chamo-fiscal-complete", h);
+    return () => window.removeEventListener("chamo-fiscal-complete", h);
+  }, [checkFiscalSetup]);
+
   const [jobCount, setJobCount] = useState(0);
   const [showCoupon, setShowCoupon] = useState(false);
   const [isReady, setIsReady] = useState(false); // ✅ Controle de renderização global
@@ -82,6 +166,9 @@ const Home = () => {
   const [locationCity, setLocationCity] = useState("");
   const [locationState, setLocationState] = useState("");
   const [locationSaving, setLocationSaving] = useState(false);
+  const [needsProfileCompletion, setNeedsProfileCompletion] = useState(false);
+  /** Nativo: só monta fetches pesados após janela (evita travar WebView com muitos .from() ao mesmo tempo). */
+  const [heavySectionsReady, setHeavySectionsReady] = useState(() => !Capacitor.isNativePlatform());
 
   // Observação: no iOS pós-OAuth, supabase.auth.getSession() pode travar.
   // O hard reload 1x após SIGNED_IN (em useAuth) resolve de forma confiável.
@@ -166,19 +253,47 @@ const Home = () => {
     return () => clearTimeout(fallback);
   }, [sections]);
 
-  // ✅ Pós-OAuth / ao entrar na Home: um único refresh após a sessão estabilizar (evita remontar 2x e travar loading)
+  // Nativo: abre janela antes de montar Sponsors/Featured/Categories (1 só leva de fetches, não 3× em paralelo).
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      setHeavySectionsReady(true);
+      return;
+    }
+    setHeavySectionsReady(false);
+    const ms = user?.id ? 1600 : 500;
+    const t = setTimeout(() => setHeavySectionsReady(true), ms);
+    return () => clearTimeout(t);
+  }, [user?.id]);
+
+  // ✅ Pós-OAuth: no web remonta seções; no nativo NÃO dar contentSeed cedo (disparava 3× montagem + trava).
   useEffect(() => {
     const t = setTimeout(() => {
       refreshLayout();
-      setContentSeed((s) => s + 1);
+      if (!Capacitor.isNativePlatform()) {
+        setContentSeed((s) => s + 1);
+      }
       supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => setJobCount(count ?? 0));
       if (user?.id) fetchUpcomingAppointments();
     }, 450);
     return () => clearTimeout(t);
   }, [user?.id]);
 
+  // Fechou o tutorial: libera seções pesadas + um remount limpo no nativo
+  useEffect(() => {
+    const onDismiss = () => {
+      if (!window.location.pathname.includes("home")) return;
+      if (Capacitor.isNativePlatform()) {
+        setHeavySectionsReady(true);
+      }
+      setTimeout(() => setContentSeed((s) => s + 1), 600);
+    };
+    window.addEventListener("chamo-tutorial-dismissed", onDismiss);
+    return () => window.removeEventListener("chamo-tutorial-dismissed", onDismiss);
+  }, []);
+
   // ✅ Pull-to-refresh (e ao fechar tutorial): atualiza layout + força remount das seções (sponsors, featured, categorias) para carregar 100%
   const onRefresh = async () => {
+    if (Capacitor.isNativePlatform()) setHeavySectionsReady(true);
     setContentSeed((s) => s + 1);
     const minDelay = new Promise(r => setTimeout(r, 400));
     await Promise.all([
@@ -266,6 +381,24 @@ const Home = () => {
     toast({ title: "Localização atualizada! Os profissionais dessa região serão exibidos." });
   };
 
+  // Checa se o cadastro está incompleto (nome, telefone e, se empresa, CPF/CNPJ)
+  useEffect(() => {
+    const fullName = (profile?.full_name || "").trim();
+    const phoneValue = (profile?.phone || "").trim();
+    const cpfValue = (profile?.cpf || "").trim();
+    const cnpjValue = (profile?.cnpj || "").trim();
+    const missingName = !fullName;
+    const missingPhone = !phoneValue;
+    const missingDoc = profile?.user_type === "company" && !cpfValue && !cnpjValue;
+    const needs = !!profile && (missingName || missingPhone || missingDoc);
+    setNeedsProfileCompletion(needs);
+    try {
+      localStorage.setItem("chamo_profile_needs_completion", needs ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [profile?.full_name, profile?.phone, profile?.cpf, profile?.cnpj, profile?.user_type]);
+
   const sectionComponents: Record<string, React.ReactNode> = {
     welcome: <HomeWelcome key="welcome" userName={userName} section={getSection("welcome")} />,
     sponsors: <SponsorCarousel key={`sponsors-${contentSeed}`} section={getSection("sponsors")} />,
@@ -325,6 +458,38 @@ const Home = () => {
             </div>
           )}
 
+          {user && needsProfileCompletion && (
+            <Link
+              to="/profile"
+              className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl p-3.5"
+            >
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-900">Complete seu cadastro</p>
+                <p className="text-xs text-amber-800">
+                  Preencha seu nome, telefone e, se for empresa, CPF ou CNPJ na tela de perfil.
+                </p>
+              </div>
+            </Link>
+          )}
+
+          {user && needsFiscalSetup && (
+            <Link
+              to="/pro/financeiro"
+              className="flex items-start gap-3 bg-primary/10 border-2 border-primary rounded-xl p-3.5 hover:bg-primary/15 transition-colors active:scale-[0.99]"
+            >
+              <Landmark className="w-6 h-6 text-primary flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-primary">Cadastro fiscal pendente</p>
+                <p className="text-xs text-foreground/90 mt-0.5">
+                  Abra o menu lateral → <strong>Financeiro</strong> → aba <strong>Cadastro fiscal</strong>, preencha todos os
+                  campos e toque em <strong>Salvar dados fiscais</strong>.
+                </p>
+                <p className="text-[11px] font-semibold text-primary mt-2">Ir para Financeiro →</p>
+              </div>
+            </Link>
+          )}
+
           {!subLoading && isFreePlan && profile?.user_type !== "client" && callsRemaining <= 1 &&
           <Link to="/subscriptions" className="flex items-center gap-3 bg-accent border border-primary/20 rounded-xl p-3.5 hover:border-primary/40 transition-all">
               <Zap className="w-5 h-5 text-primary" />
@@ -370,9 +535,24 @@ const Home = () => {
             const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
             const isWelcomeCollapsed = section.id === "welcome";
             const minHeight = isWelcomeCollapsed || isJobsEmpty ? "" : (sectionMinHeights[section.id] || "");
+            const heavyDefer =
+              Capacitor.isNativePlatform() &&
+              !heavySectionsReady &&
+              (section.id === "sponsors" || section.id === "featured" || section.id === "categories");
+            const sec = getSection(section.id);
+            const block =
+              heavyDefer && section.id === "sponsors" ? (
+                <HomeHeavyPlaceholder kind="sponsors" title={sec?.title ?? "Patrocinadores"} />
+              ) : heavyDefer && section.id === "featured" ? (
+                <HomeHeavyPlaceholder kind="featured" title={sec?.title ?? "Profissionais em destaque"} />
+              ) : heavyDefer && section.id === "categories" ? (
+                <HomeHeavyPlaceholder kind="categories" title={sec?.title ?? "Categorias"} />
+              ) : (
+                sectionComponents[section.id]
+              );
             return (
               <div key={section.id} className={`w-full ${minHeight}`}>
-                {sectionComponents[section.id]}
+                {block}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
                 {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
               </div>
@@ -392,10 +572,18 @@ const Home = () => {
             </Link>
           )}
 
-          <footer className="text-center py-6 pt-6 pb-24 border-t mt-4">
-            <p className="text-xs text-muted-foreground">
+          <footer className="text-center py-6 pt-6 pb-24 border-t mt-4 space-y-3">
+            <p className="text-xs text-muted-foreground px-2">
               {footerText}
             </p>
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
+              <Link to="/terms-of-use" className="text-primary font-semibold hover:underline underline-offset-2">
+                Termos de uso
+              </Link>
+              <Link to="/privacy" className="text-primary font-semibold hover:underline underline-offset-2">
+                Política de privacidade
+              </Link>
+            </div>
           </footer>
         </main>
       )}

@@ -10,7 +10,10 @@ type AccountType = "client" | "professional";
 export type GenderOption = "male" | "female" | "prefer_not_say";
 
 export interface BasicData {
+  /** Nome de identidade (mesmo da identidade/documento). */
   name: string;
+  /** Nome que aparece para outros usuários. */
+  displayName: string;
   email: string;
   phone: string;
   document: string;
@@ -64,6 +67,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     return () => clearTimeout(t);
   }, []);
   const [name, setName] = useState(initialData?.name || ""); // ✅ Preenche se vier do Google
+  const [displayName, setDisplayName] = useState(initialData?.displayName || initialData?.name || "");
   const [email, setEmail] = useState(initialData?.email || ""); // ✅ Preenche se vier do Google
   const [phone, setPhone] = useState("");
   const [documentType, setDocumentType] = useState<"cpf" | "cnpj">("cpf");
@@ -78,8 +82,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
   const [addressCity, setAddressCity] = useState("");
   const [addressState, setAddressState] = useState("");
   const [addressCountry, setAddressCountry] = useState("Brasil");
-  const [birthDate, setBirthDate] = useState("");
-  /** Nativo: exibição DD/MM/AAAA */
+  /** Exibição DD/MM/AAAA (DIA/MES/ANO). */
   const [birthDateBr, setBirthDateBr] = useState("");
   const [gender, setGender] = useState<BasicData["gender"]>(initialData?.gender ?? "prefer_not_say");
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -209,7 +212,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
   }, []);
 
   useEffect(() => {
-    if (!Capacitor.isNativePlatform() || !initialData?.birthDate) return;
+    if (!initialData?.birthDate) return;
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(initialData.birthDate.trim());
     if (m) setBirthDateBr(`${m[3]}/${m[2]}/${m[1]}`);
   }, [initialData?.birthDate]);
@@ -218,20 +221,16 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     e.preventDefault();
     
     // ✅ Validação ajustada: Senha só é obrigatória se NÃO for social
-    const birthOk = Capacitor.isNativePlatform() ? birthDateBr.replace(/\D/g, "").length >= 8 : !!birthDate;
-    if (!name || !email || (!isSocialSignup && !password) || !phone || !birthOk) {
+    const birthOk = birthDateBr.replace(/\D/g, "").length >= 8;
+    if (!name || !displayName || !email || (!isSocialSignup && !password) || !phone || !birthOk) {
       toast({ title: "Preencha todos os campos obrigatórios." });
       return;
     }
-    const birthIso = Capacitor.isNativePlatform()
-      ? brBirthToIso(birthDateBr) || ""
-      : birthDate.trim();
+    const birthIso = brBirthToIso(birthDateBr) || "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(birthIso)) {
       toast({
         title: "Data de nascimento",
-        description: Capacitor.isNativePlatform()
-          ? "Use dia, mês e ano completos (DD/MM/AAAA)."
-          : "Data inválida.",
+        description: "Use dia, mês e ano completos (DD/MM/AAAA).",
         variant: "destructive",
       });
       return;
@@ -280,7 +279,10 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
         }
         // Guardar asaas_customer_id para o complete-signup salvar no perfil e reutilizar em assinaturas
         onNext({
-          name, email, phone: phone.replace(/\D/g, ""),
+          name,
+          displayName,
+          email,
+          phone: phone.replace(/\D/g, ""),
           document: docClean, documentType,
           password, birthDate: birthIso, gender,
           addressZip: addressZip.replace(/\D/g, ""),
@@ -295,7 +297,10 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     }
 
     onNext({
-      name, email, phone: phone.replace(/\D/g, ""),
+      name,
+      displayName,
+      email,
+      phone: phone.replace(/\D/g, ""),
       document: docClean, documentType,
       password, birthDate: birthIso, gender,
       addressZip: addressZip.replace(/\D/g, ""),
@@ -328,8 +333,20 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-5 shadow-card space-y-3">
-          <InputRow icon={User} label="Nome completo *">
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome"
+          <InputRow icon={User} label="Nome *">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Mesmo nome da identidade"
+              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+          </InputRow>
+          <InputRow icon={UserCircle} label="Nome de exibição *">
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Nome que aparecerá para outros usuários"
               className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
           </InputRow>
 
@@ -345,30 +362,20 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
           </InputRow>
 
           <InputRow icon={Calendar} label="Data de nascimento *">
-            {Capacitor.isNativePlatform() ? (
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="DD/MM/AAAA"
-                value={birthDateBr}
-                onChange={(e) => setBirthDateBr(formatBirthBrInput(e.target.value))}
-                maxLength={10}
-                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-              />
-            ) : (
-              <input
-                type="date"
-                value={birthDate}
-                onChange={(e) => setBirthDate(e.target.value)}
-                max={new Date().toISOString().split("T")[0]}
-                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-              />
-            )}
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="DD/MM/AAAA"
+              value={birthDateBr}
+              onChange={(e) => setBirthDateBr(formatBirthBrInput(e.target.value))}
+              maxLength={10}
+              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+            />
           </InputRow>
           {(() => {
-            const iso = Capacitor.isNativePlatform() ? brBirthToIso(birthDateBr) : birthDate;
+            const iso = brBirthToIso(birthDateBr) || "";
             return iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && isUnderage(iso) ? (
-            <p className="text-xs text-destructive font-medium px-1">Você precisa ter 18 anos ou mais para se cadastrar.</p>
+              <p className="text-xs text-destructive font-medium px-1">Você precisa ter 18 anos ou mais para se cadastrar.</p>
             ) : null;
           })()}
 

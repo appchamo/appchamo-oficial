@@ -1,5 +1,7 @@
 import { User, Briefcase } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 type AccountType = "client" | "professional";
 
@@ -9,6 +11,8 @@ interface Props {
 
 const StepAccountType = ({ onSelect }: Props) => {
   // ✅ FUNÇÃO HARD RESET: A mesma limpeza nuclear usada no Signup principal
+  const [proModalOpen, setProModalOpen] = useState(false);
+
   const forceExitToLogin = async (e: React.MouseEvent) => {
     e.preventDefault();
     try {
@@ -52,7 +56,13 @@ const StepAccountType = ({ onSelect }: Props) => {
           ].map((opt) => (
             <button
               key={opt.type}
-              onClick={() => onSelect(opt.type)}
+              onClick={() => {
+                if (opt.type === "professional") {
+                  setProModalOpen(true);
+                } else {
+                  onSelect(opt.type);
+                }
+              }}
               className="flex items-center gap-4 bg-card border rounded-2xl p-5 hover:border-primary/40 hover:shadow-card transition-all text-left"
             >
               <div className="w-12 h-12 rounded-xl bg-accent flex items-center justify-center">
@@ -75,6 +85,38 @@ const StepAccountType = ({ onSelect }: Props) => {
           </button>
         </p>
       </div>
+
+      <Dialog open={proModalOpen} onOpenChange={setProModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Você presta serviços (não vende produtos)?</DialogTitle>
+            <DialogDescription>
+              Nossa plataforma é direcionada para prestadores de serviço. Se você vende produtos e não presta serviços, seu cadastro pode ser reprovado.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <div className="flex w-full gap-2">
+              <button
+                type="button"
+                onClick={() => setProModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors"
+              >
+                NÃO
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProModalOpen(false);
+                  onSelect("professional");
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                SIM
+              </button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

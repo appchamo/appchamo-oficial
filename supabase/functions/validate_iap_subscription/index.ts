@@ -7,7 +7,8 @@ const APPLE_VERIFY_SANDBOX = "https://sandbox.itunes.apple.com/verifyReceipt";
 
 const cors = () => ({
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 });
 const json = (data: object, status = 200) =>
@@ -16,17 +17,36 @@ const json = (data: object, status = 200) =>
     headers: { "Content-Type": "application/json", ...cors() },
   });
 
-/** Valida receipt iOS com Apple (verifyReceipt). Retorna true se válido. */
-async function verifyAppleReceipt(receiptBase64: string): Promise<boolean> {
+interface VerifyResult {
+  ok: boolean;
+  userMessage?: string;
+}
+
+/**
+ * Valida o recibo com a Apple e exige assinatura ATIVA do produto esperado
+ * (expires_date_ms > agora). Evita ativar plano pago quando o pagamento falhou
+ * ou quando APPLE_SHARED_SECRET / recibo estão ausentes.
+ */
+async function verifyAppleReceipt(
+  receiptBase64: string,
+  expectedProductId: string
+): Promise<VerifyResult> {
   const sharedSecret = Deno.env.get("APPLE_SHARED_SECRET");
-  if (!sharedSecret) {
-    console.warn("APPLE_SHARED_SECRET not set; skipping receipt verification.");
-    return true;
+  if (!sharedSecret?.trim()) {
+    console.error(
+      "validate_iap_subscription: APPLE_SHARED_SECRET ausente — IAP iOS bloqueado."
+    );
+    return {
+      ok: false,
+      userMessage:
+        "Validação da App Store não configurada. Contate o suporte (APPLE_SHARED_SECRET).",
+    };
   }
 
   const body = JSON.stringify({
     "receipt-data": receiptBase64,
     password: sharedSecret,
+    "exclude-old-transactions": true,
   });
 
   let res = await fetch(APPLE_VERIFY_PRODUCTION, {
@@ -34,7 +54,7 @@ async function verifyAppleReceipt(receiptBase64: string): Promise<boolean> {
     headers: { "Content-Type": "application/json" },
     body,
   });
-  let data = await res.json();
+  let data = (await res.json()) as Record<string, unknown>;
 
   if (data.status === 21007) {
     res = await fetch(APPLE_VERIFY_SANDBOX, {
@@ -42,17 +62,45 @@ async function verifyAppleReceipt(receiptBase64: string): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body,
     });
-    data = await res.json();
+    data = (await res.json()) as Record<string, unknown>;
   }
 
   if (data.status !== 0) {
     console.error("Apple verifyReceipt status:", data.status);
-    return false;
+    return {
+      ok: false,
+      userMessage:
+        "A Apple não confirmou o pagamento desta assinatura. Se o cartão foi recusado, o plano não será ativado.",
+    };
   }
 
-  const latest = data.latest_receipt_info ?? data.receipt?.in_app ?? [];
-  const hasActive = Array.isArray(latest) && latest.length > 0;
-  return hasActive;
+  const latest = Array.isArray(data.latest_receipt_info)
+    ? (data.latest_receipt_info as Record<string, string>[])
+    : [];
+  const inApp = Array.isArray((data.receipt as Record<string, unknown>)?.in_app)
+    ? ((data.receipt as Record<string, unknown>).in_app as Record<
+        string,
+        string
+      >[])
+    : [];
+
+  const now = Date.now();
+  let maxExpiry = 0;
+  for (const t of [...latest, ...inApp]) {
+    if (t.product_id !== expectedProductId) continue;
+    const exp = parseInt(t.expires_date_ms ?? "", 10) || 0;
+    if (exp > maxExpiry) maxExpiry = exp;
+  }
+
+  if (maxExpiry <= now) {
+    return {
+      ok: false,
+      userMessage:
+        "Não há assinatura ativa para este plano no recibo da App Store. Verifique o pagamento em Ajustes → Assinaturas.",
+    };
+  }
+
+  return { ok: true };
 }
 
 serve(async (req) => {
@@ -101,17 +149,42 @@ serve(async (req) => {
       );
     }
 
-    if (!userId || !planId || !transactionId || !productIdentifier || !platform) {
-      return json({ error: "Campos obrigatórios: userId, planId, transactionId, productIdentifier, platform." }, 400);
+    if (
+      !userId ||
+      !planId ||
+      !transactionId ||
+      !productIdentifier ||
+      !platform
+    ) {
+      return json(
+        {
+          error:
+            "Campos obrigatórios: userId, planId, transactionId, productIdentifier, platform.",
+        },
+        400
+      );
     }
     if (!ALLOWED_PLANS.includes(planId)) {
       return json({ error: "Plano inválido para IAP." }, 400);
     }
 
-    if (platform === "ios" && receipt) {
-      const valid = await verifyAppleReceipt(receipt);
-      if (!valid) {
-        return json({ error: "Receipt inválido ou expirado." }, 400);
+    if (platform === "ios") {
+      if (
+        !receipt ||
+        typeof receipt !== "string" ||
+        receipt.trim().length < 20
+      ) {
+        return json(
+          {
+            error:
+              "Recibo da App Store ausente. Feche o app completamente, abra de novo e tente assinar outra vez, ou use «Restaurar compras».",
+          },
+          400
+        );
+      }
+      const v = await verifyAppleReceipt(receipt.trim(), productIdentifier);
+      if (!v.ok) {
+        return json({ error: v.userMessage || "Recibo inválido." }, 400);
       }
     }
 

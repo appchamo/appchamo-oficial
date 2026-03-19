@@ -133,6 +133,7 @@ const Signup = () => {
           setCreatedUserId(currentSession.user.id);
           setBasicData({
             name: currentSession.user.user_metadata?.full_name || "",
+            displayName: currentSession.user.user_metadata?.full_name || "",
             email: currentSession.user.email || "",
             password: "",
             phone: "",
@@ -180,6 +181,7 @@ const Signup = () => {
     setCreatedUserId(session.user.id);
     setBasicData({
       name: session.user.user_metadata?.full_name || "",
+      displayName: session.user.user_metadata?.full_name || "",
       email: session.user.email || "",
       password: "",
       phone: "",
@@ -242,6 +244,7 @@ const Signup = () => {
       if (!parsed?.email && !parsed?.name) return;
       setBasicData((prev) => prev ?? ({
         name: parsed.name || "",
+        displayName: parsed.name || "",
         email: (parsed.email || "").toLowerCase().trim(),
         password: "",
         phone: "",

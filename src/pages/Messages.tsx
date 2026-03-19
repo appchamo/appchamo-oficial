@@ -155,7 +155,10 @@ const Messages = () => {
       return req.client_id === user.id ? proUserIdMap.get(req.professional_id) : req.client_id;
     }).filter(Boolean) as string[];
 
-    const { data: allProfiles } = await supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", usersToFetch);
+    const { data: allProfiles } = await supabase
+      .from("profiles_public" as any)
+      .select("user_id, full_name, display_name, avatar_url")
+      .in("user_id", usersToFetch);
     const profileMap = new Map((allProfiles || []).map(p => [p.user_id, p]));
 
     /** 1 RPC em vez de até 3×N requests por thread (última msg + não lidas) */
@@ -223,7 +226,7 @@ const Messages = () => {
         const sum = summaryByReq.get(req.id);
         return {
           ...req,
-          otherName: profile?.full_name || (isClient ? "Profissional" : "Cliente"),
+          otherName: profile?.display_name || profile?.full_name || (isClient ? "Profissional" : "Cliente"),
           otherAvatar: profile?.avatar_url || null,
           lastMessage: sum?.lastMessage ?? null,
           lastMessageTime: sum?.lastMessageTime || req.updated_at,

@@ -74,6 +74,7 @@ Deno.serve(async (req) => {
     const profileUpdates: Record<string, any> = {
       user_type: accountType,
       full_name: basicData.name,
+      display_name: basicData.displayName || basicData.name,
       phone: basicData.phone,
       birth_date: basicData.birthDate || null,
       accepted_terms_version: "1.0",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Mail, Lock, ArrowRight, RefreshCw, Smartphone, Home } from "lucide-react";
+import { Mail, Lock, ArrowRight, RefreshCw, Home } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, OAUTH_FAILED_KEY } from "@/hooks/useAuth";
@@ -26,23 +26,6 @@ const friendlyError = (type: LoginError) => {
   if (type === "email_not_confirmed") return "Verifique seu e-mail antes de entrar.";
   if (type === "rate_limit") return "Muitas tentativas. Aguarde um momento.";
   return "Erro ao entrar. Tente novamente.";
-};
-
-const getDeviceId = () => {
-  let deviceId = localStorage.getItem("chamo_device_id");
-  if (!deviceId) {
-    deviceId = crypto.randomUUID();
-    localStorage.setItem("chamo_device_id", deviceId);
-  }
-  return deviceId;
-};
-
-const getDeviceName = (): string => {
-  if (!Capacitor.isNativePlatform()) return "Web Browser";
-  const platform = Capacitor.getPlatform();
-  if (platform === "ios") return "iPhone App";
-  if (platform === "android") return "Android App";
-  return "App";
 };
 
 let isRedirecting = false;
@@ -83,8 +66,6 @@ const Login = () => {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   
-  const [deviceLimitHit, setDeviceLimitHit] = useState(false);
-  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [processingOAuth, setProcessingOAuth] = useState(hasOAuthCodeInUrl());
   const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Marca que abrimos o browser para OAuth (Google/Apple); evita toast "Demorou muito" quando o timeout é do fluxo social */
@@ -122,7 +103,7 @@ const Login = () => {
           hasRedirectedForSessionRef.current = true;
           setLoading(false);
           setProcessingOAuth(false);
-          checkDeviceLimitAndRedirect(data.session.user.id, data.session.user.email ?? undefined);
+          proceedToRedirect(data.session.user.id, data.session.user.email ?? undefined);
         }
       } catch (e) {
         console.error("[Login] exchange from URL:", e);
@@ -163,7 +144,7 @@ const Login = () => {
         oauthBrowserOpenedRef.current = false;
         setLoading(false);
         setProcessingOAuth(false);
-        checkDeviceLimitAndRedirect(data.session.user.id, data.session.user.email ?? undefined);
+        proceedToRedirect(data.session.user.id, data.session.user.email ?? undefined);
       }
     } catch (e) {
       console.error("[Login] exchangeCodeAndRedirect:", e);
@@ -180,7 +161,7 @@ const Login = () => {
     oauthBrowserOpenedRef.current = false;
     setLoading(false);
     setProcessingOAuth(false);
-    checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
+    proceedToRedirect(session.user.id, session.user.email ?? undefined);
   }, [session?.user]);
 
   // Polling no mobile: enquanto loading e não redirecionou, checa getSession a cada 1s (contexto pode atrasar)
@@ -198,7 +179,7 @@ const Login = () => {
         }
         setLoading(false);
         setProcessingOAuth(false);
-        checkDeviceLimitAndRedirect(s.user.id, s.user.email ?? undefined);
+            proceedToRedirect(s.user.id, s.user.email ?? undefined);
       }
     }, 1000);
     return () => {
@@ -258,7 +239,7 @@ const Login = () => {
             oauthBrowserOpenedRef.current = false;
             setLoading(false);
             setProcessingOAuth(false);
-            checkDeviceLimitAndRedirect(s.user.id, s.user.email ?? undefined);
+            proceedToRedirect(s.user.id, s.user.email ?? undefined);
           } else if (!s?.user && loading) {
             socialLoginInProgressRef.current = false;
             setLoading(false);
@@ -290,40 +271,6 @@ const Login = () => {
   }, []);
 
   const SUPPORT_EMAIL = "suporte@appchamo.com";
-
-  const checkDeviceLimitAndRedirect = async (userId: string, emailFromAuth?: string) => {
-    const isSupport = (emailFromAuth || "").toLowerCase().trim() === SUPPORT_EMAIL.toLowerCase().trim();
-    if (isSupport) {
-      await proceedToRedirect(userId, emailFromAuth);
-      return;
-    }
-    try {
-      const deviceId = getDeviceId();
-      const deviceName = getDeviceName();
-
-      const { data: canLogin, error: deviceError } = await supabase.rpc('check_device_limit', {
-        p_user_id: userId,
-        p_device_id: deviceId,
-        p_device_name: deviceName
-      });
-
-      if (deviceError) {
-        console.error("Erro ao verificar aparelhos:", deviceError);
-        await proceedToRedirect(userId, emailFromAuth);
-      } else if (canLogin === false) {
-        setDeviceLimitHit(true);
-        setPendingUserId(userId);
-        setLoading(false);
-        return;
-      } else {
-        await proceedToRedirect(userId, emailFromAuth);
-      }
-    } catch (err) {
-      console.error("Erro na verificação do dispositivo:", err);
-      toast({ title: "Erro ao entrar. Tente novamente.", variant: "destructive" });
-      setLoading(false);
-    }
-  };
 
   /** Após OAuth (Google/Apple) o trigger pode demorar a criar o perfil. Retry só enquanto não existir perfil; se já existir (mesmo pending_signup), decide na hora. */
   const fetchProfileWithRetry = async (userId: string): Promise<{ profile: any; roles: any[] }> => {
@@ -449,35 +396,6 @@ const Login = () => {
     }
   };
 
-  const forceDisconnectOtherDevices = async () => {
-    if (!pendingUserId) return;
-    setLoading(true);
-    
-    const deviceId = getDeviceId();
-    const { error } = await supabase
-      .from("user_devices")
-      .delete()
-      .eq("user_id", pendingUserId)
-      .neq("device_id", deviceId);
-
-    if (error) {
-      toast({ title: "Erro ao desligar aparelhos.", variant: "destructive" });
-      setLoading(false);
-      return;
-    }
-
-    toast({ title: "Aparelhos desligados com sucesso!" });
-    setDeviceLimitHit(false);
-    await checkDeviceLimitAndRedirect(pendingUserId);
-  };
-
-  const cancelDeviceLimit = async () => {
-    setDeviceLimitHit(false);
-    setPendingUserId(null);
-    await supabase.auth.signOut();
-    setLoading(false);
-  };
-
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
@@ -522,7 +440,7 @@ const Login = () => {
 
     const runRedirect = (userId: string, email?: string) => {
       if (isRedirecting) return;
-      checkDeviceLimitAndRedirect(userId, email);
+      proceedToRedirect(userId, email);
     };
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -543,7 +461,7 @@ const Login = () => {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && !isRedirecting) {
-        checkDeviceLimitAndRedirect(session.user.id, session.user.email ?? undefined);
+        proceedToRedirect(session.user.id, session.user.email ?? undefined);
       }
     });
 
@@ -583,7 +501,7 @@ const Login = () => {
     }
     
     localStorage.removeItem("manual_login_intent");
-    await checkDeviceLimitAndRedirect(data.user.id, data.user.email ?? undefined);
+    await proceedToRedirect(data.user.id, data.user.email ?? undefined);
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
@@ -683,31 +601,11 @@ const Login = () => {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-gradient mb-2">Chamô</h1>
           <p className="text-sm text-muted-foreground">
-            {forgotMode ? "Recuperar sua senha" : deviceLimitHit ? "Limite de Aparelhos" : "Entre na sua conta"}
+            {forgotMode ? "Recuperar sua senha" : "Entre na sua conta"}
           </p>
         </div>
 
-        {deviceLimitHit ? (
-          <div className="bg-card border border-destructive/20 rounded-2xl p-6 shadow-card space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex justify-center mb-2">
-              <div className="w-12 h-12 bg-destructive/10 text-destructive rounded-full flex items-center justify-center">
-                <Smartphone className="w-6 h-6" />
-              </div>
-            </div>
-            <h3 className="text-center font-bold text-foreground">Aparelhos a mais!</h3>
-            <p className="text-sm text-center text-muted-foreground">
-              Limite atingido para o seu plano atual.
-            </p>
-            <div className="space-y-2 pt-2">
-              <button onClick={forceDisconnectOtherDevices} disabled={loading} className="w-full py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 transition-colors">
-                {loading ? "Desconectando..." : "Desconectar outros e entrar"}
-              </button>
-              <button onClick={cancelDeviceLimit} disabled={loading} className="w-full py-2.5 rounded-xl border border-border text-foreground font-semibold text-sm hover:bg-muted transition-colors">
-                Cancelar
-              </button>
-            </div>
-          </div>
-        ) : forgotMode ? (
+        {forgotMode ? (
           <form onSubmit={handleForgotPassword} className="bg-card border rounded-2xl p-6 shadow-card space-y-4">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">E-mail</label>
@@ -779,16 +677,12 @@ const Login = () => {
           </div>
         )}
 
-        {!deviceLimitHit && (
-          <>
-            <p className="text-center text-xs text-muted-foreground mt-4">
-              Não tem conta? <Link to="/signup" className="text-primary font-medium hover:underline">Criar conta</Link>
-            </p>
-            <button type="button" onClick={() => setForgotMode(!forgotMode)} className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
-              {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}
-            </button>
-          </>
-        )}
+        <p className="text-center text-xs text-muted-foreground mt-4">
+          Não tem conta? <Link to="/signup" className="text-primary font-medium hover:underline">Criar conta</Link>
+        </p>
+        <button type="button" onClick={() => setForgotMode(!forgotMode)} className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
+          {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}
+        </button>
       </div>
     </div>
   );

@@ -263,13 +263,21 @@ const MessageThread = () => {
           if (pro) {
             setChatProUserId(pro.user_id);
             setRecipientUserId(pro.user_id);
-            const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
-            if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
+            const { data: profile } = (await supabase
+              .from("profiles_public" as any)
+              .select("full_name, display_name, avatar_url")
+              .eq("user_id", pro.user_id)
+              .maybeSingle()) as { data: { full_name: string; display_name?: string | null; avatar_url: string | null } | null };
+            if (profile) setOtherParty({ name: profile.display_name || profile.full_name || "Profissional", avatar_url: profile.avatar_url });
           }
         } else {
           setRecipientUserId(req.client_id);
-          const { data: profile } = (await supabase.from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle()) as {data: {full_name: string;avatar_url: string | null;} | null;};
-          if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
+          const { data: profile } = (await supabase
+            .from("profiles_public" as any)
+            .select("full_name, display_name, avatar_url")
+            .eq("user_id", req.client_id)
+            .maybeSingle()) as { data: { full_name: string; display_name?: string | null; avatar_url: string | null } | null };
+          if (profile) setOtherParty({ name: profile.display_name || profile.full_name || "Cliente", avatar_url: profile.avatar_url });
         }
 
         const { data: appSingle } = await supabase

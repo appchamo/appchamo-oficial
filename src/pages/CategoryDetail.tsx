@@ -128,7 +128,7 @@ const CategoryDetail = () => {
   const enrichPros = async (data: any[]) => {
     const userIds = data.map(p => p.user_id);
     const [profilesRes, locationsRes] = await Promise.all([
-      supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
+      supabase.from("profiles_public" as any).select("user_id, full_name, display_name, avatar_url").in("user_id", userIds),
       supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
     ]);
     const profileMap = new Map(((profilesRes.data || []) as any[]).map(p => [p.user_id, p]));
@@ -138,7 +138,10 @@ const CategoryDetail = () => {
       rating: p.rating,
       total_services: p.total_services,
       verified: p.verified,
-      full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+      full_name:
+        profileMap.get(p.user_id)?.display_name ||
+        profileMap.get(p.user_id)?.full_name ||
+        "Profissional",
       avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
       user_type: profileMap.get(p.user_id)?.user_type || "professional",
       city: locationMap.get(p.user_id)?.address_city || null,

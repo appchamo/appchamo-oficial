@@ -6,6 +6,7 @@ import { toast } from "@/hooks/use-toast";
 import { Link, useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { fetchViaCep } from "@/lib/viacep";
 
 interface JobPost {
   id: string;
@@ -39,8 +40,18 @@ const MyJobPostings = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState<string | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
-  const [form, setForm] = useState({ title: "", description: "", location: "", salary_range: "", requirements: "" });
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    cep: "",
+    location: "", // "Cidade - UF"
+    city: "",
+    state: "",
+    salary_range: "",
+    requirements: "",
+  });
   const [saving, setSaving] = useState(false);
+  const [searchingCep, setSearchingCep] = useState(false);
 
   const fetchJobs = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -82,26 +93,103 @@ const MyJobPostings = () => {
 
   useEffect(() => { fetchJobs(); }, []);
 
+  const formatCepInput = (val: string) => {
+    const clean = val.replace(/\D/g, "").slice(0, 8);
+    const masked = clean.replace(/^(\d{5})(\d)/, "$1-$2");
+    return masked;
+  };
+
+  const handleCepChange = async (val: string) => {
+    const masked = formatCepInput(val);
+    const clean = val.replace(/\D/g, "").slice(0, 8);
+    setForm((prev) => ({ ...prev, cep: masked }));
+
+    if (clean.length !== 8) {
+      setForm((prev) => ({ ...prev, location: "", city: "", state: "" }));
+      return;
+    }
+
+    setSearchingCep(true);
+    try {
+      const data = await fetchViaCep(clean);
+      if (!data?.localidade || !data?.uf) {
+        toast({ title: "CEP não encontrado", description: "Verifique o CEP e tente novamente.", variant: "destructive" });
+        setForm((prev) => ({ ...prev, location: "", city: "", state: "" }));
+        return;
+      }
+      const city = data.localidade;
+      const state = data.uf;
+      setForm((prev) => ({
+        ...prev,
+        city,
+        state,
+        location: `${city}/${state}`,
+      }));
+    } catch {
+      toast({ title: "Erro ao buscar CEP", variant: "destructive" });
+      setForm((prev) => ({ ...prev, location: "", city: "", state: "" }));
+    } finally {
+      setSearchingCep(false);
+    }
+  };
+
   const handleCreate = async () => {
     if (!proId || !form.title) {
       toast({ title: "Informe o título da vaga.", variant: "destructive" });
       return;
     }
+    if (!form.location || !form.city || !form.state) {
+      toast({ title: "Informe um CEP válido para definir a localização da vaga.", variant: "destructive" });
+      return;
+    }
     setSaving(true);
-    const { error } = await supabase.from("job_postings").insert({
-      professional_id: proId,
-      title: form.title,
-      description: form.description || null,
-      location: form.location || null,
-      salary_range: form.salary_range || null,
-      requirements: form.requirements || null,
-    });
-    if (error) {
+    const { data: createdJob, error } = await supabase
+      .from("job_postings")
+      .insert({
+        professional_id: proId,
+        title: form.title,
+        description: form.description || null,
+        location: form.location || null,
+        salary_range: form.salary_range || null,
+        requirements: form.requirements || null,
+      })
+      .select("id")
+      .maybeSingle();
+    if (error || !createdJob?.id) {
       toast({ title: "Erro ao criar vaga.", variant: "destructive" });
     } else {
+      // Notificar usuários da mesma cidade
+      try {
+        const { data: authUser } = await supabase.auth.getUser();
+        const publisherId = authUser?.user?.id;
+
+        const { data: recipients } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .eq("address_city", form.city)
+          .eq("address_state", form.state)
+          .neq("user_id", publisherId ?? "");
+
+        const rows =
+          (recipients || []).map((r: any) => ({
+            user_id: r.user_id,
+            title: "Nova vaga de Emprego",
+            message: `Confira a nova vaga "${form.title}" na sua região.`,
+            type: "job",
+            link: `/jobs/${createdJob.id}`,
+          })) || [];
+
+        if (rows.length > 0) {
+          await supabase.from("notifications").insert(rows);
+        }
+      } catch (e) {
+        // Se falhar a notificação, a vaga já existe.
+        console.warn("[MyJobPostings] Falha ao notificar usuários da cidade:", e);
+      }
+
       toast({ title: "Vaga publicada!" });
       setCreateOpen(false);
-      setForm({ title: "", description: "", location: "", salary_range: "", requirements: "" });
+      setForm({ title: "", description: "", cep: "", location: "", city: "", state: "", salary_range: "", requirements: "" });
       fetchJobs();
     }
     setSaving(false);
@@ -277,13 +365,15 @@ const MyJobPostings = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Localização</label>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">CEP *</label>
                   <input
-                    value={form.location}
-                    onChange={(e) => setForm({ ...form, location: e.target.value })}
-                    placeholder="São Paulo, SP"
+                    value={form.cep}
+                    onChange={(e) => handleCepChange(e.target.value)}
+                    placeholder="00000-000"
+                    inputMode="numeric"
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
                   />
+                  {searchingCep && <p className="text-[10px] text-muted-foreground mt-1">Buscando cidade...</p>}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Faixa salarial</label>
@@ -292,6 +382,15 @@ const MyJobPostings = () => {
                     onChange={(e) => setForm({ ...form, salary_range: e.target.value })}
                     placeholder="R$ 2.000 - 3.500"
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Cidade/UF</label>
+                  <input
+                    value={form.location}
+                    disabled
+                    placeholder="Preencha o CEP"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-muted/30 outline-none focus:ring-2 focus:ring-primary/10"
                   />
                 </div>
               </div>

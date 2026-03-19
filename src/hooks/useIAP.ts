@@ -22,9 +22,13 @@ export interface IAPPurchaseResult {
   productIdentifier: string;
   planId: string;
   receipt?: string;
+  jwsRepresentation?: string;
   verificationData?: string;
   purchaseToken?: string;
   platform: "ios" | "android";
+  /** StoreKit 2: só ativar no backend se assinatura realmente ativa */
+  subscriptionState?: string;
+  isActive?: boolean;
 }
 
 const isNative = Capacitor.isNativePlatform();
@@ -97,9 +101,14 @@ export function useIAP() {
           productIdentifier: result.productIdentifier ?? productId,
           planId,
           receipt: result.receipt,
-          verificationData: result.verificationData,
+          jwsRepresentation: (result as { jwsRepresentation?: string })
+            .jwsRepresentation,
+          verificationData: (result as { verificationData?: string })
+            .verificationData,
           purchaseToken: result.purchaseToken,
           platform,
+          subscriptionState: result.subscriptionState,
+          isActive: result.isActive,
         };
       } catch (e: any) {
         if (e?.message?.toLowerCase().includes("cancelled")) {

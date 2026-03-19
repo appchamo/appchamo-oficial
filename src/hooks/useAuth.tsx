@@ -280,7 +280,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const path = window.location.pathname || '';
           const alreadyOnLogin = path.includes('login');
           if (exchangeOk) {
-            // Igual ao Google: não navegar daqui; a página de Login reage a session?.user e chama checkDeviceLimitAndRedirect → navigate("/home") com a flag
+            // Igual ao Google: não navegar daqui; a página de Login reage a session?.user e redireciona
           } else if (!alreadyOnLogin) {
             setTimeout(() => {
               try {
@@ -422,6 +422,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     setIsSignOutInProgress(true);
     try {
+      // Limpeza do mapeamento do dispositivo para evitar que notificações do usuário anterior continuem chegando
+      // quando o mesmo celular faz login em outra conta.
+      const deviceId = localStorage.getItem("chamo_device_id");
+      const currentUserId = user?.id;
+      try {
+        if (currentUserId && deviceId) {
+          await supabase
+            .from("user_devices")
+            .delete()
+            .eq("user_id", currentUserId)
+            .eq("device_id", deviceId);
+        }
+      } catch (e) {
+        // Não bloqueia logout se a limpeza falhar (RLS/latência). O importante é sair da sessão.
+        console.warn("[signOut] Falha ao limpar user_devices:", e);
+      }
+
       localStorage.clear();
       await supabase.auth.signOut();
       setUser(null);

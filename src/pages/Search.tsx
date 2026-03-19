@@ -194,7 +194,10 @@ const Search = () => {
 
     const userIds = prosRes.data.map((p) => p.user_id);
     const [profilesRes, fullProfilesRes] = await Promise.all([
-      supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
+      supabase
+        .from("profiles_public" as any)
+        .select("user_id, full_name, display_name, avatar_url")
+        .in("user_id", userIds),
       supabase.from("profiles").select("user_id, address_city, address_state, latitude, longitude").in("user_id", userIds),
     ]);
 
@@ -209,7 +212,10 @@ const Search = () => {
         rating: p.rating,
         total_services: p.total_services,
         verified: p.verified,
-        full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+        full_name:
+          profileMap.get(p.user_id)?.display_name ||
+          profileMap.get(p.user_id)?.full_name ||
+          "Profissional",
         avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
         category_name: (p.categories as any)?.name || "—",
         profession_name: (p.professions as any)?.name || "",

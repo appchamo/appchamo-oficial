@@ -183,7 +183,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     try {
       const pair = await Promise.race([
         Promise.all([
-          supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
+          supabase.from("profiles_public" as any).select("user_id, full_name, display_name, avatar_url").in("user_id", userIds),
           supabase.from("profiles").select("user_id, latitude, longitude, address_city, address_state").in("user_id", userIds),
         ]),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("featured_secondary_timeout")), 16_000)),
@@ -214,7 +214,10 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         verified: p.verified,
         user_id: p.user_id,
         profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
-        full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+        full_name:
+          profileMap.get(p.user_id)?.display_name ||
+          profileMap.get(p.user_id)?.full_name ||
+          "Profissional",
         avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
         latitude: loc?.latitude ?? null,
         longitude: loc?.longitude ?? null,

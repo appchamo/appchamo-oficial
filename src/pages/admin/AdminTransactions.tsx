@@ -168,17 +168,16 @@ const FinancialConfig = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [planPrices, setPlanPrices] = useState<Record<string, string>>({});
   const [planFeatures, setPlanFeatures] = useState<Record<string, string[]>>({});
-  const [planMaxDevices, setPlanMaxDevices] = useState<Record<string, string>>({});
   const [expandedPlan, setExpandedPlan] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   // Textos padrões caso o banco esteja vazio
   const defaultFeatures = {
-    free: ["Até 3 chamadas por conta", "1 dispositivo simultâneo", "Acesso básico à plataforma", "Apenas cobrança presencial"],
-    pro: ["Chamadas ilimitadas", "Receba pagamentos pelo app", "Suporte no app", "Até 2 dispositivos simultâneos"],
-    vip: ["Tudo do Pro", "Selo de verificado", "Aparece em destaque na Home", "Até 10 dispositivos simultâneos"],
-    business: ["Tudo do VIP", "Consultoria personalizada", "Suporte 24h", "Catálogo de produtos", "Publicar vagas de emprego", "Acesso VIP ao Chamô Event", "Até 20 dispositivos simultâneos"]
+    free: ["Até 3 chamadas por conta", "Acesso básico à plataforma", "Apenas cobrança presencial"],
+    pro: ["Chamadas ilimitadas", "Receba pagamentos pelo app", "Suporte no app"],
+    vip: ["Tudo do Pro", "Selo de verificado", "Aparece em destaque na Home"],
+    business: ["Tudo do VIP", "Consultoria personalizada", "Suporte 24h", "Catálogo de produtos", "Publicar vagas de emprego", "Acesso VIP ao Chamô Event"]
   };
 
   useEffect(() => {
@@ -194,23 +193,16 @@ const FinancialConfig = () => {
         setSettings(map);
       }
 
-      // Busca preço, benefícios e limite de dispositivos da tabela "plans"
-      const { data: plansData } = await supabase.from("plans").select("id, price_monthly, features, max_devices");
+      const { data: plansData } = await supabase.from("plans").select("id, price_monthly, features");
       if (plansData) {
         const plansMap: Record<string, string> = {};
         const featsMap: Record<string, string[]> = {};
-        const maxDevicesMap: Record<string, string> = {};
-        
         plansData.forEach(p => {
           plansMap[p.id] = p.price_monthly.toString().replace('.', ',');
-          maxDevicesMap[p.id] = String((p as any).max_devices ?? 1);
-          // Se já tem salvo no banco, usa. Se não, preenche com os textos padrão.
           featsMap[p.id] = p.features && p.features.length > 0 ? p.features : defaultFeatures[p.id as keyof typeof defaultFeatures];
         });
-        
         setPlanPrices(plansMap);
         setPlanFeatures(featsMap);
-        setPlanMaxDevices(maxDevicesMap);
       }
 
       setLoading(false);
@@ -220,8 +212,6 @@ const FinancialConfig = () => {
 
   const set = (key: string, value: string) => setSettings(prev => ({ ...prev, [key]: value }));
   const setPlanPrice = (id: string, value: string) => setPlanPrices(prev => ({ ...prev, [id]: value }));
-  const updatePlanMaxDevices = (id: string, value: string) => setPlanMaxDevices(prev => ({ ...prev, [id]: value }));
-  
   const toggleExpand = (id: string) => setExpandedPlan(prev => ({ ...prev, [id]: !prev[id] }));
   const addFeature = (id: string) => setPlanFeatures(prev => ({ ...prev, [id]: [...(prev[id] || []), ""] }));
   const updateFeature = (id: string, index: number, value: string) => {
@@ -267,12 +257,6 @@ const FinancialConfig = () => {
             updateData.features = planFeatures[planId].filter(f => f.trim() !== "");
         }
 
-        // Limite de dispositivos simultâneos (free: 1, pro: 2, vip: 10, business: 20)
-        if (planMaxDevices[planId] !== undefined) {
-            const num = parseInt(planMaxDevices[planId], 10);
-            if (!isNaN(num) && num >= 1 && num <= 100) updateData.max_devices = num;
-        }
-
         if (Object.keys(updateData).length > 0) {
            await supabase.from("plans").update(updateData).eq("id", planId);
         }
@@ -301,11 +285,6 @@ const FinancialConfig = () => {
         {id === 'free' && (
            <label className={`text-xs font-bold ${color} block`}>{name}</label>
         )}
-
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Dispositivos simultâneos</label>
-          <input type="number" min={1} max={100} value={planMaxDevices[id] ?? "1"} onChange={(e) => updatePlanMaxDevices(id, e.target.value)} className={inputCls} />
-        </div>
 
         <div>
           <button onClick={() => toggleExpand(id)} className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 transition-colors">

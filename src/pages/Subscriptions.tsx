@@ -19,7 +19,6 @@ const planDetails = [
     color: "text-muted-foreground",
     features: [
       "Até 3 chamadas por conta",
-      "1 dispositivo simultâneo",
       "Acesso básico à plataforma",
       "Apenas cobrança presencial",
     ],
@@ -32,7 +31,6 @@ const planDetails = [
       "Chamadas ilimitadas",
       "Receba pagamentos pelo app",
       "Suporte no app",
-      "Até 2 dispositivos simultâneos",
     ],
   },
   {
@@ -45,7 +43,6 @@ const planDetails = [
       "Tudo do Pro",
       "Selo de verificado",
       "Aparece em destaque na Home",
-      "Até 10 dispositivos simultâneos",
     ],
   },
   {
@@ -59,7 +56,6 @@ const planDetails = [
       "Catálogo de produtos",
       "Publicar vagas de emprego",
       "Acesso VIP ao Chamô Event",
-      "Até 20 dispositivos simultâneos",
     ],
   },
 ];
@@ -484,6 +480,40 @@ const Subscriptions = () => {
       if (!result) {
         setProcessing(false);
         return;
+      }
+      if (Capacitor.getPlatform() === "ios") {
+        if (result.isActive === false) {
+          toast({
+            title: "Assinatura não ativa",
+            description:
+              "A App Store não confirmou uma assinatura paga ativa. Se o pagamento foi recusado, atualize o cartão em Ajustes → Assinaturas.",
+            variant: "destructive",
+          });
+          setProcessing(false);
+          return;
+        }
+        if (
+          result.subscriptionState === "expired" ||
+          result.subscriptionState === "revoked"
+        ) {
+          toast({
+            title: "Compra não válida",
+            description: "Esta assinatura está expirada ou revogada na App Store.",
+            variant: "destructive",
+          });
+          setProcessing(false);
+          return;
+        }
+        if (!result.receipt?.trim()) {
+          toast({
+            title: "Sincronizando com a App Store",
+            description:
+              "Não foi possível ler o recibo agora. Feche o app por completo, abra de novo e toque em «Restaurar compras» na tela de planos.",
+            variant: "destructive",
+          });
+          setProcessing(false);
+          return;
+        }
       }
       let { data: { session } } = await supabase.auth.getSession();
       if (!session) {

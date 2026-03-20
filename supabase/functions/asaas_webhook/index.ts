@@ -31,14 +31,84 @@ serve(async (req) => {
     if (event === "PAYMENT_RECEIVED" || event === "PAYMENT_CONFIRMED") {
       const payment = body.payment;
 
-      // 1. Atualiza pagamentos avulsos (transactions só aceita pending|completed|cancelled|refunded)
-      const { error: updErr } = await supabase
+      // 1. Busca a transação pelo payment_id do Asaas
+      const { data: tx } = await supabase
         .from("transactions")
-        .update({ status: "completed" })
-        .eq("asaas_payment_id", payment.id);
+        .select("id, request_id, client_id, total_amount, status")
+        .eq("asaas_payment_id", payment.id)
+        .maybeSingle();
 
-      if (updErr) console.error("Transaction update error:", updErr);
-      else console.log("Transaction updated to completed:", payment.id);
+      if (tx && tx.status !== "completed") {
+        // 1a. Atualiza status da transação
+        const { error: updErr } = await supabase
+          .from("transactions")
+          .update({ status: "completed" })
+          .eq("id", tx.id);
+
+        if (updErr) console.error("Transaction update error:", updErr);
+        else console.log("Transaction updated to completed:", payment.id);
+
+        // 1b. Insere mensagem de confirmação no chat (frontend Realtime a detecta em tempo real)
+        if (tx.request_id && tx.client_id) {
+          const totalStr = Number(tx.total_amount).toFixed(2).replace(".", ",");
+          const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX`;
+
+          const { error: msgErr } = await supabase
+            .from("chat_messages")
+            .insert({
+              request_id: tx.request_id,
+              sender_id: tx.client_id,
+              content: confirmContent,
+            });
+
+          if (msgErr) console.error("chat_messages insert error:", msgErr);
+          else console.log("Mensagem de confirmação inserida no chat:", tx.request_id);
+
+          // 1c. Notificações
+          await supabase.from("notifications").insert({
+            user_id: tx.client_id,
+            title: "✅ Pagamento Confirmado",
+            message: `Seu pagamento via PIX de R$ ${totalStr} foi confirmado.`,
+            type: "success",
+            link: `/messages/${tx.request_id}`,
+          });
+
+          // Busca o professional user_id para notificá-lo
+          if (tx.client_id) {
+            const { data: txFull } = await supabase
+              .from("transactions")
+              .select("professional_id")
+              .eq("id", tx.id)
+              .maybeSingle();
+
+            if (txFull?.professional_id) {
+              const { data: pro } = await supabase
+                .from("professionals")
+                .select("user_id")
+                .eq("id", txFull.professional_id)
+                .maybeSingle();
+
+              if (pro?.user_id) {
+                await supabase.from("notifications").insert({
+                  user_id: pro.user_id,
+                  title: "💰 Pagamento Recebido!",
+                  message: `Você recebeu um pagamento via PIX de R$ ${totalStr}.`,
+                  type: "success",
+                  link: `/messages/${tx.request_id}`,
+                });
+              }
+            }
+          }
+        }
+      } else if (!tx) {
+        // Pagamento avulso sem transação encontrada (fallback antigo)
+        const { error: updErr } = await supabase
+          .from("transactions")
+          .update({ status: "completed" })
+          .eq("asaas_payment_id", payment.id);
+        if (updErr) console.error("Transaction fallback update error:", updErr);
+        else console.log("Transaction (fallback) updated:", payment.id);
+      }
 
       // 2. NOVA MÁGICA: Se o pagamento for de uma ASSINATURA, libera o plano na hora!
       if (payment.subscription) {
@@ -61,16 +131,20 @@ serve(async (req) => {
               .update({ status: "ACTIVE" })
               .eq("user_id", userId);
 
-            // Manda a notificação avisando que o Pix caiu e o plano tá liberado
+            // Atualiza user_type de acordo com o plano
+            const newUserType = subData.plan_id === "business" ? "company" : "professional";
+            await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);
+
+            // Manda a notificação avisando que o plano está liberado
             await supabase.from("notifications").insert({
               user_id: userId,
-              title: "Pagamento Confirmado! 🚀",
-              message: `Seu pagamento foi aprovado e seu plano pago está ativo e pronto para uso!`,
+              title: "🚀 Plano ativado!",
+              message: `Seu pagamento foi aprovado e os benefícios do seu plano já estão disponíveis!`,
               type: "success",
               link: "/subscriptions",
             });
 
-            console.log(`✅ Assinatura ${asaasSubscriptionId} ativada automaticamente para o usuário ${userId}`);
+            console.log(`✅ Assinatura ${asaasSubscriptionId} ativada automaticamente para o usuário ${userId} (${newUserType})`);
           }
         } else {
           console.error("Assinatura não encontrada no banco da Chamô para o ID:", asaasSubscriptionId);

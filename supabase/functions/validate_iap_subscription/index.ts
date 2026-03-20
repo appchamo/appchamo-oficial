@@ -208,6 +208,19 @@ serve(async (req) => {
       return json({ error: "Erro ao ativar assinatura." }, 500);
     }
 
+    // Atualiza user_type de acordo com o plano
+    const newUserType = planId === "business" ? "company" : "professional";
+    await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);
+
+    // Notifica o usuário
+    await supabase.from("notifications").insert({
+      user_id: userId,
+      title: "🚀 Plano ativado!",
+      message: `Sua assinatura foi confirmada pela App Store e os benefícios já estão disponíveis.`,
+      type: "success",
+      link: "/subscriptions",
+    });
+
     return json({ success: true, planId });
   } catch (e: unknown) {
     console.error("validate_iap_subscription", e);

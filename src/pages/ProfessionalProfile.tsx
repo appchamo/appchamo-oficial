@@ -33,6 +33,7 @@ interface ProData {
   profession_name: string;
   user_type: string;
   agenda_enabled?: boolean;
+  slug: string | null;
 }
 
 interface Review {
@@ -72,11 +73,11 @@ const ProfessionalProfile = () => {
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
-    const { data } = await supabase
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    const baseQuery = supabase
         .from("professionals")
-        .select("id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled")
-        .eq("id", id!)
-        .maybeSingle();
+        .select("id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug");
+    const { data } = await (isUUID ? baseQuery.eq("id", id) : baseQuery.eq("slug", id)).maybeSingle();
         
       if (data) {
         let profileData = null;
@@ -111,6 +112,7 @@ const ProfessionalProfile = () => {
           availability_status: (data as any).availability_status || "available",
           user_type: profileData?.user_type || "professional",
           agenda_enabled: !!(data as any).agenda_enabled,
+          slug: (data as any).slug || null,
         });
         
         const { data: { user } } = await supabase.auth.getUser();
@@ -165,19 +167,19 @@ const ProfessionalProfile = () => {
     if (id) loadProfile();
   }, [id, loadProfile]);
 
-  // Realtime: listen for availability_status changes on this professional
+  // Realtime: listen for availability_status changes on this professional (use actual UUID, not slug)
   useEffect(() => {
-    if (!id) return;
+    if (!pro?.id) return;
     const channel = supabase
-      .channel(`pro-status-${id}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "professionals", filter: `id=eq.${id}` },
+      .channel(`pro-status-${pro.id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "professionals", filter: `id=eq.${pro.id}` },
         (payload) => {
           const updated = payload.new as any;
           setPro(prev => prev ? { ...prev, availability_status: updated.availability_status, verified: updated.verified, rating: updated.rating, total_reviews: updated.total_reviews, total_services: updated.total_services } : prev);
         })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [id]);
+  }, [pro?.id]);
 
   const handlePhotoUpload = async (url: string) => {
     if (!pro) return;
@@ -198,7 +200,18 @@ const ProfessionalProfile = () => {
     if (!pro || !editNameValue.trim()) return;
     const { error } = await supabase.from("profiles").update({ full_name: editNameValue.trim() }).eq("user_id", pro.user_id);
     if (error) { toast({ title: "Erro ao atualizar nome", variant: "destructive" }); return; }
-    setPro(prev => prev ? { ...prev, full_name: editNameValue.trim() } : prev);
+
+    // Regenerate slug from new name
+    const { data: newSlug } = await supabase.rpc("generate_professional_slug" as any, {
+      p_user_id: pro.user_id,
+      p_base_name: editNameValue.trim(),
+    });
+    if (newSlug) {
+      await supabase.from("professionals").update({ slug: newSlug } as any).eq("id", pro.id);
+      setPro(prev => prev ? { ...prev, full_name: editNameValue.trim(), slug: newSlug } : prev);
+    } else {
+      setPro(prev => prev ? { ...prev, full_name: editNameValue.trim() } : prev);
+    }
     setEditingName(false);
     toast({ title: "Nome atualizado!" });
   };
@@ -223,6 +236,16 @@ const ProfessionalProfile = () => {
     const prof = professions.find(p => p.id === professionId);
     setPro(prev => prev ? { ...prev, profession_id: professionId || null, profession_name: prof?.name || "—" } : prev);
     toast({ title: "Profissão atualizada!" });
+  };
+
+  const handleCopyLink = () => {
+    if (!pro?.slug) return;
+    const link = `https://appchamo.com/professional/${pro.slug}`;
+    navigator.clipboard.writeText(link).then(() => {
+      toast({ title: "Link copiado!" });
+    }).catch(() => {
+      toast({ title: link, description: "Copie o link acima manualmente" });
+    });
   };
 
   const handleCall = async () => {
@@ -360,23 +383,42 @@ const ProfessionalProfile = () => {
 
           {/* Owner: change availability */}
           {isOwner && (
-            <div className="mt-4 pt-3 border-t">
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status de disponibilidade</label>
-              <Select value={pro.availability_status} onValueChange={handleStatusChange}>
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availabilityOptions.map(o => (
-                    <SelectItem key={o.value} value={o.value}>
-                      <span className="flex items-center gap-2">
-                        <o.icon className={`w-3 h-3 ${o.color} fill-current`} />
-                        {o.label}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="mt-4 pt-3 border-t space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status de disponibilidade</label>
+                <Select value={pro.availability_status} onValueChange={handleStatusChange}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availabilityOptions.map(o => (
+                      <SelectItem key={o.value} value={o.value}>
+                        <span className="flex items-center gap-2">
+                          <o.icon className={`w-3 h-3 ${o.color} fill-current`} />
+                          {o.label}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {pro.slug && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Seu link público</label>
+                  <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
+                    <span className="text-xs text-muted-foreground flex-1 truncate">
+                      appchamo.com/professional/{pro.slug}
+                    </span>
+                    <button
+                      onClick={handleCopyLink}
+                      className="text-xs text-primary font-semibold hover:underline flex-shrink-0"
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

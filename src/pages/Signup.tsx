@@ -63,7 +63,7 @@ const Signup = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const error = params.get("error");
-    const description = params.get("error_description") || params.get("error_description") || "";
+    const description = params.get("error_description") || params.get("error") || "";
     if (error) {
       window.history.replaceState({}, "", window.location.pathname);
       let msg = "Verifique a configuração (Apple/Google) no Supabase.";

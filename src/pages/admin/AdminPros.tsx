@@ -109,6 +109,11 @@ const AdminPros = () => {
   const [processingSub, setProcessingSub] = useState<string | null>(null);
   const [showForceApproveForUserId, setShowForceApproveForUserId] = useState<string | null>(null);
 
+  // Estados para o Modal de Recusa de Cadastro
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectOpenPro, setRejectOpenPro] = useState<Professional | null>(null);
+  const [rejectOpenReason, setRejectOpenReason] = useState("");
+
   // Estados para o Modal de Recusa de Assinatura
   const [rejectSubOpen, setRejectSubOpen] = useState(false);
   const [rejectSubPro, setRejectSubPro] = useState<Professional | null>(null);
@@ -228,18 +233,25 @@ const AdminPros = () => {
   };
 
   const handleReject = async () => {
-    if (!detailPro) return;
-    await supabase.from("professionals").update({ profile_status: "rejected", active: false }).eq("id", detailPro.id);
-    await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", detailPro.user_id);
-    await logAction("reject_professional", "professional", detailPro.id, { reason: rejectReason });
+    if (!rejectOpenPro) return;
+    if (!rejectOpenReason.trim()) {
+      toast({ title: "Informe o motivo da reprovação", variant: "destructive" });
+      return;
+    }
+    await supabase.from("professionals").update({ profile_status: "rejected", active: false }).eq("id", rejectOpenPro.id);
+    await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", rejectOpenPro.user_id);
+    await logAction("reject_professional", "professional", rejectOpenPro.id, { reason: rejectOpenReason });
     await supabase.from("notifications").insert({
-      user_id: detailPro.user_id,
+      user_id: rejectOpenPro.user_id,
       title: "Cadastro não aprovado",
-      message: rejectReason || "Seu cadastro não foi aprovado. Verifique seus documentos e tente novamente.",
+      message: rejectOpenReason,
       type: "rejection",
-      link: "/profile",
+      link: "/notifications",
     });
     toast({ title: "Profissional reprovado" });
+    setRejectOpen(false);
+    setRejectOpenPro(null);
+    setRejectOpenReason("");
     setDetailPro(null);
     setRejectReason("");
     fetchPros();
@@ -514,9 +526,6 @@ const AdminPros = () => {
                     }`}>
                       {planLabel[pro.plan_id] || pro.plan_id}
                     </span>
-                    {pro.plan_id !== "free" && pro.subscription_status !== "ACTIVE" && (
-                      <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] rounded-full uppercase font-bold animate-pulse">Pendente</span>
-                    )}
                   </td>
                   <td className="p-3">
                     <span className="text-xs font-medium text-foreground">{pro.calls_used}</span>
@@ -545,25 +554,7 @@ const AdminPros = () => {
                           </a>
                         </DropdownMenuItem>
                         
-                        {pro.plan_id !== "free" && pro.subscription_status !== "ACTIVE" && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => handleApproveSubscription(pro)} disabled={processingSub === pro.id}>
-                              <CheckCircle className="w-3.5 h-3.5 mr-2 text-green-500" /> 
-                              {processingSub === pro.id ? "Aprovando..." : "Aprovar Assinatura"}
-                            </DropdownMenuItem>
-                            {showForceApproveForUserId === pro.user_id && (
-                              <DropdownMenuItem onClick={() => handleForceApproveSubscription(pro)} disabled={processingSub === pro.id}>
-                                <AlertTriangle className="w-3.5 h-3.5 mr-2 text-amber-500" /> 
-                                {processingSub === pro.id ? "Forçando..." : "Forçar aprovação (sem Asaas)"}
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem onClick={() => openRejectSubscriptionModal(pro)} disabled={processingSub === pro.id}>
-                              <XCircle className="w-3.5 h-3.5 mr-2 text-red-500" /> 
-                              {processingSub === pro.id ? "Recusando..." : "Recusar Assinatura"}
-                            </DropdownMenuItem>
-                          </>
-                        )}
+                        {/* Aprovação de assinatura agora é automática via Asaas/Apple — botões removidos */}
                         <DropdownMenuSeparator />
                         
                         <DropdownMenuItem onClick={() => openReviews(pro)}>
@@ -653,26 +644,7 @@ const AdminPros = () => {
                 </div>
               </div>
 
-              {detailPro.plan_id !== "free" && detailPro.subscription_status !== "ACTIVE" && (
-                 <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 my-2">
-                   <p className="text-xs font-semibold text-amber-800 dark:text-amber-400 mb-2 flex items-center gap-1.5">
-                     <CreditCard className="w-4 h-4" /> Assinatura aguardando aprovação
-                   </p>
-                   <div className="flex flex-wrap gap-2">
-                     <button onClick={() => handleApproveSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 min-w-[120px] py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors">
-                       {processingSub === detailPro.id ? "Aprovando..." : "✅ Aprovar e Cobrar"}
-                     </button>
-                     {showForceApproveForUserId === detailPro.user_id && (
-                       <button onClick={() => handleForceApproveSubscription(detailPro)} disabled={processingSub === detailPro.id} className="flex-1 min-w-[120px] py-1.5 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 transition-colors">
-                         {processingSub === detailPro.id ? "Forçando..." : "⚠️ Forçar aprovação (sem Asaas)"}
-                       </button>
-                     )}
-                     <button onClick={() => { setDetailPro(null); openRejectSubscriptionModal(detailPro); }} disabled={processingSub === detailPro.id} className="flex-1 min-w-[120px] py-1.5 rounded-lg border border-red-200 text-red-600 bg-red-50 text-xs font-medium hover:bg-red-100 transition-colors">
-                       {processingSub === detailPro.id ? "Recusando..." : "❌ Recusar Plano"}
-                     </button>
-                   </div>
-                 </div>
-              )}
+              {/* Aprovação de assinatura agora é automática via Asaas/Apple */}
 
               {(detailPro.city || detailPro.state) && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -758,16 +730,55 @@ const AdminPros = () => {
                     <button onClick={handleApprove} className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1">
                       <CheckCircle className="w-4 h-4" /> Aprovar cadastro
                     </button>
-                    <button onClick={handleReject} className="flex-1 py-2 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors flex items-center justify-center gap-1">
+                    <button onClick={() => { setRejectOpenPro(detailPro); setRejectOpenReason(""); setRejectOpen(true); }} className="flex-1 py-2 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors flex items-center justify-center gap-1">
                       <XCircle className="w-4 h-4" /> Reprovar Cadastro
                     </button>
                   </div>
-                  <input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Motivo da reprovação (opcional)"
-                    className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
                 </div>
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de reprovação de cadastro */}
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              Reprovar Cadastro
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-muted-foreground">
+              O cadastro de <strong>{rejectOpenPro?.full_name}</strong> será reprovado e o usuário voltará a ser cliente.
+            </p>
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1 block">Motivo da Reprovação (obrigatório)</label>
+              <textarea
+                value={rejectOpenReason}
+                onChange={(e) => setRejectOpenReason(e.target.value)}
+                placeholder="Ex: Documento ilegível, dados inconsistentes..."
+                className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-destructive/30 min-h-[80px] resize-none"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                O profissional receberá uma notificação com este motivo e poderá tentar novamente.
+              </p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setRejectOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
+                Cancelar
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={!rejectOpenReason.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors disabled:opacity-50"
+              >
+                Confirmar Reprovação
+              </button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

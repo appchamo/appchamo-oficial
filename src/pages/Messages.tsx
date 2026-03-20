@@ -2,6 +2,7 @@ import AppLayout from "@/components/AppLayout";
 import { MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle, Inbox, Mic, Package, CheckCheck, Trash2, XCircle, Search, CheckSquare, Square } from "lucide-react"; 
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
+import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import {
   DropdownMenu,
@@ -339,12 +340,14 @@ const Messages = () => {
     if (!user) return;
     setIsDeleting(true);
     try {
-      for (const chatId of deletingBatchIds) {
-        await supabase.from("chat_read_status" as any).upsert(
-          { request_id: chatId, user_id: user.id, last_read_at: new Date().toISOString(), is_deleted: true },
-          { onConflict: "request_id,user_id" }
-        );
-      }
+      await Promise.all(
+        deletingBatchIds.map((chatId) =>
+          supabase.from("chat_read_status" as any).upsert(
+            { request_id: chatId, user_id: user.id, last_read_at: new Date().toISOString(), is_deleted: true },
+            { onConflict: "request_id,user_id" }
+          )
+        )
+      );
       setDeletingBatchIds(null);
       setSelectedCanceladosIds(new Set());
       setCanceladosSelectMode(false);
@@ -374,9 +377,9 @@ const Messages = () => {
       }
       setReportingChatId(null);
       setReportReason("");
-      alert("Denúncia enviada com sucesso!");
+      toast({ title: "Denúncia enviada com sucesso!" });
     } catch (error) {
-      alert("Erro ao enviar denúncia.");
+      toast({ title: "Erro ao enviar denúncia.", variant: "destructive" });
     } finally { setIsSubmittingReport(false); }
   };
 
@@ -444,7 +447,7 @@ const Messages = () => {
   const archivedThreads = threadsGeral.filter((t) => t.is_archived);
   const baseList = chatTab === "cancelados" ? threadsCancelados : showArchived ? archivedThreads : activeThreads;
 
-  const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/\u0300-\u036f/g, "");
+  const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const currentList = !searchChat.trim()
     ? baseList
     : baseList.filter((t) => {

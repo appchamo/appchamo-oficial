@@ -140,6 +140,8 @@ const MessageThread = () => {
   const [pixPolling, setPixPolling] = useState(false);
   const [pixCopied, setPixCopied] = useState(false);
   const pixIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Flag: usuário fechou o modal PIX manualmente — não reabrir automaticamente até novo pagamento. */
+  const pixDismissedByUserRef = useRef(false);
   /** Parâmetros do pagamento PIX em andamento; usados ao confirmar (polling ou realtime). */
   const pixConfirmParamsRef = useRef<{
     threadId: string; userId: string; chatProUserId: string; finalAmount: number;
@@ -164,6 +166,22 @@ const MessageThread = () => {
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
   const hasPaymentConfirmed = messages.some(m => m.content && m.content.includes("PAGAMENTO CONFIRMADO"));
+
+  /**
+   * Quando o Realtime traz uma nova mensagem "PAGAMENTO CONFIRMADO" enquanto o modal PIX está aberto,
+   * fecha o modal e abre o modal de avaliação — sem depender do polling.
+   */
+  useEffect(() => {
+    if (!hasPaymentConfirmed) return;
+    if (pixOpen) {
+      // Modal PIX aberto: fecha e abre avaliação
+      if (pixIntervalRef.current) { clearInterval(pixIntervalRef.current); pixIntervalRef.current = null; }
+      setPixPolling(false);
+      setPixOpen(false);
+      setRatingOpen(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPaymentConfirmed]);
 
   /**
    * Confirma um pagamento PIX que foi detectado como pago externamente
@@ -257,6 +275,7 @@ const MessageThread = () => {
       if (!threadId || !userId || isFetchingMessages) return;
       if (hasPaymentConfirmed) return; // já confirmado no chat
       if (pixOpen) return; // modal já visível — o polling cuida disso
+      if (pixDismissedByUserRef.current) return; // usuário fechou manualmente — não reabrir
 
       const { data: tx } = await supabase
         .from("transactions")
@@ -1222,6 +1241,7 @@ const MessageThread = () => {
         };
         setProcessingPayment(false);
         setPaymentOpen(false);
+        pixDismissedByUserRef.current = false; // novo pagamento criado — permite abertura automática
         setPixOpen(true);
         setPixCopied(false);
 
@@ -1838,13 +1858,15 @@ const MessageThread = () => {
       </main>
 
       {isChatFinished ?
+      (!isChatClosedByMessage &&
       <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-4">
           <p className="text-sm text-muted-foreground text-center max-w-screen-lg mx-auto">
             {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : 
              requestStatus === "cancelled" ? "Solicitação cancelada — chat encerrado" : 
              "Serviço finalizado — chat encerrado"}
           </p>
-        </div> :
+        </div>
+      ) :
 
       <div 
         className="flex-shrink-0 bg-background border-t px-4 py-3"
@@ -2601,11 +2623,16 @@ const MessageThread = () => {
 
       {/* PIX QR Code Dialog */}
       <Dialog open={pixOpen} onOpenChange={(open) => {
-        setPixOpen(open);
-        if (!open && pixIntervalRef.current) {
-          clearInterval(pixIntervalRef.current);
+        if (!open) {
+          // Usuário fechou o modal manualmente — não reabrir automaticamente
+          pixDismissedByUserRef.current = true;
+          if (pixIntervalRef.current) {
+            clearInterval(pixIntervalRef.current);
+            pixIntervalRef.current = null;
+          }
           setPixPolling(false);
         }
+        setPixOpen(open);
       }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>

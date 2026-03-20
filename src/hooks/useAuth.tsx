@@ -154,15 +154,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // iOS pós-OAuth pode travar chamadas; se não conseguirmos confirmar o profile rápido, deslogamos (não permite auto-login sem cadastro)
         let p: Profile | null = null;
         let r: AppRole[] = [];
-        try {
-          [p, r] = await Promise.all([
-            withTimeout(fetchProfile(userId), 4000, "fetchProfile"),
-            withTimeout(fetchRoles(userId), 4000, "fetchRoles"),
-          ]);
-        } catch (_) {
-          p = null;
-          r = [];
-        }
+        const [profileResult, rolesResult] = await Promise.allSettled([
+          withTimeout(fetchProfile(userId), 4000, "fetchProfile"),
+          withTimeout(fetchRoles(userId), 4000, "fetchRoles"),
+        ]);
+        if (profileResult.status === "fulfilled") p = profileResult.value;
+        if (rolesResult.status === "fulfilled") r = rolesResult.value ?? [];
 
         if (isSignOutInProgress) return;
         // Se a sessão chegou antes do trigger inserir o profile (corrida comum pós-OAuth),
@@ -439,7 +436,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.warn("[signOut] Falha ao limpar user_devices:", e);
       }
 
-      localStorage.clear();
+      // Limpar apenas chaves relacionadas ao auth (não todas as chaves do localStorage)
+      const authKeys = [
+        "chamo_cached_profile",
+        "chamo_cached_roles",
+        "signup_in_progress",
+        "manual_login_intent",
+        "chamo_oauth_just_landed",
+        "chamo_featured_reload_after_oauth",
+        "chamo_hang_reload_grace_until",
+        `sb-${import.meta.env.VITE_SUPABASE_URL?.split("//")[1]?.split(".")[0]}-auth-token`,
+      ];
+      authKeys.forEach((k) => localStorage.removeItem(k));
       await supabase.auth.signOut();
       setUser(null);
       setSession(null);

@@ -459,7 +459,6 @@ const AppContent = () => {
 
   return (
     <>
-      <BackButtonHandler />
       <OAuthCallbackRedirectGuard />
       <Suspense fallback={<PageFallback />}>
         <Routes>

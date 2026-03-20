@@ -36,14 +36,37 @@ const Jobs = () => {
   const [myCandidaturasOpen, setMyCandidaturasOpen] = useState(false);
   const [myApplications, setMyApplications] = useState<MyApplication[]>([]);
   const [loadingMyApps, setLoadingMyApps] = useState(false);
+  const [userCity, setUserCity] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase
+      // 1. Busca a cidade do usuário logado
+      const { data: { user } } = await supabase.auth.getUser();
+      let cityFilter: string | null = null;
+      let stateFilter: string | null = null;
+      if (user) {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("address_city, address_state")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        cityFilter = prof?.address_city ?? null;
+        stateFilter = prof?.address_state ?? null;
+        setUserCity(cityFilter);
+      }
+
+      // 2. Busca vagas: filtra por cidade/estado do usuário se disponível
+      let query = supabase
         .from("job_postings")
         .select("id, title, description, location, salary_range, created_at, professionals(user_id)")
         .eq("active", true)
         .order("created_at", { ascending: false });
+
+      if (cityFilter && stateFilter) {
+        query = query.eq("city" as any, cityFilter).eq("state" as any, stateFilter);
+      }
+
+      const { data } = await query;
 
       if (data) {
         const userIds = data.map((j: any) => j.professionals?.user_id).filter(Boolean);
@@ -148,7 +171,13 @@ const Jobs = () => {
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
             <h1 className="text-xl font-bold text-foreground">Vagas</h1>
-            <p className="text-xs text-muted-foreground">{filtered.length} oportunidades</p>
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              {userCity ? (
+                <><MapPin className="w-3 h-3" /> {userCity} · {filtered.length} oportunidades</>
+              ) : (
+                <>{filtered.length} oportunidades</>
+              )}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -182,12 +211,16 @@ const Jobs = () => {
             <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3 text-center">
             <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
               <Briefcase className="w-8 h-8 text-muted-foreground/40" />
             </div>
             <p className="text-sm font-medium">Nenhuma vaga disponível</p>
-            <p className="text-xs">Volte em breve para novas oportunidades</p>
+            <p className="text-xs max-w-[200px]">
+              {userCity
+                ? `Ainda não há vagas em ${userCity}. Volte em breve!`
+                : "Volte em breve para novas oportunidades."}
+            </p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">

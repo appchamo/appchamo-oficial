@@ -200,25 +200,11 @@ serve(async (req) => {
     }
 
     // ===============================
-    // 2️⃣ Criar assinatura com Lógica Inteligente
+    // 2️⃣ Criar assinatura — cobrança imediata para todos os planos
     // ===============================
-    const skipAnalysisEmail = "testes@appchamo.com";
-    const skipAnalysis = emailEffective.toLowerCase() === skipAnalysisEmail;
-
-    let nextDueDate: string;
-    let initialStatus: string;
-
-    if (planId === "pro" || skipAnalysis) {
-      // PRO ou usuário de teste: ativo na hora, sem análise no admin
-      nextDueDate = new Date().toISOString().split("T")[0];
-      initialStatus = "ACTIVE";
-    } else {
-      // VIP/BUSINESS: Agenda para 30 dias e fica aguardando aprovação
-      const futureDate = new Date();
-      futureDate.setDate(futureDate.getDate() + 30);
-      nextDueDate = futureDate.toISOString().split("T")[0];
-      initialStatus = "PENDING";
-    }
+    // Aprovação manual removida: todos os planos são cobrados e ativados na hora.
+    const nextDueDate = new Date().toISOString().split("T")[0];
+    const initialStatus = "ACTIVE";
     
     console.log("CUSTOMER ID ENVIADO:", customerId);
     
@@ -267,7 +253,7 @@ serve(async (req) => {
     }
 
     // ===============================
-    // 3️⃣ Salvar assinatura no banco
+    // 3️⃣ Salvar assinatura no banco e atualizar tipo de usuário
     // ===============================
     const { error: saveError } = await supabase
       .from("subscriptions")
@@ -275,7 +261,7 @@ serve(async (req) => {
         {
           user_id: userId,
           plan_id: planId,
-          status: initialStatus, // Aplica a nossa variável inteligente
+          status: initialStatus,
           asaas_subscription_id: subscriptionData.id,
           asaas_customer_id: customerId,
           started_at: new Date().toISOString(),
@@ -286,6 +272,19 @@ serve(async (req) => {
     if (saveError) {
       console.log("SAVE ERROR:", saveError);
     }
+
+    // Atualiza user_type: business → company; pro/vip → professional
+    const newUserType = planId === "business" ? "company" : "professional";
+    await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);
+
+    // Notifica o profissional que o plano está ativo
+    await supabase.from("notifications").insert({
+      user_id: userId,
+      title: "🚀 Plano ativado!",
+      message: `Seu plano foi ativado e os benefícios já estão disponíveis.`,
+      type: "success",
+      link: "/subscriptions",
+    });
 
     return new Response(JSON.stringify(subscriptionData), {
       status: subscriptionResponse.status,

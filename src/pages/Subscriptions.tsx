@@ -400,13 +400,11 @@ const Subscriptions = () => {
         return;
       }
 
-      const skipAnalysis = session.user.email?.toLowerCase() === "testes@appchamo.com";
-      const finalStatus = selectedPlanId === "pro" || skipAnalysis ? "ACTIVE" : "PENDING";
-      
+      // Todos os planos são ativados imediatamente — sem aprovação manual
       const { error: upsertError } = await supabase.from("subscriptions").upsert({
         user_id: session.user.id,
         plan_id: selectedPlanId,
-        status: finalStatus,
+        status: "ACTIVE",
         business_cnpj: businessData.cnpj || null,
         business_address: fullAddress || null,
         business_proof_url: proofUrl || null
@@ -444,11 +442,7 @@ const Subscriptions = () => {
         throw new Error(msg || "Erro no processamento do pagamento.");
       }
 
-      if (finalStatus === "ACTIVE") {
-        toast({ title: "Plano Pro Ativado!", description: "Seu pagamento foi processado e o plano já está liberado." });
-      } else {
-        toast({ title: "Assinatura pré-aprovada!", description: "Seu plano entrará em vigor após aprovação do administrador." });
-      }
+      toast({ title: "Plano ativado! 🚀", description: "Seu pagamento foi processado e os benefícios já estão disponíveis." });
       
       setPaymentOpen(false);
       await refetch();
@@ -533,6 +527,11 @@ const Subscriptions = () => {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (res.error || res.data?.error) throw new Error(res.data?.error || "Erro ao ativar assinatura.");
+
+      // Atualiza user_type: business → company; pro/vip → professional
+      const newUserType = selectedPlanId === "business" ? "company" : "professional";
+      await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", user.id);
+
       if (selectedPlanId === "business" && user && businessData.cnpj) {
         const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
         let proofUrl = "";

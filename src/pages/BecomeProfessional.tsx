@@ -99,25 +99,26 @@ const BecomeProfessional = () => {
 
       let professionalId = existingPro?.id;
 
-      if (!professionalId) {
-        const { data: createdPro, error: createProError } = await supabase
-          .from("professionals")
-          .insert({
-            user_id: user.id,
-            profile_status: "pending",
-            category_id: profileData.categoryId || null,
-            profession_id: profileData.professionId || null,
-            experience: profileData.experience || null,
-            services: profileData.services?.length ? profileData.services : null,
-            bio: profileData.bio || null,
-          } as any)
-          .select("id")
-          .single();
+      // Upsert do registro profissional: o trigger já cria a linha ao mudar user_type,
+      // mas usamos upsert para garantir idempotência e atualizar os dados do perfil.
+      const { data: upsertedPro, error: upsertProError } = await supabase
+        .from("professionals")
+        .upsert({
+          user_id: user.id,
+          profile_status: "pending",
+          active: false,
+          category_id: profileData.categoryId || null,
+          profession_id: profileData.professionId || null,
+          experience: profileData.experience || null,
+          services: profileData.services?.length ? profileData.services : null,
+          bio: profileData.bio || null,
+        } as any, { onConflict: "user_id" })
+        .select("id")
+        .single();
 
-        if (createProError) throw createProError;
+      if (upsertProError) throw upsertProError;
 
-        professionalId = createdPro.id;
-      }
+      professionalId = upsertedPro?.id ?? professionalId;
 
       if (professionalId && docFiles.length > 0) {
         for (const file of docFiles) {

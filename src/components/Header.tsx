@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Menu, Clock, Crown, Bell, LogIn } from "lucide-react";
+import { Menu, Clock, Crown, Bell, LogIn, XCircle } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
@@ -67,41 +67,61 @@ const Header = () => {
 
   useEffect(() => {
     if (!user || !profile) return;
-    if (profile.user_type === "client") return;
 
     const load = async () => {
-      // 1. Pega o status do perfil
+      // 1. Pega o status do perfil profissional (para todos os tipos de usuário)
       const { data: pro } = await supabase
         .from("professionals")
         .select("profile_status")
         .eq("user_id", user.id)
         .maybeSingle();
-      if (profile.user_type === "professional") {
+
+      if (profile.user_type === "client") {
+        // Cliente: só armazenar status se for "rejected" (para exibir badge REPROVADO)
+        setProStatus(pro?.profile_status === "rejected" ? "rejected" : null);
+      } else if (profile.user_type === "professional") {
         setProStatus(pro?.profile_status ?? "pending");
       } else {
         setProStatus(pro?.profile_status ?? null);
       }
 
-      // 2. Pega os dados da assinatura
-      const { data: sub } = await supabase
-        .from("subscriptions")
-        .select("plan_id, status")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      
-      if (sub) {
-        setPlanId(sub.plan_id);
-        setSubStatus(sub.status);
+      // 2. Pega os dados da assinatura (só para não-clientes)
+      if (profile.user_type !== "client") {
+        const { data: sub } = await supabase
+          .from("subscriptions")
+          .select("plan_id, status")
+          .eq("user_id", user.id)
+          .maybeSingle();
         
-        const { data: plan } = await supabase
-          .from("plans")
-          .select("name")
-          .eq("id", sub.plan_id)
-          .single();
-        if (plan) setPlanName(plan.name);
+        if (sub) {
+          setPlanId(sub.plan_id);
+          setSubStatus(sub.status);
+          
+          const { data: plan } = await supabase
+            .from("plans")
+            .select("name")
+            .eq("id", sub.plan_id)
+            .single();
+          if (plan) setPlanName(plan.name);
+        }
       }
     };
     load();
+
+    // Listener realtime na tabela professionals para detectar aprovação/rejeição em tempo real
+    const channel = supabase
+      .channel("header-pro-status")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "professionals", filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          const newStatus = (payload.new as any)?.profile_status;
+          if (newStatus) setProStatus(newStatus);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [user, profile]);
 
   useEffect(() => {
@@ -150,7 +170,8 @@ const Header = () => {
 
   const isPro = profile && profile.user_type !== "client";
 
-  // Regra de Exibição do Selo
+  // Regra de Exibição dos Selos
+  const showRejectedBadge = !isPro && proStatus === "rejected";
   const showPendingBadge = isPro && (proStatus === "pending" || (planId !== "free" && subStatus && subStatus.toUpperCase() !== "ACTIVE"));
   const showPlanBadge = isPro && proStatus === "approved" && (!subStatus || subStatus.toUpperCase() === "ACTIVE" || planId === "free") && planName;
 
@@ -175,6 +196,14 @@ const Header = () => {
           </span>
           <div className="flex items-center gap-2 flex-shrink-0">
             
+            {/* Selo REPROVADO (cliente com cadastro profissional rejeitado) */}
+            {showRejectedBadge && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-destructive/10 border border-destructive/30">
+                <XCircle className="w-3.5 h-3.5 text-destructive" />
+                <span className="text-[11px] font-semibold text-destructive">Reprovado</span>
+              </div>
+            )}
+
             {/* Selo Em Análise (Aparece para perfil pendente ou pagamento aguardando aprovação) */}
             {showPendingBadge && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 animate-pulse">

@@ -28,7 +28,7 @@ const friendlyError = (type: LoginError) => {
   return "Erro ao entrar. Tente novamente.";
 };
 
-let isRedirecting = false;
+// Variável de módulo substituída por ref dentro do componente (ver isRedirectingRef)
 
 const hasOAuthCodeInUrl = () => {
   if (typeof window === "undefined") return false;
@@ -74,6 +74,7 @@ const Login = () => {
   const hasRedirectedForSessionRef = useRef(false);
   const exchangeCodeAndRedirectRef = useRef<(url: string) => Promise<void>>(() => Promise.resolve());
   const socialLoginInProgressRef = useRef(false);
+  const isRedirectingRef = useRef(false);
 
   // Limpa flag de "veio do signup por sessão expirada" e permite novo toque em "Entrar com Google"
   useEffect(() => {
@@ -318,8 +319,8 @@ const Login = () => {
   };
 
   const proceedToRedirect = async (userId: string, emailFromAuth?: string) => {
-    if (isRedirecting) return;
-    isRedirecting = true; 
+    if (isRedirectingRef.current) return;
+    isRedirectingRef.current = true; 
 
     try {
       const normalizedSupportEmail = SUPPORT_EMAIL.toLowerCase().trim();
@@ -336,7 +337,7 @@ const Login = () => {
         const { data: existingByEmail } = await supabase
           .from("profiles")
           .select("id, user_type")
-          .ilike("email", authEmail)
+          .eq("email", authEmail.toLowerCase())
           .maybeSingle();
 
         if (!existingByEmail || !existingByEmail.user_type || existingByEmail.user_type === "pending_signup") {
@@ -392,7 +393,7 @@ const Login = () => {
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);
-      isRedirecting = false; 
+      isRedirectingRef.current = false; 
     }
   };
 
@@ -439,12 +440,12 @@ const Login = () => {
       });
 
     const runRedirect = (userId: string, email?: string) => {
-      if (isRedirecting) return;
+      if (isRedirectingRef.current) return;
       proceedToRedirect(userId, email);
     };
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirecting) {
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirectingRef.current) {
         // No Android/Capacitor a sessão pode levar um instante a ser persistida; esperar e usar getSession
         // evita consultar o perfil com JWT antigo e mandar usuário já cadastrado para o signup.
         if (Capacitor.isNativePlatform()) {
@@ -460,14 +461,14 @@ const Login = () => {
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user && !isRedirecting) {
+      if (session?.user && !isRedirectingRef.current) {
         proceedToRedirect(session.user.id, session.user.email ?? undefined);
       }
     });
 
     return () => {
       authListener?.subscription?.unsubscribe?.();
-      isRedirecting = false; 
+      isRedirectingRef.current = false;
     };
   }, []);
 

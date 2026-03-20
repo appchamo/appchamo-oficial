@@ -150,9 +150,11 @@ const MyJobPostings = () => {
         title: form.title,
         description: form.description || null,
         location: form.location || null,
+        city: form.city || null,
+        state: form.state || null,
         salary_range: form.salary_range || null,
         requirements: form.requirements || null,
-      })
+      } as any)
       .select("id")
       .maybeSingle();
     if (error || !createdJob?.id) {

@@ -1,10 +1,11 @@
 import AppLayout from "@/components/AppLayout";
-import { Bell, ChevronDown, Loader2 } from "lucide-react";
+import { Bell, ChevronDown, Loader2, XCircle, Home, UserCheck } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { syncAppIconBadge } from "@/lib/appBadge";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 interface Notification {
   id: string;
@@ -26,6 +27,7 @@ const Notifications = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(0);
+  const [rejectionNotif, setRejectionNotif] = useState<Notification | null>(null);
 
   const fetchNotifications = useCallback(async (pageIndex = 0, append = false) => {
     if (!user) return;
@@ -97,6 +99,10 @@ const Notifications = () => {
   };
 
   const handleClick = (n: Notification) => {
+    if (n.type === "rejection") {
+      setRejectionNotif(n);
+      return;
+    }
     if (n.link) navigate(n.link);
   };
 
@@ -119,6 +125,42 @@ const Notifications = () => {
 
   return (
     <AppLayout>
+      {/* Modal de cadastro reprovado */}
+      <Dialog open={!!rejectionNotif} onOpenChange={(o) => !o && setRejectionNotif(null)}>
+        <DialogContent className="max-w-sm">
+          <div className="flex flex-col items-center text-center gap-4 py-2">
+            <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center">
+              <XCircle className="w-8 h-8 text-destructive" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-foreground mb-1">Cadastro não aprovado</h2>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {rejectionNotif?.message || "Seu cadastro não foi aprovado. Verifique seus documentos e tente novamente."}
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Você pode corrigir as informações e enviar novamente para análise.
+            </p>
+            <div className="flex flex-col gap-2 w-full pt-1">
+              <button
+                onClick={() => { setRejectionNotif(null); navigate("/signup-pro"); }}
+                className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
+              >
+                <UserCheck className="w-4 h-4" />
+                Tornar-se Profissional
+              </button>
+              <button
+                onClick={() => { setRejectionNotif(null); navigate("/home"); }}
+                className="w-full py-3 rounded-xl border text-sm font-medium text-foreground flex items-center justify-center gap-2 hover:bg-muted transition-colors"
+              >
+                <Home className="w-4 h-4" />
+                Voltar à Tela Inicial
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-foreground">Notificações</h1>

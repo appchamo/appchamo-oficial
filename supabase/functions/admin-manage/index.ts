@@ -331,26 +331,14 @@ serve(async (req) => {
         .createSignedUrl(filePath, 3600);
 
       if (error || !data?.signedUrl) {
-        console.warn("[sign_document_url] signed URL error:", error?.message, "path:", filePath);
+        console.warn("[sign_document_url] error:", error?.message, "path:", filePath);
         return new Response(JSON.stringify({ signedUrl: null, notFound: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Verify the signed URL resolves to an existing file
-      try {
-        const checkRes = await fetch(data.signedUrl, { method: "HEAD" });
-        if (checkRes.status === 404) {
-          console.warn("[sign_document_url] file not found at signed URL, path:", filePath);
-          return new Response(JSON.stringify({ signedUrl: null, notFound: true }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      } catch {
-        // If HEAD request fails for network reasons, still return the URL
-      }
-
-      return new Response(JSON.stringify({ signedUrl: data.signedUrl }), {
+      console.log("[sign_document_url] OK, path:", filePath);
+      return new Response(JSON.stringify({ signedUrl: data.signedUrl, notFound: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

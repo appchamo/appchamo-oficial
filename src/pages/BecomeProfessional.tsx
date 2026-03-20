@@ -130,20 +130,20 @@ const BecomeProfessional = () => {
           formData.append("file", file);
           formData.append("userId", user.id);
 
-          const uploadRes = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-document`,
-            {
-              method: "POST",
-              headers: { Authorization: `Bearer ${session.access_token}` },
-              body: formData,
-            }
-          );
+          const uploadUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-document`;
+          console.log("📤 Enviando para Edge Function:", uploadUrl, "file:", file.name, "size:", file.size, "type:", file.type);
+
+          const uploadRes = await fetch(uploadUrl, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            body: formData,
+          });
 
           const uploadResult = await uploadRes.json();
-          console.log("📝 UPLOAD RESULT:", uploadResult);
+          console.log("📝 UPLOAD RESULT status:", uploadRes.status, "body:", JSON.stringify(uploadResult));
 
           if (!uploadRes.ok || !uploadResult.path) {
-            throw new Error(uploadResult.error || "Falha ao enviar documento. Tente novamente.");
+            throw new Error(uploadResult.error || `Falha ao enviar documento (${uploadRes.status}). Tente novamente.`);
           }
 
           const { error: insertDocError } = await supabase

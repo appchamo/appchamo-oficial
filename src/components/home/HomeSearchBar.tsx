@@ -85,7 +85,7 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
       const [profilesPublic, profilesLocation] = await Promise.all([
         supabase
           .from("profiles_public")
-          .select("user_id, full_name, display_name, avatar_url")
+          .select("user_id, full_name, avatar_url")
           .in("user_id", userIds),
         supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
       ]);
@@ -108,7 +108,7 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
         return {
           id: p.id,
           type: "professional" as const,
-          label: profileMap.get(p.user_id)?.display_name || profileMap.get(p.user_id)?.full_name || "Profissional",
+          label: profileMap.get(p.user_id)?.full_name || "Profissional",
           sublabel: [categoryName, professionName].filter(Boolean).join(" · ") || "—",
           avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
           rating: p.rating,

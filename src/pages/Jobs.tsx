@@ -49,8 +49,8 @@ const Jobs = () => {
         const userIds = data.map((j: any) => j.professionals?.user_id).filter(Boolean);
         const { data: profiles } = await supabase
           .from("profiles_public" as any)
-          .select("user_id, full_name, display_name, avatar_url")
-          .in("user_id", userIds) as { data: { user_id: string; full_name: string; display_name?: string | null; avatar_url: string | null }[] | null };
+          .select("user_id, full_name, avatar_url")
+          .in("user_id", userIds) as { data: { user_id: string; full_name: string; avatar_url: string | null }[] | null };
 
         const mapped = data.map((j: any) => {
           const prof = profiles?.find((p) => p.user_id === j.professionals?.user_id);
@@ -61,7 +61,7 @@ const Jobs = () => {
             location: j.location,
             salary_range: j.salary_range,
             created_at: j.created_at,
-            company_name: prof?.display_name || prof?.full_name || "Empresa",
+            company_name: prof?.full_name || "Empresa",
             company_avatar: prof?.avatar_url || null,
           };
         });
@@ -119,9 +119,9 @@ const Jobs = () => {
       const userIds = (pros || []).map((p: any) => p.user_id);
       const { data: profiles } = await supabase
         .from("profiles_public" as any)
-        .select("user_id, full_name, display_name")
+        .select("user_id, full_name")
         .in("user_id", userIds);
-      const userToName = new Map((profiles || []).map((p: any) => [p.user_id, p.display_name || p.full_name || "Empresa"]));
+      const userToName = new Map((profiles || []).map((p: any) => [p.user_id, p.full_name || "Empresa"]));
       companyMap = Object.fromEntries((pros || []).map((p: any) => [p.id, userToName.get(p.user_id) || "Empresa"]));
     }
     const jobMap = Object.fromEntries((jobRows || []).map((j: any) => [j.id, j]));

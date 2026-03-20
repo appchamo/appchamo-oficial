@@ -4,7 +4,9 @@
 ALTER TABLE public.profiles
 ADD COLUMN IF NOT EXISTS display_name text NOT NULL DEFAULT '';
 
-CREATE OR REPLACE VIEW public.profiles_public AS
+DROP VIEW IF EXISTS public.profiles_public;
+
+CREATE VIEW public.profiles_public AS
 SELECT
   "id",
   "user_id",
@@ -13,4 +15,3 @@ SELECT
   "avatar_url",
   "user_type"
 FROM public.profiles;
-

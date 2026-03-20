@@ -84,7 +84,7 @@ const ProfessionalProfile = () => {
         // 1. Tenta buscar da tabela principal 'profiles'
         const { data: mainProfile } = await supabase
           .from("profiles")
-          .select("full_name, display_name, avatar_url, user_type")
+          .select("full_name, avatar_url, user_type")
           .eq("user_id", data.user_id)
           .maybeSingle();
         
@@ -94,7 +94,7 @@ const ProfessionalProfile = () => {
           // 2. Fallback para a view 'profiles_public' caso exista bloqueio de segurança
           const { data: publicProfile } = await supabase
             .from("profiles_public" as any)
-            .select("full_name, display_name, avatar_url, user_type")
+            .select("full_name, avatar_url, user_type")
             .eq("user_id", data.user_id)
             .maybeSingle();
           if (publicProfile) profileData = publicProfile;
@@ -102,7 +102,7 @@ const ProfessionalProfile = () => {
 
         setPro({
           ...data,
-          full_name: profileData?.display_name || profileData?.full_name || "Profissional",
+          full_name: profileData?.full_name || "Profissional",
           avatar_url: profileData?.avatar_url || null,
           category_id: (data as any).category_id || null,
           profession_id: (data as any).profession_id || null,
@@ -143,9 +143,9 @@ const ProfessionalProfile = () => {
           const clientIds = [...new Set(reviewsData.map((r: any) => r.client_id))];
           const { data: clientProfiles } = await supabase
             .from("profiles_public" as any)
-            .select("user_id, full_name, display_name")
+            .select("user_id, full_name")
             .in("user_id", clientIds) as { data: { user_id: string; full_name: string }[] | null };
-          const nameMap = new Map((clientProfiles || []).map(p => [p.user_id, (p as any).display_name || p.full_name]));
+          const nameMap = new Map((clientProfiles || []).map(p => [p.user_id, p.full_name]));
 
           setReviews(reviewsData.map((r: any) => ({
             id: r.id,

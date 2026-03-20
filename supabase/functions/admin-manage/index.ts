@@ -318,6 +318,27 @@ serve(async (req) => {
       });
     }
 
+    // ==========================================
+    // 🔗 AÇÃO: GERAR URL ASSINADA DE DOCUMENTO
+    // ==========================================
+    if (action === "sign_document_url") {
+      await verifyAdmin();
+      const { filePath } = body;
+      if (!filePath) throw new Error("filePath é obrigatório.");
+
+      const { data, error } = await supabase.storage
+        .from("uploads")
+        .createSignedUrl(filePath, 3600);
+
+      if (error || !data?.signedUrl) {
+        throw new Error(`Não foi possível assinar a URL: ${error?.message ?? "caminho não encontrado"}`);
+      }
+
+      return new Response(JSON.stringify({ signedUrl: data.signedUrl }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     throw new Error("Invalid action");
   } catch (error: any) {
     console.error(`[admin-manage] Error: ${error.message}`);

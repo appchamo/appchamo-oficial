@@ -209,9 +209,18 @@ const AdminPros = () => {
     const items = list || [];
     const withUrls = await Promise.all(
       items.map(async (d: any) => {
-        const { data: signed, error: signErr } = await supabase.storage.from("uploads").createSignedUrl(d.file_url, 3600);
-        if (signErr) console.warn("createSignedUrl error:", signErr.message, "path:", d.file_url);
-        return { ...d, viewUrl: signed?.signedUrl ?? null };
+        try {
+          const { data, error } = await supabase.functions.invoke("admin-manage", {
+            body: { action: "sign_document_url", filePath: d.file_url },
+          });
+          if (error || !data?.signedUrl) {
+            console.warn("sign_document_url error:", error?.message, "path:", d.file_url);
+          }
+          return { ...d, viewUrl: data?.signedUrl ?? null };
+        } catch (e) {
+          console.warn("sign_document_url exception:", e, "path:", d.file_url);
+          return { ...d, viewUrl: null };
+        }
       })
     );
     setDocs(withUrls);

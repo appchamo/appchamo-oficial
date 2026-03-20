@@ -29,22 +29,18 @@ interface OtherParty {
   avatar_url: string | null;
 }
 
-// 🚀 OTIMIZAÇÃO 1: Reduz o peso do Avatar para o cabeçalho e mensagens
 const getOptimizedAvatar = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}width=100&height=100&quality=75&resize=cover`;
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=96&height=96&resize=cover&quality=70";
   }
   return url;
 };
 
-// 🚀 OTIMIZAÇÃO 2: Reduz drasticamente o peso das fotos enviadas no chat sem perder o original no clique
 const getOptimizedChatImage = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}width=400&quality=75`;
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=600&quality=75";
   }
   return url;
 };
@@ -340,78 +336,69 @@ const MessageThread = () => {
     }
   }, [threadId]);
 
-  // 🛡️ OTIMIZAÇÃO E TRAVA DO LOAD
   const load = useCallback(async () => {
     if (!threadId || isCurrentlyLoading.current) return;
-    
     isCurrentlyLoading.current = true;
     setIsFetchingMessages(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // getSession() usa cache local — sem chamada de rede
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (user) setUserId(user.id);
 
-      const { data: req } = await supabase.from("service_requests").select("*").eq("id", threadId).maybeSingle();
+      // ⚡ Busca request + mensagens em paralelo (maior ganho de velocidade)
+      const [{ data: req }, { data: msgs }] = await Promise.all([
+        supabase.from("service_requests").select("*").eq("id", threadId).maybeSingle(),
+        supabase.from("chat_messages").select("*").eq("request_id", threadId).order("created_at"),
+      ]);
+
+      setMessages((msgs as Message[]) || []);
+
       if (req && user) {
         setRequestStatus(req.status);
         setRequestProtocol((req as any).protocol || null);
         const isClient = req.client_id === user.id;
 
-        if (isClient && (req.status === "completed" || req.status === "closed")) {
-          const { count } = await supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId).eq("client_id", user.id);
-          if ((count || 0) > 0) setHasRated(true);
-        }
+        // ⚡ Paraleliza tudo que depende de req + user
+        const proQuery = supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
+        const reviewCountQuery = (isClient && (req.status === "completed" || req.status === "closed"))
+          ? supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId).eq("client_id", user.id)
+          : Promise.resolve({ count: null });
+        const appointmentQuery = supabase
+          .from("agenda_appointments")
+          .select("id, status, service_id, appointment_date, start_time, end_time, client_id, professional_id, atendente_id, agenda_services(name, duration_minutes)")
+          .eq("chat_request_id", threadId).order("start_time", { ascending: true }).limit(1).maybeSingle();
 
-        if (!isClient) {
-          const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
-          if (pro && pro.user_id === user.id) {
+        const [proRes, reviewRes, appRes] = await Promise.all([proQuery, reviewCountQuery, appointmentQuery]);
+        const pro = proRes.data;
+
+        if ((reviewRes as any).count > 0) setHasRated(true);
+        setAppointment(appRes.data ? (appRes.data as any) : null);
+
+        if (pro) {
+          if (!isClient && pro.user_id === user.id) {
             setIsProfessional(true);
             setChatProUserId(user.id);
-            const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
-            setProPlanId(sub?.plan_id || "free");
+            // Busca plano do profissional sem bloquear
+            supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle()
+              .then(({ data: sub }) => setProPlanId(sub?.plan_id || "free"));
           }
-        }
 
-        if (isClient) {
-          const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
-          if (pro) {
+          if (isClient) {
             setChatProUserId(pro.user_id);
             setRecipientUserId(pro.user_id);
             const { data: profile } = (await supabase
-              .from("profiles_public" as any)
-              .select("full_name, avatar_url")
-              .eq("user_id", pro.user_id)
-              .maybeSingle()) as { data: { full_name: string; avatar_url: string | null } | null };
+              .from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", pro.user_id).maybeSingle()) as { data: { full_name: string; avatar_url: string | null } | null };
             if (profile) setOtherParty({ name: profile.full_name || "Profissional", avatar_url: profile.avatar_url });
+          } else {
+            setRecipientUserId(req.client_id);
+            const { data: profile } = (await supabase
+              .from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle()) as { data: { full_name: string; avatar_url: string | null } | null };
+            if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
           }
-        } else {
-          setRecipientUserId(req.client_id);
-          const { data: profile } = (await supabase
-            .from("profiles_public" as any)
-            .select("full_name, avatar_url")
-            .eq("user_id", req.client_id)
-            .maybeSingle()) as { data: { full_name: string; avatar_url: string | null } | null };
-          if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
         }
-
-        const { data: appSingle } = await supabase
-          .from("agenda_appointments")
-          .select("id, status, service_id, appointment_date, start_time, end_time, client_id, professional_id, atendente_id, agenda_services(name, duration_minutes)")
-          .eq("chat_request_id", threadId)
-          .order("start_time", { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        setAppointment(appSingle ? (appSingle as any) : null);
       }
-
-      const { data } = await supabase.
-      from("chat_messages").
-      select("*").
-      eq("request_id", threadId).
-      order("created_at");
-      
-      setMessages(data as Message[] || []);
-      
     } catch (err) {
       console.error("Erro ao carregar chat:", err);
     } finally {

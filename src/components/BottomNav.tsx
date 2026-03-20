@@ -27,11 +27,8 @@ const BottomNav = () => {
 
     try {
       isFetchingRef.current = true;
-      const userPromise = supabase.auth.getUser();
-      const timeoutPromise = new Promise<{ data: { user: null } }>((resolve) =>
-        setTimeout(() => resolve({ data: { user: null } }), 3000)
-      );
-      const { data: { user } } = await Promise.race([userPromise, timeoutPromise]);
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return;
 
       // 1. Unread notifications count (exclui chat; mensagens só no push)

@@ -39,19 +39,25 @@ interface Thread {
   manual_unread: boolean;
 }
 
-// 🚀 OTIMIZAÇÃO: Função de compressão de avatar na nuvem
+// Cache em memória: mostra a lista instantaneamente ao voltar para a tela
+let _threadsCache: Thread[] = [];
+
 const getOptimizedAvatar = (url: string | null | undefined) => {
   if (!url) return undefined;
+  // Supabase Render API (transforma apenas URLs do próprio storage)
   if (url.includes("supabase.co/storage/v1/object/public/")) {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}width=150&height=150&quality=75&resize=cover`;
+    return url.replace(
+      "/storage/v1/object/public/",
+      "/storage/v1/render/image/public/"
+    ) + "?width=96&height=96&resize=cover&quality=70";
   }
   return url;
 };
 
 const Messages = () => {
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Inicializa com cache para exibir instantaneamente ao abrir a tela
+  const [threads, setThreads] = useState<Thread[]>(_threadsCache);
+  const [loading, setLoading] = useState(_threadsCache.length === 0);
   const [supportUnread, setSupportUnread] = useState(0);
   const [supportLastMsg, setSupportLastMsg] = useState<string | null>(null);
   const [supportLastTime, setSupportLastTime] = useState<string | null>(null);
@@ -75,107 +81,86 @@ const Messages = () => {
   const [deletingBatchIds, setDeletingBatchIds] = useState<string[] | null>(null);
 
   const load = useCallback(async (isBackgroundUpdate = false) => {
-    // Só mostra o loading pesado se for a primeira vez que a tela abre
-    if (!isBackgroundUpdate && threads.length === 0) setLoading(true); 
-    
-    const { data: { user } } = await supabase.auth.getUser();
+    if (!isBackgroundUpdate && _threadsCache.length === 0) setLoading(true);
+
+    // getSession() é síncrono (usa cache local), sem chamada de rede
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) { if (!isBackgroundUpdate) setLoading(false); return; }
 
     const PAGE_SIZE = 7;
     const limitCount = (page + 1) * PAGE_SIZE;
 
-    // --- Suporte ---
-    const { data: supportMsgs, count: totalSupport } = await supabase
-      .from("support_messages")
-      .select("*", { count: "exact" })
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    
+    // ⚡ Paraleliza: suporte + profissionais ao mesmo tempo
+    const [
+      { data: supportMsgs, count: totalSupport },
+      { data: proData },
+    ] = await Promise.all([
+      supabase.from("support_messages").select("*", { count: "exact" }).eq("user_id", user.id).order("created_at", { ascending: false }).limit(1),
+      supabase.from("professionals").select("id").eq("user_id", user.id),
+    ]);
+
+    // Suporte (sem bloquear a lista principal)
     if (totalSupport && totalSupport > 0 && supportMsgs && supportMsgs.length > 0) {
       setHasSupportMessages(true);
       setSupportLastMsg((supportMsgs[0] as any).content);
       setSupportLastTime((supportMsgs[0] as any).created_at);
-      const { data: readStatus } = await supabase.from("support_read_status" as any).select("last_read_at").eq("user_id", user.id).eq("thread_user_id", user.id).maybeSingle() as { data: { last_read_at: string } | null };
-      if (readStatus) {
-        const { count } = await supabase.from("support_messages").select("*", { count: "exact", head: true }).eq("user_id", user.id).neq("sender_id", user.id).gt("created_at", readStatus.last_read_at);
-        setSupportUnread(count || 0);
-      } else {
-        const { count } = await supabase.from("support_messages").select("*", { count: "exact", head: true }).eq("user_id", user.id).neq("sender_id", user.id);
-        setSupportUnread(count || 0);
-      }
+      // Busca não-lidas do suporte em paralelo (não await — não bloqueia)
+      supabase.from("support_read_status" as any).select("last_read_at").eq("user_id", user.id).eq("thread_user_id", user.id).maybeSingle().then(({ data: readStatus }: { data: { last_read_at: string } | null }) => {
+        const q = supabase.from("support_messages").select("*", { count: "exact", head: true }).eq("user_id", user.id).neq("sender_id", user.id);
+        (readStatus ? q.gt("created_at", readStatus.last_read_at) : q).then(({ count }) => setSupportUnread(count || 0));
+      });
     }
 
-    // 🚀 OTIMIZAÇÃO: Busca única com limite (Acabou o N+1 da morte)
-    const { data: proData } = await supabase.from("professionals").select("id").eq("user_id", user.id);
-    const proIds = proData?.map(p => p.id) || [];
+    const proIds = proData?.map((p: any) => p.id) || [];
 
-    let allReqs = [];
-    if (proIds.length > 0) {
-      const { data } = await supabase
-        .from("service_requests")
-        .select("*")
-        .or(`client_id.eq.${user.id},professional_id.in.(${proIds.join(',')})`)
-        .order("updated_at", { ascending: false })
-        .limit(limitCount);
-      allReqs = data || [];
-    } else {
-      const { data } = await supabase
-        .from("service_requests")
-        .select("*")
-        .eq("client_id", user.id)
-        .order("updated_at", { ascending: false })
-        .limit(limitCount);
-      allReqs = data || [];
-    }
+    // Busca service_requests
+    const reqQuery = proIds.length > 0
+      ? supabase.from("service_requests").select("*").or(`client_id.eq.${user.id},professional_id.in.(${proIds.join(",")})`).order("updated_at", { ascending: false }).limit(limitCount)
+      : supabase.from("service_requests").select("*").eq("client_id", user.id).order("updated_at", { ascending: false }).limit(limitCount);
 
+    const { data: allReqsRaw } = await reqQuery;
+    const allReqs = allReqsRaw || [];
     setHasMore(allReqs.length === limitCount);
 
-    const unique = Array.from(new Map(allReqs.map(r => [r.id, r])).values());
-    const threadIds = unique.map(r => r.id);
+    const unique = Array.from(new Map(allReqs.map((r: any) => [r.id, r])).values()) as any[];
+    const threadIds = unique.map((r: any) => r.id);
 
     if (threadIds.length === 0) {
+      _threadsCache = [];
       setThreads([]);
       if (!isBackgroundUpdate) setLoading(false);
       return;
     }
 
-    const { data: readStatuses } = await supabase
-      .from("chat_read_status" as any)
-      .select("request_id, last_read_at, is_archived, is_deleted, manual_unread")
-      .eq("user_id", user.id)
-      .in("request_id", threadIds) as { data: any[] | null };
-    
-    const statusMap = new Map((readStatuses || []).map(rs => [rs.request_id, rs]));
+    // ⚡ Paraleliza: read statuses + pro user IDs (ao mesmo tempo)
+    const proIdsUniq = [...new Set(unique.map((r: any) => r.professional_id))] as string[];
+    const [
+      { data: readStatuses },
+      { data: allPros },
+    ] = await Promise.all([
+      supabase.from("chat_read_status" as any).select("request_id, last_read_at, is_archived, is_deleted, manual_unread").eq("user_id", user.id).in("request_id", threadIds),
+      supabase.from("professionals").select("id, user_id").in("id", proIdsUniq),
+    ]);
 
-    const proIdsUniq = unique.map(r => r.professional_id);
-    const { data: allPros } = await supabase.from("professionals").select("id, user_id").in("id", proIdsUniq);
-    const proUserIdMap = new Map((allPros || []).map(p => [p.id, p.user_id]));
+    const statusMap = new Map(((readStatuses || []) as any[]).map(rs => [rs.request_id, rs]));
+    const proUserIdMap = new Map(((allPros || []) as any[]).map(p => [p.id, p.user_id]));
 
-    const usersToFetch = unique.map(req => {
-      return req.client_id === user.id ? proUserIdMap.get(req.professional_id) : req.client_id;
-    }).filter(Boolean) as string[];
+    // ⚡ Busca profiles em paralelo com o RPC de summaries
+    const usersToFetch = [...new Set(unique.map((req: any) => req.client_id === user.id ? proUserIdMap.get(req.professional_id) : req.client_id).filter(Boolean))] as string[];
 
-    const { data: allProfiles } = await supabase
-      .from("profiles_public" as any)
-      .select("user_id, full_name, avatar_url")
-      .in("user_id", usersToFetch);
-    const profileMap = new Map((allProfiles || []).map(p => [p.user_id, p]));
+    const [profilesResult, sumsResult] = await Promise.all([
+      supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", usersToFetch),
+      supabase.rpc("get_chat_thread_summaries", { _request_ids: threadIds, _user_id: user.id }),
+    ]);
 
-    /** 1 RPC em vez de até 3×N requests por thread (última msg + não lidas) */
+    const profileMap = new Map(((profilesResult.data || []) as any[]).map(p => [p.user_id, p]));
+
     type Sum = { lastMessage: string | null; lastMessageTime: string | null; unreadCount: number };
     const summaryByReq = new Map<string, Sum>();
-    const { data: sums, error: rpcErr } = await supabase.rpc("get_chat_thread_summaries", {
-      _request_ids: threadIds,
-      _user_id: user.id,
-    });
-    if (!rpcErr && Array.isArray(sums)) {
-      for (const row of sums as {
-        request_id: string;
-        last_message: string | null;
-        last_message_at: string | null;
-        unread_count: number | string;
-      }[]) {
+
+    if (!sumsResult.error && Array.isArray(sumsResult.data)) {
+      for (const row of sumsResult.data as any[]) {
         summaryByReq.set(row.request_id, {
           lastMessage: row.last_message ?? null,
           lastMessageTime: row.last_message_at ?? null,
@@ -183,38 +168,21 @@ const Messages = () => {
         });
       }
     } else {
-      for (const req of unique) {
+      // Fallback: busca em lote para cada thread (apenas se RPC falhar)
+      await Promise.all(unique.map(async (req: any) => {
         const st = statusMap.get(req.id) || {};
-        const { data: lastMsg } = await supabase
-          .from("chat_messages")
-          .select("content, created_at")
-          .eq("request_id", req.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        let unreadCount = 0;
-        if (st.last_read_at) {
-          const { count } = await supabase
-            .from("chat_messages")
-            .select("*", { count: "exact", head: true })
-            .eq("request_id", req.id)
-            .neq("sender_id", user.id)
-            .gt("created_at", st.last_read_at);
-          unreadCount = count || 0;
-        } else {
-          const { count } = await supabase
-            .from("chat_messages")
-            .select("*", { count: "exact", head: true })
-            .eq("request_id", req.id)
-            .neq("sender_id", user.id);
-          unreadCount = count || 0;
-        }
+        const [lastMsgRes, unreadRes] = await Promise.all([
+          supabase.from("chat_messages").select("content, created_at").eq("request_id", req.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+          st.last_read_at
+            ? supabase.from("chat_messages").select("*", { count: "exact", head: true }).eq("request_id", req.id).neq("sender_id", user.id).gt("created_at", st.last_read_at)
+            : supabase.from("chat_messages").select("*", { count: "exact", head: true }).eq("request_id", req.id).neq("sender_id", user.id),
+        ]);
         summaryByReq.set(req.id, {
-          lastMessage: lastMsg?.content ?? null,
-          lastMessageTime: lastMsg?.created_at ?? null,
-          unreadCount,
+          lastMessage: lastMsgRes.data?.content ?? null,
+          lastMessageTime: lastMsgRes.data?.created_at ?? null,
+          unreadCount: unreadRes.count || 0,
         });
-      }
+      }));
     }
 
     const enriched: Thread[] = unique
@@ -239,30 +207,31 @@ const Messages = () => {
       .filter((t) => t !== null) as Thread[];
 
     const finalThreads = enriched.sort(
-      (a, b) =>
-        new Date(b.lastMessageTime || b.updated_at).getTime() -
-        new Date(a.lastMessageTime || a.updated_at).getTime()
+      (a, b) => new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime()
     );
+    _threadsCache = finalThreads;
     setThreads(finalThreads);
     if (!isBackgroundUpdate) setLoading(false);
-  }, [page]); // Adicionado `page` como dependência para carregar mais quando mudar
+  }, [page]);
 
   useEffect(() => { 
     load(); 
 
+    let realtimeTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (realtimeTimer) clearTimeout(realtimeTimer);
+      realtimeTimer = setTimeout(() => load(true), 800);
+    };
+
     const channel = supabase.channel('messages-list-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
-        setTimeout(() => load(true), 500);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_read_status' }, () => {
-        setTimeout(() => load(true), 500);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_requests' }, () => {
-        setTimeout(() => load(true), 500);
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_read_status' }, scheduleReload)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'service_requests' }, scheduleReload)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'service_requests' }, scheduleReload)
       .subscribe();
 
     return () => {
+      if (realtimeTimer) clearTimeout(realtimeTimer);
       supabase.removeChannel(channel);
     };
   }, [load]);

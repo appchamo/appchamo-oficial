@@ -200,7 +200,8 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
     let cancelled = false;
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user;
         if (!user || cancelled) return;
         const res = await supabase
           .from("profiles")
@@ -284,8 +285,9 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
 
   const handleClick = (sponsor: Sponsor) => {
     window.open(sponsor.link_url, "_blank");
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      supabase.from("sponsor_clicks").insert({ sponsor_id: sponsor.id, user_id: user?.id || null }).then(() => {});
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const uid = session?.user?.id || null;
+      supabase.from("sponsor_clicks").insert({ sponsor_id: sponsor.id, user_id: uid }).then(() => {});
       supabase.rpc("increment_sponsor_clicks" as any, { _sponsor_id: sponsor.id }).then(() => {});
     });
   };

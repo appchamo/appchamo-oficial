@@ -1,7 +1,7 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { useRefresh } from "@/contexts/RefreshContext";
-import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar, Share2 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -238,15 +238,26 @@ const ProfessionalProfile = () => {
     toast({ title: "Profissão atualizada!" });
   };
 
-  const handleCopyLink = () => {
+  const handleShareLink = async () => {
     if (!pro?.slug) return;
     const link = `https://appchamo.com/professional/${pro.slug}`;
-    navigator.clipboard.writeText(link).then(() => {
-      toast({ title: "Link copiado!" });
-    }).catch(() => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: pro.full_name, text: `Veja o perfil de ${pro.full_name} no Chamô`, url: link });
+        return;
+      } catch {
+        // user cancelled or not supported — fall through to copy
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      toast({ title: "Link copiado!", description: link });
+    } catch {
       toast({ title: link, description: "Copie o link acima manualmente" });
-    });
+    }
   };
+
+  const handleCopyLink = () => handleShareLink();
 
   const handleCall = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -311,9 +322,16 @@ const ProfessionalProfile = () => {
                       </div>
                     )}
                     {isOwner && (
-                      <button onClick={() => { setEditNameValue(name); setEditingName(true); }} className="ml-1 p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0">
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                      <>
+                        <button onClick={() => { setEditNameValue(name); setEditingName(true); }} className="ml-1 p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        {pro.slug && (
+                          <button onClick={handleShareLink} className="p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0" title="Compartilhar perfil">
+                            <Share2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </>
                     )}
                   </>
                 )}

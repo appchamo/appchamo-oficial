@@ -131,23 +131,6 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
     try {
       diagLog("info", "featured", "pros fetch start");
-      if (Capacitor.isNativePlatform()) {
-        try {
-          const graceUntil = parseInt(sessionStorage.getItem("chamo_hang_reload_grace_until") || "0", 10);
-          const postOAuthWarmup = Date.now() < graceUntil;
-          const oauthJustLanded = sessionStorage.getItem("chamo_oauth_just_landed") === "1";
-          if (
-            (postOAuthWarmup || oauthJustLanded) &&
-            sessionStorage.getItem("chamo_featured_reload_after_oauth") !== "1"
-          ) {
-            sessionStorage.setItem("chamo_featured_reload_after_oauth", "1");
-            clearTimeout(watchdog);
-            diagLog("info", "featured", "reload completo pós-OAuth");
-            window.location.reload();
-            return;
-          }
-        } catch { /* ignore */ }
-      }
 
       const { data: pros, error: prosErr } = await supabase
         .from("professionals")

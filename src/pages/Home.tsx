@@ -177,6 +177,25 @@ const Home = () => {
     diagLog("info", "home", "render state", { authLoading, isReady, userId: user?.id ?? null });
   }, [authLoading, isReady, user?.id]);
 
+  // iOS WebView: reload de estabilização pós-OAuth/login feito aqui (fase do skeleton),
+  // antes de qualquer conteúdo ou modal aparecer para o usuário.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    try {
+      const graceUntil = parseInt(sessionStorage.getItem("chamo_hang_reload_grace_until") || "0", 10);
+      const postOAuthWarmup = Date.now() < graceUntil;
+      const oauthJustLanded = sessionStorage.getItem("chamo_oauth_just_landed") === "1";
+      if (
+        (postOAuthWarmup || oauthJustLanded) &&
+        sessionStorage.getItem("chamo_featured_reload_after_oauth") !== "1"
+      ) {
+        sessionStorage.setItem("chamo_featured_reload_after_oauth", "1");
+        diagLog("info", "home", "reload de estabilização pós-OAuth (skeleton phase)");
+        window.location.reload();
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => {
       setJobCount(count || 0);

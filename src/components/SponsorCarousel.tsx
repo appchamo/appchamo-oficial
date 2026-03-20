@@ -4,6 +4,38 @@ import { normalizeLocation } from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 
+// Shared location cache (same key as FeaturedProfessionals)
+const LOCATION_CACHE_KEY = "chamo_user_location_v1";
+const LOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function getCachedLocation(): { city: string | null; state: string | null } | null {
+  try {
+    const raw = localStorage.getItem(LOCATION_CACHE_KEY);
+    if (!raw) return null;
+    const { city, state, ts } = JSON.parse(raw);
+    if (Date.now() - ts > LOCATION_CACHE_TTL_MS) return null;
+    return { city: city ?? null, state: state ?? null };
+  } catch { return null; }
+}
+
+function setCachedLocation(city: string | null, state: string | null) {
+  try {
+    localStorage.setItem(LOCATION_CACHE_KEY, JSON.stringify({ city, state, ts: Date.now() }));
+  } catch { /* ignore */ }
+}
+
+function getSponsorLogoUrl(logoUrl: string | null): string | null {
+  if (!logoUrl) return null;
+  const base = import.meta.env.VITE_SUPABASE_URL as string;
+  if (logoUrl.startsWith("http")) {
+    if (logoUrl.includes("/storage/v1/object/public/")) {
+      return logoUrl.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=130&quality=60";
+    }
+    return logoUrl;
+  }
+  return `${base}/storage/v1/render/image/public/uploads/${logoUrl}?width=130&quality=60`;
+}
+
 const ITEMS_PER_PAGE = 4;
 const AUTO_ADVANCE_MS = 6000;
 
@@ -47,8 +79,10 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [allSponsors, setAllSponsors] = useState<Sponsor[]>([]);
-  const [userState, setUserState] = useState<string | null>(null);
-  const [userCity, setUserCity] = useState<string | null>(null);
+  // Init from cache immediately to avoid extra DB round-trip
+  const cachedLoc = useMemo(() => getCachedLocation(), []);
+  const [userState, setUserState] = useState<string | null>(cachedLoc?.state ?? null);
+  const [userCity, setUserCity] = useState<string | null>(cachedLoc?.city ?? null);
   const [loaded, setLoaded] = useState(false);
 
   const sponsors = useMemo(() => {
@@ -164,28 +198,31 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         });
     };
 
-    const t = setTimeout(fetchSponsors, 400);
-    return () => { cancelledRef.current = true; clearTimeout(t); };
+    fetchSponsors();
+    return () => { cancelledRef.current = true; };
   }, []);
 
+  // Refresh location in background and update cache
   useEffect(() => {
     let cancelled = false;
-    supabase.auth.getUser()
-      .then(({ data: { user } }) => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
         if (!user || cancelled) return;
-        return supabase
+        const res = await supabase
           .from("profiles")
           .select("address_state, address_city")
           .eq("user_id", user.id)
           .maybeSingle();
-      })
-      .then((res) => {
         if (cancelled || !res?.data) return;
-        diagLog("info", "sponsors", "user location loaded", { state: res.data.address_state || null, city: res.data.address_city || null });
-        setUserState(res.data.address_state || null);
-        setUserCity(res.data.address_city || null);
-      })
-      .catch(() => {});
+        const city = res.data.address_city || null;
+        const state = res.data.address_state || null;
+        diagLog("info", "sponsors", "user location refreshed", { state, city });
+        setCachedLocation(city, state);
+        setUserState(state);
+        setUserCity(city);
+      } catch { /* ignore */ }
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -304,7 +341,13 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
                 <div className="w-[65px] h-[65px] rounded-full ring-2 ring-primary group-hover:ring-primary/70 transition-all flex items-center justify-center overflow-hidden shrink-0">
                   <div className="w-full h-full rounded-full bg-muted flex items-center justify-center overflow-hidden">
                     {sponsor.logo_url ? (
-                      <img src={sponsor.logo_url} alt={sponsor.name} className="w-full h-full object-cover rounded-full" />
+                      <img
+                        src={getSponsorLogoUrl(sponsor.logo_url)}
+                        alt={sponsor.name}
+                        className="w-full h-full object-cover rounded-full"
+                        loading="lazy"
+                        decoding="async"
+                      />
                     ) : (
                       <span className="text-xs font-bold text-muted-foreground leading-none">{sponsor.name.slice(0, 2).toUpperCase()}</span>
                     )}

@@ -146,7 +146,7 @@ const Home = () => {
   }, [user?.id, profile?.user_type]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => void checkFiscalSetup(), 500);
+    const t = window.setTimeout(() => void checkFiscalSetup(), 200);
     return () => clearTimeout(t);
   }, [checkFiscalSetup]);
 
@@ -253,14 +253,15 @@ const Home = () => {
     return () => clearTimeout(fallback);
   }, [sections]);
 
-  // Nativo: abre janela antes de montar Sponsors/Featured/Categories (1 só leva de fetches, não 3× em paralelo).
+  // Nativo: abre janela antes de montar Sponsors/Featured/Categories.
+  // Delay reduzido para 600ms (era 1600ms) — WebView já está estabilizado nesse ponto.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
       setHeavySectionsReady(true);
       return;
     }
     setHeavySectionsReady(false);
-    const ms = user?.id ? 1600 : 500;
+    const ms = user?.id ? 600 : 300;
     const t = setTimeout(() => setHeavySectionsReady(true), ms);
     return () => clearTimeout(t);
   }, [user?.id]);

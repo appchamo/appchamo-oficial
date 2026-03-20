@@ -1,6 +1,6 @@
 import AppLayout from "@/components/AppLayout";
-import { Bell } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Bell, ChevronDown, Loader2 } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
@@ -16,35 +16,62 @@ interface Notification {
   created_at: string;
 }
 
+const PAGE_SIZE = 7;
+
 const Notifications = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [page, setPage] = useState(0);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async (pageIndex = 0, append = false) => {
     if (!user) return;
+    if (pageIndex === 0) setLoading(true); else setLoadingMore(true);
+
+    const from = pageIndex * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
     const { data } = await supabase
       .from("notifications")
       .select("*")
       .eq("user_id", user.id)
       .neq("type", "chat")
-      .order("created_at", { ascending: false });
-    
-    setNotifications((data as Notification[]) || []);
-    setLoading(false);
+      .order("created_at", { ascending: false })
+      .range(from, to + 1); // fetch 1 extra to detect hasMore
 
-    // ✅ LIMPEZA AUTOMÁTICA SILENCIOSA (exclui chat; mensagens só aparecem no push)
-    const unread = (data as Notification[])?.filter(n => !n.read && n.type !== "chat") || [];
-    if (unread.length > 0) {
-      await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false).neq("type", "chat");
+    const items = ((data as Notification[]) || []).slice(0, PAGE_SIZE);
+    const more = (data?.length ?? 0) > PAGE_SIZE;
+
+    if (append) {
+      setNotifications((prev) => [...prev, ...items]);
+    } else {
+      setNotifications(items);
     }
-    // Zera o badge do ícone do app (iOS/Android) ao abrir a tela de notificações
-    syncAppIconBadge(0);
-  };
+    setHasMore(more);
+    setPage(pageIndex);
+
+    if (pageIndex === 0) setLoading(false); else setLoadingMore(false);
+
+    // Mark all unread as read silently
+    if (pageIndex === 0) {
+      const unread = items.filter((n) => !n.read);
+      if (unread.length > 0) {
+        await supabase
+          .from("notifications")
+          .update({ read: true })
+          .eq("user_id", user.id)
+          .eq("read", false)
+          .neq("type", "chat");
+      }
+      syncAppIconBadge(0);
+    }
+  }, [user]);
 
   useEffect(() => {
-    fetchNotifications();
+    fetchNotifications(0);
 
     if (!user) return;
 
@@ -58,16 +85,16 @@ const Notifications = () => {
           table: "notifications",
           filter: `user_id=eq.${user.id}`,
         },
-        () => {
-          fetchNotifications();
-        }
+        () => { fetchNotifications(0); }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user]);
+    return () => { supabase.removeChannel(channel); };
+  }, [user, fetchNotifications]);
+
+  const handleLoadMore = () => {
+    fetchNotifications(page + 1, true);
+  };
 
   const handleClick = (n: Notification) => {
     if (n.link) navigate(n.link);
@@ -84,7 +111,6 @@ const Notifications = () => {
     return `${days}d`;
   };
 
-  // Remove artefatos de string (ex: "}" no final) de notificações antigas salvas no banco
   const sanitizeMessage = (msg: string | null): string | null => {
     if (!msg) return null;
     const cleaned = msg.replace(/"}\s*$/, "").replace(/\}"\s*$/, "").trim();
@@ -112,27 +138,42 @@ const Notifications = () => {
           </div>
         ) : (
           <div className="space-y-2">
-            {notifications.map(n => {
-                const message = sanitizeMessage(n.message);
-                return (
-              <button
-                key={n.id}
-                onClick={() => handleClick(n)}
-                className={`w-full text-left p-4 rounded-xl border transition-colors ${
-                  n.read ? "bg-card" : "bg-primary/5 border-primary/20"
-                } hover:bg-muted/50`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "bg-transparent" : "bg-primary"}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>{n.title}</p>
-                    {message && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>}
+            {notifications.map((n) => {
+              const message = sanitizeMessage(n.message);
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => handleClick(n)}
+                  className={`w-full text-left p-4 rounded-xl border transition-colors ${
+                    n.read ? "bg-card" : "bg-primary/5 border-primary/20"
+                  } hover:bg-muted/50`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "bg-transparent" : "bg-primary"}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>{n.title}</p>
+                      {message && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground flex-shrink-0">{timeAgo(n.created_at)}</span>
                   </div>
-                  <span className="text-[10px] text-muted-foreground flex-shrink-0">{timeAgo(n.created_at)}</span>
-                </div>
-              </button>
-                );
+                </button>
+              );
             })}
+
+            {hasMore && (
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-muted-foreground/30 text-sm text-muted-foreground hover:bg-muted/40 transition-colors disabled:opacity-50"
+              >
+                {loadingMore ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+                {loadingMore ? "Carregando..." : "Ver mais"}
+              </button>
+            )}
           </div>
         )}
       </main>

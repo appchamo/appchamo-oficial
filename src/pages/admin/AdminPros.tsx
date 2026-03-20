@@ -209,8 +209,9 @@ const AdminPros = () => {
     const items = list || [];
     const withUrls = await Promise.all(
       items.map(async (d: any) => {
-        const { data: signed } = await supabase.storage.from("uploads").createSignedUrl(d.file_url, 3600);
-        return { ...d, viewUrl: signed?.signedUrl ?? "" };
+        const { data: signed, error: signErr } = await supabase.storage.from("uploads").createSignedUrl(d.file_url, 3600);
+        if (signErr) console.warn("createSignedUrl error:", signErr.message, "path:", d.file_url);
+        return { ...d, viewUrl: signed?.signedUrl ?? null };
       })
     );
     setDocs(withUrls);
@@ -698,7 +699,8 @@ const AdminPros = () => {
   {docs.map((d: any) => (
     <a
       key={d.id}
-      href={d.viewUrl || supabase.storage.from("uploads").getPublicUrl(d.file_url).data.publicUrl}
+      href={d.viewUrl ?? "#"}
+      onClick={!d.viewUrl ? (e) => { e.preventDefault(); toast({ title: "URL indisponível", description: "Não foi possível gerar o link do documento. Verifique as permissões de storage.", variant: "destructive" }); } : undefined}
       target="_blank"
       rel="noopener noreferrer"
       className="flex items-center gap-2 text-xs text-primary hover:underline"

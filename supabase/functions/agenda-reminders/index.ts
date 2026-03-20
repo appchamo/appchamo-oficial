@@ -1,12 +1,13 @@
 /**
- * Edge Function: Lembretes de agendamento (24h e 1h antes).
+ * Edge Function: Lembretes de agendamento (24h, 6h e 1h antes).
  * Deve ser invocada por cron a cada 15–30 min (ex.: Supabase Dashboard > Edge Functions > Cron).
  *
  * Regras:
  * - Considera appointments com status 'confirmed' (e opcionalmente 'pending').
  * - Horário do agendamento é interpretado no fuso Brasil (UTC-3).
  * - 24h: janela [now + 23h30, now + 24h30].
- * - 1h: janela [now + 50min, now + 70min].
+ * - 6h:  janela [now + 5h30,  now + 6h30].
+ * - 1h:  janela [now + 50min, now + 70min].
  * - Evita duplicata via tabela agenda_reminder_log.
  */
 
@@ -45,8 +46,10 @@ serve(async (req) => {
     const now = Date.now();
     const window24Min = now + (23.5 * 60 * 60 * 1000);
     const window24Max = now + (24.5 * 60 * 60 * 1000);
-    const window1hMin = now + (50 * 60 * 1000);
-    const window1hMax = now + (70 * 60 * 1000);
+    const window6hMin  = now + (5.5  * 60 * 60 * 1000);
+    const window6hMax  = now + (6.5  * 60 * 60 * 1000);
+    const window1hMin  = now + (50   * 60 * 1000);
+    const window1hMax  = now + (70   * 60 * 1000);
 
     const { data: appointments, error: fetchError } = await supabase
       .from("agenda_appointments")
@@ -76,6 +79,7 @@ serve(async (req) => {
     const linkBase = Deno.env.get("APP_URL") || "";
     const formatTime = (t: string) => t.slice(0, 5);
     let sent24 = 0;
+    let sent6h = 0;
     let sent1h = 0;
 
     for (const app of appointments || []) {
@@ -121,29 +125,56 @@ serve(async (req) => {
         sent24++;
       }
 
+      if (utcMs >= window6hMin && utcMs <= window6hMax) {
+        if (!sentSet.has(`${a.id}:6h`)) {
+          const { data: pro6 } = await supabase
+            .from("professionals")
+            .select("user_id")
+            .eq("id", a.professional_id)
+            .single();
+
+          const title6h = "Lembrete: agendamento em 6 horas";
+          const msg6h = `${serviceName} hoje às ${timeStr}.`;
+
+          const rows6h: { user_id: string; title: string; message: string; type: string; link: string | null }[] = [
+            { user_id: a.client_id, title: title6h, message: msg6h, type: "appointment", link },
+          ];
+          const proUserId6h = (pro6 as { user_id?: string } | null)?.user_id;
+          if (proUserId6h) rows6h.push({ user_id: proUserId6h, title: title6h, message: msg6h, type: "appointment", link });
+          await supabase.from("notifications").insert(rows6h);
+
+          await supabase.from("agenda_reminder_log").insert({
+            appointment_id: a.id,
+            reminder_type: "6h",
+          });
+          sent6h++;
+        }
+      }
+
       if (utcMs >= window1hMin && utcMs <= window1hMax) {
-        if (sentSet.has(`${a.id}:1h`)) continue;
-        const { data: pro } = await supabase
-          .from("professionals")
-          .select("user_id")
-          .eq("id", a.professional_id)
-          .single();
+        if (!sentSet.has(`${a.id}:1h`)) {
+          const { data: pro1 } = await supabase
+            .from("professionals")
+            .select("user_id")
+            .eq("id", a.professional_id)
+            .single();
 
-        const title1h = "Lembrete: agendamento em 1 hora";
-        const msg1h = `${serviceName} hoje às ${timeStr}.`;
+          const title1h = "Lembrete: agendamento em 1 hora";
+          const msg1h = `${serviceName} hoje às ${timeStr}.`;
 
-        const rows1h: { user_id: string; title: string; message: string; type: string; link: string | null }[] = [
-          { user_id: a.client_id, title: title1h, message: msg1h, type: "appointment", link },
-        ];
-        const proUserId1h = (pro as { user_id?: string } | null)?.user_id;
-        if (proUserId1h) rows1h.push({ user_id: proUserId1h, title: title1h, message: msg1h, type: "appointment", link });
-        await supabase.from("notifications").insert(rows1h);
+          const rows1h: { user_id: string; title: string; message: string; type: string; link: string | null }[] = [
+            { user_id: a.client_id, title: title1h, message: msg1h, type: "appointment", link },
+          ];
+          const proUserId1h = (pro1 as { user_id?: string } | null)?.user_id;
+          if (proUserId1h) rows1h.push({ user_id: proUserId1h, title: title1h, message: msg1h, type: "appointment", link });
+          await supabase.from("notifications").insert(rows1h);
 
-        await supabase.from("agenda_reminder_log").insert({
-          appointment_id: a.id,
-          reminder_type: "1h",
-        });
-        sent1h++;
+          await supabase.from("agenda_reminder_log").insert({
+            appointment_id: a.id,
+            reminder_type: "1h",
+          });
+          sent1h++;
+        }
       }
     }
 
@@ -151,6 +182,7 @@ serve(async (req) => {
       JSON.stringify({
         ok: true,
         reminders_24h: sent24,
+        reminders_6h: sent6h,
         reminders_1h: sent1h,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }

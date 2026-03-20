@@ -165,6 +165,36 @@ const MessageThread = () => {
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
   const hasPaymentConfirmed = messages.some(m => m.content && m.content.includes("PAGAMENTO CONFIRMADO"));
 
+  /**
+   * Confirma um pagamento PIX que foi detectado como pago externamente
+   * (ex.: usuário copiou código, saiu do app, pagou no banco e voltou).
+   */
+  const handlePixAutoConfirm = useCallback(async (totalAmount: number, paymentId: string) => {
+    if (!threadId || !userId) return;
+    // Guard: não confirmar duas vezes
+    if (messages.some(m => m.content?.includes("✅ PAGAMENTO CONFIRMADO"))) return;
+
+    try {
+      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalAmount.toFixed(2).replace(".", ",")}\nMétodo: PIX`;
+      await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: userId, content: confirmContent });
+
+      // Garante status correto no banco
+      await supabase.from("transactions").update({ status: "completed" }).eq("asaas_payment_id", paymentId);
+
+      await sendNotification(userId, "✅ Pagamento Aprovado", `Pagamento via PIX de R$ ${totalAmount.toFixed(2).replace(".", ",")} confirmado.`);
+      if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um pagamento via PIX de R$ ${totalAmount.toFixed(2).replace(".", ",")}!`);
+
+      toast({ title: "Pagamento PIX confirmado!" });
+      setPixOpen(false);
+      if (pixIntervalRef.current) { clearInterval(pixIntervalRef.current); pixIntervalRef.current = null; }
+      setPixPolling(false);
+      setRatingOpen(true);
+    } catch (err) {
+      console.error("handlePixAutoConfirm error:", err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, userId, chatProUserId, messages]);
+
   const loadFeeSettings = useCallback(async () => {
     const { data } = await supabase.from("platform_settings").select("key, value");
     if (data) {
@@ -219,6 +249,71 @@ const MessageThread = () => {
   }, [threadId]);
 
   useEffect(() => { loadFeeSettings(); }, [loadFeeSettings]);
+
+  // Detecta PIX pago externamente (usuário saiu do app e pagou no banco)
+  // Roda: (a) após mensagens carregadas e (b) toda vez que o app volta ao foreground
+  useEffect(() => {
+    const checkExternalPix = async () => {
+      if (!threadId || !userId || isFetchingMessages) return;
+      if (hasPaymentConfirmed) return; // já confirmado no chat
+      if (pixOpen) return; // modal já visível — o polling cuida disso
+
+      const { data: tx } = await supabase
+        .from("transactions")
+        .select("asaas_payment_id, total_amount, status, pix_qr_code, pix_copy_paste")
+        .eq("request_id", threadId)
+        .eq("client_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!tx) return;
+
+      if (tx.status === "completed") {
+        // Webhook já processou — confirmar no chat e abrir avaliação
+        await handlePixAutoConfirm(tx.total_amount, tx.asaas_payment_id);
+      } else if (tx.status === "pending" && tx.pix_qr_code) {
+        // Pagamento ainda pendente — reabre o modal com o QR code existente e inicia polling
+        setPixData({ qrCode: tx.pix_qr_code, copyPaste: tx.pix_copy_paste, paymentId: tx.asaas_payment_id });
+        pixConfirmParamsRef.current = {
+          threadId: threadId!,
+          userId: userId!,
+          chatProUserId: chatProUserId || "",
+          finalAmount: tx.total_amount,
+          couponDiscount: null,
+          selectedCouponId: null,
+          paymentDataAmount: String(tx.total_amount),
+        };
+        setPixOpen(true);
+        setPixPolling(true);
+        if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
+        const pmtId = tx.asaas_payment_id;
+        const pmtAmount = tx.total_amount;
+        pixIntervalRef.current = setInterval(async () => {
+          try {
+            const check = await supabase.functions.invoke("create_payment", {
+              body: { action: "check_payment_status", payment_id: pmtId },
+            });
+            if (check.data?.confirmed) {
+              clearInterval(pixIntervalRef.current!);
+              pixIntervalRef.current = null;
+              setPixPolling(false);
+              await handlePixAutoConfirm(pmtAmount, pmtId);
+            }
+          } catch { /* ignore */ }
+        }, 3000);
+      }
+    };
+
+    checkExternalPix();
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") checkExternalPix();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, userId, chatProUserId, hasPaymentConfirmed, pixOpen, isFetchingMessages, handlePixAutoConfirm]);
 
   useEffect(() => {
     if (threadId && localStorage.getItem(`receipt_dismissed_${threadId}`) === "true") {
@@ -1351,7 +1446,7 @@ const MessageThread = () => {
       return (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <DollarSign className="w-4 h-4" />
+            <span className="text-sm font-bold">R$</span>
             <span className="font-semibold">Cobrança</span>
           </div>
           <p className="text-lg font-bold">R$ {parseFloat(billing.amount).toFixed(2).replace(".", ",")}</p>
@@ -1363,8 +1458,8 @@ const MessageThread = () => {
           {isMine ? (
              <button
                 onClick={() => setViewingBilling(billing)}
-                className="mt-1 w-full py-2 rounded-lg bg-background/20 backdrop-blur-sm text-xs font-semibold hover:bg-background/30 transition-colors border border-current/20 flex items-center justify-center gap-1">
-                <Info className="w-3.5 h-3.5" /> Detalhes da cobrança
+                className="mt-1 w-full py-1.5 rounded-lg bg-background/20 backdrop-blur-sm text-[11px] font-semibold hover:bg-background/30 transition-colors border border-current/20 flex items-center justify-center gap-1 px-2">
+                <Info className="w-3 h-3 flex-shrink-0" /> Detalhes da cobrança
               </button>
           ) : (
             alreadyPaid ? (

@@ -1,4 +1,4 @@
-import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LayoutDashboard, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, DollarSign, ScrollText, Calendar, CalendarCheck, ShieldCheck, Image } from "lucide-react";
+import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, DollarSign, ScrollText, Calendar, CalendarCheck, ShieldCheck, Image } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -29,21 +29,20 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
     {
       title: "Meus Acessos",
       items: [
-        { icon: LayoutDashboard, label: "Painel do Cliente", path: "/client" },
         ...(profile?.user_type === "professional" || profile?.user_type === "company"
           ? [
-              { icon: Briefcase, label: "Painel Profissional", path: "/pro" },
               { icon: DollarSign, label: "Financeiro", path: "/pro/financeiro" },
               ...(profile?.user_type === "company"
                 ? [
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },
-                    ...(isBusiness ? [{ icon: ShoppingBag, label: "Catálogo de Produtos", path: "/my-catalog" }] : []),
                     ...(plan?.id === "vip" || plan?.id === "pro" ? [{ icon: Image, label: "Serviços", path: "/my-services" }] : []),
                   ]
                 : [
                     ...(canPostJobs ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }] : []),
                     ...(plan?.id === "pro" || plan?.id === "vip" ? [{ icon: Image, label: "Serviços", path: "/my-services" }] : []),
                   ]),
+              // Catálogo de Produtos disponível para qualquer profissional/empresa no plano Business
+              ...(isBusiness ? [{ icon: ShoppingBag, label: "Catálogo de Produtos", path: "/my-catalog" }] : []),
               ...(isBusiness
                 ? [
                     { icon: Calendar, label: "Minha agenda", path: "/pro/agenda/calendario" },
@@ -52,7 +51,7 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
                 : []),
             ]
           : []),
-        // Cliente com vaga liberada pelo admin: mesma aba "Minhas Vagas" do plano Empresarial
+        // Cliente com vaga liberada pelo admin
         ...(profile?.user_type === "client" && canPostJobs
           ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }]
           : []),

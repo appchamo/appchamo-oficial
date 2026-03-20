@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText } from "lucide-react";
+import { FileText, ShieldCheck, Clock, Star, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,7 +9,7 @@ import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 
-type Step = "cpf" | "doc-notice" | "documents" | "profile";
+type Step = "intro" | "cpf" | "doc-notice" | "documents" | "profile";
 
 const BecomeProfessional = () => {
   const navigate = useNavigate();
@@ -29,9 +29,9 @@ const BecomeProfessional = () => {
       return;
     }
     if (profile && step === null) {
-      setStep(needsCpf ? "cpf" : "doc-notice");
+      setStep("intro");
     }
-  }, [profile, navigate, needsCpf, step]);
+  }, [profile, navigate, step]);
 
   const handleCpfNext = async () => {
     const raw = cpfValue.replace(/\D/g, "");
@@ -194,6 +194,81 @@ const BecomeProfessional = () => {
 
   return (
     <>
+      {step === "intro" && (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
+          <div className="w-full max-w-sm">
+            <div className="text-center mb-6">
+              <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
+              <p className="text-sm text-muted-foreground">Tornar-se profissional</p>
+              <button type="button" onClick={() => navigate("/home")} className="text-xs text-primary mt-1 hover:underline">
+                ← Voltar ao início
+              </button>
+            </div>
+
+            <div className="bg-card border rounded-2xl p-6 shadow-card space-y-5">
+              <div className="flex flex-col items-center text-center gap-2">
+                <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-1">
+                  <ShieldCheck className="w-7 h-7 text-primary" />
+                </div>
+                <h2 className="text-lg font-bold text-foreground">Antes de começar</h2>
+                <p className="text-sm text-muted-foreground">
+                  Para se tornar profissional na Chamô, precisaremos de alguns dados de identificação e documentos.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/50">
+                  <FileText className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Documentos solicitados</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      CPF, foto de documento com selfie e informações do seu perfil profissional.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/50">
+                  <Clock className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Análise em até 24h</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Seu cadastro passará por uma análise interna. Você receberá uma notificação quando for aprovado.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/50">
+                  <Star className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Planos disponíveis após aprovação</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Durante a análise, você terá acesso ao plano <strong>Free</strong>. Os planos pagos (Pro, VIP, Business) são liberados após aprovação.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStep(needsCpf ? "cpf" : "doc-notice")}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors"
+              >
+                Entendi, quero continuar
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate("/home")}
+                className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {step === "doc-notice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
           <div className="w-full max-w-sm text-center mb-4">

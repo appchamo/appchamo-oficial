@@ -326,6 +326,26 @@ serve(async (req) => {
       const { filePath } = body;
       if (!filePath) throw new Error("filePath é obrigatório.");
 
+      // Verify file exists before creating signed URL
+      const { data: fileList, error: listErr } = await supabase.storage
+        .from("uploads")
+        .list(filePath.substring(0, filePath.lastIndexOf("/")), {
+          search: filePath.substring(filePath.lastIndexOf("/") + 1),
+        });
+
+      if (listErr) {
+        console.error("[sign_document_url] list error:", listErr.message, "path:", filePath);
+      }
+
+      const fileExists = fileList && fileList.length > 0;
+
+      if (!fileExists) {
+        console.warn("[sign_document_url] file not found in storage:", filePath);
+        return new Response(JSON.stringify({ signedUrl: null, notFound: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       const { data, error } = await supabase.storage
         .from("uploads")
         .createSignedUrl(filePath, 3600);

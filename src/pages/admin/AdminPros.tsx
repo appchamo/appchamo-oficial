@@ -216,10 +216,10 @@ const AdminPros = () => {
           if (error || !data?.signedUrl) {
             console.warn("sign_document_url error:", error?.message, "path:", d.file_url);
           }
-          return { ...d, viewUrl: data?.signedUrl ?? null };
+          return { ...d, viewUrl: data?.signedUrl ?? null, notFound: data?.notFound ?? false };
         } catch (e) {
           console.warn("sign_document_url exception:", e, "path:", d.file_url);
-          return { ...d, viewUrl: null };
+          return { ...d, viewUrl: null, notFound: true };
         }
       })
     );
@@ -706,16 +706,22 @@ const AdminPros = () => {
                  {/* Documentos de Identidade (Cadastro inicial) */}
 <div className="space-y-1.5 mb-3">
   {docs.map((d: any) => (
-    <a
-      key={d.id}
-      href={d.viewUrl ?? "#"}
-      onClick={!d.viewUrl ? (e) => { e.preventDefault(); toast({ title: "URL indisponível", description: "Não foi possível gerar o link do documento. Verifique as permissões de storage.", variant: "destructive" }); } : undefined}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-2 text-xs text-primary hover:underline"
-    >
-      <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
-    </a>
+    d.notFound ? (
+      <div key={d.id} className="flex items-center gap-2 text-xs text-muted-foreground italic">
+        <FileText className="w-3.5 h-3.5 text-destructive" /> {d.type} — <span className="text-destructive">arquivo não encontrado no storage (peça reenvio)</span>
+      </div>
+    ) : (
+      <a
+        key={d.id}
+        href={d.viewUrl ?? "#"}
+        onClick={!d.viewUrl ? (e) => { e.preventDefault(); toast({ title: "URL indisponível", description: "Não foi possível gerar o link do documento.", variant: "destructive" }); } : undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-2 text-xs text-primary hover:underline"
+      >
+        <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+      </a>
+    )
   ))}
 </div>
 

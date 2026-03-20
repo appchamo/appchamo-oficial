@@ -164,8 +164,16 @@ const AdminUsers = () => {
       const items = list || [];
       const withUrls = await Promise.all(
         items.map(async (d: any) => {
-          const { data: signed } = await supabase.storage.from("uploads").createSignedUrl(d.file_url, 3600);
-          return { ...d, viewUrl: signed?.signedUrl ?? "" };
+          try {
+            const { data, error } = await supabase.functions.invoke("admin-manage", {
+              body: { action: "sign_document_url", filePath: d.file_url },
+            });
+            if (error) console.warn("sign_document_url error:", error?.message, "path:", d.file_url);
+            return { ...d, viewUrl: data?.signedUrl ?? null, notFound: data?.notFound ?? false };
+          } catch (e) {
+            console.warn("sign_document_url exception:", e);
+            return { ...d, viewUrl: null, notFound: true };
+          }
         })
       );
       setDocs(withUrls);
@@ -296,20 +304,31 @@ const AdminUsers = () => {
           ) : (
             <div className="space-y-3">
               {docs.map((d: any) => (
-                <a
-                  key={d.id}
-                  href={d.viewUrl || supabase.storage.from("uploads").getPublicUrl(d.file_url).data.publicUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-3 border rounded-xl hover:bg-muted/50 transition-colors"
-                >
-                  <FileText className="w-5 h-5 text-primary flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground capitalize">{d.type}</p>
-                    <p className="text-xs text-muted-foreground">Status: {d.status} · {new Date(d.created_at).toLocaleDateString("pt-BR")}</p>
+                d.notFound ? (
+                  <div key={d.id} className="flex items-center gap-3 p-3 border border-destructive/30 rounded-xl bg-destructive/5">
+                    <FileText className="w-5 h-5 text-destructive flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground capitalize">{d.type}</p>
+                      <p className="text-xs text-destructive">Arquivo não encontrado — peça reenvio</p>
+                    </div>
                   </div>
-                  <Eye className="w-4 h-4 text-muted-foreground" />
-                </a>
+                ) : (
+                  <a
+                    key={d.id}
+                    href={d.viewUrl ?? "#"}
+                    onClick={!d.viewUrl ? (e) => { e.preventDefault(); } : undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-3 border rounded-xl hover:bg-muted/50 transition-colors"
+                  >
+                    <FileText className="w-5 h-5 text-primary flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground capitalize">{d.type}</p>
+                      <p className="text-xs text-muted-foreground">Status: {d.status} · {new Date(d.created_at).toLocaleDateString("pt-BR")}</p>
+                    </div>
+                    <Eye className="w-4 h-4 text-muted-foreground" />
+                  </a>
+                )
               ))}
             </div>
           )}

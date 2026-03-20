@@ -60,15 +60,8 @@ interface FeaturedProfessionalsProps {
 
 const getAvatarUrl = (avatarUrl?: string | null) => {
   if (!avatarUrl) return null;
-  const base = import.meta.env.VITE_SUPABASE_URL as string;
-  if (avatarUrl.startsWith("http")) {
-    // Já é URL completa — se for do nosso storage, converte para render com compressão
-    if (avatarUrl.includes("/storage/v1/object/public/")) {
-      return avatarUrl.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=120&quality=60";
-    }
-    return avatarUrl;
-  }
-  return `${base}/storage/v1/render/image/public/uploads/${avatarUrl}?width=120&quality=60`;
+  if (avatarUrl.startsWith("http")) return avatarUrl;
+  return `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${avatarUrl}`;
 };
 
 const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {

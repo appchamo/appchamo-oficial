@@ -26,14 +26,7 @@ function setCachedLocation(city: string | null, state: string | null) {
 
 function getSponsorLogoUrl(logoUrl: string | null): string | null {
   if (!logoUrl) return null;
-  const base = import.meta.env.VITE_SUPABASE_URL as string;
-  if (logoUrl.startsWith("http")) {
-    if (logoUrl.includes("/storage/v1/object/public/")) {
-      return logoUrl.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=130&quality=60";
-    }
-    return logoUrl;
-  }
-  return `${base}/storage/v1/render/image/public/uploads/${logoUrl}?width=130&quality=60`;
+  return logoUrl;
 }
 
 const ITEMS_PER_PAGE = 4;

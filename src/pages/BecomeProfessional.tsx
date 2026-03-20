@@ -121,29 +121,36 @@ const BecomeProfessional = () => {
       professionalId = upsertedPro?.id ?? professionalId;
 
       if (professionalId && docFiles.length > 0) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("Sessão expirada. Faça login novamente.");
+
         for (const file of docFiles) {
-          const ext = file.name.split(".").pop() || "jpg";
+          // Upload via Edge Function com service_role — garante que o arquivo vai ao storage
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("userId", user.id);
 
-          const fileName = `documents/${user.id}/${Date.now()}_${Math.random()
-            .toString(36)
-            .slice(2)}.${ext}`;
+          const uploadRes = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-document`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${session.access_token}` },
+              body: formData,
+            }
+          );
 
-          console.log("📝 ARQUIVO SENDO SALVO:", fileName);
+          const uploadResult = await uploadRes.json();
+          console.log("📝 UPLOAD RESULT:", uploadResult);
 
-          const { error: uploadError } = await supabase.storage
-            .from("uploads")
-            .upload(fileName, file, {
-              contentType: file.type,
-              upsert: false,
-            });
-
-          if (uploadError) throw uploadError;
+          if (!uploadRes.ok || !uploadResult.path) {
+            throw new Error(uploadResult.error || "Falha ao enviar documento. Tente novamente.");
+          }
 
           const { error: insertDocError } = await supabase
             .from("professional_documents")
             .insert({
               professional_id: professionalId,
-              file_url: fileName,
+              file_url: uploadResult.path,
               type: "identity",
               status: "pending",
             });

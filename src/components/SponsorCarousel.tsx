@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation } from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
+import SponsorStoryViewer, { SponsorStory } from "./SponsorStoryViewer";
 
 // Shared location cache (same key as FeaturedProfessionals)
 const LOCATION_CACHE_KEY = "chamo_user_location_v1";
@@ -77,6 +78,8 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const [userState, setUserState] = useState<string | null>(cachedLoc?.state ?? null);
   const [userCity, setUserCity] = useState<string | null>(cachedLoc?.city ?? null);
   const [loaded, setLoaded] = useState(false);
+  const [activeStories, setActiveStories] = useState<Record<string, SponsorStory[]>>({});
+  const [viewerStories, setViewerStories] = useState<SponsorStory[] | null>(null);
 
   const sponsors = useMemo(() => {
     return allSponsors.filter((s) => sponsorMatchesLocation(s, userState, userCity));
@@ -195,6 +198,38 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
     return () => { cancelledRef.current = true; };
   }, []);
 
+  // Busca stories ativos após sponsors carregarem
+  useEffect(() => {
+    if (!loaded || allSponsors.length === 0) return;
+    const ids = allSponsors.map((s) => s.id);
+    supabase
+      .from("sponsor_stories")
+      .select("id, sponsor_id, photo_url, caption, link_url, expires_at")
+      .in("sponsor_id", ids)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (!data) return;
+        const byId: Record<string, any[]> = {};
+        for (const story of data as any[]) {
+          const sp = allSponsors.find((s) => s.id === story.sponsor_id);
+          if (!sp) continue;
+          if (!byId[story.sponsor_id]) byId[story.sponsor_id] = [];
+          byId[story.sponsor_id].push({
+            id: story.id,
+            sponsor_id: story.sponsor_id,
+            sponsor_name: sp.name,
+            sponsor_logo: sp.logo_url,
+            photo_url: story.photo_url,
+            caption: story.caption,
+            link_url: story.link_url,
+            sponsor_link: sp.link_url,
+          });
+        }
+        setActiveStories(byId);
+      });
+  }, [loaded, allSponsors]);
+
   // Refresh location in background and update cache
   useEffect(() => {
     let cancelled = false;
@@ -284,12 +319,17 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   }, [totalDisplayPages, syncPageFromScroll]);
 
   const handleClick = (sponsor: Sponsor) => {
-    window.open(sponsor.link_url, "_blank");
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const uid = session?.user?.id || null;
-      supabase.from("sponsor_clicks").insert({ sponsor_id: sponsor.id, user_id: uid }).then(() => {});
-      supabase.rpc("increment_sponsor_clicks" as any, { _sponsor_id: sponsor.id }).then(() => {});
-    });
+    const stories = activeStories[sponsor.id];
+    if (stories && stories.length > 0) {
+      setViewerStories(stories);
+    } else {
+      window.open(sponsor.link_url, "_blank");
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        const uid = session?.user?.id || null;
+        supabase.from("sponsor_clicks").insert({ sponsor_id: sponsor.id, user_id: uid }).then(() => {});
+        supabase.rpc("increment_sponsor_clicks" as any, { _sponsor_id: sponsor.id }).then(() => {});
+      });
+    }
   };
 
   if (!loaded) {
@@ -329,12 +369,13 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
             style={{ scrollSnapStop: "always" }}
           >
             {pageSponsors.map((sponsor) => (
+              {(() => { const hasStory = !!(activeStories[sponsor.id]?.length); return (
               <button
                 key={sponsor.id}
                 onClick={() => handleClick(sponsor)}
                 className="flex-1 min-w-0 flex flex-col gap-1.5 items-center justify-start py-[4px] px-0 group"
               >
-                <div className="w-[65px] h-[65px] rounded-full ring-2 ring-primary group-hover:ring-primary/70 transition-all flex items-center justify-center overflow-hidden shrink-0">
+                <div className={`w-[65px] h-[65px] rounded-full flex items-center justify-center overflow-hidden shrink-0 ${hasStory ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "ring-2 ring-muted group-hover:ring-primary/40 transition-all"}`}>
                   <div className="w-full h-full rounded-full bg-muted flex items-center justify-center overflow-hidden">
                     {sponsor.logo_url ? (
                       <img
@@ -350,8 +391,9 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
                   </div>
                 </div>
                 <span className="text-[11px] font-medium text-foreground truncate w-full text-center">{sponsor.name}</span>
-                <span className="text-[9px] text-muted-foreground -mt-1">{subtitle}</span>
+                <span className={`text-[9px] -mt-1 ${hasStory ? "text-primary font-medium" : "text-muted-foreground"}`}>{hasStory ? "Novidade" : subtitle}</span>
               </button>
+              ); })()}
             ))}
           </div>
         ))}

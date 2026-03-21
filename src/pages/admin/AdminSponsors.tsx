@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Plus, ExternalLink, MoreHorizontal, Eye, Pencil, Trash2, Power, MapPin, Package } from "lucide-react";
+import { Plus, ExternalLink, MoreHorizontal, Eye, EyeOff, Pencil, Trash2, Power, MapPin, Package } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -72,6 +72,7 @@ const AdminSponsors = () => {
   const [editing, setEditing] = useState<Sponsor | null>(null);
   const [form, setForm] = useState(emptyForm());
   const [cities, setCities] = useState<string[]>([]);
+  const [showPassword, setShowPassword] = useState(false);
   const [loadingCities, setLoadingCities] = useState(false);
 
   const fetchSponsors = async () => {
@@ -104,6 +105,7 @@ const AdminSponsors = () => {
 
   const openEdit = (s: Sponsor) => {
     setEditing(s);
+    setShowPassword(false);
     const scope = (s.location_scope === "state" || s.location_scope === "city" ? s.location_scope : "nationwide") as LocationScope;
     setForm({
       ...emptyForm(),
@@ -119,10 +121,13 @@ const AdminSponsors = () => {
     if (form.location_scope === "state" && !form.location_state) { toast({ title: "Selecione o estado", variant: "destructive" }); return; }
     if (form.location_scope === "city" && (!form.location_state || !form.location_city)) { toast({ title: "Selecione o estado e a cidade", variant: "destructive" }); return; }
 
-    // Validação do acesso apenas no cadastro
+    // Validação do acesso
     if (!editing) {
       if (!form.access_email.trim()) { toast({ title: "Email de acesso é obrigatório", variant: "destructive" }); return; }
       if (!form.access_password.trim() || form.access_password.length < 6) { toast({ title: "Senha deve ter ao menos 6 caracteres", variant: "destructive" }); return; }
+    }
+    if (editing && form.access_password.trim() && form.access_password.length < 6) {
+      toast({ title: "Senha deve ter ao menos 6 caracteres", variant: "destructive" }); return;
     }
 
     setSaving(true);
@@ -138,6 +143,20 @@ const AdminSponsors = () => {
       if (editing) {
         const { error } = await supabase.from("sponsors").update(payload).eq("id", editing.id);
         if (error) throw new Error(translateError(error.message));
+
+        // Se preencheu email ou senha, redefine o acesso
+        if (form.access_email.trim() || form.access_password.trim()) {
+          const { data: accData, error: accErr } = await supabase.functions.invoke("admin-manage", {
+            body: {
+              action: "create_sponsor_user",
+              email: form.access_email.trim() || undefined,
+              password: form.access_password.trim() || undefined,
+              sponsorId: editing.id,
+            },
+          });
+          if (accErr || !accData?.success) throw new Error(accErr?.message || accData?.error || "Erro ao atualizar acesso");
+        }
+
         await logAction("update_sponsor", "sponsor", editing.id, { name: form.name });
         toast({ title: "Patrocinador atualizado!" });
       } else {
@@ -344,21 +363,37 @@ const AdminSponsors = () => {
               </div>
             )}
 
-            {/* Acesso — somente no cadastro */}
-            {!editing && (
-              <div className="border-t pt-4 space-y-3">
-                <p className="text-xs font-semibold text-foreground">Acesso do patrocinador</p>
+            {/* Acesso do patrocinador */}
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-xs font-semibold text-foreground">Acesso do patrocinador</p>
+              {editing ? (
+                <p className="text-[11px] text-muted-foreground -mt-2">Preencha para redefinir o acesso. Deixe em branco para manter o atual.</p>
+              ) : (
                 <p className="text-[11px] text-muted-foreground -mt-2">O patrocinador vai usar esse email e senha para entrar no app.</p>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email *</label>
-                  <input type="email" value={form.access_email} onChange={(e) => f("access_email", e.target.value)} placeholder="email@empresa.com" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha *</label>
-                  <input type="password" value={form.access_password} onChange={(e) => f("access_password", e.target.value)} placeholder="Mínimo 6 caracteres" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+              )}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email {!editing && "*"}</label>
+                <input type="email" value={form.access_email} onChange={(e) => f("access_email", e.target.value)}
+                  placeholder={editing ? "Deixe vazio para manter" : "email@empresa.com"}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha {!editing && "*"}</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={form.access_password}
+                    onChange={(e) => f("access_password", e.target.value)}
+                    placeholder={editing ? "Deixe vazio para manter" : "Mínimo 6 caracteres"}
+                    className="w-full border rounded-xl px-3 py-2.5 pr-10 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <button type="button" onClick={() => setShowPassword((p) => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
-            )}
+            </div>
 
             <button onClick={handleSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">
               {saving ? "Salvando..." : editing ? "Salvar alterações" : "Criar patrocinador"}

@@ -21,6 +21,7 @@ import { diagLog, diagEnabled } from "@/lib/diag";
 // Lazy pages – carregam sob demanda para navegação mais rápida
 const Index = lazy(() => import("./pages/Index"));
 const Home = lazy(() => import("./pages/Home"));
+const SponsorDashboard = lazy(() => import("./pages/SponsorDashboard"));
 const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
@@ -197,14 +198,13 @@ const RedirectLoggedIn = () => {
     );
   }
 
-  // Se o social foi iniciado a partir do fluxo de cadastro, respeitar esse fluxo:
-  // mesmo logado, o usuário deve voltar para o Signup para completar dados.
+  // Patrocinador → vai direto pro painel deles
+  if (profile?.user_type === "sponsor") return <Navigate to="/sponsor/dashboard" replace />;
+
   if (signupInProgress) {
     return <Navigate to="/signup" replace />;
   }
 
-  // Logado (não-admin/suporte): só entra na Home se o cadastro estiver completo.
-  // profile ainda não carregado deve cair no gate.
   if (!profile) return <Navigate to="/post-login" replace />;
   return <Navigate to="/home" replace />;
 };
@@ -516,6 +516,9 @@ const AppContent = () => {
         <Route path="/how-to-pay" element={<ProtectedRoute><HowToPay /></ProtectedRoute>} />
         <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
         <Route path="/checkout/business" element={<BusinessCheckout />} />
+
+        {/* Painel do Patrocinador */}
+        <Route path="/sponsor/dashboard" element={<ProtectedRoute><SponsorDashboard /></ProtectedRoute>} />
 
         <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
         <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />

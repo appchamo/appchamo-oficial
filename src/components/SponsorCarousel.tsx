@@ -368,6 +368,14 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         </div>
       )}
     </section>
+
+    {/* Viewer de novidades */}
+    {viewerStories && (
+      <SponsorStoryViewer
+        stories={viewerStories}
+        onClose={() => setViewerStories(null)}
+      />
+    )}
   );
 };
 

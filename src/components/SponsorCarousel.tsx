@@ -310,6 +310,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const subtitle = section?.subtitle ?? "Patrocinado";
 
   return (
+    <>
     <section>
       <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">{title}</h3>
       <div
@@ -376,6 +377,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
         onClose={() => setViewerStories(null)}
       />
     )}
+    </>
   );
 };
 

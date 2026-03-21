@@ -318,6 +318,60 @@ serve(async (req) => {
       });
     }
 
+
+
+    // ==========================================
+    // 🔄 AÇÃO: RELOAD SCHEMA CACHE
+    // ==========================================
+    if (action === "reload_schema") {
+      await verifyAdmin();
+      // Força PostgREST a recarregar o schema cache
+      await supabase.rpc("reload_pgrst_schema" as any).catch(() => null);
+      // Fallback: query direta
+      try {
+        await (supabase as any).from("_pgrst_reserved").select().limit(0).throwOnError();
+      } catch { /* ignorar */ }
+      return new Response(JSON.stringify({ success: true, message: "Schema reload requested" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ==========================================
+    // 👤 AÇÃO: CRIAR CONTA DE PATROCINADOR
+    // ==========================================
+    if (action === "create_sponsor_user") {
+      await verifyAdmin();
+      const { email, password, sponsorId } = body;
+      if (!email || !password || !sponsorId) throw new Error("email, password e sponsorId são obrigatórios.");
+
+      const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+      if (createErr || !newUser?.user) throw new Error(createErr?.message || "Erro ao criar usuário.");
+
+      const userId = newUser.user.id;
+      await new Promise((r) => setTimeout(r, 800));
+
+      await supabase.from("profiles").upsert({
+        user_id: userId,
+        email,
+        full_name: "",
+        user_type: "sponsor",
+      }, { onConflict: "user_id" });
+
+      const { error: linkErr } = await supabase
+        .from("sponsors")
+        .update({ user_id: userId })
+        .eq("id", sponsorId);
+      if (linkErr) throw new Error("Erro ao vincular sponsor: " + linkErr.message);
+
+      return new Response(JSON.stringify({ success: true, userId }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ==========================================
     // 🔗 AÇÃO: GERAR URL ASSINADA DE DOCUMENTO
     // ==========================================

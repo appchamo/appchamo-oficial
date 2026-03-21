@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Plus, ExternalLink, MoreHorizontal, Eye, Pencil, Trash2, Power, MapPin, UserPlus, Package } from "lucide-react";
+import { Plus, ExternalLink, MoreHorizontal, Eye, Pencil, Trash2, Power, MapPin, Package } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -49,30 +49,30 @@ const PLAN_LABELS: Record<WeeklyPlan, string> = {
   pack_28: "Pacote 28/sem",
 };
 
+const emptyForm = () => ({
+  name: "",
+  niche: "",
+  link_url: "",
+  logo_url: "",
+  location_scope: "nationwide" as LocationScope,
+  location_state: "",
+  location_city: "",
+  weekly_plan: "free" as WeeklyPlan,
+  // acesso (só no cadastro)
+  access_email: "",
+  access_password: "",
+});
+
 const AdminSponsors = () => {
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Sponsor | null>(null);
-  const [form, setForm] = useState({
-    name: "",
-    niche: "",
-    link_url: "",
-    logo_url: "",
-    location_scope: "nationwide" as LocationScope,
-    location_state: "",
-    location_city: "",
-    weekly_plan: "free" as WeeklyPlan,
-  });
+  const [form, setForm] = useState(emptyForm());
   const [cities, setCities] = useState<string[]>([]);
   const [loadingCities, setLoadingCities] = useState(false);
-
-  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
-  const [accountSponsor, setAccountSponsor] = useState<Sponsor | null>(null);
-  const [accountEmail, setAccountEmail] = useState("");
-  const [accountPassword, setAccountPassword] = useState("");
-  const [accountLoading, setAccountLoading] = useState(false);
 
   const fetchSponsors = async () => {
     const { data, error } = await supabase.from("sponsors").select("*").order("sort_order");
@@ -97,7 +97,7 @@ const AdminSponsors = () => {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: "", niche: "", link_url: "", logo_url: "", location_scope: "nationwide", location_state: "", location_city: "", weekly_plan: "free" });
+    setForm(emptyForm());
     setCities([]);
     setDialogOpen(true);
   };
@@ -106,6 +106,7 @@ const AdminSponsors = () => {
     setEditing(s);
     const scope = (s.location_scope === "state" || s.location_scope === "city" ? s.location_scope : "nationwide") as LocationScope;
     setForm({
+      ...emptyForm(),
       name: s.name, niche: s.niche || "", link_url: s.link_url, logo_url: s.logo_url || "",
       location_scope: scope, location_state: s.location_state || "", location_city: s.location_city || "",
       weekly_plan: s.weekly_plan || "free",
@@ -117,27 +118,64 @@ const AdminSponsors = () => {
     if (!form.name.trim()) { toast({ title: "Nome é obrigatório", variant: "destructive" }); return; }
     if (form.location_scope === "state" && !form.location_state) { toast({ title: "Selecione o estado", variant: "destructive" }); return; }
     if (form.location_scope === "city" && (!form.location_state || !form.location_city)) { toast({ title: "Selecione o estado e a cidade", variant: "destructive" }); return; }
-    const payload = {
-      name: form.name, niche: form.niche || null, link_url: form.link_url, logo_url: form.logo_url || null,
-      location_scope: form.location_scope,
-      location_state: form.location_scope === "state" || form.location_scope === "city" ? form.location_state || null : null,
-      location_city: form.location_scope === "city" ? form.location_city || null : null,
-      weekly_plan: form.weekly_plan,
-    };
-    if (editing) {
-      const { error } = await supabase.from("sponsors").update(payload).eq("id", editing.id);
-      if (error) { toast({ title: "Erro ao atualizar", description: translateError(error.message), variant: "destructive" }); return; }
-      await logAction("update_sponsor", "sponsor", editing.id, { name: form.name });
-      toast({ title: "Patrocinador atualizado!" });
-    } else {
-      const maxOrder = sponsors.length > 0 ? Math.max(...sponsors.map(s => s.sort_order)) + 1 : 1;
-      const { error } = await supabase.from("sponsors").insert({ ...payload, sort_order: maxOrder });
-      if (error) { toast({ title: "Erro ao criar", description: translateError(error.message), variant: "destructive" }); return; }
-      await logAction("create_sponsor", "sponsor", null, { name: form.name });
-      toast({ title: "Patrocinador criado!" });
+
+    // Validação do acesso apenas no cadastro
+    if (!editing) {
+      if (!form.access_email.trim()) { toast({ title: "Email de acesso é obrigatório", variant: "destructive" }); return; }
+      if (!form.access_password.trim() || form.access_password.length < 6) { toast({ title: "Senha deve ter ao menos 6 caracteres", variant: "destructive" }); return; }
     }
-    setDialogOpen(false);
-    fetchSponsors();
+
+    setSaving(true);
+    try {
+      const payload = {
+        name: form.name, niche: form.niche || null, link_url: form.link_url, logo_url: form.logo_url || null,
+        location_scope: form.location_scope,
+        location_state: form.location_scope === "state" || form.location_scope === "city" ? form.location_state || null : null,
+        location_city: form.location_scope === "city" ? form.location_city || null : null,
+        weekly_plan: form.weekly_plan,
+      };
+
+      if (editing) {
+        const { error } = await supabase.from("sponsors").update(payload).eq("id", editing.id);
+        if (error) throw new Error(translateError(error.message));
+        await logAction("update_sponsor", "sponsor", editing.id, { name: form.name });
+        toast({ title: "Patrocinador atualizado!" });
+      } else {
+        // 1. Cria o sponsor
+        const maxOrder = sponsors.length > 0 ? Math.max(...sponsors.map(s => s.sort_order)) + 1 : 1;
+        const { data: newSponsor, error: insertErr } = await supabase
+          .from("sponsors")
+          .insert({ ...payload, sort_order: maxOrder })
+          .select("id")
+          .single();
+        if (insertErr || !newSponsor) throw new Error(translateError(insertErr?.message || "Erro ao criar patrocinador"));
+
+        // 2. Cria a conta de acesso via Edge Function
+        const { data: accData, error: accErr } = await supabase.functions.invoke("admin-manage", {
+          body: {
+            action: "create_sponsor_user",
+            email: form.access_email.trim(),
+            password: form.access_password,
+            sponsorId: newSponsor.id,
+          },
+        });
+        if (accErr || !accData?.success) {
+          // Rollback: remove sponsor criado
+          await supabase.from("sponsors").delete().eq("id", newSponsor.id);
+          throw new Error(accErr?.message || accData?.error || "Erro ao criar acesso");
+        }
+
+        await logAction("create_sponsor", "sponsor", newSponsor.id, { name: form.name, email: form.access_email });
+        toast({ title: "Patrocinador criado!", description: `Acesso: ${form.access_email}` });
+      }
+
+      setDialogOpen(false);
+      fetchSponsors();
+    } catch (e: any) {
+      toast({ title: "Erro", description: e.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -158,31 +196,17 @@ const AdminSponsors = () => {
     fetchSponsors();
   };
 
-  const openAccountDialog = (s: Sponsor) => {
-    setAccountSponsor(s);
-    setAccountEmail("");
-    setAccountPassword("");
-    setAccountDialogOpen(true);
-  };
-
-  const handleCreateAccount = async () => {
-    if (!accountSponsor) return;
-    if (!accountEmail.trim() || !accountPassword.trim()) { toast({ title: "Preencha email e senha", variant: "destructive" }); return; }
-    if (accountPassword.length < 6) { toast({ title: "Senha deve ter ao menos 6 caracteres", variant: "destructive" }); return; }
-    setAccountLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("admin-manage", {
-        body: { action: "create_sponsor_user", email: accountEmail.trim(), password: accountPassword, sponsorId: accountSponsor.id },
-      });
-      if (error || !data?.success) throw new Error(error?.message || data?.error || "Erro desconhecido");
-      toast({ title: "Conta criada!", description: `${accountEmail} pode fazer login agora.` });
-      setAccountDialogOpen(false);
-      fetchSponsors();
-    } catch (e: any) {
-      toast({ title: "Erro ao criar conta", description: e.message, variant: "destructive" });
-    } finally {
-      setAccountLoading(false);
-    }
+  const handleResetAccess = async (s: Sponsor) => {
+    const email = prompt("Novo email de acesso:");
+    if (!email) return;
+    const password = prompt("Nova senha (mín. 6 caracteres):");
+    if (!password || password.length < 6) { toast({ title: "Senha inválida", variant: "destructive" }); return; }
+    const { data, error } = await supabase.functions.invoke("admin-manage", {
+      body: { action: "create_sponsor_user", email: email.trim(), password, sponsorId: s.id },
+    });
+    if (error || !data?.success) { toast({ title: "Erro", description: error?.message || data?.error, variant: "destructive" }); return; }
+    toast({ title: "Acesso redefinido!", description: email });
+    fetchSponsors();
   };
 
   const logAction = async (action: string, target_type: string, target_id: string | null, details?: any) => {
@@ -191,6 +215,8 @@ const AdminSponsors = () => {
       await supabase.from("admin_logs").insert({ admin_user_id: session.user.id, action, target_type, target_id, details: details || null });
     }
   };
+
+  const f = (key: keyof ReturnType<typeof emptyForm>, val: string) => setForm((prev) => ({ ...prev, [key]: val }));
 
   return (
     <AdminLayout title="Patrocinadores">
@@ -226,7 +252,7 @@ const AdminSponsors = () => {
                 </div>
                 <div className="flex items-center gap-3 mt-1">
                   <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><Eye className="w-3 h-3" /> {s.clicks} cliques</span>
-                  <a href={s.link_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] text-primary hover:underline"><ExternalLink className="w-3 h-3" /> Link</a>
+                  {s.link_url && <a href={s.link_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] text-primary hover:underline"><ExternalLink className="w-3 h-3" /> Link</a>}
                 </div>
               </div>
               <DropdownMenu>
@@ -235,7 +261,7 @@ const AdminSponsors = () => {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5 mr-2" /> Editar</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => openAccountDialog(s)}><UserPlus className="w-3.5 h-3.5 mr-2" /> {s.user_id ? "Redefinir acesso" : "Criar acesso"}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleResetAccess(s)}><Eye className="w-3.5 h-3.5 mr-2" /> Redefinir acesso</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => toggleActive(s)}><Power className="w-3.5 h-3.5 mr-2" /> {s.active ? "Desativar" : "Ativar"}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setDeleteId(s.id)} className="text-destructive"><Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir</DropdownMenuItem>
                 </DropdownMenuContent>
@@ -246,50 +272,64 @@ const AdminSponsors = () => {
       )}
 
       {/* Create/Edit dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!saving) setDialogOpen(o); }}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editing ? "Editar patrocinador" : "Novo patrocinador"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar patrocinador" : "Novo patrocinador"}</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4">
+            {/* Logo */}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Logo</label>
-              <ImageCropUpload aspect={1} shape="round" bucketPath="sponsors" currentImage={form.logo_url || null} onUpload={(url) => setForm((f) => ({ ...f, logo_url: url }))} label="Upload logo" />
+              <ImageCropUpload aspect={1} shape="round" bucketPath="sponsors" currentImage={form.logo_url || null} onUpload={(url) => f("logo_url", url)} label="Upload logo" />
             </div>
+
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nome *</label>
-              <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+              <input value={form.name} onChange={(e) => f("name", e.target.value)} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
+
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nicho</label>
-              <input value={form.niche} onChange={(e) => setForm((f) => ({ ...f, niche: e.target.value }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nicho / Segmento</label>
+              <input value={form.niche} onChange={(e) => f("niche", e.target.value)} placeholder="Ex: Barbearia, Pizzaria..." className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
+
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Link URL</label>
-              <input value={form.link_url} onChange={(e) => setForm((f) => ({ ...f, link_url: e.target.value }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="https://..." />
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Link externo (site, Instagram...)</label>
+              <input value={form.link_url} onChange={(e) => f("link_url", e.target.value)} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="https://..." />
             </div>
+
+            {/* Plano semanal */}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Plano de novidades</label>
               <div className="flex flex-col gap-2">
                 {(["free", "pack_14", "pack_28"] as WeeklyPlan[]).map((plan) => (
                   <label key={plan} className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" name="weekly_plan" checked={form.weekly_plan === plan} onChange={() => setForm((f) => ({ ...f, weekly_plan: plan }))} />
+                    <input type="radio" name="weekly_plan" checked={form.weekly_plan === plan} onChange={() => setForm((prev) => ({ ...prev, weekly_plan: plan }))} />
                     <span className="text-sm">{PLAN_LABELS[plan]}</span>
                   </label>
                 ))}
               </div>
             </div>
+
+            {/* Localização */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Onde o patrocinador aparece</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Onde aparece</label>
               <div className="flex flex-col gap-2">
-                <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="location_scope" checked={form.location_scope === "nationwide"} onChange={() => setForm((f) => ({ ...f, location_scope: "nationwide", location_state: "", location_city: "" }))} /><span className="text-sm">Todo o Brasil</span></label>
-                <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="location_scope" checked={form.location_scope === "state"} onChange={() => setForm((f) => ({ ...f, location_scope: "state", location_city: "" }))} /><span className="text-sm">Apenas um Estado</span></label>
-                <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="location_scope" checked={form.location_scope === "city"} onChange={() => setForm((f) => ({ ...f, location_scope: "city" }))} /><span className="text-sm">Apenas uma Cidade</span></label>
+                {([["nationwide", "Todo o Brasil"], ["state", "Apenas um Estado"], ["city", "Apenas uma Cidade"]] as [LocationScope, string][]).map(([val, label]) => (
+                  <label key={val} className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="location_scope" checked={form.location_scope === val}
+                      onChange={() => setForm((p) => ({ ...p, location_scope: val, location_state: "", location_city: "" }))} />
+                    <span className="text-sm">{label}</span>
+                  </label>
+                ))}
               </div>
             </div>
             {(form.location_scope === "state" || form.location_scope === "city") && (
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Estado</label>
-                <select value={form.location_state} onChange={(e) => setForm((f) => ({ ...f, location_state: e.target.value, location_city: "" }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-                  <option value="">Selecione o estado</option>
+                <select value={form.location_state} onChange={(e) => setForm((p) => ({ ...p, location_state: e.target.value, location_city: "" }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
+                  <option value="">Selecione</option>
                   {ESTADOS_BR.map((st) => <option key={st.sigla} value={st.sigla}>{st.nome} ({st.sigla})</option>)}
                 </select>
               </div>
@@ -297,40 +337,37 @@ const AdminSponsors = () => {
             {form.location_scope === "city" && form.location_state && (
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cidade</label>
-                <select value={form.location_city} onChange={(e) => setForm((f) => ({ ...f, location_city: e.target.value }))} disabled={loadingCities} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-                  <option value="">{loadingCities ? "Carregando cidades..." : "Selecione a cidade"}</option>
+                <select value={form.location_city} onChange={(e) => setForm((p) => ({ ...p, location_city: e.target.value }))} disabled={loadingCities} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
+                  <option value="">{loadingCities ? "Carregando..." : "Selecione"}</option>
                   {cities.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             )}
-            <button onClick={handleSave} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
-              {editing ? "Salvar alterações" : "Criar patrocinador"}
+
+            {/* Acesso — somente no cadastro */}
+            {!editing && (
+              <div className="border-t pt-4 space-y-3">
+                <p className="text-xs font-semibold text-foreground">Acesso do patrocinador</p>
+                <p className="text-[11px] text-muted-foreground -mt-2">O patrocinador vai usar esse email e senha para entrar no app.</p>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email *</label>
+                  <input type="email" value={form.access_email} onChange={(e) => f("access_email", e.target.value)} placeholder="email@empresa.com" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha *</label>
+                  <input type="password" value={form.access_password} onChange={(e) => f("access_password", e.target.value)} placeholder="Mínimo 6 caracteres" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+              </div>
+            )}
+
+            <button onClick={handleSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">
+              {saving ? "Salvando..." : editing ? "Salvar alterações" : "Criar patrocinador"}
             </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Criar acesso */}
-      <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Criar acesso — {accountSponsor?.name}</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Crie um email e senha para o patrocinador acessar o painel deles.</p>
-          <div className="space-y-3 mt-2">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
-              <input type="email" value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="email@empresa.com" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha</label>
-              <input type="password" value={accountPassword} onChange={(e) => setAccountPassword(e.target.value)} placeholder="Mínimo 6 caracteres" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-            </div>
-            <button onClick={handleCreateAccount} disabled={accountLoading} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">
-              {accountLoading ? "Criando..." : "Criar acesso"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
+      {/* Delete confirmation */}
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Excluir patrocinador?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription></AlertDialogHeader>

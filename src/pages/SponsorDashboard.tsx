@@ -93,11 +93,19 @@ const SponsorDashboard = () => {
         filter: `sponsor_id=eq.${sponsor.id}`,
       }, (payload) => {
         setStories((prev) =>
-          prev.map((s) => s.id === payload.new.id ? { ...s, views_count: payload.new.views_count, clicks_count: payload.new.clicks_count } : s)
+          prev.map((s) => s.id === payload.new.id
+            ? { ...s, views_count: (payload.new as Story).views_count, clicks_count: (payload.new as Story).clicks_count }
+            : s)
         );
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    // Também faz polling a cada 30s como fallback
+    const interval = setInterval(load, 30000);
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
   }, [sponsor?.id]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

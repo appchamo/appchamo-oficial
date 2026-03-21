@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Plus, ExternalLink, MoreHorizontal, Eye, Pencil, Trash2, Power, GripVertical, MapPin } from "lucide-react";
+import { Plus, ExternalLink, MoreHorizontal, Eye, Pencil, Trash2, Power, MapPin, UserPlus, Package } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 type LocationScope = "nationwide" | "state" | "city";
+type WeeklyPlan = "free" | "pack_14" | "pack_28";
 
 interface Sponsor {
   id: string;
@@ -38,7 +39,15 @@ interface Sponsor {
   location_scope: string | null;
   location_state: string | null;
   location_city: string | null;
+  user_id: string | null;
+  weekly_plan: WeeklyPlan;
 }
+
+const PLAN_LABELS: Record<WeeklyPlan, string> = {
+  free: "Grátis (4/sem)",
+  pack_14: "Pacote 14/sem",
+  pack_28: "Pacote 28/sem",
+};
 
 const AdminSponsors = () => {
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
@@ -54,23 +63,29 @@ const AdminSponsors = () => {
     location_scope: "nationwide" as LocationScope,
     location_state: "",
     location_city: "",
+    weekly_plan: "free" as WeeklyPlan,
   });
   const [cities, setCities] = useState<string[]>([]);
   const [loadingCities, setLoadingCities] = useState(false);
 
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+  const [accountSponsor, setAccountSponsor] = useState<Sponsor | null>(null);
+  const [accountEmail, setAccountEmail] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountLoading, setAccountLoading] = useState(false);
+
   const fetchSponsors = async () => {
     const { data, error } = await supabase.from("sponsors").select("*").order("sort_order");
     if (error) { toast({ title: "Erro ao carregar", description: translateError(error.message), variant: "destructive" }); return; }
-    setSponsors(data || []);
+    setSponsors((data || []) as Sponsor[]);
     setLoading(false);
   };
 
   useEffect(() => { fetchSponsors(); }, []);
 
   useEffect(() => {
-    if (form.location_scope !== "state" && form.location_scope !== "city" || !form.location_state) {
-      setCities([]);
-      return;
+    if ((form.location_scope !== "state" && form.location_scope !== "city") || !form.location_state) {
+      setCities([]); return;
     }
     setLoadingCities(true);
     fetchCitiesByState(form.location_state).then((list) => {
@@ -82,7 +97,7 @@ const AdminSponsors = () => {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: "", niche: "", link_url: "", logo_url: "", location_scope: "nationwide", location_state: "", location_city: "" });
+    setForm({ name: "", niche: "", link_url: "", logo_url: "", location_scope: "nationwide", location_state: "", location_city: "", weekly_plan: "free" });
     setCities([]);
     setDialogOpen(true);
   };
@@ -91,33 +106,23 @@ const AdminSponsors = () => {
     setEditing(s);
     const scope = (s.location_scope === "state" || s.location_scope === "city" ? s.location_scope : "nationwide") as LocationScope;
     setForm({
-      name: s.name,
-      niche: s.niche || "",
-      link_url: s.link_url,
-      logo_url: s.logo_url || "",
-      location_scope: scope,
-      location_state: s.location_state || "",
-      location_city: s.location_city || "",
+      name: s.name, niche: s.niche || "", link_url: s.link_url, logo_url: s.logo_url || "",
+      location_scope: scope, location_state: s.location_state || "", location_city: s.location_city || "",
+      weekly_plan: s.weekly_plan || "free",
     });
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast({ title: "Nome é obrigatório", variant: "destructive" }); return; }
-    if (form.location_scope === "state" && !form.location_state) {
-      toast({ title: "Selecione o estado", variant: "destructive" }); return;
-    }
-    if (form.location_scope === "city" && (!form.location_state || !form.location_city)) {
-      toast({ title: "Selecione o estado e a cidade", variant: "destructive" }); return;
-    }
+    if (form.location_scope === "state" && !form.location_state) { toast({ title: "Selecione o estado", variant: "destructive" }); return; }
+    if (form.location_scope === "city" && (!form.location_state || !form.location_city)) { toast({ title: "Selecione o estado e a cidade", variant: "destructive" }); return; }
     const payload = {
-      name: form.name,
-      niche: form.niche || null,
-      link_url: form.link_url,
-      logo_url: form.logo_url || null,
+      name: form.name, niche: form.niche || null, link_url: form.link_url, logo_url: form.logo_url || null,
       location_scope: form.location_scope,
       location_state: form.location_scope === "state" || form.location_scope === "city" ? form.location_state || null : null,
       location_city: form.location_scope === "city" ? form.location_city || null : null,
+      weekly_plan: form.weekly_plan,
     };
     if (editing) {
       const { error } = await supabase.from("sponsors").update(payload).eq("id", editing.id);
@@ -153,12 +158,37 @@ const AdminSponsors = () => {
     fetchSponsors();
   };
 
+  const openAccountDialog = (s: Sponsor) => {
+    setAccountSponsor(s);
+    setAccountEmail("");
+    setAccountPassword("");
+    setAccountDialogOpen(true);
+  };
+
+  const handleCreateAccount = async () => {
+    if (!accountSponsor) return;
+    if (!accountEmail.trim() || !accountPassword.trim()) { toast({ title: "Preencha email e senha", variant: "destructive" }); return; }
+    if (accountPassword.length < 6) { toast({ title: "Senha deve ter ao menos 6 caracteres", variant: "destructive" }); return; }
+    setAccountLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("admin-manage", {
+        body: { action: "create_sponsor_user", email: accountEmail.trim(), password: accountPassword, sponsorId: accountSponsor.id },
+      });
+      if (error || !data?.success) throw new Error(error?.message || data?.error || "Erro desconhecido");
+      toast({ title: "Conta criada!", description: `${accountEmail} pode fazer login agora.` });
+      setAccountDialogOpen(false);
+      fetchSponsors();
+    } catch (e: any) {
+      toast({ title: "Erro ao criar conta", description: e.message, variant: "destructive" });
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
   const logAction = async (action: string, target_type: string, target_id: string | null, details?: any) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
-      await supabase.from("admin_logs").insert({
-        admin_user_id: session.user.id, action, target_type, target_id, details: details || null,
-      });
+      await supabase.from("admin_logs").insert({ admin_user_id: session.user.id, action, target_type, target_id, details: details || null });
     }
   };
 
@@ -178,45 +208,34 @@ const AdminSponsors = () => {
           {sponsors.map((s) => (
             <div key={s.id} className="bg-card border rounded-xl p-4 flex items-center gap-4">
               <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
-                {s.logo_url ? (
-                  <img src={s.logo_url} alt={s.name} className="w-full h-full object-contain p-1" />
-                ) : (
-                  <span className="text-sm font-bold text-muted-foreground">{s.name.slice(0, 2).toUpperCase()}</span>
-                )}
+                {s.logo_url ? <img src={s.logo_url} alt={s.name} className="w-full h-full object-contain p-1" /> : <span className="text-sm font-bold text-muted-foreground">{s.name.slice(0, 2).toUpperCase()}</span>}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-sm text-foreground">{s.name}</p>
-                  {!s.active && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground">Inativo</span>
-                  )}
+                  {!s.active && <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground">Inativo</span>}
+                  {s.user_id && <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">Com acesso</span>}
                 </div>
                 <p className="text-xs text-muted-foreground">{s.niche || "Sem nicho"}</p>
-                <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                  <MapPin className="w-3 h-3" />
-                  {!s.location_scope || s.location_scope === "nationwide"
-                    ? "Todo o Brasil"
-                    : s.location_scope === "state"
-                      ? s.location_state || "—"
-                      : [s.location_city, s.location_state].filter(Boolean).join(" - ")}
-                </p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <MapPin className="w-3 h-3" />
+                    {!s.location_scope || s.location_scope === "nationwide" ? "Todo o Brasil" : s.location_scope === "state" ? s.location_state || "—" : [s.location_city, s.location_state].filter(Boolean).join(" - ")}
+                  </p>
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><Package className="w-3 h-3" /> {PLAN_LABELS[s.weekly_plan] || "Grátis"}</span>
+                </div>
                 <div className="flex items-center gap-3 mt-1">
-                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <Eye className="w-3 h-3" /> {s.clicks} cliques
-                  </span>
-                  <a href={s.link_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] text-primary hover:underline">
-                    <ExternalLink className="w-3 h-3" /> Link
-                  </a>
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><Eye className="w-3 h-3" /> {s.clicks} cliques</span>
+                  <a href={s.link_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] text-primary hover:underline"><ExternalLink className="w-3 h-3" /> Link</a>
                 </div>
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                    <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-                  </button>
+                  <button className="p-1.5 rounded-lg hover:bg-muted transition-colors"><MoreHorizontal className="w-4 h-4 text-muted-foreground" /></button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5 mr-2" /> Editar</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openAccountDialog(s)}><UserPlus className="w-3.5 h-3.5 mr-2" /> {s.user_id ? "Redefinir acesso" : "Criar acesso"}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => toggleActive(s)}><Power className="w-3.5 h-3.5 mr-2" /> {s.active ? "Desativar" : "Ativar"}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setDeleteId(s.id)} className="text-destructive"><Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir</DropdownMenuItem>
                 </DropdownMenuContent>
@@ -228,82 +247,59 @@ const AdminSponsors = () => {
 
       {/* Create/Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Editar patrocinador" : "Novo patrocinador"}</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{editing ? "Editar patrocinador" : "Novo patrocinador"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Logo</label>
-              <ImageCropUpload
-                aspect={1}
-                shape="round"
-                bucketPath="sponsors"
-                currentImage={form.logo_url || null}
-                onUpload={(url) => setForm((f) => ({ ...f, logo_url: url }))}
-                label="Upload logo"
-              />
+              <ImageCropUpload aspect={1} shape="round" bucketPath="sponsors" currentImage={form.logo_url || null} onUpload={(url) => setForm((f) => ({ ...f, logo_url: url }))} label="Upload logo" />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nome *</label>
-              <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+              <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nicho</label>
-              <input value={form.niche} onChange={(e) => setForm((f) => ({ ...f, niche: e.target.value }))}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+              <input value={form.niche} onChange={(e) => setForm((f) => ({ ...f, niche: e.target.value }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Link URL</label>
-              <input value={form.link_url} onChange={(e) => setForm((f) => ({ ...f, link_url: e.target.value }))}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="https://..." />
+              <input value={form.link_url} onChange={(e) => setForm((f) => ({ ...f, link_url: e.target.value }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="https://..." />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Plano de novidades</label>
+              <div className="flex flex-col gap-2">
+                {(["free", "pack_14", "pack_28"] as WeeklyPlan[]).map((plan) => (
+                  <label key={plan} className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="weekly_plan" checked={form.weekly_plan === plan} onChange={() => setForm((f) => ({ ...f, weekly_plan: plan }))} />
+                    <span className="text-sm">{PLAN_LABELS[plan]}</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Onde o patrocinador aparece</label>
               <div className="flex flex-col gap-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="location_scope" checked={form.location_scope === "nationwide"} onChange={() => setForm((f) => ({ ...f, location_scope: "nationwide", location_state: "", location_city: "" }))} className="rounded-full" />
-                  <span className="text-sm">Todo o Brasil</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="location_scope" checked={form.location_scope === "state"} onChange={() => setForm((f) => ({ ...f, location_scope: "state", location_city: "" }))} className="rounded-full" />
-                  <span className="text-sm">Apenas um Estado</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="location_scope" checked={form.location_scope === "city"} onChange={() => setForm((f) => ({ ...f, location_scope: "city" }))} className="rounded-full" />
-                  <span className="text-sm">Apenas uma Cidade</span>
-                </label>
+                <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="location_scope" checked={form.location_scope === "nationwide"} onChange={() => setForm((f) => ({ ...f, location_scope: "nationwide", location_state: "", location_city: "" }))} /><span className="text-sm">Todo o Brasil</span></label>
+                <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="location_scope" checked={form.location_scope === "state"} onChange={() => setForm((f) => ({ ...f, location_scope: "state", location_city: "" }))} /><span className="text-sm">Apenas um Estado</span></label>
+                <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="location_scope" checked={form.location_scope === "city"} onChange={() => setForm((f) => ({ ...f, location_scope: "city" }))} /><span className="text-sm">Apenas uma Cidade</span></label>
               </div>
             </div>
             {(form.location_scope === "state" || form.location_scope === "city") && (
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Estado</label>
-                <select
-                  value={form.location_state}
-                  onChange={(e) => setForm((f) => ({ ...f, location_state: e.target.value, location_city: "" }))}
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                >
+                <select value={form.location_state} onChange={(e) => setForm((f) => ({ ...f, location_state: e.target.value, location_city: "" }))} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
                   <option value="">Selecione o estado</option>
-                  {ESTADOS_BR.map((st) => (
-                    <option key={st.sigla} value={st.sigla}>{st.nome} ({st.sigla})</option>
-                  ))}
+                  {ESTADOS_BR.map((st) => <option key={st.sigla} value={st.sigla}>{st.nome} ({st.sigla})</option>)}
                 </select>
               </div>
             )}
             {form.location_scope === "city" && form.location_state && (
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cidade</label>
-                <select
-                  value={form.location_city}
-                  onChange={(e) => setForm((f) => ({ ...f, location_city: e.target.value }))}
-                  disabled={loadingCities}
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                >
+                <select value={form.location_city} onChange={(e) => setForm((f) => ({ ...f, location_city: e.target.value }))} disabled={loadingCities} className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
                   <option value="">{loadingCities ? "Carregando cidades..." : "Selecione a cidade"}</option>
-                  {cities.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
+                  {cities.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             )}
@@ -314,13 +310,30 @@ const AdminSponsors = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation */}
+      {/* Criar acesso */}
+      <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Criar acesso — {accountSponsor?.name}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Crie um email e senha para o patrocinador acessar o painel deles.</p>
+          <div className="space-y-3 mt-2">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
+              <input type="email" value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="email@empresa.com" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha</label>
+              <input type="password" value={accountPassword} onChange={(e) => setAccountPassword(e.target.value)} placeholder="Mínimo 6 caracteres" className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+            <button onClick={handleCreateAccount} disabled={accountLoading} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">
+              {accountLoading ? "Criando..." : "Criar acesso"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir patrocinador?</AlertDialogTitle>
-            <AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>Excluir patrocinador?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Excluir</AlertDialogAction>

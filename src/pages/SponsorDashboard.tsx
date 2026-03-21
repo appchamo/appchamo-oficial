@@ -81,6 +81,25 @@ const SponsorDashboard = () => {
 
   useEffect(() => { load(); }, [user]);
 
+  // Atualiza contadores em tempo real quando views/clicks chegam
+  useEffect(() => {
+    if (!sponsor) return;
+    const channel = supabase
+      .channel(`sponsor_stories_counts_${sponsor.id}`)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "sponsor_stories",
+        filter: `sponsor_id=eq.${sponsor.id}`,
+      }, (payload) => {
+        setStories((prev) =>
+          prev.map((s) => s.id === payload.new.id ? { ...s, views_count: payload.new.views_count, clicks_count: payload.new.clicks_count } : s)
+        );
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [sponsor?.id]);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;

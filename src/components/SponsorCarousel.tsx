@@ -368,8 +368,9 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
             className="flex gap-[14px] flex-[0_0_100%] min-w-0 shrink-0 snap-start justify-evenly items-stretch px-0.5"
             style={{ scrollSnapStop: "always" }}
           >
-            {pageSponsors.map((sponsor) => (
-              {(() => { const hasStory = !!(activeStories[sponsor.id]?.length); return (
+            {pageSponsors.map((sponsor) => {
+              const hasStory = !!(activeStories[sponsor.id]?.length);
+              return (
               <button
                 key={sponsor.id}
                 onClick={() => handleClick(sponsor)}
@@ -393,8 +394,8 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
                 <span className="text-[11px] font-medium text-foreground truncate w-full text-center">{sponsor.name}</span>
                 <span className={`text-[9px] -mt-1 ${hasStory ? "text-primary font-medium" : "text-muted-foreground"}`}>{hasStory ? "Novidade" : subtitle}</span>
               </button>
-              ); })()}
-            ))}
+              );
+            })}
           </div>
         ))}
       </div>

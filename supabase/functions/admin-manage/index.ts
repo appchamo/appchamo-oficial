@@ -320,6 +320,26 @@ serve(async (req) => {
 
 
 
+
+    // ==========================================
+    // 🪣 AÇÃO: CRIAR BUCKET SPONSOR-STORIES
+    // ==========================================
+    if (action === "create_sponsor_bucket") {
+      await verifyAdmin();
+      const { data: existing } = await supabase.storage.getBucket("sponsor-stories");
+      if (!existing) {
+        const { error: bucketErr } = await supabase.storage.createBucket("sponsor-stories", {
+          public: true,
+          fileSizeLimit: 10485760,
+          allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+        });
+        if (bucketErr) throw new Error("Erro ao criar bucket: " + bucketErr.message);
+      }
+      return new Response(JSON.stringify({ success: true, existed: !!existing }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ==========================================
     // 🔄 AÇÃO: RELOAD SCHEMA CACHE
     // ==========================================

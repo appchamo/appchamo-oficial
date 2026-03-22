@@ -79,8 +79,7 @@ class NotificationService: UNNotificationServiceExtension {
             let destURL = tempURL.deletingLastPathComponent().appendingPathComponent("avatar.\(ext)")
             try? FileManager.default.moveItem(at: tempURL, to: destURL)
 
-            let options: [String: Any] = [UNNotificationAttachmentOptionsThumbnailClippingRectKey: CGRect(x: 0, y: 0, width: 1, height: 1)]
-            let attachment = try? UNNotificationAttachment(identifier: "avatar", url: destURL, options: options)
+            let attachment = try? UNNotificationAttachment(identifier: "avatar", url: destURL, options: nil)
             completion(attachment)
         }
         task.resume()

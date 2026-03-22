@@ -1,5 +1,6 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2 } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard } from "lucide-react";
+import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -50,8 +51,8 @@ const Profile = () => {
   const metaName = ((user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined)?.trim() || "";
   const [pendingName, setPendingName] = useState("");
   const [pendingPhone, setPendingPhone] = useState("");
-  const [pendingCpf, setPendingCpf] = useState("");
-  const [pendingCnpj, setPendingCnpj] = useState("");
+  const [pendingDoc, setPendingDoc] = useState("");
+  const [pendingDocType, setPendingDocType] = useState<"cpf" | "cnpj">("cpf");
   const [savingPending, setSavingPending] = useState(false);
 
   // Recalcula pendências sempre que o profile mudar
@@ -62,9 +63,8 @@ const Profile = () => {
 
   useEffect(() => {
     if (!profile) return;
-    if (missingName)  setPendingName(metaName);   // pré-preenche com OAuth se disponível
+    if (missingName)  setPendingName(metaName);
     if (missingPhone) setPendingPhone(profile.phone || "");
-    if (missingCpf)   setPendingCpf(profile.cpf || "");
   }, [profile?.full_name, profile?.phone, profile?.cpf, profile?.cnpj]);
 
   const handleSavePending = async () => {
@@ -75,22 +75,19 @@ const Profile = () => {
     if (missingPhone && !pendingPhone.trim()) {
       toast({ title: "Informe seu telefone", variant: "destructive" }); return;
     }
-    if (missingCpf && !pendingCpf.trim() && !pendingCnpj.trim()) {
+    const docClean = pendingDoc.replace(/\D/g, "");
+    if (missingCpf && !docClean) {
       toast({ title: "Informe seu CPF ou CNPJ", variant: "destructive" }); return;
     }
     setSavingPending(true);
     const payload: Record<string, string> = {};
     if (missingName)  payload.full_name = pendingName.trim();
-    if (missingPhone) payload.phone     = pendingPhone.trim();
-    if (missingCpf) {
-      if (pendingCpf.trim())  payload.cpf  = pendingCpf.trim();
-      if (pendingCnpj.trim()) payload.cnpj = pendingCnpj.trim();
-    }
+    if (missingPhone) payload.phone     = pendingPhone.replace(/\D/g, "");
+    if (missingCpf)   payload[pendingDocType] = docClean;
     const { error } = await supabase.from("profiles").update(payload).eq("user_id", user.id);
     setSavingPending(false);
     if (error) { toast({ title: "Erro ao salvar", variant: "destructive" }); return; }
     await refreshProfile();
-    // Atualiza campos de edição principal também
     if (payload.full_name) setName(payload.full_name);
     if (payload.phone) setPhone(payload.phone);
     toast({ title: "Cadastro completado!", description: "Suas informações foram salvas com sucesso." });
@@ -252,25 +249,48 @@ const Profile = () => {
                 </div>
               )}
               {missingCpf && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-amber-800 mb-1 block">CPF</label>
-                    <input
-                      value={pendingCpf}
-                      onChange={e => setPendingCpf(e.target.value)}
-                      placeholder="000.000.000-00"
-                      className="w-full border border-amber-300 rounded-xl px-3 py-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-amber-400/50"
-                    />
+                <div>
+                  <label className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
+                    <CreditCard className="w-3.5 h-3.5" /> Documento <span className="text-red-500">*</span>
+                  </label>
+                  {/* Toggle CPF / CNPJ igual ao cadastro inicial */}
+                  <div className="flex gap-2 mb-2.5">
+                    <button
+                      type="button"
+                      onClick={() => { setPendingDocType("cpf"); setPendingDoc(""); }}
+                      className={`px-4 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+                        pendingDocType === "cpf"
+                          ? "bg-amber-500 border-amber-500 text-white"
+                          : "border-amber-300 text-amber-700 bg-white"
+                      }`}
+                    >
+                      CPF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPendingDocType("cnpj"); setPendingDoc(""); }}
+                      className={`px-4 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+                        pendingDocType === "cnpj"
+                          ? "bg-amber-500 border-amber-500 text-white"
+                          : "border-amber-300 text-amber-700 bg-white"
+                      }`}
+                    >
+                      CNPJ
+                    </button>
                   </div>
-                  <div>
-                    <label className="text-xs font-semibold text-amber-800 mb-1 block">CNPJ</label>
-                    <input
-                      value={pendingCnpj}
-                      onChange={e => setPendingCnpj(e.target.value)}
-                      placeholder="00.000.000/0000-00"
-                      className="w-full border border-amber-300 rounded-xl px-3 py-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-amber-400/50"
-                    />
-                  </div>
+                  <input
+                    value={pendingDoc}
+                    onChange={e =>
+                      setPendingDoc(
+                        pendingDocType === "cpf"
+                          ? formatCpf(e.target.value)
+                          : formatCnpj(e.target.value)
+                      )
+                    }
+                    placeholder={pendingDocType === "cpf" ? "000.000.000-00" : "00.000.000/0000-00"}
+                    maxLength={pendingDocType === "cpf" ? 14 : 18}
+                    className="w-full border border-amber-300 rounded-xl px-3 py-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-amber-400/50"
+                  />
                 </div>
               )}
               <button

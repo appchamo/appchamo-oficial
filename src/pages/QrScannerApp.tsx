@@ -1,97 +1,55 @@
 /**
  * QrScannerApp — Aberta pelo app quando o usuário clica "Logar via Web" em Perfil
  *
- * Usa a câmera do dispositivo via getUserMedia para escanear o QR Code
- * exibido em appchamo.com/qr-auth e autenticar a sessão web.
+ * Usa @capacitor/camera para tirar foto do QR Code (funciona em iOS/Android nativos).
+ * O jsQR decodifica a imagem e autentica a sessão web via Edge Function qr-login/scan.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
-import { Camera, CheckCircle2, AlertCircle, Loader2, ArrowLeft, X } from "lucide-react";
+import { Camera as CameraIcon, CheckCircle2, AlertCircle, Loader2, ArrowLeft, QrCode, RefreshCw } from "lucide-react";
 
 const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qr-login`;
 
-type ScanStage = "idle" | "scanning" | "processing" | "success" | "error";
+type ScanStage = "idle" | "processing" | "success" | "error";
 
 export default function QrScannerApp() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number>(0);
   const [stage, setStage] = useState<ScanStage>("idle");
   const [errorMsg, setErrorMsg] = useState("");
-  const [cameraPermission, setCameraPermission] = useState<"unknown" | "granted" | "denied">("unknown");
 
-  const stopCamera = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-  }, []);
+  const decodeQrFromBase64 = async (base64: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { resolve(null); return; }
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        try {
+          const jsQR = (await import("jsqr")).default;
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth",
+          });
+          resolve(code?.data ?? null);
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = `data:image/jpeg;base64,${base64}`;
+    });
+  };
 
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } },
-      });
-      streamRef.current = stream;
-      setCameraPermission("granted");
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setStage("scanning");
-    } catch {
-      setCameraPermission("denied");
-      setStage("error");
-      setErrorMsg("Sem permissão para usar a câmera. Verifique as configurações do seu dispositivo.");
-    }
-  }, []);
-
-  // Scan loop usando jsQR dinamicamente
-  const scan = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx || video.readyState !== video.HAVE_ENOUGH_DATA) {
-      rafRef.current = requestAnimationFrame(scan);
-      return;
-    }
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    try {
-      // Importa jsQR dinamicamente
-      const jsQR = (await import("jsqr")).default;
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: "dontInvert",
-      });
-
-      if (code?.data) {
-        await handleTokenFound(code.data);
-        return;
-      }
-    } catch {
-      // jsQR não disponível — continua tentando
-    }
-
-    rafRef.current = requestAnimationFrame(scan);
-  }, []);
-
-  const handleTokenFound = async (token: string) => {
-    stopCamera();
-    setStage("processing");
-
+  const handleScan = useCallback(async () => {
     if (!user) {
       setStage("error");
       setErrorMsg("Você precisa estar logado no app para usar esta função.");
@@ -99,6 +57,30 @@ export default function QrScannerApp() {
     }
 
     try {
+      // 1. Abre a câmera nativa e tira foto
+      const photo = await Camera.getPhoto({
+        quality: 90,
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Camera,
+        presentationStyle: "fullScreen",
+        promptLabelHeader: "Escaneie o QR Code",
+        promptLabelPhoto: "Galeria",
+        promptLabelPicture: "Câmera",
+      });
+
+      if (!photo.base64String) throw new Error("Foto não capturada");
+      setStage("processing");
+
+      // 2. Decodifica o QR Code da foto
+      const token = await decodeQrFromBase64(photo.base64String);
+      if (!token) {
+        setStage("error");
+        setErrorMsg("Nenhum QR Code encontrado na foto. Certifique-se de que o código está visível e tente novamente.");
+        return;
+      }
+
+      // 3. Autentica via Edge Function
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão não encontrada");
 
@@ -116,33 +98,36 @@ export default function QrScannerApp() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Erro ao autenticar");
-      }
+      if (!res.ok) throw new Error(data.error || "Erro ao autenticar");
 
       setStage("success");
       setTimeout(() => navigate(-1), 2000);
     } catch (e: any) {
+      const msg = e?.message ?? "";
+      // Usuário cancelou a câmera — volta ao idle sem erro
+      if (
+        msg.includes("cancelled") ||
+        msg.includes("canceled") ||
+        msg.includes("User cancelled") ||
+        msg.includes("No image picked")
+      ) {
+        setStage("idle");
+        return;
+      }
       setStage("error");
-      setErrorMsg(e.message || "Erro ao processar o QR Code.");
+      setErrorMsg(msg || "Erro ao processar o QR Code.");
     }
-  };
-
-  useEffect(() => {
-    if (stage === "scanning") {
-      rafRef.current = requestAnimationFrame(scan);
-    }
-  }, [stage, scan]);
-
-  useEffect(() => () => stopCamera(), [stopCamera]);
+  }, [user, navigate]);
 
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => { stopCamera(); navigate(-1); }} className="p-2 rounded-xl hover:bg-muted transition-colors">
+        <div className="flex items-center gap-3 mb-8">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2 rounded-xl hover:bg-muted transition-colors"
+          >
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </button>
           <div>
@@ -151,90 +136,62 @@ export default function QrScannerApp() {
           </div>
         </div>
 
-        {/* Stages */}
+        {/* Idle */}
         {stage === "idle" && (
-          <div className="flex flex-col items-center gap-6 py-8">
-            <div className="w-24 h-24 rounded-3xl bg-primary/10 flex items-center justify-center">
-              <Camera className="w-12 h-12 text-primary" />
+          <div className="flex flex-col items-center gap-6 py-4">
+            <div className="w-28 h-28 rounded-3xl bg-primary/10 flex items-center justify-center">
+              <QrCode className="w-14 h-14 text-primary" />
             </div>
+
             <div className="text-center max-w-xs">
-              <h2 className="font-bold text-foreground text-lg mb-2">Escanear QR Code</h2>
+              <h2 className="font-bold text-foreground text-xl mb-2">Escanear QR Code</h2>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Abra <strong>appchamo.com</strong> no computador, clique em <strong>"Acessar via Web"</strong> e aponte a câmera para o QR Code que aparecer.
+                Abra <strong>appchamo.com</strong> no seu computador, clique em{" "}
+                <strong>"Acessar via Web"</strong> e fotografe o QR Code que aparecer.
               </p>
             </div>
-            <div className="w-full max-w-xs space-y-3 text-sm text-muted-foreground bg-muted/40 rounded-2xl p-4">
-              <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-2">Como funciona</p>
+
+            {/* Steps */}
+            <div className="w-full max-w-xs space-y-3">
               {[
-                "Acesse appchamo.com no navegador do computador",
+                "Acesse appchamo.com no computador",
                 'Clique em "Acessar via Web"',
                 "Um QR Code aparecerá na tela",
-                "Toque em Abrir Câmera e escaneie o código",
-              ].map((s, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <span className="w-5 h-5 rounded-full bg-primary text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
-                  <span className="text-xs">{s}</span>
+                'Toque em "Fotografar QR Code" abaixo e aponte para a tela',
+              ].map((step, i) => (
+                <div key={i} className="flex items-start gap-3 bg-muted/40 rounded-2xl px-4 py-3">
+                  <span className="w-6 h-6 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                    {i + 1}
+                  </span>
+                  <span className="text-xs text-muted-foreground leading-relaxed">{step}</span>
                 </div>
               ))}
             </div>
+
             <button
-              onClick={startCamera}
-              className="w-full max-w-xs flex items-center justify-center gap-2 py-4 rounded-2xl bg-primary text-primary-foreground font-bold text-base active:scale-95 transition-transform shadow-lg"
+              onClick={handleScan}
+              className="w-full max-w-xs flex items-center justify-center gap-2 py-4 rounded-2xl bg-primary text-primary-foreground font-bold text-base active:scale-95 transition-transform shadow-lg shadow-primary/30 mt-2"
             >
-              <Camera className="w-5 h-5" />
-              Abrir Câmera
+              <CameraIcon className="w-5 h-5" />
+              Fotografar QR Code
             </button>
           </div>
         )}
 
-        {stage === "scanning" && (
-          <div className="flex flex-col items-center gap-4">
-            <div className="relative w-full max-w-sm aspect-square rounded-3xl overflow-hidden border-4 border-primary shadow-xl bg-black">
-              <video
-                ref={videoRef}
-                autoPlay
-                muted
-                playsInline
-                className="w-full h-full object-cover"
-              />
-              <canvas ref={canvasRef} className="hidden" />
-              {/* Crosshair overlay */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-48 h-48 relative">
-                  <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-primary rounded-tl-xl" />
-                  <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-primary rounded-tr-xl" />
-                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-primary rounded-bl-xl" />
-                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-primary rounded-br-xl" />
-                  {/* Scanner line */}
-                  <div className="absolute left-0 right-0 h-0.5 bg-primary/70 animate-bounce" style={{ top: "50%" }} />
-                </div>
-              </div>
-              {/* Close */}
-              <button
-                onClick={() => { stopCamera(); setStage("idle"); }}
-                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center"
-              >
-                <X className="w-4 h-4 text-white" />
-              </button>
-            </div>
-            <p className="text-sm text-muted-foreground text-center">
-              Aponte para o QR Code exibido em <strong>appchamo.com</strong>
-            </p>
-          </div>
-        )}
-
+        {/* Processing */}
         {stage === "processing" && (
-          <div className="flex flex-col items-center gap-4 py-12">
+          <div className="flex flex-col items-center gap-4 py-16">
             <Loader2 className="w-16 h-16 animate-spin text-primary" />
-            <p className="font-semibold text-foreground">Autenticando...</p>
+            <p className="font-semibold text-foreground text-lg">Decodificando QR Code...</p>
             <p className="text-sm text-muted-foreground">Aguarde um momento</p>
           </div>
         )}
 
+        {/* Success */}
         {stage === "success" && (
-          <div className="flex flex-col items-center gap-4 py-12">
-            <div className="w-24 h-24 rounded-3xl bg-emerald-50 flex items-center justify-center">
-              <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+          <div className="flex flex-col items-center gap-5 py-16">
+            <div className="w-28 h-28 rounded-3xl bg-emerald-50 flex items-center justify-center">
+              <CheckCircle2 className="w-14 h-14 text-emerald-500" />
             </div>
             <h2 className="font-bold text-foreground text-xl">Login autorizado!</h2>
             <p className="text-sm text-muted-foreground text-center max-w-xs">
@@ -243,17 +200,21 @@ export default function QrScannerApp() {
           </div>
         )}
 
+        {/* Error */}
         {stage === "error" && (
-          <div className="flex flex-col items-center gap-4 py-12">
-            <div className="w-24 h-24 rounded-3xl bg-rose-50 flex items-center justify-center">
-              <AlertCircle className="w-12 h-12 text-rose-500" />
+          <div className="flex flex-col items-center gap-5 py-12">
+            <div className="w-28 h-28 rounded-3xl bg-rose-50 flex items-center justify-center">
+              <AlertCircle className="w-14 h-14 text-rose-500" />
             </div>
-            <h2 className="font-bold text-foreground text-lg">Ops! Algo deu errado</h2>
-            <p className="text-sm text-muted-foreground text-center max-w-xs">{errorMsg}</p>
+            <h2 className="font-bold text-foreground text-xl">Algo deu errado</h2>
+            <p className="text-sm text-muted-foreground text-center max-w-xs leading-relaxed">
+              {errorMsg}
+            </p>
             <button
               onClick={() => { setStage("idle"); setErrorMsg(""); }}
-              className="px-6 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm active:scale-95 transition-transform"
+              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm active:scale-95 transition-transform"
             >
+              <RefreshCw className="w-4 h-4" />
               Tentar novamente
             </button>
           </div>

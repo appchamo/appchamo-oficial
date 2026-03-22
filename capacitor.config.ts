@@ -16,6 +16,13 @@ const config: CapacitorConfig = {
       'appchamo.com'
     ]
   },
+  ios: {
+    allowsInlineMediaPlayback: true,
+    scrollEnabled: false,
+  },
+  android: {
+    allowMixedContent: true,
+  },
   plugins: {
     Badge: {
       persist: true,

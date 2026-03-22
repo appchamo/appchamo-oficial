@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark } from "lucide-react"; 
+import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, Wallet, ChevronRight, TrendingUp, Star } from "lucide-react"; 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -109,6 +109,9 @@ const Home = () => {
   const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
   const nameFromAuth = (user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined;
   const userName = nameFromProfile || nameFromAuth?.trim().split(/\s+/)[0] || "Usuário";
+  const isPro = profile?.user_type === "professional" || profile?.user_type === "company";
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [walletLoaded, setWalletLoaded] = useState(false);
   const [hasUpcomingAppointment, setHasUpcomingAppointment] = useState(false);
   const [appointmentBannerDismissed, setAppointmentBannerDismissed] = useState(() =>
     localStorage.getItem("chamo_appointment_banner_dismissed") === "1"
@@ -149,6 +152,24 @@ const Home = () => {
     const t = window.setTimeout(() => void checkFiscalSetup(), 200);
     return () => clearTimeout(t);
   }, [checkFiscalSetup]);
+
+  // Busca saldo da carteira para profissionais
+  useEffect(() => {
+    if (!user?.id || !isPro) return;
+    const fetchWallet = async () => {
+      const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+      if (!pro?.id) return;
+      const { data } = await supabase
+        .from("wallet_transactions")
+        .select("amount")
+        .eq("professional_id", pro.id)
+        .eq("status", "pending");
+      const total = (data || []).reduce((s, t) => s + Number(t.amount), 0);
+      setWalletBalance(total);
+      setWalletLoaded(true);
+    };
+    fetchWallet();
+  }, [user?.id, isPro]);
 
   useEffect(() => {
     const h = () => void checkFiscalSetup();
@@ -462,21 +483,94 @@ const Home = () => {
           className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
-          {user && (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-base font-semibold text-foreground">
-                {welcomeWord}, <span className="text-primary">{userName}</span> 👋
-              </p>
-              <button
-                type="button"
-                onClick={handleOpenLocation}
-                className="flex items-center gap-2 w-fit px-3 py-1.5 rounded-full text-xs font-medium bg-muted/80 hover:bg-muted border border-border/80 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <MapPin className="w-3.5 h-3.5" />
-                <span className="truncate max-w-[180px]">{locationLabel}</span>
-              </button>
+          {user && isPro ? (
+            /* ── Hero card profissional ── */
+            <Link
+              to="/pro/financeiro"
+              className="relative overflow-hidden rounded-2xl shadow-lg active:scale-[0.985] transition-transform"
+              style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }}
+            >
+              {/* Círculos decorativos */}
+              <div className="absolute -top-8 -right-8 w-36 h-36 bg-white/10 rounded-full" />
+              <div className="absolute -bottom-6 -left-6 w-28 h-28 bg-white/5 rounded-full" />
+              <div className="absolute top-4 right-16 w-10 h-10 bg-white/10 rounded-full" />
+
+              <div className="relative p-5">
+                {/* Topo: avatar + saudação */}
+                <div className="flex items-center gap-3 mb-4">
+                  {profile?.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt={userName}
+                      className="w-12 h-12 rounded-full object-cover border-2 border-white/40 shrink-0"
+                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center shrink-0">
+                      <span className="text-white font-bold text-xl">{userName.charAt(0).toUpperCase()}</span>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white/75 text-xs leading-none mb-0.5">{welcomeWord} de volta,</p>
+                    <p className="text-white font-bold text-lg leading-tight truncate">{userName} 👋</p>
+                    <button
+                      type="button"
+                      onClick={e => { e.preventDefault(); handleOpenLocation(); }}
+                      className="flex items-center gap-1 text-white/60 text-[10px] mt-1 hover:text-white/90 transition-colors"
+                    >
+                      <MapPin className="w-2.5 h-2.5" />
+                      <span className="truncate max-w-[160px]">{locationLabel}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Saldo a receber */}
+                <div className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                      <Wallet className="w-4.5 h-4.5 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-white/70 text-[10px] uppercase tracking-wider leading-none mb-0.5">Saldo a receber</p>
+                      <p className="text-white font-bold text-xl leading-none">
+                        {walletLoaded
+                          ? walletBalance.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+                          : "…"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 text-white/70 text-xs font-medium">
+                    <span>Ver carteira</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+              </div>
+            </Link>
+          ) : user ? (
+            /* ── Welcome cliente ── */
+            <div className="flex items-center gap-3">
+              {profile?.avatar_url ? (
+                <img src={profile.avatar_url} alt={userName} className="w-11 h-11 rounded-full object-cover border border-border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              ) : (
+                <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <span className="text-primary font-bold text-base">{userName.charAt(0).toUpperCase()}</span>
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-base font-bold text-foreground leading-tight">
+                  {welcomeWord}, <span className="text-primary">{userName}</span> 👋
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenLocation}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5 hover:text-foreground transition-colors"
+                >
+                  <MapPin className="w-3 h-3" />
+                  <span className="truncate max-w-[200px]">{locationLabel}</span>
+                </button>
+              </div>
             </div>
-          )}
+          ) : null}
 
           {user && needsProfileCompletion && (
             <Link
@@ -511,15 +605,17 @@ const Home = () => {
           )}
 
           {!subLoading && isFreePlan && profile?.user_type !== "client" && callsRemaining <= 1 &&
-          <Link to="/subscriptions" className="flex items-center gap-3 bg-accent border border-primary/20 rounded-xl p-3.5 hover:border-primary/40 transition-all">
-              <Zap className="w-5 h-5 text-primary" />
+          <Link to="/subscriptions" className="flex items-center gap-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-xl p-3.5 hover:border-amber-400 transition-all shadow-sm">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                <Zap className="w-4.5 h-4.5 text-amber-600" />
+              </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold text-foreground">
+                <p className="text-sm font-bold text-amber-900">
                   {callsRemaining <= 0 ? "Limite atingido!" : "Última chamada gratuita!"}
                 </p>
-                <p className="text-xs text-muted-foreground">Faça upgrade para chamadas ilimitadas</p>
+                <p className="text-xs text-amber-700">Faça upgrade para chamadas ilimitadas</p>
               </div>
-              <span className="text-xs font-semibold text-primary">Upgrade →</span>
+              <span className="text-xs font-bold text-primary flex items-center gap-0.5">Upgrade <ChevronRight className="w-3.5 h-3.5" /></span>
             </Link>
           }
 

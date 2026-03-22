@@ -1,5 +1,13 @@
 import AdminLayout from "@/components/AdminLayout";
-import { DollarSign, TrendingUp, Users, Search, Crown, Calendar, CreditCard, ChevronDown, ChevronUp, Settings2, Save, Loader2, X, FileText, Landmark, Check } from "lucide-react";
+import { DollarSign, TrendingUp, Users, Search, Crown, Calendar, CreditCard, ChevronDown, ChevronUp, Settings2, Save, Loader2, X, FileText, Landmark, Check, Plus, Trash2, Info, Package, List } from "lucide-react";
+
+interface InstallmentPackage {
+  id: string;
+  label: string;
+  from: number;
+  to: number;
+  rate: string;
+}
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -172,10 +180,33 @@ const FinancialConfig = () => {
   const [planPrices, setPlanPrices] = useState<Record<string, string>>({});
   const [planPricesAnnual, setPlanPricesAnnual] = useState<Record<string, string>>({});
   const [planPricesSemester, setPlanPricesSemester] = useState<Record<string, string>>({});
-  const [planFeatures, setPlanFeatures] = useState<Record<string, string[]>>({}); 
+  const [planFeatures, setPlanFeatures] = useState<Record<string, string[]>>({});
   const [expandedPlan, setExpandedPlan] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Modo de taxas por parcela
+  const [installmentMode, setInstallmentMode] = useState<"individual" | "package">("individual");
+  const [installmentPackages, setInstallmentPackages] = useState<InstallmentPackage[]>([
+    { id: "pkg1", label: "À vista", from: 1, to: 1, rate: "2.99" },
+    { id: "pkg2", label: "2 a 6x", from: 2, to: 6, rate: "3.49" },
+    { id: "pkg3", label: "7 a 12x", from: 7, to: 12, rate: "3.99" },
+  ]);
+
+  // Antecipação detalhada
+  const [anticipationMode, setAnticipationMode] = useState<"simple" | "monthly">("simple");
+  const [anticipationMonthlyRate, setAnticipationMonthlyRate] = useState("1.15");
+
+  const addPackage = () => {
+    setInstallmentPackages(prev => [
+      ...prev,
+      { id: `pkg${Date.now()}`, label: "", from: 1, to: 1, rate: "0" },
+    ]);
+  };
+  const removePackage = (id: string) =>
+    setInstallmentPackages(prev => prev.filter(p => p.id !== id));
+  const updatePackage = (id: string, field: keyof InstallmentPackage, value: string | number) =>
+    setInstallmentPackages(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
 
   // Textos padrões caso o banco esteja vazio
   const defaultFeatures = {
@@ -196,6 +227,26 @@ const FinancialConfig = () => {
           map[s.key] = val;
         }
         setSettings(map);
+
+        // Carrega modo de parcelas e pacotes
+        if (map.installment_mode === "package" || map.installment_mode === "individual") {
+          setInstallmentMode(map.installment_mode);
+        }
+        if (map.installment_packages) {
+          try {
+            const raw = map.installment_packages;
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) setInstallmentPackages(parsed);
+          } catch { /* mantém default */ }
+        }
+
+        // Carrega modo de antecipação
+        if (map.anticipation_mode === "monthly" || map.anticipation_mode === "simple") {
+          setAnticipationMode(map.anticipation_mode);
+        }
+        if (map.anticipation_monthly_rate) {
+          setAnticipationMonthlyRate(map.anticipation_monthly_rate);
+        }
       }
 
       const { data: plansData } = await supabase.from("plans").select("id, price_monthly, price_annual, price_semester, features");
@@ -242,17 +293,24 @@ const FinancialConfig = () => {
 
   const handleSave = async () => {
     setSaving(true);
-    
-    // Salva Taxas
+
+    // Salva Taxas simples (chave-valor)
     const feeKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed", "max_installments",
       "transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct",
       ...Array.from({ length: 11 }, (_, i) => `installment_fee_${i + 2}x`)];
-    
     for (const key of feeKeys) {
       if (settings[key] !== undefined) {
         await supabase.from("platform_settings").upsert({ key, value: settings[key] as any }, { onConflict: "key" });
       }
     }
+
+    // Salva configurações de parcelas (modo e pacotes)
+    await supabase.from("platform_settings").upsert({ key: "installment_mode", value: installmentMode as any }, { onConflict: "key" });
+    await supabase.from("platform_settings").upsert({ key: "installment_packages", value: installmentPackages as any }, { onConflict: "key" });
+
+    // Salva configurações de antecipação detalhada
+    await supabase.from("platform_settings").upsert({ key: "anticipation_mode", value: anticipationMode as any }, { onConflict: "key" });
+    await supabase.from("platform_settings").upsert({ key: "anticipation_monthly_rate", value: anticipationMonthlyRate as any }, { onConflict: "key" });
 
     // Salva Preço e Benefícios dos Planos
     for (const planId of ['free', 'pro', 'vip', 'business']) {
@@ -386,30 +444,165 @@ const FinancialConfig = () => {
           </div>
         </div>
 
-        <div className="bg-card border rounded-xl p-4 space-y-3">
+        {/* Taxas por Parcela */}
+        <div className="bg-card border rounded-xl p-4 space-y-4">
           <h2 className="font-semibold text-foreground text-sm">Taxas por Parcela</h2>
+
+          {/* Modo toggle */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setInstallmentMode("individual")}
+              className={`flex-1 flex items-center justify-center gap-1.5 p-2.5 rounded-xl border text-xs font-medium transition-colors ${installmentMode === "individual" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+            >
+              <List className="w-3.5 h-3.5" /> Por Parcela Individual
+            </button>
+            <button
+              type="button"
+              onClick={() => setInstallmentMode("package")}
+              className={`flex-1 flex items-center justify-center gap-1.5 p-2.5 rounded-xl border text-xs font-medium transition-colors ${installmentMode === "package" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+            >
+              <Package className="w-3.5 h-3.5" /> Por Pacote de Parcelas
+            </button>
+          </div>
+
+          {/* Máximo de parcelas */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Máximo de parcelas</label>
-            <input type="number" min="1" max="12" value={settings.max_installments || "12"} onChange={(e) => set("max_installments", e.target.value)} className={inputCls} />
+            <input type="number" min="1" max="21" value={settings.max_installments || "12"} onChange={(e) => set("max_installments", e.target.value)} className={inputCls} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {Array.from({ length: 11 }, (_, i) => i + 2).map(n => (
-              <div key={n}>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{n}x (%)</label>
-                <input type="number" step="0.1" value={settings[`installment_fee_${n}x`] || "0"} onChange={(e) => set(`installment_fee_${n}x`, e.target.value)} className={inputCls} />
+
+          {installmentMode === "package" ? (
+            <div className="space-y-3">
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 flex items-start gap-2">
+                <Info className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-blue-700 dark:text-blue-300">A taxa é cobrada sobre o <strong>valor total da venda</strong>, independente do número de parcelas dentro do pacote. Ex.: Asaas cobra 3,99% para qualquer parcelamento de 7 a 12x.</p>
               </div>
-            ))}
-          </div>
+
+              {/* Lista de pacotes */}
+              <div className="space-y-2">
+                {/* Header */}
+                <div className="grid grid-cols-[1fr_60px_60px_70px_32px] gap-2 text-[10px] font-semibold text-muted-foreground uppercase px-1">
+                  <span>Descrição</span><span>De (x)</span><span>Até (x)</span><span>Taxa (%)</span><span />
+                </div>
+                {installmentPackages.map((pkg) => (
+                  <div key={pkg.id} className="grid grid-cols-[1fr_60px_60px_70px_32px] gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="Ex: 2 a 6x"
+                      value={pkg.label}
+                      onChange={(e) => updatePackage(pkg.id, "label", e.target.value)}
+                      className={inputCls}
+                    />
+                    <input
+                      type="number" min="1" max="21"
+                      value={pkg.from}
+                      onChange={(e) => updatePackage(pkg.id, "from", Number(e.target.value))}
+                      className={inputCls}
+                    />
+                    <input
+                      type="number" min="1" max="21"
+                      value={pkg.to}
+                      onChange={(e) => updatePackage(pkg.id, "to", Number(e.target.value))}
+                      className={inputCls}
+                    />
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={pkg.rate}
+                      onChange={(e) => updatePackage(pkg.id, "rate", e.target.value)}
+                      className={inputCls}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removePackage(pkg.id)}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={addPackage}
+                className="w-full flex items-center justify-center gap-1.5 p-2.5 rounded-xl border border-dashed border-primary/40 text-primary text-xs font-medium hover:bg-primary/5 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" /> Adicionar pacote
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {Array.from({ length: 11 }, (_, i) => i + 2).map(n => (
+                <div key={n}>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{n}x (%)</label>
+                  <input type="number" step="0.01" value={settings[`installment_fee_${n}x`] || "0"} onChange={(e) => set(`installment_fee_${n}x`, e.target.value)} className={inputCls} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
+        {/* Prazos de Repasse */}
         <div className="bg-card border rounded-xl p-4 space-y-3">
           <h2 className="font-semibold text-foreground text-sm">Prazos de Repasse</h2>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX (horas)</label><input type="number" value={settings.transfer_period_pix_hours || "48"} onChange={(e) => set("transfer_period_pix_hours", e.target.value)} className={inputCls} /></div>
             <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão sem antecipação (dias úteis)</label><input type="number" value={settings.transfer_period_card_days || "33"} onChange={(e) => set("transfer_period_card_days", e.target.value)} className={inputCls} /></div>
-            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão com antecipação (dias úteis)</label><input type="number" value={settings.transfer_period_card_anticipated_days || "4"} onChange={(e) => set("transfer_period_card_anticipated_days", e.target.value)} className={inputCls} /></div>
-            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Taxa de antecipação (%)</label><input type="number" step="0.1" value={settings.anticipation_fee_pct || "3.5"} onChange={(e) => set("anticipation_fee_pct", e.target.value)} className={inputCls} /></div>
+            <div className="col-span-2"><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão com antecipação (dias úteis)</label><input type="number" value={settings.transfer_period_card_anticipated_days || "4"} onChange={(e) => set("transfer_period_card_anticipated_days", e.target.value)} className={inputCls} /></div>
           </div>
+        </div>
+
+        {/* Antecipação de Recebíveis */}
+        <div className="bg-card border rounded-xl p-4 space-y-4">
+          <h2 className="font-semibold text-foreground text-sm">Antecipação de Recebíveis</h2>
+          <p className="text-[11px] text-muted-foreground">Configure como a taxa de antecipação é calculada e cobrada.</p>
+
+          {/* Modo de taxa */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setAnticipationMode("simple")}
+              className={`flex-1 p-2.5 rounded-xl border text-xs font-medium text-left transition-colors ${anticipationMode === "simple" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+            >
+              <p className="font-semibold">Taxa simples (%)</p>
+              <p className="text-[10px] mt-0.5 opacity-70">Ex.: 3,5% sobre o valor total antecipado</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnticipationMode("monthly")}
+              className={`flex-1 p-2.5 rounded-xl border text-xs font-medium text-left transition-colors ${anticipationMode === "monthly" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+            >
+              <p className="font-semibold">% ao mês por parcela</p>
+              <p className="text-[10px] mt-0.5 opacity-70">Ex.: 1,15% × nº parcelas antecipadas</p>
+            </button>
+          </div>
+
+          {anticipationMode === "monthly" ? (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Taxa ao mês (%)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={anticipationMonthlyRate}
+                  onChange={(e) => setAnticipationMonthlyRate(e.target.value)}
+                  className={inputCls}
+                />
+              </div>
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium mb-1">Como será exibido ao profissional:</p>
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  Taxa: {anticipationMonthlyRate}% ao mês por parcela antecipada<br />
+                  <span className="opacity-80">Ex.: antecipando 6 parcelas → {(parseFloat(anticipationMonthlyRate || "0") * 6).toFixed(2).replace(".", ",")}% sobre o valor total</span>
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Taxa de antecipação (%)</label>
+              <input type="number" step="0.01" min="0" value={settings.anticipation_fee_pct || "3.5"} onChange={(e) => set("anticipation_fee_pct", e.target.value)} className={inputCls} />
+            </div>
+          )}
         </div>
       </div>
 

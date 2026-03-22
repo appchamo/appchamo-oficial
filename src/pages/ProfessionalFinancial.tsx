@@ -362,10 +362,27 @@ const FeePreferencesTab = ({ proId }: { proId: string }) => {
   const cardAnticipatedPeriod = settings.transfer_period_card_anticipated_days || "4";
   const anticipationFee = settings.anticipation_fee_pct || "3.5";
   const commissionPct = settings.commission_pct || "10";
+  const installmentMode = settings.installment_mode || "individual";
+  const anticipationMode = settings.anticipation_mode || "simple";
+  const anticipationMonthlyRate = settings.anticipation_monthly_rate || "1.15";
+
+  // Parse pacotes de parcelas
+  let installmentPackages: Array<{ id: string; label: string; from: number; to: number; rate: string }> = [];
+  if (installmentMode === "package" && settings.installment_packages) {
+    try {
+      const raw = settings.installment_packages;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) installmentPackages = parsed;
+    } catch { /* usa array vazio */ }
+  }
+
+  const payerLabel = (charged: boolean) => charged
+    ? <span className="text-muted-foreground text-[11px]">Cliente</span>
+    : <span className="text-amber-600 dark:text-amber-400 text-[11px] font-medium">Você</span>;
 
   return (
     <div className="space-y-5">
-      {/* Transfer periods */}
+      {/* Prazos de Repasse */}
       <div className="bg-card border rounded-xl p-4 space-y-3">
         <h2 className="font-semibold text-foreground text-sm">Prazos de Repasse</h2>
         <div className="space-y-2">
@@ -386,7 +403,7 @@ const FeePreferencesTab = ({ proId }: { proId: string }) => {
         </div>
       </div>
 
-      {/* Interest preference */}
+      {/* Juros do Parcelamento */}
       <div className="bg-card border rounded-xl p-4 space-y-3">
         <h2 className="font-semibold text-foreground text-sm">Juros do Parcelamento</h2>
         <p className="text-xs text-muted-foreground">Escolha quem paga as taxas de parcelamento no cartão de crédito.</p>
@@ -412,29 +429,52 @@ const FeePreferencesTab = ({ proId }: { proId: string }) => {
           </div>
         )}
 
-        {/* Show fee table */}
-        <div className="space-y-1.5 pt-2">
+        {/* Tabela de taxas */}
+        <div className="space-y-1.5 pt-1">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Taxas por parcela</p>
-          <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-            <span className="text-muted-foreground font-medium">Parcelas</span>
-            <span className="text-muted-foreground font-medium">Taxa</span>
-            <span className="text-muted-foreground font-medium">Quem paga</span>
-            {Array.from({ length: parseInt(settings.max_installments || "12") }, (_, i) => i + 1).map(n => {
-              const feeKey = n === 1 ? "card_fee_pct" : `installment_fee_${n}x`;
-              const fee = settings[feeKey] || "0";
-              return (
-                <React.Fragment key={n}>
-                  <span className="text-foreground">{n}x</span>
-                  <span className="text-foreground">{fee}%</span>
-                  <span className={chargeInterest ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400"}>{chargeInterest ? "Cliente" : "Você"}</span>
-                </React.Fragment>
-              );
-            })}
-          </div>
+
+          {installmentMode === "package" ? (
+            <div className="space-y-2">
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 flex items-start gap-2">
+                <Info className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-blue-700 dark:text-blue-300">Taxa cobrada sobre o valor total da venda, não por parcela.</p>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                <span className="text-muted-foreground font-medium">Parcelas</span>
+                <span className="text-muted-foreground font-medium">Taxa</span>
+                <span className="text-muted-foreground font-medium">Quem paga</span>
+                {/* Linha "À vista" usando card_fee_pct */}
+                {installmentPackages.map(pkg => (
+                  <React.Fragment key={pkg.id}>
+                    <span className="text-foreground font-medium">{pkg.label || `${pkg.from === pkg.to ? `${pkg.from}x` : `${pkg.from} a ${pkg.to}x`}`}</span>
+                    <span className="text-foreground font-semibold">{pkg.rate}%</span>
+                    {payerLabel(chargeInterest)}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+              <span className="text-muted-foreground font-medium">Parcelas</span>
+              <span className="text-muted-foreground font-medium">Taxa</span>
+              <span className="text-muted-foreground font-medium">Quem paga</span>
+              {Array.from({ length: parseInt(settings.max_installments || "12") }, (_, i) => i + 1).map(n => {
+                const feeKey = n === 1 ? "card_fee_pct" : `installment_fee_${n}x`;
+                const fee = settings[feeKey] || "0";
+                return (
+                  <React.Fragment key={n}>
+                    <span className="text-foreground">{n}x</span>
+                    <span className="text-foreground">{fee}%</span>
+                    {payerLabel(chargeInterest)}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Anticipation preference */}
+      {/* Antecipação de Recebíveis */}
       <div className="bg-card border rounded-xl p-4 space-y-3">
         <h2 className="font-semibold text-foreground text-sm">Antecipação de Recebíveis</h2>
         <p className="text-xs text-muted-foreground">Escolha se quer receber pagamentos de cartão de forma antecipada.</p>
@@ -449,9 +489,35 @@ const FeePreferencesTab = ({ proId }: { proId: string }) => {
             className={`flex-1 p-3 rounded-xl border text-left transition-colors ${anticipation ? "border-primary bg-primary/5" : "border-border hover:bg-muted"}`}>
             <p className="text-xs font-semibold text-foreground">Com antecipação</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">Receba em {cardAnticipatedPeriod} dias úteis</p>
-            <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">Taxa: {anticipationFee}%</p>
+            {anticipationMode === "monthly"
+              ? <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">{anticipationMonthlyRate}% ao mês por parcela</p>
+              : <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">Taxa: {anticipationFee}%</p>
+            }
           </button>
         </div>
+
+        {anticipation && (
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 space-y-1">
+            {anticipationMode === "monthly" ? (
+              <>
+                <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Taxa de antecipação por parcela</p>
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  A taxa de {anticipationMonthlyRate}% é cobrada <strong>por mês, por parcela antecipada</strong>.
+                </p>
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  Exemplo: antecipando 6 parcelas → {(parseFloat(anticipationMonthlyRate) * 6).toFixed(2).replace(".", ",")}% sobre o valor total.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Taxa de antecipação</p>
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  Uma taxa de {anticipationFee}% é cobrada sobre o valor total antecipado.
+                </p>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

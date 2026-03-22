@@ -39,32 +39,53 @@ const AdminWallet = () => {
 
   const load = async () => {
     setLoading(true);
+
+    // 1. Busca todas as transações da carteira
     const { data, error } = await supabase
       .from("wallet_transactions")
-      .select(`
-        id, professional_id, amount, description, status, created_at, transferred_at, asaas_transfer_id,
-        professionals!inner(
-          id,
-          profiles!inner(display_name, email),
-          professional_fiscal_info(pix_key, pix_key_type)
-        )
-      `)
+      .select("id, professional_id, amount, description, status, created_at, transferred_at, asaas_transfer_id")
       .order("created_at", { ascending: false });
 
     if (error) { toast({ title: "Erro ao carregar carteiras", variant: "destructive" }); setLoading(false); return; }
 
+    // 2. Busca dados dos profissionais únicos
+    const proIds = [...new Set((data || []).map(t => t.professional_id))];
+    if (!proIds.length) { setEntries([]); setLoading(false); return; }
+
+    const { data: pros } = await supabase
+      .from("professionals")
+      .select("id, user_id")
+      .in("id", proIds);
+
+    const userIds = (pros || []).map(p => p.user_id).filter(Boolean);
+
+    const [{ data: profiles }, { data: fiscals }] = await Promise.all([
+      supabase.from("profiles").select("user_id, display_name, email").in("user_id", userIds),
+      supabase.from("professional_fiscal_info").select("professional_id, pix_key, pix_key_type").in("professional_id", proIds),
+    ]);
+
+    // Mapas auxiliares
+    const proByProId: Record<string, string> = {};
+    (pros || []).forEach(p => { proByProId[p.id] = p.user_id; });
+    const profileByUserId: Record<string, { display_name: string; email: string }> = {};
+    (profiles || []).forEach(p => { profileByUserId[p.user_id] = p; });
+    const fiscalByProId: Record<string, { pix_key: string; pix_key_type: string }> = {};
+    (fiscals || []).forEach(f => { fiscalByProId[f.professional_id] = f; });
+
     // Agrupa por profissional
     const map: Record<string, WalletEntry> = {};
     for (const tx of (data || [])) {
-      const pro = (tx as any).professionals;
       const pid = tx.professional_id;
+      const userId = proByProId[pid];
+      const profile = profileByUserId[userId] || { display_name: "—", email: "—" };
+      const fiscal = fiscalByProId[pid];
       if (!map[pid]) {
         map[pid] = {
           professional_id: pid,
-          professional_name: pro?.profiles?.display_name || "—",
-          professional_email: pro?.profiles?.email || "—",
-          pix_key: pro?.professional_fiscal_info?.[0]?.pix_key || null,
-          pix_key_type: pro?.professional_fiscal_info?.[0]?.pix_key_type || null,
+          professional_name: profile.display_name || "—",
+          professional_email: profile.email || "—",
+          pix_key: fiscal?.pix_key || null,
+          pix_key_type: fiscal?.pix_key_type || null,
           pending_amount: 0,
           transferred_amount: 0,
           pending_count: 0,

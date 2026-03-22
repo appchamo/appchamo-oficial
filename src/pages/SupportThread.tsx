@@ -212,23 +212,10 @@ const SupportThread = () => {
         body: { ticket_id: ticketId },
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
-      if (fnError) {
-        console.error("[Suporte IA] Erro na função:", fnError);
-        toast({
-          title: "Resposta automática indisponível",
-          description: "Um atendente pode responder em breve.",
-          variant: "destructive",
-        });
-      } else if (data?.error) {
-        console.error("[Suporte IA] Resposta da função:", data.error);
-      }
+      if (fnError) console.error("[Suporte IA] Erro na função:", fnError);
+      else if (data?.error) console.error("[Suporte IA] Resposta da função:", data.error);
     } catch (e) {
       console.error("[Suporte IA] Falha ao chamar função:", e);
-      toast({
-        title: "Resposta automática indisponível",
-        description: "Um atendente pode responder em breve.",
-        variant: "destructive",
-      });
     }
   };
 
@@ -513,8 +500,11 @@ const SupportThread = () => {
       <PullToRefresh scrollContainerRef={scrollContainerRef} scrollContainer={scrollContainerEl}>
       <main
         ref={setScrollRef}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full flex flex-col"
       >
+        {/* Empurra mensagens para baixo quando há poucas */}
+        <div className="flex-1" />
+        <div className="flex flex-col gap-2 px-4 py-4">
         {messages.map((msg) => {
           const isFromBot = isSupportBotMessage(msg.sender_id);
           const isMine = !isFromBot && msg.sender_id != null && user?.id != null && String(msg.sender_id) === String(user.id);
@@ -540,6 +530,7 @@ const SupportThread = () => {
           );
         })}
         <div ref={bottomRef} />
+        </div>
       </main>
       </PullToRefresh>
 
@@ -562,26 +553,13 @@ const SupportThread = () => {
             </button>
             <button
               type="button"
-              onClick={() => sendQuickReply("Falar com atendente humano")}
-              disabled={sending}
+              onClick={handleRequestHuman}
+              disabled={sending || requestingHuman || !!requestedHumanAt}
               className="flex-1 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-50"
             >
-              Falar com atendente humano
+              {requestingHuman ? "Enviando…" : requestedHumanAt ? "Atendente solicitado" : "Falar com atendente"}
             </button>
           </div>
-          {!requestedHumanAt && (
-            <div className="max-w-screen-lg mx-auto mb-2">
-              <button
-                type="button"
-                onClick={handleRequestHuman}
-                disabled={requestingHuman}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-50"
-              >
-                {requestingHuman ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCircle className="w-4 h-4" />}
-                {requestingHuman ? "Enviando…" : "Falar com um atendente"}
-              </button>
-            </div>
-          )}
           <div className="flex items-center gap-2 max-w-screen-lg mx-auto">
             {isRecording ? (
               <>

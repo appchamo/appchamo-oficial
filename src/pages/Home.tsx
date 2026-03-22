@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Zap, Ticket, CalendarCheck, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, Wallet, ChevronRight, TrendingUp, Star } from "lucide-react"; 
+import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -18,7 +18,7 @@ import HomeJobsBanner from "@/components/home/HomeJobsBanner";
 import HomeWelcome from "@/components/home/HomeWelcome";
 import HomeAlertCarousel from "@/components/home/HomeAlertCarousel";
 import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
-import ProAgendaTodayCard from "@/components/home/ProAgendaTodayCard";
+import HomeProCarousel from "@/components/home/HomeProCarousel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
@@ -498,69 +498,43 @@ const Home = () => {
           className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
-          {user && isPro ? (
-            /* ── Hero card profissional ── */
-            <Link
-              to="/pro/financeiro"
-              className="relative overflow-hidden rounded-2xl shadow-lg active:scale-[0.985] transition-transform"
+          {user && isPro && proId ? (
+            /* ── Carrossel: Carteira + Agenda (só monta quando proId está pronto) ── */
+            <HomeProCarousel
+              profile={profile}
+              userName={userName}
+              welcomeWord={welcomeWord}
+              locationLabel={locationLabel}
+              onLocationClick={handleOpenLocation}
+              walletBalance={walletBalance}
+              walletLoaded={walletLoaded}
+              professionalId={proId}
+            />
+          ) : user && isPro ? (
+            /* ── Placeholder enquanto proId carrega ── */
+            <div
+              className="relative overflow-hidden rounded-2xl shadow-lg"
               style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }}
             >
-              {/* Círculos decorativos */}
               <div className="absolute -top-8 -right-8 w-36 h-36 bg-white/10 rounded-full" />
               <div className="absolute -bottom-6 -left-6 w-28 h-28 bg-white/5 rounded-full" />
-              <div className="absolute top-4 right-16 w-10 h-10 bg-white/10 rounded-full" />
-
               <div className="relative p-5">
-                {/* Topo: avatar + saudação */}
                 <div className="flex items-center gap-3 mb-4">
                   {profile?.avatar_url ? (
-                    <img
-                      src={profile.avatar_url}
-                      alt={userName}
-                      className="w-12 h-12 rounded-full object-cover border-2 border-white/40 shrink-0"
-                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
+                    <img src={profile.avatar_url} alt={userName} className="w-12 h-12 rounded-full object-cover border-2 border-white/40 shrink-0" />
                   ) : (
                     <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center shrink-0">
                       <span className="text-white font-bold text-xl">{userName.charAt(0).toUpperCase()}</span>
                     </div>
                   )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white/75 text-xs leading-none mb-0.5">{welcomeWord} de volta,</p>
-                    <p className="text-white font-bold text-lg leading-tight truncate">{userName} 👋</p>
-                    <button
-                      type="button"
-                      onClick={e => { e.preventDefault(); handleOpenLocation(); }}
-                      className="flex items-center gap-1 text-white/60 text-[10px] mt-1 hover:text-white/90 transition-colors"
-                    >
-                      <MapPin className="w-2.5 h-2.5" />
-                      <span className="truncate max-w-[160px]">{locationLabel}</span>
-                    </button>
+                  <div>
+                    <p className="text-white/75 text-xs">{welcomeWord} de volta,</p>
+                    <p className="text-white font-bold text-lg">{userName} 👋</p>
                   </div>
                 </div>
-
-                {/* Saldo a receber */}
-                <div className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                      <Wallet className="w-4.5 h-4.5 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-white/70 text-[10px] uppercase tracking-wider leading-none mb-0.5">Saldo a receber</p>
-                      <p className="text-white font-bold text-xl leading-none">
-                        {walletLoaded
-                          ? walletBalance.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
-                          : "…"}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 text-white/70 text-xs font-medium">
-                    <span>Ver carteira</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </div>
-                </div>
+                <div className="bg-white/15 rounded-xl p-3.5 h-14 animate-pulse" />
               </div>
-            </Link>
+            </div>
           ) : user ? (
             /* ── Welcome cliente ── */
             <div className="flex items-center gap-3">
@@ -586,10 +560,6 @@ const Home = () => {
               </div>
             </div>
           ) : null}
-
-          {user && isPro && isBusiness && proId && (
-            <ProAgendaTodayCard professionalId={proId} />
-          )}
 
           {user && needsProfileCompletion && (
             <Link

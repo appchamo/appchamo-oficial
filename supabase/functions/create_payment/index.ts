@@ -301,6 +301,8 @@ serve(async (req) => {
         request_id: request_id,
         total_amount: totalAmount,
         platform_fee: platformFee,
+        commission_fee: commissionFee,
+        payment_fee: paymentFee,
         professional_net: professionalNet,
         asaas_payment_id: asaasPayment.id,
         pix_qr_code: pixData.encodedImage,

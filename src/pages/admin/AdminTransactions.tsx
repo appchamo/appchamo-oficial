@@ -12,6 +12,8 @@ interface Transaction {
   professional_id: string | null;
   total_amount: number;
   platform_fee: number;
+  commission_fee: number;
+  payment_fee: number;
   professional_net: number;
   status: string;
   created_at: string;
@@ -87,7 +89,8 @@ const TransactionDetail = ({ tx, onClose }: { tx: Transaction; onClose: () => vo
           <div><p className="text-[10px] text-muted-foreground">Cliente</p><p className="font-medium text-foreground">{clientName}</p></div>
           <div><p className="text-[10px] text-muted-foreground">Profissional</p><p className="font-medium text-foreground">{proName}</p></div>
           <div><p className="text-[10px] text-muted-foreground">Total</p><p className="font-medium text-foreground">R$ {Number(tx.total_amount).toLocaleString("pt-BR")}</p></div>
-          <div><p className="text-[10px] text-muted-foreground">Comissão</p><p className="font-medium text-primary">R$ {Number(tx.platform_fee).toLocaleString("pt-BR")}</p></div>
+          <div><p className="text-[10px] text-muted-foreground">Comissão App</p><p className="font-medium text-primary">R$ {Number(tx.commission_fee || tx.platform_fee).toLocaleString("pt-BR")}</p></div>
+          {Number(tx.payment_fee) > 0 && <div><p className="text-[10px] text-muted-foreground">Taxa transação</p><p className="font-medium text-orange-600">R$ {Number(tx.payment_fee).toLocaleString("pt-BR")}</p></div>}
           <div><p className="text-[10px] text-muted-foreground">Líquido profissional</p><p className="font-medium text-foreground">R$ {Number(tx.professional_net).toLocaleString("pt-BR")}</p></div>
           <div><p className="text-[10px] text-muted-foreground">Status</p>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${(statusMap[tx.status] || statusMap.pending).cls}`}>{(statusMap[tx.status] || statusMap.pending).label}</span>
@@ -651,7 +654,8 @@ const AdminTransactions = () => {
                   <table className="w-full text-sm">
                     <thead><tr className="border-b bg-muted/50">
                       <th className="text-left p-3 font-medium text-muted-foreground">Total</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground">Comissão</th>
+                      <th className="text-left p-3 font-medium text-muted-foreground">Comissão App</th>
+                      <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Taxa Transação</th>
                       <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Líquido</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Data</th>
@@ -661,7 +665,8 @@ const AdminTransactions = () => {
                       {transactions.map((t) => (
                         <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                           <td className="p-3 text-xs md:text-sm">R$ {Number(t.total_amount).toLocaleString("pt-BR")}</td>
-                          <td className="p-3 text-primary font-medium text-xs md:text-sm">R$ {Number(t.platform_fee).toLocaleString("pt-BR")}</td>
+                          <td className="p-3 text-primary font-medium text-xs md:text-sm">R$ {Number(t.commission_fee || t.platform_fee).toLocaleString("pt-BR")}</td>
+                          <td className="p-3 hidden md:table-cell text-xs text-orange-600">R$ {Number(t.payment_fee || 0).toLocaleString("pt-BR")}</td>
                           <td className="p-3 hidden md:table-cell text-xs">R$ {Number(t.professional_net).toLocaleString("pt-BR")}</td>
                           <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${(statusMap[t.status] || statusMap.pending).cls}`}>{(statusMap[t.status] || statusMap.pending).label}</span></td>
                           <td className="p-3 text-[11px] text-muted-foreground">{new Date(t.created_at).toLocaleDateString("pt-BR")}</td>

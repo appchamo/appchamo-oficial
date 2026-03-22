@@ -2160,12 +2160,19 @@ const MessageThread = () => {
                               <span>(-) Comissão da plataforma ({feeSettings.commission_pct || "10"}%)</span>
                               <span>- {fmt(b.commissionFee)}</span>
                             </div>
-                            {b.paymentFee > 0 && (
-                              <div className="flex justify-between text-red-500">
-                                <span>(-) Taxa de transação {billingMethod === "pix" ? `PIX${b.pct > 0 ? ` (${b.pct}%` : ""}${b.fixed > 0 ? ` + ${fmt(b.fixed)}` : ""}${b.pct > 0 ? ")" : ""}` : `cartão${b.pct > 0 ? ` (${b.pct}%)` : ""}`}</span>
-                                <span>- {fmt(b.paymentFee)}</span>
-                              </div>
-                            )}
+                            {b.paymentFee > 0 && (() => {
+                              const parts: string[] = [];
+                              if (b.pct > 0) parts.push(`${b.pct}%`);
+                              if (b.fixed > 0) parts.push(fmt(b.fixed));
+                              const method = billingMethod === "pix" ? "PIX" : "Cartão";
+                              const detail = parts.length > 0 ? ` (${parts.join(" + ")})` : "";
+                              return (
+                                <div className="flex justify-between text-red-500">
+                                  <span>(-) Taxa de transação {method}{detail}</span>
+                                  <span>- {fmt(b.paymentFee)}</span>
+                                </div>
+                              );
+                            })()}
                           </>
                         )}
                         <div className="flex justify-between font-semibold text-emerald-700 border-t pt-1 mt-1">

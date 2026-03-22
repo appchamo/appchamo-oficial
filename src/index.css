@@ -148,4 +148,15 @@
   .safe-area-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+
+  /* QR Scanner nativo — torna o WebView transparente para câmera aparecer */
+  body.qr-scanner-active {
+    background: transparent !important;
+  }
+  body.qr-scanner-active #root {
+    background: transparent !important;
+  }
+  body.qr-scanner-active #root > * {
+    background: transparent !important;
+  }
 }

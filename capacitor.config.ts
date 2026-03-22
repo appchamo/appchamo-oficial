@@ -18,6 +18,7 @@ const config: CapacitorConfig = {
   },
   ios: {
     allowsInlineMediaPlayback: true,
+    backgroundColor: "#ffffff",
   },
   android: {
     allowMixedContent: true,

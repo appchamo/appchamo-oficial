@@ -127,22 +127,15 @@ const AdminWallet = () => {
     setTransferring(entry.professional_id);
     try {
       const pendingIds = entry.transactions.filter(t => t.status === "pending").map(t => t.id);
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process_transfer`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${session?.access_token}`,
-          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({
+      const { data, error } = await supabase.functions.invoke("process_transfer", {
+        body: {
           professional_id: entry.professional_id,
           wallet_transaction_ids: pendingIds,
-        }),
+        },
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Erro ao repassar");
-      toast({ title: `✅ Repasse de ${fmt(result.amount)} realizado!`, description: `ID Asaas: ${result.transfer_id}` });
+      if (error) throw new Error(error.message || "Erro ao repassar");
+      if (data?.error) throw new Error(data.error);
+      toast({ title: `✅ Repasse de ${fmt(data.amount)} realizado!`, description: `ID Asaas: ${data.transfer_id}` });
       load();
     } catch (err: any) {
       toast({ title: "Erro ao repassar", description: err.message, variant: "destructive" });

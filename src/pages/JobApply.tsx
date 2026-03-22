@@ -116,12 +116,20 @@ const JobApply = () => {
       if (insertError) throw insertError;
 
       if (jobOwnerId) {
+        // Busca avatar do candidato para exibir na notificação do dono da vaga
+        const { data: applicantPub } = await supabase
+          .from("profiles_public" as any)
+          .select("avatar_url")
+          .eq("user_id", user.id)
+          .maybeSingle() as { data: { avatar_url: string | null } | null };
+
         await supabase.from("notifications").insert({
           user_id: jobOwnerId,
           title: "Nova candidatura recebida",
           message: `${form.full_name} se candidatou para ${jobTitle}`,
           type: "job",
           link: "/my-jobs",
+          image_url: applicantPub?.avatar_url ?? null,
         } as any);
       }
 

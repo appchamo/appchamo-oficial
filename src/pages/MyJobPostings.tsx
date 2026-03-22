@@ -165,6 +165,17 @@ const MyJobPostings = () => {
         const { data: authUser } = await supabase.auth.getUser();
         const publisherId = authUser?.user?.id;
 
+        // Busca avatar do publicador para exibir na notificação push
+        let publisherAvatar: string | null = null;
+        if (publisherId) {
+          const { data: pubProfile } = await supabase
+            .from("profiles")
+            .select("avatar_url")
+            .eq("user_id", publisherId)
+            .maybeSingle();
+          publisherAvatar = (pubProfile as any)?.avatar_url ?? null;
+        }
+
         const { data: recipients } = await supabase
           .from("profiles")
           .select("user_id")
@@ -179,10 +190,11 @@ const MyJobPostings = () => {
             message: `Confira a nova vaga "${form.title}" na sua região.`,
             type: "job",
             link: `/jobs/${createdJob.id}`,
+            image_url: publisherAvatar,
           })) || [];
 
         if (rows.length > 0) {
-          await supabase.from("notifications").insert(rows);
+          await supabase.from("notifications").insert(rows as any);
         }
       } catch (e) {
         // Se falhar a notificação, a vaga já existe.

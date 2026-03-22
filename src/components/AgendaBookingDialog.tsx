@@ -306,13 +306,21 @@ export default function AgendaBookingDialog({
         content: msg,
       });
 
+      // Busca avatar do cliente para exibir na notificação do profissional
+      const { data: clientPub } = await supabase
+        .from("profiles_public" as any)
+        .select("avatar_url")
+        .eq("user_id", user.id)
+        .maybeSingle() as { data: { avatar_url: string | null } | null };
+
       await supabase.from("notifications").insert({
         user_id: professionalUserId,
         title: "Novo agendamento 📅",
         message: `${servicesLabel} - ${format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às ${selectedSlot}`,
         type: "appointment",
         link: `/messages/${requestId}`,
-      });
+        image_url: clientPub?.avatar_url ?? null,
+      } as any);
 
       onOpenChange(false);
       toast({ title: "Agendamento enviado! Aguarde a confirmação." });

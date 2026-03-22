@@ -154,7 +154,7 @@ serve(async (req) => {
             channelId: "default_v2",
             defaultSound: false,
             defaultVibrateTimings: true,
-            ...(imageUrl ? { imageUrl } : {}),
+            ...(imageUrl ? { image: imageUrl } : {}),
           },
           data: dataPayload,
         }

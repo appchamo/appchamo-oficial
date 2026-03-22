@@ -134,16 +134,20 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
         image_urls: photoUrls.length > 0 ? photoUrls : null
       });
 
-      // 5. Notificação
-      const { data: proRecord } = await supabase.from("professionals").select("user_id").eq("id", professionalId).single();
+      // 5. Notificação — busca avatar do cliente para exibir ao profissional
+      const [{ data: proRecord }, { data: clientPub }] = await Promise.all([
+        supabase.from("professionals").select("user_id").eq("id", professionalId).single(),
+        supabase.from("profiles_public" as any).select("avatar_url").eq("user_id", user.id).maybeSingle() as Promise<{ data: { avatar_url: string | null } | null }>,
+      ]);
       if (proRecord) {
         await supabase.from("notifications").insert({
-          user_id: proRecord.user_id,
+          user_id: (proRecord as any).user_id,
           title: "Novo serviço solicitado! 💬",
           message: "Um cliente chamou você.",
           type: "service_request",
           link: `/messages/${requestId}`,
-        });
+          image_url: (clientPub as any)?.avatar_url ?? null,
+        } as any);
       }
 
       handleClose(false);

@@ -60,7 +60,7 @@ export default function PostLoginGate() {
             const userType = (data as any)?.user_type as string | undefined;
             if (userType) {
               setChecking(false);
-              navigate("/home", { replace: true });
+              navigate(userType === "sponsor" ? "/sponsor/dashboard" : "/home", { replace: true });
               return;
             }
           } catch (_) {
@@ -85,9 +85,9 @@ export default function PostLoginGate() {
       };
     }
 
-    // Perfil carregado → Home
+    // Perfil carregado → redireciona conforme tipo
     setChecking(false);
-    navigate("/home", { replace: true });
+    navigate(profile?.user_type === "sponsor" ? "/sponsor/dashboard" : "/home", { replace: true });
   }, [loading, session?.user, profile, navigate]);
 
   return (

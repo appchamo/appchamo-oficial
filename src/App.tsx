@@ -139,6 +139,24 @@ const BackButtonHandler = () => {
   return null;
 };
 
+/** Patrocinador sempre fica no painel: se estiver logado como sponsor e em rota que não seja /sponsor/*, redireciona para /sponsor/dashboard */
+const SponsorRedirectGuard = () => {
+  const { profile, loading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (loading || !profile) return;
+    if (profile.user_type !== "sponsor") return;
+    const path = location.pathname;
+    if (path.startsWith("/sponsor")) return;
+    if (path === "/login" || path === "/reset-password") return;
+    navigate("/sponsor/dashboard", { replace: true });
+  }, [loading, profile, location.pathname, navigate]);
+
+  return null;
+};
+
 /** Admin sempre fica no painel: se estiver logado como admin e em rota do app (não admin), redireciona para /admin */
 const AdminRedirectGuard = () => {
   const { session, loading } = useAuth();
@@ -251,7 +269,7 @@ const AppIconBadgeClearWhenLoggedOut = () => {
  * - Caso contrário: manda para /home.
  */
 const OAuthCallbackRedirectGuard = () => {
-  const { session, loading } = useAuth();
+  const { session, profile, loading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   useEffect(() => {
@@ -259,6 +277,10 @@ const OAuthCallbackRedirectGuard = () => {
     if (!session?.user) return; 
     const path = location.pathname;
     if (path === "/oauth-callback" || path === "/login") {
+      if (profile?.user_type === "sponsor") {
+        navigate("/sponsor/dashboard", { replace: true });
+        return;
+      }
       let fromSignup = false;
       try {
         fromSignup = localStorage.getItem("signup_in_progress") === "true";
@@ -267,7 +289,7 @@ const OAuthCallbackRedirectGuard = () => {
       }
       navigate(fromSignup ? "/signup" : "/home", { replace: true });
     }
-  }, [loading, location.pathname, session?.user, navigate]);
+  }, [loading, location.pathname, session?.user, profile, navigate]);
   return null;
 };
 
@@ -557,6 +579,7 @@ const App = () => {
             <RefreshProvider>
               <ScrollToTop />
               <AdminRedirectGuard />
+              <SponsorRedirectGuard />
               <AppIconBadgeResetOnLaunch />
               <AppIconBadgeClearWhenLoggedOut />
               <NotificationOpenHandler />

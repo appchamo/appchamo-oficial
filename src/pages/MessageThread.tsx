@@ -1587,14 +1587,27 @@ const MessageThread = () => {
           <Link to="/messages" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </Link>
-          {otherParty.avatar_url ?
-          // ✨ OTIMIZAÇÃO: Imagem otimizada no cabeçalho + Eager load
-          <img src={getOptimizedAvatar(otherParty.avatar_url)} alt={otherParty.name} loading="eager" className="w-9 h-9 rounded-full object-cover" /> :
-
-          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
-              {otherInitials}
-            </div>
-          }
+          {otherParty.avatar_url ? (
+            <img
+              src={otherParty.avatar_url}
+              alt={otherParty.name}
+              loading="eager"
+              className="w-9 h-9 rounded-full object-cover"
+              onError={(e) => {
+                const t = e.currentTarget;
+                t.onerror = null;
+                t.style.display = "none";
+                const fb = t.nextElementSibling as HTMLElement | null;
+                if (fb) fb.style.display = "flex";
+              }}
+            />
+          ) : null}
+          <div
+            className="w-9 h-9 rounded-full bg-primary/10 items-center justify-center text-xs font-bold text-primary"
+            style={{ display: otherParty.avatar_url ? "none" : "flex" }}
+          >
+            {otherInitials}
+          </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
             <p className="text-[10px] text-muted-foreground">online</p>
@@ -1832,15 +1845,30 @@ const MessageThread = () => {
             return (
               <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
                 {!isMine && (
-                otherParty.avatar_url ?
-                // ✨ OTIMIZAÇÃO: Lazy Loading nos avatares das mensagens
-                <img src={getOptimizedAvatar(otherParty.avatar_url)} alt="" loading="lazy" className="w-7 h-7 rounded-full object-cover mt-1 flex-shrink-0" /> :
-
-                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary mt-1 flex-shrink-0">
-                  {otherInitials}
-                  </div>)
-
-                }
+                  <div className="relative w-7 h-7 mt-1 flex-shrink-0">
+                    {otherParty.avatar_url ? (
+                      <img
+                        src={otherParty.avatar_url}
+                        alt=""
+                        loading="lazy"
+                        className="w-7 h-7 rounded-full object-cover absolute inset-0"
+                        onError={(e) => {
+                          const t = e.currentTarget;
+                          t.onerror = null;
+                          t.style.display = "none";
+                          const fb = t.nextElementSibling as HTMLElement | null;
+                          if (fb) fb.style.display = "flex";
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className="w-7 h-7 rounded-full bg-primary/10 items-center justify-center text-[10px] font-bold text-primary absolute inset-0"
+                      style={{ display: otherParty.avatar_url ? "none" : "flex" }}
+                    >
+                      {otherInitials}
+                    </div>
+                  </div>
+                )}
                 <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
                 isMine ?
                 "bg-primary text-primary-foreground rounded-br-md" :

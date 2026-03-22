@@ -702,35 +702,49 @@ const MessageThread = () => {
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  const getBillingFeeLabel = () => {
+  const getBillingFeeBreakdown = () => {
     if (!billingMethod || !billingAmount) return null;
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return null;
 
+    const commissionPct = parseFloat(feeSettings.commission_pct || "10");
+    const commissionFee = parseFloat((amount * commissionPct / 100).toFixed(2));
+
     if (passFeeToClient) {
-      return { fee: 0, label: `✅ Você receberá R$ ${amount.toFixed(2).replace(".", ",")}. ${billingMethod === 'pix' ? 'A taxa do PIX será cobrada' : 'As taxas do parcelamento serão cobradas'} do cliente.` };
+      return { net: amount, commissionFee, paymentFee: 0, totalFee: commissionFee, passedToClient: true };
     }
 
     if (billingMethod === "pix") {
-      const pct = parseFloat(feeSettings.pix_fee_pct || "0");
+      const pct   = parseFloat(feeSettings.pix_fee_pct || "0");
       const fixed = parseFloat(feeSettings.pix_fee_fixed || "0");
-      const fee = amount * pct / 100 + fixed;
-      return { fee, label: `Sua taxa PIX: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
+      const paymentFee = parseFloat((amount * pct / 100 + fixed).toFixed(2));
+      const totalFee   = parseFloat((commissionFee + paymentFee).toFixed(2));
+      const net        = parseFloat((amount - totalFee).toFixed(2));
+      return { net, commissionFee, paymentFee, totalFee, pct, fixed, passedToClient: false };
     }
     if (billingMethod === "card") {
       const inst = parseInt(billingInstallments);
+      let paymentFeePct = 0;
+      let paymentFeeFixed = 0;
       if (inst === 1) {
-        const pct = parseFloat(feeSettings.card_fee_pct || "0");
-        const fixed = parseFloat(feeSettings.card_fee_fixed || "0");
-        const fee = amount * pct / 100 + fixed;
-        return { fee, label: `Sua taxa cartão à vista: ${pct}%${fixed > 0 ? ` + R$ ${fixed.toFixed(2).replace(".", ",")}` : ""} = R$ ${fee.toFixed(2).replace(".", ",")}` };
+        paymentFeePct   = parseFloat(feeSettings.card_fee_pct || "0");
+        paymentFeeFixed = parseFloat(feeSettings.card_fee_fixed || "0");
       } else {
-        const pct = parseFloat(feeSettings[`installment_fee_${inst}x`] || "0");
-        const fee = amount * pct / 100;
-        return { fee, label: `Sua taxa em ${inst}x: ${pct}% = R$ ${fee.toFixed(2).replace(".", ",")}` };
+        paymentFeePct = parseFloat(feeSettings[`installment_fee_${inst}x`] || "0");
       }
+      const paymentFee = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
+      const totalFee   = parseFloat((commissionFee + paymentFee).toFixed(2));
+      const net        = parseFloat((amount - totalFee).toFixed(2));
+      return { net, commissionFee, paymentFee, totalFee, pct: paymentFeePct, fixed: paymentFeeFixed, passedToClient: false, inst };
     }
     return null;
+  };
+
+  // mantém compatibilidade com código que usa .label
+  const getBillingFeeLabel = () => {
+    const b = getBillingFeeBreakdown();
+    if (!b) return null;
+    return { fee: b.totalFee, label: "" };
   };
 
   const getBillingInstallmentOptions = () => {
@@ -2098,11 +2112,41 @@ const MessageThread = () => {
                       </select>
                     </div>
               }
-                  {getBillingFeeLabel() &&
-              <p className={`text-xs ${passFeeToClient ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
-                    {passFeeToClient ? '' : '💰 '} {getBillingFeeLabel()!.label}
-                    </p>
-              }
+                  {getBillingFeeBreakdown() && (() => {
+                    const b = getBillingFeeBreakdown()!;
+                    const fmt = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`;
+                    return (
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Valor cobrado</span>
+                          <span>{fmt(parseFloat(billingAmount))}</span>
+                        </div>
+                        {b.passedToClient ? (
+                          <div className="flex justify-between text-muted-foreground">
+                            <span>Taxa repassada ao cliente</span>
+                            <span className="text-amber-600">cobrada do cliente</span>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex justify-between text-red-500">
+                              <span>(-) Comissão da plataforma ({feeSettings.commission_pct || "10"}%)</span>
+                              <span>- {fmt(b.commissionFee)}</span>
+                            </div>
+                            {b.paymentFee > 0 && (
+                              <div className="flex justify-between text-red-500">
+                                <span>(-) Taxa de transação {billingMethod === "pix" ? `PIX${b.pct > 0 ? ` (${b.pct}%` : ""}${b.fixed > 0 ? ` + ${fmt(b.fixed)}` : ""}${b.pct > 0 ? ")" : ""}` : `cartão${b.pct > 0 ? ` (${b.pct}%)` : ""}`}</span>
+                                <span>- {fmt(b.paymentFee)}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        <div className="flex justify-between font-semibold text-emerald-700 border-t pt-1 mt-1">
+                          <span>Você receberá</span>
+                          <span>{fmt(b.net)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
             }
 

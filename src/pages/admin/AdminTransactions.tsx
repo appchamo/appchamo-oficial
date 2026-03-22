@@ -614,18 +614,44 @@ const AdminTransactions = () => {
 
   useEffect(() => {
     const fetchSubs = async () => {
-      const { data: subs } = await supabase.from("subscriptions").select("*").neq("plan_id", "free").order("started_at", { ascending: false });
-      if (!subs || subs.length === 0) { setSubscribers([]); setSubStats({ pro: 0, vip: 0, business: 0, total: 0 }); setSubsLoading(false); return; }
+      // Busca apenas assinaturas ativas (ACTIVE ou active) e planos pagos
+      const { data: subs } = await supabase
+        .from("subscriptions")
+        .select("*")
+        .neq("plan_id", "free")
+        .in("status", ["ACTIVE", "active"])
+        .order("started_at", { ascending: false });
+
+      if (!subs || subs.length === 0) {
+        setSubscribers([]);
+        setSubStats({ pro: 0, vip: 0, business: 0, total: 0 });
+        setSubsLoading(false);
+        return;
+      }
+
       const userIds = subs.map(s => s.user_id);
-      const { data: profiles } = await supabase.from("profiles").select("user_id, full_name, email").in("user_id", userIds);
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, email")
+        .in("user_id", userIds);
+
       const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
-      const mapped: Subscriber[] = subs.map(s => ({ ...s, full_name: profileMap.get(s.user_id)?.full_name || "—", email: profileMap.get(s.user_id)?.email || "—" }));
+
+      // Filtra fora usuários deletados (sem perfil correspondente)
+      const mapped: Subscriber[] = subs
+        .filter(s => profileMap.has(s.user_id))
+        .map(s => ({
+          ...s,
+          full_name: profileMap.get(s.user_id)?.full_name || "—",
+          email: profileMap.get(s.user_id)?.email || "—",
+        }));
+
       setSubscribers(mapped);
       setSubStats({
-        pro: mapped.filter(s => s.plan_id === "pro" && s.status === "active").length,
-        vip: mapped.filter(s => s.plan_id === "vip" && s.status === "active").length,
-        business: mapped.filter(s => s.plan_id === "business" && s.status === "active").length,
-        total: mapped.filter(s => s.status === "active").length,
+        pro: mapped.filter(s => s.plan_id === "pro").length,
+        vip: mapped.filter(s => s.plan_id === "vip").length,
+        business: mapped.filter(s => s.plan_id === "business").length,
+        total: mapped.length,
       });
       setSubsLoading(false);
     };

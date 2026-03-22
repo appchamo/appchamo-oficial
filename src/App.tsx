@@ -14,7 +14,7 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { Capacitor } from "@capacitor/core";
-import { CheckCircle2, Star, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { syncAppIconBadge } from "@/lib/appBadge";
 import { diagLog, diagEnabled } from "@/lib/diag";
 
@@ -406,81 +406,6 @@ const AppContent = () => {
 
   if (showCustomSplash) {
     return <CustomSplash config={splashConfig} onFinish={handleSplashFinish} />;
-  }
-
-  const isWeb = Capacitor.getPlatform() === 'web';
-  const currentPath = window.location.pathname;
-  const isRootPath = currentPath === '/' || currentPath === '/index.html';
-  const isWebBypassed = localStorage.getItem('chamo_web_bypass') === 'true';
-
-  // Landing Page (Apenas Web e deslogado)
-  if (isWeb && isRootPath && !isWebBypassed && !session) {
-    return (
-      <div 
-        className="relative min-h-screen flex flex-col justify-center overflow-hidden font-sans bg-[#1A0B00]"
-        style={{
-          backgroundImage: 'url("https://wfxeiuqxzrlnvlopcrwd.supabase.co/storage/v1/object/public/uploads/tutorials/135419.png")',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
-      >
-        <div className="absolute inset-0 bg-gradient-to-r from-black/95 via-black/70 to-transparent"></div>
-        <div className="absolute inset-0 bg-black/20 md:hidden"></div>
-
-        <header className="absolute top-0 left-0 right-0 z-20 container mx-auto p-6 md:px-12 flex justify-between items-center">
-          <div className="flex items-center gap-2">
-             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg">
-                <span className="text-xl text-primary-foreground font-extrabold">C</span>
-             </div>
-             <span className="text-3xl font-extrabold text-white tracking-tight">Chamô</span>
-          </div>
-          <a href="/login" className="text-sm font-semibold text-white/80 hover:text-white transition-colors">
-            Acesso Restrito
-          </a>
-        </header>
-
-        <main className="relative z-10 container mx-auto px-6 md:px-12 flex-1 flex flex-col justify-center mt-16 md:mt-0 max-w-7xl">
-          <div className="max-w-2xl space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
-            <h1 className="text-5xl md:text-7xl font-bold text-white leading-[1.1] tracking-tight">
-              O profissional ideal,<br className="hidden md:block" />
-              <span className="text-primary"> na palma da sua mão.</span>
-            </h1>
-
-            <div className="space-y-4 pt-2">
-               <div className="flex items-center gap-3">
-                 <CheckCircle2 className="w-7 h-7 text-[#00E676] fill-[#00E676]/20" />
-                 <span className="text-white text-lg md:text-xl font-medium">Contrate, gerencie e pague com segurança</span>
-               </div>
-               <div className="flex items-center gap-3">
-                 <CheckCircle2 className="w-7 h-7 text-[#00E676] fill-[#00E676]/20" />
-                 <span className="text-white text-lg md:text-xl font-medium">O ecossistema mais completo do mercado</span>
-               </div>
-            </div>
-
-            <div className="border border-white/20 bg-black/40 backdrop-blur-md rounded-2xl p-5 w-fit shadow-2xl mt-4">
-              <p className="text-white text-sm font-medium mb-2">Seguro e confiável</p>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="flex text-yellow-400">
-                   <Star className="w-5 h-5 fill-current" />
-                   <Star className="w-5 h-5 fill-current" />
-                   <Star className="w-5 h-5 fill-current" />
-                   <Star className="w-5 h-5 fill-current" />
-                   <Star className="w-5 h-5 fill-current" />
-                </div>
-                <span className="text-white font-bold ml-1 text-lg">4.9</span>
-              </div>
-              <p className="text-white/70 text-sm mt-1">Baseado em +200.000 avaliações</p>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-4 pt-6">
-              <a href="/login" className="flex items-center justify-center gap-3 bg-white text-black px-10 py-4 rounded-2xl font-bold text-lg shadow-xl hover:bg-gray-100 transition-all">
-                Começar Agora
-              </a>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
   }
 
   return (

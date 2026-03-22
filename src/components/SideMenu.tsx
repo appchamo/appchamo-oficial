@@ -81,7 +81,7 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
   const handleLogout = async () => {
     onClose();
     await signOut();
-    navigate("/");
+    window.location.href = "/login";
   };
 
   return (

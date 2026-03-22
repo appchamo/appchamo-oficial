@@ -324,7 +324,8 @@ const FeePreferencesTab = ({ proId }: { proId: string }) => {
       const map: Record<string, string> = {};
       for (const s of ps) {
         const v = s.value;
-        map[s.key] = typeof v === "string" ? v : String(v);
+        // JSONB arrays/objects precisam de JSON.stringify para preservar o formato
+        map[s.key] = typeof v === "string" ? v : JSON.stringify(v);
       }
       setSettings(map);
     }

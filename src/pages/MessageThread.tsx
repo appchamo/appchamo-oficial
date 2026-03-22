@@ -75,6 +75,7 @@ const MessageThread = () => {
   const [billingDesc, setBillingDesc] = useState("");
   const [billingMethod, setBillingMethod] = useState<"pix" | "card" | null>(null);
   const [billingInstallments, setBillingInstallments] = useState("1");
+  const [billingAnticipation, setBillingAnticipation] = useState(false);
   const [feeSettings, setFeeSettings] = useState<Record<string, string>>({});
   const [passFeeToClient, setPassFeeToClient] = useState(false); 
   const [closingCall, setClosingCall] = useState(false);
@@ -768,7 +769,24 @@ const MessageThread = () => {
     return parseFloat((originalAmount - commission - gatewayFee).toFixed(2));
   };
 
-  const getBillingFeeBreakdown = () => {
+  /** Retorna a taxa (%) para N parcelas respeitando o modo de configuração (pacote ou individual) */
+  const getInstallmentPackageRate = (installments: number): number => {
+    const mode = feeSettings.installment_mode || "individual";
+    if (mode === "package" && feeSettings.installment_packages) {
+      try {
+        const pkgs = JSON.parse(feeSettings.installment_packages);
+        const pkg = Array.isArray(pkgs)
+          ? pkgs.find((p: any) => installments >= Number(p.from) && installments <= Number(p.to))
+          : null;
+        if (pkg) return parseFloat(pkg.rate || "0");
+      } catch { /* fallback individual */ }
+    }
+    // Modo individual
+    if (installments === 1) return parseFloat(feeSettings.card_fee_pct || "0");
+    return parseFloat(feeSettings[`installment_fee_${installments}x`] || "0");
+  };
+
+  const getBillingFeeBreakdown = (withAnticipation = billingAnticipation) => {
     if (!billingMethod || !billingAmount) return null;
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return null;
@@ -777,33 +795,41 @@ const MessageThread = () => {
     const commissionFee = parseFloat((amount * commissionPct / 100).toFixed(2));
 
     if (passFeeToClient) {
-      return { net: amount, commissionFee, paymentFee: 0, totalFee: commissionFee, passedToClient: true };
+      return { net: amount, commissionFee, paymentFee: 0, anticipationFee: 0, totalFee: commissionFee, passedToClient: true, pct: 0, fixed: 0 };
     }
 
+    let paymentFee = 0;
+    let paymentFeePct = 0;
+    let paymentFeeFixed = 0;
+
     if (billingMethod === "pix") {
-      const pct   = parseFloat(feeSettings.pix_fee_pct || "0");
-      const fixed = parseFloat(feeSettings.pix_fee_fixed || "0");
-      const paymentFee = parseFloat((amount * pct / 100 + fixed).toFixed(2));
-      const totalFee   = parseFloat((commissionFee + paymentFee).toFixed(2));
-      const net        = parseFloat((amount - totalFee).toFixed(2));
-      return { net, commissionFee, paymentFee, totalFee, pct, fixed, passedToClient: false };
-    }
-    if (billingMethod === "card") {
+      paymentFeePct   = parseFloat(feeSettings.pix_fee_pct || "0");
+      paymentFeeFixed = parseFloat(feeSettings.pix_fee_fixed || "0");
+      paymentFee = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
+    } else if (billingMethod === "card") {
       const inst = parseInt(billingInstallments);
-      let paymentFeePct = 0;
-      let paymentFeeFixed = 0;
-      if (inst === 1) {
-        paymentFeePct   = parseFloat(feeSettings.card_fee_pct || "0");
-        paymentFeeFixed = parseFloat(feeSettings.card_fee_fixed || "0");
-      } else {
-        paymentFeePct = parseFloat(feeSettings[`installment_fee_${inst}x`] || "0");
-      }
-      const paymentFee = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
-      const totalFee   = parseFloat((commissionFee + paymentFee).toFixed(2));
-      const net        = parseFloat((amount - totalFee).toFixed(2));
-      return { net, commissionFee, paymentFee, totalFee, pct: paymentFeePct, fixed: paymentFeeFixed, passedToClient: false, inst };
+      paymentFeePct   = getInstallmentPackageRate(inst);
+      paymentFeeFixed = inst === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
+      paymentFee = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
     }
-    return null;
+
+    // Taxa de antecipação
+    let anticipationFee = 0;
+    if (withAnticipation && billingMethod === "card") {
+      const inst = parseInt(billingInstallments);
+      const antMode = feeSettings.anticipation_mode || "simple";
+      if (antMode === "monthly") {
+        const monthlyRate = parseFloat(feeSettings.anticipation_monthly_rate || "1.15");
+        anticipationFee = parseFloat((amount * monthlyRate / 100 * inst).toFixed(2));
+      } else {
+        const antPct = parseFloat(feeSettings.anticipation_fee_pct || "3.5");
+        anticipationFee = parseFloat((amount * antPct / 100).toFixed(2));
+      }
+    }
+
+    const totalFee = parseFloat((commissionFee + paymentFee + anticipationFee).toFixed(2));
+    const net      = parseFloat((amount - totalFee).toFixed(2));
+    return { net, commissionFee, paymentFee, anticipationFee, totalFee, pct: paymentFeePct, fixed: paymentFeeFixed, passedToClient: false };
   };
 
   // mantém compatibilidade com código que usa .label
@@ -819,17 +845,17 @@ const MessageThread = () => {
     const maxInst = parseInt(feeSettings.max_installments || "12");
     const options = [];
     for (let i = 1; i <= maxInst; i++) {
-      const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
+      const feePct  = getInstallmentPackageRate(i);
       const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
       const fee = (amount * feePct / 100) + feeFixed;
 
       if (passFeeToClient) {
         const totalWithFee = amount + fee;
         const val = (totalWithFee / i).toFixed(2).replace(".", ",");
-        options.push({ value: String(i), label: `${i}x de R$ ${val} (Taxa: ${feePct}%)` });
+        options.push({ value: String(i), label: `${i}x de R$ ${val}` });
       } else {
         const val = (amount / i).toFixed(2).replace(".", ",");
-        options.push({ value: String(i), label: `${i}x de R$ ${val} (Sua taxa: ${feePct}%)` });
+        options.push({ value: String(i), label: `${i}x de R$ ${val}` });
       }
     }
     return options;
@@ -858,6 +884,7 @@ const MessageThread = () => {
       setBillingMethod(null);
       setBillingInstallments("1");
       setPassFeeToClient(false);
+      setBillingAnticipation(false);
       toast({ title: "Cobrança enviada!" });
     }
   };
@@ -2240,13 +2267,13 @@ const MessageThread = () => {
               </div>
 
               {billingMethod && billingAmount && parseFloat(billingAmount) > 0 &&
-            <div className="bg-muted/50 border rounded-xl p-3">
+            <div className="bg-muted/50 border rounded-xl p-3 space-y-3">
                   {billingMethod === "card" &&
-              <div className="mb-2">
+              <div>
                       <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Simulação de Parcelas (O cliente poderá alterar)</label>
                       <select
                   value={billingInstallments}
-                  onChange={(e) => setBillingInstallments(e.target.value)}
+                  onChange={(e) => { setBillingInstallments(e.target.value); setBillingAnticipation(false); }}
                   className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
                         {getBillingInstallmentOptions().map((opt) =>
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -2254,9 +2281,40 @@ const MessageThread = () => {
                       </select>
                     </div>
               }
+
+                  {/* Botões de antecipação (apenas cartão) */}
+                  {billingMethod === "card" && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1.5">Quando deseja receber?</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setBillingAnticipation(false)}
+                          className={`flex-1 py-2 rounded-xl text-[11px] font-semibold border-2 transition-all ${!billingAnticipation ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground hover:bg-muted"}`}
+                        >
+                          Sem Antecipação<br/><span className="text-[9px] font-normal">{feeSettings.transfer_period_card_days || "32"} dias úteis</span>
+                        </button>
+                        <button
+                          onClick={() => setBillingAnticipation(true)}
+                          className={`flex-1 py-2 rounded-xl text-[11px] font-semibold border-2 transition-all ${billingAnticipation ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                        >
+                          Receber Antecipado<br/><span className="text-[9px] font-normal">~{feeSettings.transfer_period_card_anticipated_days || "4"} dias úteis</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {getBillingFeeBreakdown() && (() => {
                     const b = getBillingFeeBreakdown()!;
                     const fmt = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`;
+                    const inst = parseInt(billingInstallments);
+                    const instRate = billingMethod === "card" ? getInstallmentPackageRate(inst) : 0;
+                    const isPackageMode = (feeSettings.installment_mode || "individual") === "package";
+                    const antMode = feeSettings.anticipation_mode || "simple";
+                    const antLabel = billingAnticipation
+                      ? antMode === "monthly"
+                        ? `${feeSettings.anticipation_monthly_rate || "1.15"}% × ${inst} parcelas`
+                        : `${feeSettings.anticipation_fee_pct || "3.5"}%`
+                      : null;
                     return (
                       <div className="space-y-1 text-xs">
                         <div className="flex justify-between text-muted-foreground">
@@ -2274,22 +2332,24 @@ const MessageThread = () => {
                               <span>(-) Comissão da plataforma ({feeSettings.commission_pct || "10"}%)</span>
                               <span>- {fmt(b.commissionFee)}</span>
                             </div>
-                            {b.paymentFee > 0 && (() => {
-                              const parts: string[] = [];
-                              if (b.pct > 0) parts.push(`${b.pct}%`);
-                              if (b.fixed > 0) parts.push(fmt(b.fixed));
-                              const method = billingMethod === "pix" ? "PIX" : "Cartão";
-                              const detail = parts.length > 0 ? ` (${parts.join(" + ")})` : "";
-                              return (
-                                <div className="flex justify-between text-red-500">
-                                  <span>(-) Taxa de transação {method}{detail}</span>
-                                  <span>- {fmt(b.paymentFee)}</span>
-                                </div>
-                              );
-                            })()}
+                            {b.paymentFee > 0 && (
+                              <div className="flex justify-between text-red-500">
+                                <span>
+                                  (-) Taxa {billingMethod === "pix" ? "PIX" : "Cartão"}
+                                  {billingMethod === "card" && ` (${instRate}%${isPackageMode ? " sobre total" : ""})`}
+                                </span>
+                                <span>- {fmt(b.paymentFee)}</span>
+                              </div>
+                            )}
+                            {billingAnticipation && b.anticipationFee > 0 && (
+                              <div className="flex justify-between text-orange-500">
+                                <span>(-) Taxa antecipação ({antLabel})</span>
+                                <span>- {fmt(b.anticipationFee)}</span>
+                              </div>
+                            )}
                           </>
                         )}
-                        <div className="flex justify-between font-semibold text-emerald-700 border-t pt-1 mt-1">
+                        <div className="flex justify-between font-semibold text-emerald-700 dark:text-emerald-400 border-t pt-1 mt-1">
                           <span>Você receberá</span>
                           <span>{fmt(b.net)}</span>
                         </div>

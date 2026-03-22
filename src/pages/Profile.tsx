@@ -174,7 +174,7 @@ const Profile = () => {
 
   const handleLogout = async () => {
     await signOut();
-    navigate("/");
+    window.location.href = "/login";
   };
 
   const handleDeleteAccount = async () => {

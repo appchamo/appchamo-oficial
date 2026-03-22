@@ -424,18 +424,28 @@ const MessageThread = () => {
 
   useEffect(() => {
     if (!threadId) return;
-    const channel = supabase.
-    channel(`chat-${threadId}`).
-    on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
-    (payload) => {
-      // Impede duplicação de mensagens no state
-      setMessages((prev) => {
-        if (prev.some(m => m.id === payload.new.id)) return prev;
-        return [...prev, payload.new as Message];
-      });
-    }).
-    subscribe();
-    return () => {supabase.removeChannel(channel);};
+    const channel = supabase
+      .channel(`chat-${threadId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
+        (payload) => {
+          setMessages((prev) => {
+            const incoming = payload.new as Message;
+            // Já existe pelo id real → ignora
+            if (prev.some(m => m.id === incoming.id)) return prev;
+            // Substitui possível mensagem otimista (temp-*) do mesmo remetente com mesmo conteúdo
+            const tempIdx = prev.findIndex(
+              m => m.id.startsWith("temp-") && m.sender_id === incoming.sender_id && m.content === incoming.content
+            );
+            if (tempIdx !== -1) {
+              const next = [...prev];
+              next[tempIdx] = incoming;
+              return next;
+            }
+            return [...prev, incoming];
+          });
+        })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [threadId]);
 
   useEffect(() => {
@@ -531,9 +541,16 @@ const MessageThread = () => {
     }
   }, [location.state, location.pathname, navigate]);
 
+  // Controla se é o primeiro render (scroll instantâneo) ou mensagem nova (smooth)
+  const isFirstScrollRef = useRef(true);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    if (threadId && userId && messages.length > 0) {
+    if (messages.length === 0) return;
+    const behavior = isFirstScrollRef.current ? "instant" : "smooth";
+    isFirstScrollRef.current = false;
+    bottomRef.current?.scrollIntoView({ behavior: behavior as ScrollBehavior });
+
+    if (threadId && userId) {
       supabase.from("chat_read_status" as any).upsert(
         { request_id: threadId, user_id: userId, last_read_at: new Date().toISOString() },
         { onConflict: "request_id,user_id" }
@@ -542,16 +559,40 @@ const MessageThread = () => {
   }, [messages, threadId, userId]);
 
   const handleSend = async () => {
-    if (!text.trim() || !userId || !threadId) return;
+    const content = text.trim();
+    if (!content || !userId || !threadId) return;
+
+    // ── Update otimista: mensagem aparece IMEDIATAMENTE na UI ──────────
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      sender_id: userId,
+      content,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setText("");
     setSending(true);
-    const { error } = await supabase.from("chat_messages").insert({
+
+    const { data: inserted, error } = await supabase.from("chat_messages").insert({
       request_id: threadId,
       sender_id: userId,
-      content: text.trim()
-    });
-    if (error) toast({ title: "Erro ao enviar mensagem", variant: "destructive" }); else {
-      sendMessagePushNotification(recipientUserId, text.trim());
-      setText("");
+      content,
+    }).select().maybeSingle();
+
+    if (error) {
+      // Remove a mensagem otimista em caso de erro
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setText(content); // restaura o texto
+      toast({ title: "Erro ao enviar mensagem", variant: "destructive" });
+    } else {
+      // Substitui a mensagem temp pelo registro real (evita duplicata do realtime)
+      if (inserted) {
+        setMessages((prev) =>
+          prev.map((m) => m.id === tempId ? (inserted as Message) : m)
+        );
+      }
+      sendMessagePushNotification(recipientUserId, content);
     }
     setSending(false);
   };

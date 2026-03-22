@@ -161,6 +161,8 @@ const MyCatalog = () => {
                 bucketPath="catalog"
                 currentImage={form.image_url || undefined}
                 label="Foto do produto"
+                maxSize={600}
+                quality={0.75}
               />
             </div>
             {form.image_url && (

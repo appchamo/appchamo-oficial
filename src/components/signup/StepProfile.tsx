@@ -110,6 +110,8 @@ const StepProfile = ({ accountType, onNext, onBack }: Props) => {
                   shape="round"
                   bucketPath="avatars"
                   label=""
+                  maxSize={400}
+                  quality={0.82}
                 />
               </div>
             </div>

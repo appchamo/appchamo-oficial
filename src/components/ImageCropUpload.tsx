@@ -7,12 +7,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
 interface ImageCropUploadProps {
-  onUpload: (path: string) => void; // AGORA RECEBE PATH
+  onUpload: (path: string) => void;
   aspect?: number;
   shape?: "round" | "rect";
   bucketPath?: string;
   currentImage?: string | null;
   label?: string;
+  /** Dimensão máxima (px) da imagem final. Default: 800 */
+  maxSize?: number;
+  /** Qualidade WebP 0–1. Default: 0.80 */
+  quality?: number;
 }
 
 function createImage(url: string): Promise<HTMLImageElement> {
@@ -25,28 +29,35 @@ function createImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-async function getCroppedImg(imageSrc: string, pixelCrop: Area): Promise<Blob> {
+async function getCroppedImg(
+  imageSrc: string,
+  pixelCrop: Area,
+  maxSize = 800,
+  quality = 0.80,
+): Promise<Blob> {
   const image = await createImage(imageSrc);
+
+  // Redimensiona para no máximo maxSize em qualquer dimensão
+  const scale = Math.min(maxSize / pixelCrop.width, maxSize / pixelCrop.height, 1);
+  const outW = Math.round(pixelCrop.width * scale);
+  const outH = Math.round(pixelCrop.height * scale);
+
   const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d")!;
-  canvas.width = pixelCrop.width;
-  canvas.height = pixelCrop.height;
+  ctx.imageSmoothingEnabled = true;
+  if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = "high";
 
   ctx.drawImage(
     image,
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height,
-    0,
-    0,
-    pixelCrop.width,
-    pixelCrop.height
+    pixelCrop.x, pixelCrop.y,
+    pixelCrop.width, pixelCrop.height,
+    0, 0, outW, outH,
   );
 
-  if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = "high";
   return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob!), "image/webp", 0.95);
+    canvas.toBlob((blob) => resolve(blob!), "image/webp", quality);
   });
 }
 
@@ -57,6 +68,8 @@ const ImageCropUpload = ({
   bucketPath = "general",
   currentImage,
   label = "Upload imagem",
+  maxSize = 800,
+  quality = 0.80,
 }: ImageCropUploadProps) => {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -103,7 +116,7 @@ const ImageCropUpload = ({
     setUploading(true);
 
     try {
-      const blob = await getCroppedImg(imageSrc, croppedAreaPixels);
+      const blob = await getCroppedImg(imageSrc, croppedAreaPixels, maxSize, quality);
 
       const fileName = `${bucketPath}/${Date.now()}.webp`;
 

@@ -495,11 +495,11 @@ const ProfessionalProfile = () => {
           </div>
         )}
 
-        {/* Serviços (fotos) para Pro e VIP */}
-        {(planId === "pro" || planId === "vip") && (
+        {/* Fotos de serviços — Pro, VIP e Business */}
+        {(planId === "pro" || planId === "vip" || planId === "business") && (
           <ProfessionalServices professionalId={pro.id} isOwner={isOwner} />
         )}
-        {/* Catálogo de produtos para Business (empresa) */}
+        {/* Catálogo de produtos — Business */}
         {(pro.user_type === "company" || planId === "business") && (
           <ProductCatalog professionalId={pro.id} isOwner={isOwner} />
         )}

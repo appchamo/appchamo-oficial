@@ -409,8 +409,8 @@ const AppContent = () => {
 
         {/* Logo */}
         <div className="relative flex flex-col items-center gap-4">
-          <div className="w-20 h-20 rounded-3xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center shadow-2xl">
-            <span className="text-white font-black text-4xl" style={{ fontFamily: "serif" }}>C</span>
+          <div className="w-24 h-24 rounded-3xl overflow-hidden shadow-2xl border-2 border-white/20">
+            <img src="/icon-512.png" alt="Chamô" className="w-full h-full object-cover" />
           </div>
           <div className="text-center">
             <p className="text-white font-black text-3xl tracking-tight leading-none">Chamô</p>

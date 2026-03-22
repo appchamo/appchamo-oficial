@@ -332,7 +332,7 @@ const Profile = () => {
               )}
               {editing && (
                 <div className="absolute -bottom-1 -right-1">
-                  <ImageCropUpload onUpload={handleAvatarUpload} aspect={1} shape="round" bucketPath="avatars" currentImage={profile.avatar_url} label="" />
+                  <ImageCropUpload onUpload={handleAvatarUpload} aspect={1} shape="round" bucketPath="avatars" currentImage={profile.avatar_url} label="" maxSize={400} quality={0.82} />
                 </div>
               )}
             </div>

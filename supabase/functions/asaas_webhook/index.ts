@@ -1,19 +1,41 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// ─── Helper: busca user_id do admin principal ────────────────────────────────
+async function getAdminId(supabase: any): Promise<string | null> {
+  const { data } = await supabase
+    .from("profiles")
+    .select("user_id")
+    .eq("email", "admin@appchamo.com")
+    .maybeSingle();
+  return data?.user_id ?? null;
+}
+
+// ─── Helper: notifica o admin com dedup (evita duplicata no mesmo dia) ───────
+async function notifyAdmin(supabase: any, title: string, message: string, type: string, link: string) {
+  const adminId = await getAdminId(supabase);
+  if (!adminId) return;
+  await supabase.from("notifications").insert({
+    user_id: adminId,
+    title,
+    message,
+    type,
+    link,
+    read: false,
+  });
+}
+
 serve(async (req) => {
   try {
     const WEBHOOK_TOKEN = Deno.env.get("ASAAS_WEBHOOK_TOKEN");
     const receivedToken = req.headers.get("asaas-access-token") ?? null;
 
-    // Só exige token se você configurou ASAAS_WEBHOOK_TOKEN no Supabase
     if (WEBHOOK_TOKEN && WEBHOOK_TOKEN.length > 0) {
       if (receivedToken !== WEBHOOK_TOKEN) {
         console.error("❌ Webhook: token recebido não confere com ASAAS_WEBHOOK_TOKEN.");
         return new Response("Unauthorized", { status: 401 });
       }
     }
-    // Se não configurou token no Supabase, aceita (Asaas pode não enviar header)
 
     const body = await req.json();
     console.log("ASAAS EVENT:", body.event);
@@ -51,7 +73,7 @@ serve(async (req) => {
           console.log("Transaction already completed (polling beat webhook):", payment.id);
         }
 
-        // Verifica se wallet_transaction já existe (previne duplicata se webhook disparar duas vezes)
+        // Verifica se wallet_transaction já existe
         const { data: existingWallet } = await supabase
           .from("wallet_transactions")
           .select("id")
@@ -62,12 +84,10 @@ serve(async (req) => {
           console.log("wallet_transaction already exists for transaction:", tx.id, "— skipping wallet insert");
         }
 
-        // 1b. Insere mensagem de confirmação no chat e cria wallet_transaction
-        // Roda sempre, mas wallet insert é protegido pelo check acima
+        // 1b. Chat e wallet
         if (tx.request_id && tx.client_id) {
           const totalStr = Number(tx.total_amount).toFixed(2).replace(".", ",");
 
-          // Busca o professional user_id para notificá-lo e calcular o líquido
           if (tx.client_id) {
             const { data: txFull } = await supabase
               .from("transactions")
@@ -75,12 +95,10 @@ serve(async (req) => {
               .eq("id", tx.id)
               .maybeSingle();
 
-            // professional_net já calculado no create_payment (baseado no original_amount sem cupom)
             const professionalNetStr = txFull?.professional_net
               ? Number(txFull.professional_net).toFixed(2).replace(".", ",")
               : null;
 
-            // Insere mensagem de confirmação no chat
             const confirmContent = professionalNetStr
               ? `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX\nRecebe: R$ ${professionalNetStr}`
               : `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX`;
@@ -96,18 +114,18 @@ serve(async (req) => {
             if (msgErr) console.error("chat_messages insert error:", msgErr);
             else console.log("Mensagem de confirmação inserida no chat:", tx.request_id);
 
-            // 1c. Busca avatares para incluir nas notificações push
+            // Avatares
             let clientAvatar: string | null = null;
             let proAvatar: string | null = null;
             let proUserId: string | null = null;
 
-            // Busca avatar do cliente
             const { data: clientProfile } = await supabase
               .from("profiles")
-              .select("avatar_url")
+              .select("avatar_url, full_name")
               .eq("user_id", tx.client_id)
               .maybeSingle();
             clientAvatar = (clientProfile as any)?.avatar_url ?? null;
+            const clientName: string = (clientProfile as any)?.full_name ?? "Cliente";
 
             if (txFull?.professional_id) {
               const { data: pro } = await supabase
@@ -119,14 +137,14 @@ serve(async (req) => {
                 proUserId = pro.user_id;
                 const { data: proProfile } = await supabase
                   .from("profiles")
-                  .select("avatar_url")
+                  .select("avatar_url, full_name")
                   .eq("user_id", pro.user_id)
                   .maybeSingle();
                 proAvatar = (proProfile as any)?.avatar_url ?? null;
               }
             }
 
-            // Notificação ao cliente: mostra o avatar do profissional (quem recebeu o pagamento)
+            // Notificação ao cliente
             await supabase.from("notifications").insert({
               user_id: tx.client_id,
               title: "✅ Pagamento Confirmado",
@@ -140,7 +158,6 @@ serve(async (req) => {
               const proMsg = professionalNetStr
                 ? `Você vai receber R$ ${professionalNetStr} via PIX (líquido após taxas).`
                 : `Você recebeu um pagamento via PIX de R$ ${totalStr}.`;
-              // Notificação ao profissional: mostra o avatar do cliente (quem pagou)
               await supabase.from("notifications").insert({
                 user_id: proUserId,
                 title: "💰 Pagamento Recebido!",
@@ -150,14 +167,22 @@ serve(async (req) => {
                 image_url: clientAvatar,
               } as any);
 
-              // Busca dados fiscais do profissional para verificar antecipação
+              // ── Notificação admin: nova transação ──
+              await notifyAdmin(
+                supabase,
+                "💳 Nova Transação",
+                `${clientName} realizou um pagamento de R$ ${totalStr}.`,
+                "transaction",
+                "/admin/wallet"
+              );
+
+              // Busca dados fiscais
               const { data: fiscal } = await supabase
                 .from("professional_fiscal_data")
                 .select("anticipation_enabled, payment_method")
                 .eq("professional_id", txFull.professional_id)
                 .maybeSingle();
 
-              // Busca configurações de prazo de repasse e taxas
               const { data: settings } = await supabase
                 .from("platform_settings")
                 .select("key, value")
@@ -175,7 +200,6 @@ serve(async (req) => {
               const paymentMethod = fiscal?.payment_method || "pix";
               const grossAmount = Number(tx.total_amount);
 
-              // Calcula comissão e taxa de transação separadamente
               const commissionPct = settingsMap["commission_pct"] ?? 10;
               let paymentFeePct = 0;
               let paymentFeeFixed = 0;
@@ -189,25 +213,20 @@ serve(async (req) => {
               const commissionFeeCalc = Number((grossAmount * commissionPct / 100).toFixed(2));
               const paymentFeeCalc    = Number((grossAmount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
 
-              // Usa professional_net da transactions se disponível (já calculado pelo create_payment)
               const { data: txDetail } = await supabase
                 .from("transactions")
                 .select("professional_net, platform_fee")
                 .eq("id", tx.id)
                 .maybeSingle();
 
-              // professional_net = gross - commission - payment_fee
               const professionalNet = txDetail?.professional_net != null
                 ? Number(txDetail.professional_net)
                 : Number((grossAmount - commissionFeeCalc - paymentFeeCalc).toFixed(2));
 
-              // Decompõe platform_fee do banco (commission + payment) em partes
               const totalStoredFee = txDetail?.platform_fee != null ? Number(txDetail.platform_fee) : (commissionFeeCalc + paymentFeeCalc);
-              // Se create_payment não tinha payment_fee, tenta estimar a partir das configs atuais
               const paymentFeeAmount  = paymentFeeCalc;
               const commissionAmount  = Number((totalStoredFee - paymentFeeAmount).toFixed(2));
 
-              // Calcula taxa de antecipação (só em cartão)
               let anticipationFeeAmount = 0;
               if (anticipationEnabled && paymentMethod !== "pix") {
                 const anticipationFeePct = settingsMap["anticipation_fee_pct"] || 15;
@@ -216,7 +235,6 @@ serve(async (req) => {
 
               const netAmount = Number((professionalNet - anticipationFeeAmount).toFixed(2));
 
-              // Calcula quando fica disponível para repasse
               let availableAt = new Date();
               if (paymentMethod === "pix") {
                 const hours = settingsMap["transfer_period_pix_hours"] || 12;
@@ -229,14 +247,13 @@ serve(async (req) => {
                 availableAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
               }
 
-              // Registra na carteira do profissional (só se ainda não existir)
               if (!existingWallet) {
                 const { error: walletErr } = await supabase.from("wallet_transactions").insert({
                   professional_id: txFull.professional_id,
                   transaction_id: tx.id,
                   gross_amount: grossAmount,
-                  platform_fee_amount: commissionAmount,   // só comissão
-                  payment_fee_amount: paymentFeeAmount,    // taxa Asaas/gateway
+                  platform_fee_amount: commissionAmount,
+                  payment_fee_amount: paymentFeeAmount,
                   anticipation_fee_amount: anticipationFeeAmount,
                   amount: netAmount,
                   payment_method: paymentMethod,
@@ -252,15 +269,13 @@ serve(async (req) => {
           }
         }
       } else {
-        // Nenhuma transação encontrada para este payment_id (pagamento avulso ou assinatura)
         console.log("No transaction found for payment:", payment.id, "— may be a subscription payment");
       }
 
-      // 2. NOVA MÁGICA: Se o pagamento for de uma ASSINATURA, libera o plano na hora!
+      // 2. Se o pagamento for de uma ASSINATURA
       if (payment.subscription) {
         const asaasSubscriptionId = payment.subscription;
 
-        // Busca qual usuário é o dono dessa assinatura na Chamô
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
           .select("user_id, plan_id, status")
@@ -270,18 +285,22 @@ serve(async (req) => {
         if (!subError && subData) {
           const userId = subData.user_id;
 
-          // Só ativa e notifica se ainda não estiver ACTIVE
+          // Resolve carência caso existisse
+          await supabase
+            .from("subscription_grace_periods")
+            .update({ status: "resolved", resolved_at: new Date().toISOString() })
+            .eq("asaas_subscription_id", asaasSubscriptionId)
+            .eq("status", "active");
+
           if (subData.status !== "ACTIVE") {
             await supabase
               .from("subscriptions")
               .update({ status: "ACTIVE" })
               .eq("user_id", userId);
 
-            // Atualiza user_type de acordo com o plano
             const newUserType = subData.plan_id === "business" ? "company" : "professional";
             await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);
 
-            // Manda a notificação avisando que o plano está liberado
             await supabase.from("notifications").insert({
               user_id: userId,
               title: "🚀 Plano ativado!",
@@ -290,16 +309,116 @@ serve(async (req) => {
               link: "/subscriptions",
             });
 
-            console.log(`✅ Assinatura ${asaasSubscriptionId} ativada automaticamente para o usuário ${userId} (${newUserType})`);
+            // ── Notificação admin: nova assinatura ──
+            const { data: userProfile } = await supabase
+              .from("profiles")
+              .select("full_name")
+              .eq("user_id", userId)
+              .maybeSingle();
+            const userName = (userProfile as any)?.full_name ?? "Profissional";
+            const planLabel = subData.plan_id === "business" ? "Business" : subData.plan_id === "vip" ? "VIP" : "Pro";
+            await notifyAdmin(
+              supabase,
+              "⭐ Nova Assinatura",
+              `${userName} ativou o plano ${planLabel}.`,
+              "subscription",
+              "/admin/users"
+            );
+
+            console.log(`✅ Assinatura ${asaasSubscriptionId} ativada para ${userId}`);
+          } else {
+            // Renovação bem-sucedida de plano já ativo
+            await supabase.from("notifications").insert({
+              user_id: userId,
+              title: "✅ Plano Renovado",
+              message: `Seu plano foi renovado com sucesso! Acesso garantido por mais um mês.`,
+              type: "success",
+              link: "/subscriptions",
+            });
+            console.log(`✅ Assinatura ${asaasSubscriptionId} renovada com sucesso para ${userId}`);
           }
         } else {
-          console.error("Assinatura não encontrada no banco da Chamô para o ID:", asaasSubscriptionId);
+          console.error("Assinatura não encontrada para:", asaasSubscriptionId);
         }
       }
     }
 
     // ===============================
-    // SUBSCRIPTION UPDATED (Backup do Asaas)
+    // PAGAMENTO VENCIDO → inicia carência de 7 dias
+    // ===============================
+    if (event === "PAYMENT_OVERDUE") {
+      const payment = body.payment;
+
+      if (payment.subscription) {
+        const asaasSubscriptionId = payment.subscription;
+
+        const { data: subData } = await supabase
+          .from("subscriptions")
+          .select("user_id, plan_id")
+          .eq("asaas_subscription_id", asaasSubscriptionId)
+          .maybeSingle();
+
+        if (subData?.user_id) {
+          const userId = subData.user_id;
+
+          // Verifica se já existe carência ativa para esta assinatura
+          const { data: existing } = await supabase
+            .from("subscription_grace_periods")
+            .select("id")
+            .eq("asaas_subscription_id", asaasSubscriptionId)
+            .eq("status", "active")
+            .maybeSingle();
+
+          if (!existing) {
+            const now = new Date();
+            // Próxima tentativa: dia 2 (26h depois)
+            const nextAttempt = new Date(now.getTime() + 26 * 60 * 60 * 1000);
+
+            await supabase.from("subscription_grace_periods").insert({
+              user_id: userId,
+              asaas_subscription_id: asaasSubscriptionId,
+              asaas_payment_id: payment.id,
+              attempt_count: 1,
+              started_at: now.toISOString(),
+              last_attempt_at: now.toISOString(),
+              next_attempt_at: nextAttempt.toISOString(),
+              status: "active",
+            });
+
+            // Notifica o usuário sobre a falha
+            await supabase.from("notifications").insert({
+              user_id: userId,
+              title: "⚠️ Falha na renovação do plano",
+              message: "Não conseguimos cobrar a renovação do seu plano. Verifique seu cartão. Você tem 7 dias antes do cancelamento.",
+              type: "warning",
+              link: "/subscriptions",
+            });
+
+            // Notifica admin
+            const { data: userProfile } = await supabase
+              .from("profiles")
+              .select("full_name")
+              .eq("user_id", userId)
+              .maybeSingle();
+            const userName = (userProfile as any)?.full_name ?? "Profissional";
+            await notifyAdmin(
+              supabase,
+              "⚠️ Falha de Renovação",
+              `Falha ao renovar plano de ${userName}. Carência de 7 dias iniciada.`,
+              "warning",
+              "/admin/users"
+            );
+
+            console.log(`⚠️ Carência iniciada para ${userId} (assinatura: ${asaasSubscriptionId})`);
+          } else {
+            console.log("Carência já ativa para:", asaasSubscriptionId);
+          }
+        }
+      }
+    }
+
+    // ===============================
+    // SUBSCRIPTION UPDATED
     // ===============================
     if (event === "SUBSCRIPTION_UPDATED") {
       const subscription = body.subscription;
@@ -312,7 +431,6 @@ serve(async (req) => {
       console.log("Subscription updated via event:", subscription.id);
     }
 
-    // Sempre retorna 200 pro Asaas parar de insistir
     return new Response("OK", { status: 200 });
 
   } catch (error: any) {

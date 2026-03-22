@@ -334,16 +334,14 @@ const Messages = () => {
       if (!user) throw new Error("Usuário não autenticado");
       const { error } = await supabase.from('chat_reports' as any).insert({ reporter_id: user.id, chat_id: reportingChatId, reason: reportReason.trim() });
       if (error) throw error;
-      const { data: supportProfile } = await supabase.from("profiles").select("user_id").eq("email", "suporte@appchamo.com").maybeSingle();
-      if (supportProfile?.user_id) {
-        await supabase.from("notifications").insert({
-          user_id: supportProfile.user_id,
-          title: "Nova denúncia de chat",
-          message: "Uma conversa foi denunciada. Abra a Central de Atendimento para revisar.",
-          type: "support",
-          link: "/suporte-desk",
-        });
-      }
+      const [{ data: supportProfile2 }, { data: adminProfile2 }] = await Promise.all([
+        supabase.from("profiles").select("user_id").eq("email", "suporte@appchamo.com").maybeSingle(),
+        supabase.from("profiles").select("user_id").eq("email", "admin@appchamo.com").maybeSingle(),
+      ]);
+      const reportNotifs: any[] = [];
+      if (supportProfile2?.user_id) reportNotifs.push({ user_id: supportProfile2.user_id, title: "🚨 Nova denúncia de chat", message: "Uma conversa foi denunciada. Revisar na Central.", type: "support", link: "/suporte-desk" });
+      if (adminProfile2?.user_id) reportNotifs.push({ user_id: adminProfile2.user_id, title: "🚨 Nova Denúncia", message: "Uma conversa foi denunciada por um usuário.", type: "report", link: "/suporte-desk" });
+      if (reportNotifs.length > 0) await supabase.from("notifications").insert(reportNotifs as any);
       setReportingChatId(null);
       setReportReason("");
       toast({ title: "Denúncia enviada com sucesso!" });

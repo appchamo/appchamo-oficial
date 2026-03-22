@@ -286,6 +286,29 @@ serve(async (req) => {
       link: "/subscriptions",
     });
 
+    // Notifica o admin sobre nova assinatura
+    const { data: adminRow } = await supabase
+      .from("profiles")
+      .select("user_id, full_name")
+      .eq("email", "admin@appchamo.com")
+      .maybeSingle();
+    if (adminRow?.user_id) {
+      const { data: proProfile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const proName = (proProfile as any)?.full_name ?? "Profissional";
+      const planLabel = planId === "business" ? "Business" : planId === "vip" ? "VIP" : "Pro";
+      await supabase.from("notifications").insert({
+        user_id: adminRow.user_id,
+        title: "⭐ Nova Assinatura",
+        message: `${proName} assinou o plano ${planLabel} (R$ ${value}/mês).`,
+        type: "subscription",
+        link: "/admin/users",
+      });
+    }
+
     return new Response(JSON.stringify(subscriptionData), {
       status: subscriptionResponse.status,
       headers: { "Access-Control-Allow-Origin": "*" },

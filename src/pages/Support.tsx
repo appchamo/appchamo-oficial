@@ -148,20 +148,14 @@ const Support = () => {
           content: firstThreadMessage,
         });
       }
-      const { data: supportProfile } = await supabase
-        .from("profiles")
-        .select("user_id")
-        .eq("email", "suporte@appchamo.com")
-        .maybeSingle();
-      if (supportProfile?.user_id) {
-        await supabase.from("notifications").insert({
-          user_id: supportProfile.user_id,
-          title: "Nova solicitação de suporte",
-          message: subject,
-          type: "support",
-          link: "/suporte-desk",
-        });
-      }
+      const [{ data: supportProfile }, { data: adminProfile }] = await Promise.all([
+        supabase.from("profiles").select("user_id").eq("email", "suporte@appchamo.com").maybeSingle(),
+        supabase.from("profiles").select("user_id").eq("email", "admin@appchamo.com").maybeSingle(),
+      ]);
+      const notifRows: any[] = [];
+      if (supportProfile?.user_id) notifRows.push({ user_id: supportProfile.user_id, title: "🎧 Nova solicitação de suporte", message: subject, type: "support", link: "/suporte-desk" });
+      if (adminProfile?.user_id) notifRows.push({ user_id: adminProfile.user_id, title: "🎧 Novo Suporte", message: subject, type: "support", link: "/suporte-desk" });
+      if (notifRows.length > 0) await supabase.from("notifications").insert(notifRows as any);
       if (firstThreadMessage) {
         navigate(`/support/${newTicket.id}`);
       } else {

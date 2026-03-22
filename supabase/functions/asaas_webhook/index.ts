@@ -116,7 +116,13 @@ serve(async (req) => {
 
               const anticipationEnabled = fiscal?.anticipation_enabled || false;
               const paymentMethod = fiscal?.payment_method || "pix";
-              const professionalNet = Number(tx.total_amount) - (payment.platformFee || 0);
+              // Busca professional_net já calculado na transação
+              const { data: txDetail } = await supabase
+                .from("transactions")
+                .select("professional_net, platform_fee")
+                .eq("id", tx.id)
+                .maybeSingle();
+              const professionalNet = Number(txDetail?.professional_net || tx.total_amount);
 
               // Calcula taxa de antecipação se aplicável
               let anticipationFeeAmount = 0;
@@ -145,7 +151,7 @@ serve(async (req) => {
                 professional_id: txFull.professional_id,
                 transaction_id: tx.id,
                 gross_amount: tx.total_amount,
-                platform_fee_amount: payment.platformFee || (tx.total_amount - professionalNet),
+                platform_fee_amount: txDetail?.platform_fee || (tx.total_amount - professionalNet),
                 anticipation_fee_amount: anticipationFeeAmount,
                 amount: netAmount,
                 payment_method: paymentMethod,

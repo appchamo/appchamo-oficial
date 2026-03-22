@@ -52,6 +52,7 @@ interface Pro {
   latitude: number | null;
   longitude: number | null;
   distance_km: number | null;
+  created_at: string | null;
 }
 
 interface FeaturedProfessionalsProps {
@@ -135,13 +136,12 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
       const { data: pros, error: prosErr } = await supabase
         .from("professionals")
-        .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name)")
+        .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
         .eq("active", true)
         .eq("profile_status", "approved")
         .neq("availability_status", "unavailable")
         .eq("verified", true)
-        .order("rating", { ascending: false })
-        .limit(20); // reduzido de 80 → 20
+        .limit(40);
 
       clearTimeout(watchdog);
       if (loadGenRef.current !== gen) return;
@@ -210,6 +210,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           latitude: loc?.latitude ?? null,
           longitude: loc?.longitude ?? null,
           distance_km: null as number | null,
+          created_at: (p as any).created_at as string | null,
           _city: loc?.address_city ?? null,
           _state: loc?.address_state ?? null,
         };
@@ -218,11 +219,16 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       const filtered = (userCity || userState)
         ? withLocation.filter((p) => sameCityState(userCity, userState, p._city, p._state))
         : withLocation;
-      // Ordem aleatória a cada carregamento
-      for (let i = filtered.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
-      }
+
+      // Critério 1: mais serviços → Critério 2: maior rating → Critério 3: quem se cadastrou primeiro
+      filtered.sort((a, b) => {
+        if (b.total_services !== a.total_services) return b.total_services - a.total_services;
+        if (b.rating !== a.rating) return b.rating - a.rating;
+        const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return tA - tB; // mais antigo aparece primeiro
+      });
+
       const top10 = filtered.slice(0, 10).map(({ _city, _state, ...p }) => p);
 
       diagLog("info", "featured", "pros computed", { total: pros.length, filtered: filtered.length, shown: top10.length });

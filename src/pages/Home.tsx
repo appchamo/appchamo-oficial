@@ -634,8 +634,6 @@ const Home = () => {
           {sections.filter((s) => s.visible).map((section) => {
             const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
             const isWelcomeCollapsed = section.id === "welcome";
-            const blockIsNull = block === null || block === undefined;
-            const minHeight = isWelcomeCollapsed || isJobsEmpty || blockIsNull ? "" : (sectionMinHeights[section.id] || "");
             const heavyDefer =
               Capacitor.isNativePlatform() &&
               !heavySectionsReady &&
@@ -651,6 +649,9 @@ const Home = () => {
               ) : (
                 sectionComponents[section.id]
               );
+            // blockIsNull declarado APÓS block para evitar TDZ (Temporal Dead Zone)
+            const blockIsNull = block === null || block === undefined;
+            const minHeight = isWelcomeCollapsed || isJobsEmpty || blockIsNull ? "" : (sectionMinHeights[section.id] || "");
             return (
               <div key={section.id} className={`w-full ${minHeight}`}>
                 {/* Carrossel de alertas aparece ACIMA dos tutoriais */}

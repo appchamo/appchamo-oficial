@@ -142,6 +142,7 @@ const MessageThread = () => {
   /** Parâmetros do pagamento PIX em andamento; usados ao confirmar (polling ou realtime). */
   const pixConfirmParamsRef = useRef<{
     threadId: string; userId: string; chatProUserId: string; finalAmount: number;
+    originalAmount: number;
     couponDiscount: { type: string; value: number } | null; selectedCouponId: string | null;
     paymentDataAmount: string;
   } | null>(null);
@@ -296,6 +297,7 @@ const MessageThread = () => {
           userId: userId!,
           chatProUserId: chatProUserId || "",
           finalAmount: tx.total_amount,
+          originalAmount: tx.total_amount,
           couponDiscount: null,
           selectedCouponId: null,
           paymentDataAmount: String(tx.total_amount),
@@ -491,7 +493,8 @@ const MessageThread = () => {
           const discountNote = params.couponDiscount
             ? `\nDesconto: ${params.couponDiscount.type === "percentage" ? `${params.couponDiscount.value}%` : `R$ ${params.couponDiscount.value.toFixed(2).replace(".", ",")}`}`
             : "";
-          const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${params.finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX`;
+          const proNet = calcProfessionalNet(params.originalAmount, "pix");
+          const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${params.finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX\nRecebe: R$ ${proNet.toFixed(2).replace(".", ",")}`;
           await supabase.from("chat_messages").insert({
             request_id: params.threadId,
             sender_id: params.userId,
@@ -500,8 +503,8 @@ const MessageThread = () => {
           if (params.selectedCouponId) {
             await supabase.from("coupons").update({ used: true } as any).eq("id", params.selectedCouponId);
           }
-          await sendNotification(params.userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${params.finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
-          if (params.chatProUserId) await sendNotification(params.chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${params.finalAmount.toFixed(2).replace(".", ",")}!`);
+          await sendNotification(params.userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${params.finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
+          if (params.chatProUserId) await sendNotification(params.chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNet.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`);
           await awardPostPaymentCoupon(parseFloat(params.paymentDataAmount));
           toast({ title: "Pagamento PIX confirmado!" });
           setPixOpen(false);
@@ -702,6 +705,23 @@ const MessageThread = () => {
   };
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  // Calcula o líquido do profissional sobre um valor ORIGINAL (sem desconto de cupom)
+  const calcProfessionalNet = (originalAmount: number, method: "pix" | "card", installments = 1): number => {
+    const commissionPct = parseFloat(feeSettings.commission_pct || "10");
+    const commission = parseFloat((originalAmount * commissionPct / 100).toFixed(2));
+    let gatewayFee = 0;
+    if (method === "pix") {
+      const pct   = parseFloat(feeSettings.pix_fee_pct || "0");
+      const fixed = parseFloat(feeSettings.pix_fee_fixed || "0");
+      gatewayFee = parseFloat(((originalAmount * pct / 100) + fixed).toFixed(2));
+    } else {
+      const feePct = installments === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${installments}x`] || "0");
+      const feeFixed = installments === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
+      gatewayFee = parseFloat(((originalAmount * feePct / 100) + feeFixed).toFixed(2));
+    }
+    return parseFloat((originalAmount - commission - gatewayFee).toFixed(2));
+  };
 
   const getBillingFeeBreakdown = () => {
     if (!billingMethod || !billingAmount) return null;
@@ -1242,6 +1262,7 @@ const MessageThread = () => {
             action: "create_service_payment",
             request_id: threadId,
             amount: finalAmount,
+            original_amount: parseFloat(paymentData.amount), // valor sem desconto de cupom
             billing_type: "PIX",
           }),
         });
@@ -1269,6 +1290,7 @@ const MessageThread = () => {
           userId: userId!,
           chatProUserId: chatProUserId || "",
           finalAmount,
+          originalAmount: parseFloat(paymentData.amount), // valor original sem desconto de cupom
           couponDiscount,
           selectedCouponId,
           paymentDataAmount: paymentData.amount,
@@ -1295,7 +1317,9 @@ const MessageThread = () => {
               const discountNote = couponDiscount ?
               `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
               "";
-              const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX`;
+              const originalAmt = parseFloat(paymentData?.amount || String(finalAmount));
+              const proNetPoll = calcProfessionalNet(originalAmt, "pix");
+              const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX\nRecebe: R$ ${proNetPoll.toFixed(2).replace(".", ",")}`;
 
               await supabase.from("chat_messages").insert({
                 request_id: threadId,
@@ -1307,8 +1331,8 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
-              await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
-              if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via PIX no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
+              await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
+              if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetPoll.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`);
 
               await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
@@ -1332,7 +1356,9 @@ const MessageThread = () => {
       const discountNote = couponDiscount ?
       `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
       "";
-      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: ${methodLabel}`;
+      const originalAmtCard = parseFloat(paymentData.amount);
+      const proNetCard = calcProfessionalNet(originalAmtCard, "card", parseInt(installments));
+      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: ${methodLabel}\nRecebe: R$ ${proNetCard.toFixed(2).replace(".", ",")}`;
 
       await supabase.from("chat_messages").insert({
         request_id: threadId,
@@ -1344,8 +1370,8 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
-      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento no Cartão de Crédito no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
-      await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um novo pagamento via Cartão no valor de R$ ${finalAmount.toFixed(2).replace(".", ",")}!`);
+      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
+      await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetCard.toFixed(2).replace(".", ",")} via Cartão (líquido após taxas).`);
 
       await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
@@ -1532,12 +1558,22 @@ const MessageThread = () => {
     }
 
     if (isPaymentConfirm) {
+      const lines = msg.content.split("\n").slice(1);
+      // "Recebe: R$X" só aparece para o profissional (quem recebe a mensagem, não quem enviou)
+      const visibleLines = isMine
+        ? lines.filter(l => !l.startsWith("Recebe:"))
+        : lines;
       return (
         <div className="space-y-1">
           <p className="font-semibold flex items-center gap-1.5"><Check className="w-4 h-4" /> Pagamento confirmado</p>
-          {msg.content.split("\n").slice(1).map((line, i) =>
-          <p key={i} className="text-xs opacity-80">{line}</p>
-          )}
+          {visibleLines.map((line, i) => {
+            const isReceive = line.startsWith("Recebe:");
+            return (
+              <p key={i} className={`text-xs ${isReceive ? "font-bold text-emerald-300 mt-1" : "opacity-80"}`}>
+                {isReceive ? `💰 ${line}` : line}
+              </p>
+            );
+          })}
         </div>);
     }
 

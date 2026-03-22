@@ -185,6 +185,9 @@ serve(async (req) => {
     if (!request_id || !amount) {
       throw new Error("request_id and amount required");
     }
+    // original_amount: valor original antes do cupom — usado para calcular professional_net
+    // amount: valor que o cliente efetivamente paga (pode ter desconto de cupom)
+    const originalAmountRaw = body.original_amount ?? amount;
 
     // ===============================
     // Buscar service request
@@ -239,7 +242,8 @@ serve(async (req) => {
     // ===============================
     // Cálculos — lê configurações da plataforma
     // ===============================
-    const totalAmount = Number(amount);
+    const totalAmount    = Number(amount);           // valor que o Asaas cobra do cliente (pode ser com desconto)
+    const originalAmount = Number(originalAmountRaw); // valor original sem desconto de cupom
 
     const settingsKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed"];
     const { data: settingsRows } = await supabase
@@ -254,10 +258,11 @@ serve(async (req) => {
     const pixFeePct    = cfg["pix_fee_pct"] ?? 0;
     const pixFeeFixed  = cfg["pix_fee_fixed"] ?? 0;
 
-    const commissionFee  = Number((totalAmount * commissionPct / 100).toFixed(2));
-    const paymentFee     = Number((totalAmount * pixFeePct / 100 + pixFeeFixed).toFixed(2));
+    // Taxas calculadas sobre o valor ORIGINAL (profissional não é penalizado pelo cupom)
+    const commissionFee  = Number((originalAmount * commissionPct / 100).toFixed(2));
+    const paymentFee     = Number((originalAmount * pixFeePct / 100 + pixFeeFixed).toFixed(2));
     const platformFee    = Number((commissionFee + paymentFee).toFixed(2));
-    const professionalNet = Number((totalAmount - platformFee).toFixed(2));
+    const professionalNet = Number((originalAmount - platformFee).toFixed(2));
 
     // ===============================
     // Customer
@@ -300,6 +305,7 @@ serve(async (req) => {
         professional_id: professionalId,
         request_id: request_id,
         total_amount: totalAmount,
+        original_amount: originalAmount,
         platform_fee: platformFee,
         commission_fee: commissionFee,
         payment_fee: paymentFee,

@@ -34,7 +34,7 @@ serve(async (req) => {
       // 1. Busca a transação pelo payment_id do Asaas
       const { data: tx } = await supabase
         .from("transactions")
-        .select("id, request_id, client_id, total_amount, status")
+        .select("id, request_id, client_id, total_amount, original_amount, status")
         .eq("asaas_payment_id", payment.id)
         .maybeSingle();
 
@@ -51,35 +51,44 @@ serve(async (req) => {
         // 1b. Insere mensagem de confirmação no chat (frontend Realtime a detecta em tempo real)
         if (tx.request_id && tx.client_id) {
           const totalStr = Number(tx.total_amount).toFixed(2).replace(".", ",");
-          const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX`;
 
-          const { error: msgErr } = await supabase
-            .from("chat_messages")
-            .insert({
-              request_id: tx.request_id,
-              sender_id: tx.client_id,
-              content: confirmContent,
-            });
-
-          if (msgErr) console.error("chat_messages insert error:", msgErr);
-          else console.log("Mensagem de confirmação inserida no chat:", tx.request_id);
-
-          // 1c. Notificações
-          await supabase.from("notifications").insert({
-            user_id: tx.client_id,
-            title: "✅ Pagamento Confirmado",
-            message: `Seu pagamento via PIX de R$ ${totalStr} foi confirmado.`,
-            type: "success",
-            link: `/messages/${tx.request_id}`,
-          });
-
-          // Busca o professional user_id para notificá-lo
+          // Busca o professional user_id para notificá-lo e calcular o líquido
           if (tx.client_id) {
             const { data: txFull } = await supabase
               .from("transactions")
-              .select("professional_id")
+              .select("professional_id, professional_net, original_amount")
               .eq("id", tx.id)
               .maybeSingle();
+
+            // professional_net já calculado no create_payment (baseado no original_amount sem cupom)
+            const professionalNetStr = txFull?.professional_net
+              ? Number(txFull.professional_net).toFixed(2).replace(".", ",")
+              : null;
+
+            // Insere mensagem de confirmação no chat
+            const confirmContent = professionalNetStr
+              ? `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX\nRecebe: R$ ${professionalNetStr}`
+              : `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX`;
+
+            const { error: msgErr } = await supabase
+              .from("chat_messages")
+              .insert({
+                request_id: tx.request_id,
+                sender_id: tx.client_id,
+                content: confirmContent,
+              });
+
+            if (msgErr) console.error("chat_messages insert error:", msgErr);
+            else console.log("Mensagem de confirmação inserida no chat:", tx.request_id);
+
+            // 1c. Notificações
+            await supabase.from("notifications").insert({
+              user_id: tx.client_id,
+              title: "✅ Pagamento Confirmado",
+              message: `Seu pagamento via PIX de R$ ${totalStr} foi confirmado.`,
+              type: "success",
+              link: `/messages/${tx.request_id}`,
+            });
 
             if (txFull?.professional_id) {
               const { data: pro } = await supabase
@@ -89,10 +98,13 @@ serve(async (req) => {
                 .maybeSingle();
 
               if (pro?.user_id) {
+                const proMsg = professionalNetStr
+                  ? `Você vai receber R$ ${professionalNetStr} via PIX (líquido após taxas).`
+                  : `Você recebeu um pagamento via PIX de R$ ${totalStr}.`;
                 await supabase.from("notifications").insert({
                   user_id: pro.user_id,
                   title: "💰 Pagamento Recebido!",
-                  message: `Você recebeu um pagamento via PIX de R$ ${totalStr}.`,
+                  message: proMsg,
                   type: "success",
                   link: `/messages/${tx.request_id}`,
                 });

@@ -39,8 +39,8 @@ const ProfessionalDashboard = () => {
 
   const actions = [
     { icon: Pencil, label: "Editar perfil", description: "Atualize suas informações", path: "/profile" },
-    { icon: DollarSign, label: "Financeiro", description: "Relatório de faturamento", path: "/pro/financeiro" },
-    { icon: Wallet, label: "Carteira", description: "Valores a receber e recebidos", path: "/pro/carteira" },
+    { icon: Wallet, label: "Carteira", description: "Saldo a receber e recebido", path: "/pro/financeiro" },
+    { icon: DollarSign, label: "Extrato", description: "Relatório de faturamento", path: "/pro/financeiro?tab=transactions" },
     { icon: CreditCard, label: "Minha assinatura", description: "Gerencie seu plano", path: "/subscriptions" },
     ...(plan?.id === "business" && profile?.user_type === "company"
       ? [{ icon: ShoppingBag, label: "Catálogo de Produtos", description: "Gerencie seus produtos e serviços", path: "/my-catalog" }]

@@ -1,8 +1,8 @@
 import AppLayout from "@/components/AppLayout";
-import { DollarSign, TrendingUp, Calendar, Landmark, FileText, AlertTriangle, Save, Loader2, Info } from "lucide-react";
+import { DollarSign, TrendingUp, Calendar, Landmark, FileText, AlertTriangle, Save, Loader2, Info, Wallet, Clock, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import React, { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -615,6 +615,119 @@ const TransactionsTab = ({ proId }: { proId: string }) => {
   );
 };
 
+// === Wallet Tab ===
+interface WalletTxItem { id: string; amount: number; description: string; status: string; created_at: string; transferred_at: string | null; }
+const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const WalletTab = ({ proId }: { proId: string }) => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [txs, setTxs] = useState<WalletTxItem[]>([]);
+  const [pixKey, setPixKey] = useState<string | null>(null);
+  const [pixKeyType, setPixKeyType] = useState<string | null>(null);
+  const [walletTab, setWalletTab] = useState<"pending" | "transferred">("pending");
+
+  const loadWallet = async () => {
+    const [{ data: fiscal }, { data: walletData }] = await Promise.all([
+      supabase.from("professional_fiscal_info").select("pix_key, pix_key_type").eq("professional_id", proId).maybeSingle(),
+      supabase.from("wallet_transactions").select("id, amount, description, status, created_at, transferred_at")
+        .eq("professional_id", proId).order("created_at", { ascending: false }),
+    ]);
+    setPixKey(fiscal?.pix_key || null);
+    setPixKeyType(fiscal?.pix_key_type || null);
+    setTxs((walletData || []).map(t => ({ ...t, amount: Number(t.amount) })));
+    setLoading(false);
+  };
+
+  useEffect(() => { loadWallet(); }, [proId]);
+
+  useEffect(() => {
+    const ch = supabase.channel(`wallet_pro_${proId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "wallet_transactions", filter: `professional_id=eq.${proId}` }, loadWallet)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [proId]);
+
+  const pending = txs.filter(t => t.status === "pending");
+  const transferred = txs.filter(t => t.status === "transferred");
+  const pendingTotal = pending.reduce((s, t) => s + t.amount, 0);
+  const transferredTotal = transferred.reduce((s, t) => s + t.amount, 0);
+  const displayed = walletTab === "pending" ? pending : transferred;
+
+  if (loading) return <div className="flex justify-center py-10"><Loader2 className="w-7 h-7 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="space-y-4">
+      {!pixKey ? (
+        <div onClick={() => {}} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-800">Cadastre sua chave PIX</p>
+            <p className="text-xs text-amber-700">Vá em "Cadastro Fiscal" para cadastrar seus dados de recebimento</p>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-center gap-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-emerald-800">Chave PIX cadastrada</p>
+            <p className="text-xs text-emerald-700">{pixKeyType?.toUpperCase()}: {pixKey}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border bg-amber-50 border-amber-200 p-4">
+          <p className="text-xs text-amber-700 font-medium flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> A Receber</p>
+          <p className="text-xl font-bold text-amber-800 mt-1">{fmtBRL(pendingTotal)}</p>
+          <p className="text-xs text-amber-600 mt-0.5">{pending.length} pagamento{pending.length !== 1 ? "s" : ""}</p>
+        </div>
+        <div className="rounded-xl border bg-emerald-50 border-emerald-200 p-4">
+          <p className="text-xs text-emerald-700 font-medium flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Recebido</p>
+          <p className="text-xl font-bold text-emerald-800 mt-1">{fmtBRL(transferredTotal)}</p>
+          <p className="text-xs text-emerald-600 mt-0.5">{transferred.length} repasse{transferred.length !== 1 ? "s" : ""}</p>
+        </div>
+      </div>
+
+      <div className="flex rounded-lg border overflow-hidden">
+        <button onClick={() => setWalletTab("pending")} className={`flex-1 py-2 text-sm font-medium transition-colors ${walletTab === "pending" ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted"}`}>
+          A Receber
+        </button>
+        <button onClick={() => setWalletTab("transferred")} className={`flex-1 py-2 text-sm font-medium transition-colors ${walletTab === "transferred" ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted"}`}>
+          Recebidos
+        </button>
+      </div>
+
+      {displayed.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <Wallet className="w-10 h-10 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">{walletTab === "pending" ? "Nenhum valor pendente" : "Nenhum repasse ainda"}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {displayed.map(tx => (
+            <div key={tx.id} className="flex items-center justify-between border rounded-xl px-4 py-3 bg-white">
+              <div>
+                <p className="text-sm font-medium">{tx.description}</p>
+                <p className="text-xs text-muted-foreground">
+                  {new Date(tx.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+                  {tx.transferred_at && ` · Recebido ${new Date(tx.transferred_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`font-bold ${tx.status === "pending" ? "text-amber-700" : "text-emerald-700"}`}>{fmtBRL(tx.amount)}</span>
+                {tx.status === "pending"
+                  ? <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pendente</span>
+                  : <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Recebido</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // === Main Component ===
 
 
@@ -626,7 +739,7 @@ const ProfessionalFinancial = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const initialTab =
-    tabParam === "transactions" || tabParam === "fees" || tabParam === "fiscal" ? tabParam : "fiscal";
+    tabParam === "transactions" || tabParam === "fees" || tabParam === "fiscal" || tabParam === "wallet" ? tabParam : "wallet";
   const [activeTab, setActiveTab] = useState(initialTab);
   const [taxasSeen, setTaxasSeen] = useState(() => {
     try {
@@ -644,14 +757,14 @@ const ProfessionalFinancial = () => {
 
   useEffect(() => {
     const t = searchParams.get("tab");
-    if (t === "fiscal" || t === "transactions" || t === "fees") setActiveTab(t);
+    if (t === "fiscal" || t === "transactions" || t === "fees" || t === "wallet") setActiveTab(t);
   }, [searchParams]);
 
   const userDoc = profile?.cpf || profile?.cnpj || null;
 
   const onTabChange = (v: string) => {
     setActiveTab(v);
-    setSearchParams(v === "fiscal" ? {} : { tab: v }, { replace: true });
+    setSearchParams(v === "wallet" ? {} : { tab: v }, { replace: true });
     if (v === "fees") {
       try {
         localStorage.setItem(TAXAS_SEEN_KEY, "1");
@@ -675,12 +788,16 @@ const ProfessionalFinancial = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <h1 className="text-xl font-bold text-foreground mb-5">Financeiro</h1>
+        <h1 className="text-xl font-bold text-foreground mb-5">Carteira</h1>
         <Tabs value={activeTab} onValueChange={onTabChange} className="w-full">
-          <TabsList className="mb-4 w-full h-auto p-1.5 bg-muted/60 rounded-xl grid grid-cols-3 gap-1.5 border border-primary/20">
+          <TabsList className="mb-4 w-full h-auto p-1.5 bg-muted/60 rounded-xl grid grid-cols-4 gap-1.5 border border-primary/20">
+            <TabsTrigger value="wallet" className={tabBase}>
+              <Wallet className="w-3.5 h-3.5 mr-1 shrink-0" />
+              Carteira
+            </TabsTrigger>
             <TabsTrigger value="fiscal" className={tabBase}>
               <FileText className="w-3.5 h-3.5 mr-1 shrink-0" />
-              Cadastro Fiscal
+              Fiscal
             </TabsTrigger>
             <TabsTrigger value="transactions" className={tabBase}>
               <DollarSign className="w-3.5 h-3.5 mr-1 shrink-0" />
@@ -699,6 +816,7 @@ const ProfessionalFinancial = () => {
               Taxas
             </TabsTrigger>
           </TabsList>
+          <TabsContent value="wallet"><WalletTab proId={proId} /></TabsContent>
           <TabsContent value="fiscal"><FiscalTab proId={proId} userDoc={userDoc} /></TabsContent>
           <TabsContent value="transactions"><TransactionsTab proId={proId} /></TabsContent>
           <TabsContent value="fees"><FeePreferencesTab proId={proId} /></TabsContent>

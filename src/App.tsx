@@ -398,8 +398,31 @@ const AppContent = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#1A0B00]">
-        <Loader2 className="w-10 h-10 text-primary animate-spin" />
+      <div
+        className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden"
+        style={{ background: "linear-gradient(160deg, #f97316 0%, #ea580c 55%, #c2410c 100%)" }}
+      >
+        {/* Círculos decorativos de fundo */}
+        <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-white/10" />
+        <div className="absolute -bottom-24 -left-16 w-64 h-64 rounded-full bg-white/5" />
+        <div className="absolute top-1/3 left-8 w-16 h-16 rounded-full bg-white/10" />
+
+        {/* Logo */}
+        <div className="relative flex flex-col items-center gap-4">
+          <div className="w-20 h-20 rounded-3xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center shadow-2xl">
+            <span className="text-white font-black text-4xl" style={{ fontFamily: "serif" }}>C</span>
+          </div>
+          <div className="text-center">
+            <p className="text-white font-black text-3xl tracking-tight leading-none">Chamô</p>
+            <p className="text-white/70 text-sm font-medium mt-1">Conectando você a quem resolve</p>
+          </div>
+        </div>
+
+        {/* Spinner */}
+        <div className="absolute bottom-20 flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-3 border-white/30 border-t-white animate-spin" style={{ borderWidth: 3 }} />
+          <p className="text-white/60 text-xs font-medium">Carregando...</p>
+        </div>
       </div>
     );
   }

@@ -585,21 +585,21 @@ const SponsorDashboard = () => {
                 </button>
               )}
               <ShoppingCart className="w-5 h-5 text-primary" />
-              {upgradeStep === "success" ? "Pacote ativado!" : "Assinar pacote"}
+              {upgradeStep === "success" ? "Pacote ativado!" : "Comprar pacote"}
             </DialogTitle>
           </DialogHeader>
 
           {/* STEP 1: Escolha do pacote */}
           {upgradeStep === "package" && (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Escolha o pacote de novidades mensais:</p>
+              <p className="text-sm text-muted-foreground">Escolha o pacote de novidades:</p>
               {sponsor.weekly_plan !== "pack_14" && sponsor.weekly_plan !== "pack_28" && (
                 <button onClick={() => setSelectedPack("pack_14")}
                   className={`w-full p-4 rounded-2xl border-2 text-left transition-colors ${selectedPack === "pack_14" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-bold text-sm">14 novidades/semana</p>
-                      <p className="text-xs text-muted-foreground">Assinatura mensal</p>
+                      <p className="text-xs text-muted-foreground">Pagamento único • renove quando quiser</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <p className="font-bold text-primary">{pack14Price ? `R$ ${parseFloat(pack14Price).toFixed(2).replace(".", ",")}` : "—"}</p>
@@ -613,7 +613,7 @@ const SponsorDashboard = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-bold text-sm">28 novidades/semana</p>
-                    <p className="text-xs text-muted-foreground">Assinatura mensal</p>
+                    <p className="text-xs text-muted-foreground">Pagamento único • renove quando quiser</p>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 mt-1 inline-block">Mais popular</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -640,7 +640,7 @@ const SponsorDashboard = () => {
                   <QrCode className="w-8 h-8 text-green-600" />
                   <div>
                     <p className="font-bold text-sm">PIX</p>
-                    <p className="text-xs text-muted-foreground">QR code gerado na hora. Renova manualmente todo mês.</p>
+                    <p className="text-xs text-muted-foreground">QR code gerado na hora. Compra única.</p>
                   </div>
                 </div>
               </button>
@@ -650,7 +650,7 @@ const SponsorDashboard = () => {
                   <CreditCard className="w-8 h-8 text-blue-600" />
                   <div>
                     <p className="font-bold text-sm">Cartão de Crédito</p>
-                    <p className="text-xs text-muted-foreground">Cobrança automática todo mês. Cancele quando quiser.</p>
+                    <p className="text-xs text-muted-foreground">Pagamento único. Compre de novo quando precisar.</p>
                   </div>
                 </div>
               </button>
@@ -685,7 +685,7 @@ const SponsorDashboard = () => {
           {upgradeStep === "pix_qr" && pixQrCode && (
             <div className="space-y-4 text-center">
               <p className="text-sm font-semibold">Escaneie o QR Code para pagar</p>
-              <p className="text-xs text-muted-foreground">Valor: <strong>R$ {pixAmount.toFixed(2).replace(".", ",")}</strong>/mês</p>
+              <p className="text-xs text-muted-foreground">Valor: <strong>R$ {pixAmount.toFixed(2).replace(".", ",")}</strong></p>
               <div className="flex justify-center">
                 <img src={`data:image/png;base64,${pixQrCode}`} alt="PIX QR Code" className="w-48 h-48 rounded-2xl border" />
               </div>
@@ -752,8 +752,9 @@ const SponsorDashboard = () => {
               <div>
                 <p className="font-bold text-lg text-foreground">Pacote ativado!</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Suas novidades semanais foram ampliadas.{" "}
-                  {selectedPack === "pack_28" ? "28" : "14"} publicações por semana por 31 dias.
+                  Seu limite foi ampliado para{" "}
+                  {selectedPack === "pack_28" ? "28" : "14"} novidades por semana.
+                  Quando atingir o limite, basta comprar novamente.
                 </p>
               </div>
               <button onClick={() => { resetUpgradeModal(); setUpgradeOpen(false); }}

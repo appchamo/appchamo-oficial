@@ -272,7 +272,7 @@ serve(async (req) => {
       console.log("No transaction found for payment:", payment.id, "— may be a subscription payment");
     }
 
-      // 2a. Pagamento de PATROCINADOR (PIX avulso ou renovação de assinatura CC)
+      // 2. Pagamento de PATROCINADOR (compra única PIX ou CC)
       const { data: sponsorPayment } = await supabase
         .from("sponsor_payments")
         .select("id, sponsor_id, pack, status")
@@ -280,17 +280,17 @@ serve(async (req) => {
         .maybeSingle();
 
       if (sponsorPayment && sponsorPayment.status !== "active") {
-        const expiresAt = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+        // Ativa o pacote: atualiza weekly_plan
         await supabase.from("sponsor_payments")
           .update({ status: "active" })
           .eq("id", sponsorPayment.id);
         await supabase.from("sponsors")
-          .update({ weekly_plan: sponsorPayment.pack, plan_expires_at: expiresAt })
+          .update({ weekly_plan: sponsorPayment.pack })
           .eq("id", sponsorPayment.sponsor_id);
 
         const { data: sp } = await supabase
           .from("sponsors")
-          .select("user_id, name")
+          .select("user_id")
           .eq("id", sponsorPayment.sponsor_id)
           .maybeSingle();
         if (sp?.user_id) {
@@ -298,38 +298,12 @@ serve(async (req) => {
           await supabase.from("notifications").insert({
             user_id: sp.user_id,
             title: "🎉 Pacote ativado!",
-            message: `Seu pacote de ${packLabel} foi ativado! Válido por 31 dias.`,
+            message: `Seu pacote de ${packLabel} foi ativado com sucesso!`,
             type: "success",
             link: "/sponsor/dashboard",
           });
         }
         console.log("✅ Sponsor pack activated via webhook:", sponsorPayment.sponsor_id);
-      }
-
-      // 2b. Renovação de assinatura CC de patrocinador (payment.subscription)
-      if (payment.subscription && !sponsorPayment) {
-        const { data: spBySub } = await supabase
-          .from("sponsors")
-          .select("id, weekly_plan, user_id")
-          .eq("asaas_subscription_id", payment.subscription)
-          .maybeSingle();
-
-        if (spBySub) {
-          const expiresAt = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
-          await supabase.from("sponsors")
-            .update({ plan_expires_at: expiresAt })
-            .eq("id", spBySub.id);
-          if (spBySub.user_id) {
-            await supabase.from("notifications").insert({
-              user_id: spBySub.user_id,
-              title: "✅ Pacote renovado!",
-              message: `Sua assinatura de novidades foi renovada por mais um mês.`,
-              type: "success",
-              link: "/sponsor/dashboard",
-            });
-          }
-          console.log("✅ Sponsor subscription renewed:", spBySub.id);
-        }
       }
 
       // 3. Se o pagamento for de uma ASSINATURA de profissional

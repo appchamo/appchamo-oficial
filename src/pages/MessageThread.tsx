@@ -786,50 +786,79 @@ const MessageThread = () => {
     return parseFloat(feeSettings[`installment_fee_${installments}x`] || "0");
   };
 
+  /** Calcula taxa de antecipação sobre o valor base */
+  const calcAnticipationFee = (amount: number, installments: number): number => {
+    const antMode = feeSettings.anticipation_mode || "simple";
+    if (antMode === "monthly") {
+      const monthlyRate = parseFloat(feeSettings.anticipation_monthly_rate || "1.15");
+      return parseFloat((amount * monthlyRate / 100 * installments).toFixed(2));
+    }
+    const antPct = parseFloat(feeSettings.anticipation_fee_pct || "3.5");
+    return parseFloat((amount * antPct / 100).toFixed(2));
+  };
+
   const getBillingFeeBreakdown = (withAnticipation = billingAnticipation) => {
     if (!billingMethod || !billingAmount) return null;
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return null;
 
-    const commissionPct = parseFloat(feeSettings.commission_pct || "10");
-    const commissionFee = parseFloat((amount * commissionPct / 100).toFixed(2));
+    const commissionPct  = parseFloat(feeSettings.commission_pct || "10");
+    const commissionFee  = parseFloat((amount * commissionPct / 100).toFixed(2));
 
-    if (passFeeToClient) {
-      return { net: amount, commissionFee, paymentFee: 0, anticipationFee: 0, totalFee: commissionFee, passedToClient: true, pct: 0, fixed: 0 };
-    }
-
-    let paymentFee = 0;
-    let paymentFeePct = 0;
+    let paymentFeePct   = 0;
     let paymentFeeFixed = 0;
+    let paymentFee      = 0;
 
     if (billingMethod === "pix") {
       paymentFeePct   = parseFloat(feeSettings.pix_fee_pct || "0");
       paymentFeeFixed = parseFloat(feeSettings.pix_fee_fixed || "0");
-      paymentFee = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
+      paymentFee      = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
     } else if (billingMethod === "card") {
-      const inst = parseInt(billingInstallments);
+      const inst      = parseInt(billingInstallments);
       paymentFeePct   = getInstallmentPackageRate(inst);
       paymentFeeFixed = inst === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
-      paymentFee = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
+      paymentFee      = parseFloat((amount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
     }
 
     // Taxa de antecipação
-    let anticipationFee = 0;
-    if (withAnticipation && billingMethod === "card") {
-      const inst = parseInt(billingInstallments);
-      const antMode = feeSettings.anticipation_mode || "simple";
-      if (antMode === "monthly") {
-        const monthlyRate = parseFloat(feeSettings.anticipation_monthly_rate || "1.15");
-        anticipationFee = parseFloat((amount * monthlyRate / 100 * inst).toFixed(2));
-      } else {
-        const antPct = parseFloat(feeSettings.anticipation_fee_pct || "3.5");
-        anticipationFee = parseFloat((amount * antPct / 100).toFixed(2));
-      }
+    const anticipationFee = (withAnticipation && billingMethod === "card")
+      ? calcAnticipationFee(amount, parseInt(billingInstallments))
+      : 0;
+
+    if (passFeeToClient) {
+      // Todas as taxas são embutidas no valor cobrado do cliente.
+      // O profissional recebe o valor base integral.
+      const totalAddedToClient = parseFloat((commissionFee + paymentFee + anticipationFee).toFixed(2));
+      const clientTotal = parseFloat((amount + totalAddedToClient).toFixed(2));
+      return {
+        net: amount,             // profissional recebe valor base
+        commissionFee,
+        paymentFee,
+        anticipationFee,
+        totalAddedToClient,
+        clientTotal,
+        totalFee: 0,             // profissional não paga nada
+        pct: paymentFeePct,
+        fixed: paymentFeeFixed,
+        passedToClient: true,
+      };
     }
 
+    // "Sem Juros" — todas as taxas saem do bolso do profissional
     const totalFee = parseFloat((commissionFee + paymentFee + anticipationFee).toFixed(2));
     const net      = parseFloat((amount - totalFee).toFixed(2));
-    return { net, commissionFee, paymentFee, anticipationFee, totalFee, pct: paymentFeePct, fixed: paymentFeeFixed, passedToClient: false };
+    return {
+      net,
+      commissionFee,
+      paymentFee,
+      anticipationFee,
+      totalAddedToClient: 0,
+      clientTotal: amount,
+      totalFee,
+      pct: paymentFeePct,
+      fixed: paymentFeeFixed,
+      passedToClient: false,
+    };
   };
 
   // mantém compatibilidade com código que usa .label
@@ -843,17 +872,22 @@ const MessageThread = () => {
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) return [];
     const maxInst = parseInt(feeSettings.max_installments || "12");
+    const commissionPct = parseFloat(feeSettings.commission_pct || "10");
     const options = [];
     for (let i = 1; i <= maxInst; i++) {
-      const feePct  = getInstallmentPackageRate(i);
+      const feePct   = getInstallmentPackageRate(i);
       const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
-      const fee = (amount * feePct / 100) + feeFixed;
+      const cardFee  = (amount * feePct / 100) + feeFixed;
 
       if (passFeeToClient) {
-        const totalWithFee = amount + fee;
-        const val = (totalWithFee / i).toFixed(2).replace(".", ",");
+        // Valor que o cliente paga = base + comissão + taxa cartão + antecipação (se selecionada)
+        const commissionFee  = amount * commissionPct / 100;
+        const anticipationFee = billingAnticipation ? calcAnticipationFee(amount, i) : 0;
+        const clientTotal    = amount + commissionFee + cardFee + anticipationFee;
+        const val = (clientTotal / i).toFixed(2).replace(".", ",");
         options.push({ value: String(i), label: `${i}x de R$ ${val}` });
       } else {
+        // Profissional absorve as taxas — cliente vê apenas o valor base dividido
         const val = (amount / i).toFixed(2).replace(".", ",");
         options.push({ value: String(i), label: `${i}x de R$ ${val}` });
       }
@@ -2318,15 +2352,42 @@ const MessageThread = () => {
                     return (
                       <div className="space-y-1 text-xs">
                         <div className="flex justify-between text-muted-foreground">
-                          <span>Valor cobrado</span>
+                          <span>Valor do serviço</span>
                           <span>{fmt(parseFloat(billingAmount))}</span>
                         </div>
                         {b.passedToClient ? (
-                          <div className="flex justify-between text-muted-foreground">
-                            <span>Taxa repassada ao cliente</span>
-                            <span className="text-amber-600">cobrada do cliente</span>
-                          </div>
+                          // ── COM JUROS: taxas embutidas no valor cobrado do cliente ──
+                          <>
+                            <div className="flex justify-between text-blue-600 dark:text-blue-400">
+                              <span>(+) Comissão da plataforma ({feeSettings.commission_pct || "10"}%)</span>
+                              <span>+ {fmt(b.commissionFee)}</span>
+                            </div>
+                            {b.paymentFee > 0 && (
+                              <div className="flex justify-between text-blue-600 dark:text-blue-400">
+                                <span>
+                                  (+) Taxa {billingMethod === "pix" ? "PIX" : "Cartão"}
+                                  {billingMethod === "card" && ` (${instRate}%${isPackageMode ? " s/ total" : ""})`}
+                                </span>
+                                <span>+ {fmt(b.paymentFee)}</span>
+                              </div>
+                            )}
+                            {billingAnticipation && b.anticipationFee > 0 && (
+                              <div className="flex justify-between text-orange-500">
+                                <span>(+) Taxa antecipação ({antLabel})</span>
+                                <span>+ {fmt(b.anticipationFee)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between text-muted-foreground border-t pt-1 mt-1 text-[11px]">
+                              <span>Total cobrado do cliente</span>
+                              <span>{fmt(b.clientTotal)}</span>
+                            </div>
+                            <div className="flex justify-between font-semibold text-emerald-700 dark:text-emerald-400">
+                              <span>Você receberá</span>
+                              <span>{fmt(b.net)}</span>
+                            </div>
+                          </>
                         ) : (
+                          // ── SEM JUROS: taxas descontadas do profissional ──
                           <>
                             <div className="flex justify-between text-red-500">
                               <span>(-) Comissão da plataforma ({feeSettings.commission_pct || "10"}%)</span>
@@ -2336,7 +2397,7 @@ const MessageThread = () => {
                               <div className="flex justify-between text-red-500">
                                 <span>
                                   (-) Taxa {billingMethod === "pix" ? "PIX" : "Cartão"}
-                                  {billingMethod === "card" && ` (${instRate}%${isPackageMode ? " sobre total" : ""})`}
+                                  {billingMethod === "card" && ` (${instRate}%${isPackageMode ? " s/ total" : ""})`}
                                 </span>
                                 <span>- {fmt(b.paymentFee)}</span>
                               </div>
@@ -2347,12 +2408,12 @@ const MessageThread = () => {
                                 <span>- {fmt(b.anticipationFee)}</span>
                               </div>
                             )}
+                            <div className="flex justify-between font-semibold text-emerald-700 dark:text-emerald-400 border-t pt-1 mt-1">
+                              <span>Você receberá</span>
+                              <span>{fmt(b.net)}</span>
+                            </div>
                           </>
                         )}
-                        <div className="flex justify-between font-semibold text-emerald-700 dark:text-emerald-400 border-t pt-1 mt-1">
-                          <span>Você receberá</span>
-                          <span>{fmt(b.net)}</span>
-                        </div>
                       </div>
                     );
                   })()}

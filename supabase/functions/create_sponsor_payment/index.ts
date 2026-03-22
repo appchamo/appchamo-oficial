@@ -6,6 +6,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const jsonRes = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
 const ASAAS_ENV = Deno.env.get("ASAAS_ENV") ?? "sandbox";
 const ASAAS_BASE_URL = ASAAS_ENV === "production"
   ? "https://api.asaas.com/v3"
@@ -27,8 +33,13 @@ async function asaasReq(path: string, method: string, body?: unknown) {
   return data;
 }
 
-async function findOrCreateCustomer(supabase: any, sponsorUserId: string, name: string, email: string, cpfCnpj: string) {
-  // Verifica se já tem asaas_customer_id no perfil
+async function findOrCreateCustomer(
+  supabase: any,
+  sponsorUserId: string,
+  name: string,
+  email: string,
+  cpfCnpj: string,
+) {
   const { data: profile } = await supabase
     .from("profiles")
     .select("asaas_customer_id")
@@ -38,8 +49,6 @@ async function findOrCreateCustomer(supabase: any, sponsorUserId: string, name: 
   if (profile?.asaas_customer_id) return profile.asaas_customer_id;
 
   const clean = cpfCnpj.replace(/\D/g, "");
-
-  // Busca por CPF/CNPJ no Asaas
   const search = await asaasReq(`/customers?cpfCnpj=${clean}`, "GET");
   let customerId: string;
 
@@ -50,72 +59,107 @@ async function findOrCreateCustomer(supabase: any, sponsorUserId: string, name: 
     customerId = customer.id;
   }
 
-  // Salva no perfil
   await supabase.from("profiles").update({ asaas_customer_id: customerId }).eq("user_id", sponsorUserId);
   return customerId;
+}
+
+// ── Ativa o pacote do patrocinador (compra única — sem expiração) ─────────────
+async function activateSponsorPack(
+  supabase: any,
+  sponsorId: string,
+  pack: string,
+  asaasPaymentId: string | null,
+) {
+  // Atualiza weekly_plan do patrocinador
+  await supabase
+    .from("sponsors")
+    .update({ weekly_plan: pack })
+    .eq("id", sponsorId);
+
+  if (asaasPaymentId) {
+    await supabase
+      .from("sponsor_payments")
+      .update({ status: "active" })
+      .eq("asaas_payment_id", asaasPaymentId);
+  }
+
+  // Notifica o patrocinador
+  const { data: sp } = await supabase
+    .from("sponsors")
+    .select("user_id")
+    .eq("id", sponsorId)
+    .maybeSingle();
+
+  if (sp?.user_id) {
+    const packLabel = pack === "pack_28" ? "28 novidades/semana" : "14 novidades/semana";
+    await supabase.from("notifications").insert({
+      user_id: sp.user_id,
+      title: "🎉 Pacote ativado!",
+      message: `Seu pacote de ${packLabel} foi ativado! Boas novidades!`,
+      type: "success",
+      link: "/sponsor/dashboard",
+    });
+  }
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    // Usa service role para todas as operações de banco
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Unauthorized");
+    // ── Autenticação: valida JWT do usuário via service role ─────────────────
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!token) return jsonRes({ error: "Token não fornecido" }, 401);
 
-    const anonClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: { user } } = await anonClient.auth.getUser();
-    if (!user) throw new Error("Unauthorized");
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user) {
+      console.error("Auth error:", authErr?.message);
+      return jsonRes({ error: "Não autorizado" }, 401);
+    }
 
     const body = await req.json();
     const { action } = body;
 
-    // ── Verificar status de pagamento PIX ──────────────────────────────────────
+    // ── Verificar status de pagamento PIX (polling) ───────────────────────────
     if (action === "check_status") {
       const { payment_id } = body;
+
+      // Primeiro checa no banco
       const { data: sp } = await supabase
         .from("sponsor_payments")
-        .select("status, sponsor_id")
+        .select("status, sponsor_id, pack")
         .eq("asaas_payment_id", payment_id)
         .maybeSingle();
 
       if (sp?.status === "active") {
-        return new Response(JSON.stringify({ confirmed: true }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonRes({ confirmed: true });
       }
 
-      // Fallback: consulta direto no Asaas
+      // Fallback: consulta direta no Asaas
       try {
         const payment = await asaasReq(`/payments/${payment_id}`, "GET");
         const status = String(payment?.status || "").toUpperCase();
         const paid = status === "RECEIVED" || status === "CONFIRMED";
         if (paid && sp) {
-          await activateSponsorPlan(supabase, sp.sponsor_id, sp.pack ?? "pack_14", payment_id, null);
+          await activateSponsorPack(supabase, sp.sponsor_id, sp.pack ?? "pack_14", payment_id);
         }
-        return new Response(JSON.stringify({ confirmed: paid }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonRes({ confirmed: paid });
       } catch {
-        return new Response(JSON.stringify({ confirmed: false }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonRes({ confirmed: false });
       }
     }
 
-    // ── Criar pagamento ────────────────────────────────────────────────────────
+    // ── Criar pagamento (compra única) ────────────────────────────────────────
     const { sponsor_id, pack, payment_method, cpf_cnpj, holder_name, email, card } = body;
 
     if (!sponsor_id || !pack || !payment_method) {
-      throw new Error("sponsor_id, pack e payment_method são obrigatórios");
+      return jsonRes({ error: "sponsor_id, pack e payment_method são obrigatórios" }, 400);
     }
 
     // Verifica que o usuário é dono desse sponsor
@@ -126,7 +170,7 @@ serve(async (req) => {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (!sponsor) throw new Error("Patrocinador não encontrado");
+    if (!sponsor) return jsonRes({ error: "Patrocinador não encontrado" }, 404);
 
     // Busca preço do pacote
     const priceKey = pack === "pack_28" ? "sponsor_pack_28_price" : "sponsor_pack_14_price";
@@ -136,10 +180,13 @@ serve(async (req) => {
       .eq("key", priceKey)
       .maybeSingle();
 
-    const amount = parseFloat(String(settingRow?.value || "0"));
-    if (!amount || amount <= 0) throw new Error("Preço do pacote não configurado");
+    const amount = parseFloat(String(settingRow?.value ?? "0"));
+    if (!amount || amount <= 0) return jsonRes({ error: "Preço do pacote não configurado" }, 400);
 
-    // Reutiliza pagamento PIX pendente se existir
+    const packLabel = pack === "pack_28" ? "28 novidades/semana" : "14 novidades/semana";
+    const today = new Date().toISOString().split("T")[0];
+
+    // ── Reutiliza PIX pendente se já existir ─────────────────────────────────
     if (payment_method === "PIX") {
       const { data: existing } = await supabase
         .from("sponsor_payments")
@@ -153,29 +200,28 @@ serve(async (req) => {
         .maybeSingle();
 
       if (existing?.pix_qr_code) {
-        return new Response(JSON.stringify({
+        return jsonRes({
           success: true,
           payment_id: existing.asaas_payment_id,
           pix_qr_code: existing.pix_qr_code,
           pix_copy_paste: existing.pix_copy_paste,
           amount,
           reused: true,
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        });
       }
     }
 
+    // Busca/cria cliente Asaas
     const customerId = await findOrCreateCustomer(
-      supabase, user.id,
+      supabase,
+      user.id,
       holder_name || sponsor.name,
       email || user.email || "",
       cpf_cnpj || "",
     );
 
-    const today = new Date().toISOString().split("T")[0];
-    const packLabel = pack === "pack_28" ? "28 novidades/semana" : "14 novidades/semana";
-
+    // ── PIX — pagamento único ─────────────────────────────────────────────────
     if (payment_method === "PIX") {
-      // Pagamento único PIX (o patrocinador renova manualmente todo mês)
       const asaasPayment = await asaasReq("/payments", "POST", {
         customer: customerId,
         billingType: "PIX",
@@ -198,111 +244,59 @@ serve(async (req) => {
         status: "pending",
       });
 
-      return new Response(JSON.stringify({
+      return jsonRes({
         success: true,
         payment_id: asaasPayment.id,
         pix_qr_code: pixData.encodedImage,
         pix_copy_paste: pixData.payload,
         amount,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-    } else {
-      // Assinatura mensal via Cartão de Crédito
-      if (!card || !cpf_cnpj) throw new Error("Dados do cartão e CPF/CNPJ obrigatórios");
-
-      const nextMonth = new Date();
-      nextMonth.setMonth(nextMonth.getMonth() + 1);
-      const nextDueDate = nextMonth.toISOString().split("T")[0];
-
-      const subscription = await asaasReq("/subscriptions", "POST", {
-        customer: customerId,
-        billingType: "CREDIT_CARD",
-        value: amount,
-        nextDueDate,
-        cycle: "MONTHLY",
-        description: `Pacote Chamô Patrocinador — ${packLabel}`,
-        creditCard: {
-          holderName: card.holderName,
-          number: card.number.replace(/\s/g, ""),
-          expiryMonth: card.expiryMonth,
-          expiryYear: card.expiryYear,
-          ccv: card.ccv,
-        },
-        creditCardHolderInfo: {
-          name: holder_name || sponsor.name,
-          email: email || user.email || "",
-          cpfCnpj: cpf_cnpj.replace(/\D/g, ""),
-          postalCode: card.postalCode || "00000000",
-          addressNumber: card.addressNumber || "0",
-          phone: card.phone || "",
-        },
       });
-
-      await supabase.from("sponsor_payments").insert({
-        sponsor_id,
-        pack,
-        payment_method: "CREDIT_CARD",
-        amount,
-        asaas_subscription_id: subscription.id,
-        status: "active",
-      });
-
-      // Atualiza plano do patrocinador imediatamente (cartão é síncrono)
-      await activateSponsorPlan(supabase, sponsor_id, pack, null, subscription.id);
-
-      return new Response(JSON.stringify({
-        success: true,
-        subscription_id: subscription.id,
-        activated: true,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+
+    // ── Cartão de Crédito — pagamento único (não é assinatura) ───────────────
+    if (!card || !cpf_cnpj) {
+      return jsonRes({ error: "Dados do cartão e CPF/CNPJ obrigatórios" }, 400);
+    }
+
+    const asaasPayment = await asaasReq("/payments", "POST", {
+      customer: customerId,
+      billingType: "CREDIT_CARD",
+      value: amount,
+      dueDate: today,
+      description: `Pacote Chamô Patrocinador — ${packLabel}`,
+      creditCard: {
+        holderName: card.holderName,
+        number: card.number.replace(/\s/g, ""),
+        expiryMonth: card.expiryMonth,
+        expiryYear: card.expiryYear,
+        ccv: card.ccv,
+      },
+      creditCardHolderInfo: {
+        name: holder_name || sponsor.name,
+        email: email || user.email || "",
+        cpfCnpj: cpf_cnpj.replace(/\D/g, ""),
+        postalCode: card.postalCode || "00000000",
+        addressNumber: card.addressNumber || "0",
+        phone: card.phone || "",
+      },
+    });
+
+    await supabase.from("sponsor_payments").insert({
+      sponsor_id,
+      pack,
+      payment_method: "CREDIT_CARD",
+      amount,
+      asaas_payment_id: asaasPayment.id,
+      status: "active",
+    });
+
+    // Ativa imediatamente (cartão é síncrono)
+    await activateSponsorPack(supabase, sponsor_id, pack, asaasPayment.id);
+
+    return jsonRes({ success: true, payment_id: asaasPayment.id, activated: true });
 
   } catch (err: any) {
     console.error("create_sponsor_payment error:", err.message);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonRes({ error: err.message }, 400);
   }
 });
-
-// ── Ativa o plano do patrocinador no banco ─────────────────────────────────
-async function activateSponsorPlan(
-  supabase: any,
-  sponsorId: string,
-  pack: string,
-  asaasPaymentId: string | null,
-  asaasSubscriptionId: string | null,
-) {
-  const expiresAt = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
-
-  await supabase.from("sponsors").update({
-    weekly_plan: pack,
-    plan_expires_at: expiresAt,
-    ...(asaasSubscriptionId ? { asaas_subscription_id: asaasSubscriptionId } : {}),
-  }).eq("id", sponsorId);
-
-  if (asaasPaymentId) {
-    await supabase.from("sponsor_payments")
-      .update({ status: "active" })
-      .eq("asaas_payment_id", asaasPaymentId);
-  }
-
-  // Notifica o patrocinador
-  const { data: sp } = await supabase
-    .from("sponsors")
-    .select("user_id, name")
-    .eq("id", sponsorId)
-    .maybeSingle();
-
-  if (sp?.user_id) {
-    const packLabel = pack === "pack_28" ? "28 novidades/semana" : "14 novidades/semana";
-    await supabase.from("notifications").insert({
-      user_id: sp.user_id,
-      title: "🎉 Pacote ativado!",
-      message: `Seu pacote de ${packLabel} foi ativado com sucesso!`,
-      type: "success",
-      link: "/sponsor/dashboard",
-    });
-  }
-}

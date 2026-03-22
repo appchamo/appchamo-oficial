@@ -237,13 +237,27 @@ serve(async (req) => {
     }
 
     // ===============================
-    // Cálculos
+    // Cálculos — lê configurações da plataforma
     // ===============================
     const totalAmount = Number(amount);
-    const platformFee = Number((totalAmount * 0.1).toFixed(2));
-    const professionalNet = Number(
-      (totalAmount - platformFee).toFixed(2)
-    );
+
+    const settingsKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed"];
+    const { data: settingsRows } = await supabase
+      .from("platform_settings")
+      .select("key, value")
+      .in("key", settingsKeys);
+
+    const cfg: Record<string, number> = {};
+    (settingsRows || []).forEach(r => { cfg[r.key] = parseFloat(r.value || "0"); });
+
+    const commissionPct = cfg["commission_pct"] ?? 10;
+    const pixFeePct    = cfg["pix_fee_pct"] ?? 0;
+    const pixFeeFixed  = cfg["pix_fee_fixed"] ?? 0;
+
+    const commissionFee  = Number((totalAmount * commissionPct / 100).toFixed(2));
+    const paymentFee     = Number((totalAmount * pixFeePct / 100 + pixFeeFixed).toFixed(2));
+    const platformFee    = Number((commissionFee + paymentFee).toFixed(2));
+    const professionalNet = Number((totalAmount - platformFee).toFixed(2));
 
     // ===============================
     // Customer

@@ -105,33 +105,64 @@ serve(async (req) => {
                 .eq("professional_id", txFull.professional_id)
                 .maybeSingle();
 
-              // Busca configurações de prazo de repasse
+              // Busca configurações de prazo de repasse e taxas
               const { data: settings } = await supabase
                 .from("platform_settings")
                 .select("key, value")
-                .in("key", ["transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct"]);
+                .in("key", [
+                  "transfer_period_pix_hours", "transfer_period_card_days",
+                  "transfer_period_card_anticipated_days", "anticipation_fee_pct",
+                  "commission_pct", "pix_fee_pct", "pix_fee_fixed",
+                  "card_fee_pct", "card_fee_fixed",
+                ]);
 
               const settingsMap: Record<string, number> = {};
               (settings || []).forEach((s: any) => { settingsMap[s.key] = parseFloat(s.value) || 0; });
 
               const anticipationEnabled = fiscal?.anticipation_enabled || false;
               const paymentMethod = fiscal?.payment_method || "pix";
-              // Busca professional_net já calculado na transação
+              const grossAmount = Number(tx.total_amount);
+
+              // Calcula comissão e taxa de transação separadamente
+              const commissionPct = settingsMap["commission_pct"] ?? 10;
+              let paymentFeePct = 0;
+              let paymentFeeFixed = 0;
+              if (paymentMethod === "pix") {
+                paymentFeePct  = settingsMap["pix_fee_pct"] ?? 0;
+                paymentFeeFixed = settingsMap["pix_fee_fixed"] ?? 0;
+              } else {
+                paymentFeePct  = settingsMap["card_fee_pct"] ?? 0;
+                paymentFeeFixed = settingsMap["card_fee_fixed"] ?? 0;
+              }
+              const commissionFeeCalc = Number((grossAmount * commissionPct / 100).toFixed(2));
+              const paymentFeeCalc    = Number((grossAmount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
+
+              // Usa professional_net da transactions se disponível (já calculado pelo create_payment)
               const { data: txDetail } = await supabase
                 .from("transactions")
                 .select("professional_net, platform_fee")
                 .eq("id", tx.id)
                 .maybeSingle();
-              const professionalNet = Number(txDetail?.professional_net || tx.total_amount);
 
-              // Calcula taxa de antecipação se aplicável
+              // professional_net = gross - commission - payment_fee
+              const professionalNet = txDetail?.professional_net != null
+                ? Number(txDetail.professional_net)
+                : Number((grossAmount - commissionFeeCalc - paymentFeeCalc).toFixed(2));
+
+              // Decompõe platform_fee do banco (commission + payment) em partes
+              const totalStoredFee = txDetail?.platform_fee != null ? Number(txDetail.platform_fee) : (commissionFeeCalc + paymentFeeCalc);
+              // Se create_payment não tinha payment_fee, tenta estimar a partir das configs atuais
+              const paymentFeeAmount  = paymentFeeCalc;
+              const commissionAmount  = Number((totalStoredFee - paymentFeeAmount).toFixed(2));
+
+              // Calcula taxa de antecipação (só em cartão)
               let anticipationFeeAmount = 0;
               if (anticipationEnabled && paymentMethod !== "pix") {
                 const anticipationFeePct = settingsMap["anticipation_fee_pct"] || 15;
-                anticipationFeeAmount = (professionalNet * anticipationFeePct) / 100;
+                anticipationFeeAmount = Number((professionalNet * anticipationFeePct / 100).toFixed(2));
               }
 
-              const netAmount = professionalNet - anticipationFeeAmount;
+              const netAmount = Number((professionalNet - anticipationFeeAmount).toFixed(2));
 
               // Calcula quando fica disponível para repasse
               let availableAt = new Date();
@@ -150,8 +181,9 @@ serve(async (req) => {
               const { error: walletErr } = await supabase.from("wallet_transactions").insert({
                 professional_id: txFull.professional_id,
                 transaction_id: tx.id,
-                gross_amount: tx.total_amount,
-                platform_fee_amount: txDetail?.platform_fee || (tx.total_amount - professionalNet),
+                gross_amount: grossAmount,
+                platform_fee_amount: commissionAmount,   // só comissão
+                payment_fee_amount: paymentFeeAmount,    // taxa Asaas/gateway
                 anticipation_fee_amount: anticipationFeeAmount,
                 amount: netAmount,
                 payment_method: paymentMethod,

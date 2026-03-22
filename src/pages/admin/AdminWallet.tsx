@@ -21,6 +21,7 @@ interface WalletTx {
   amount: number;
   gross_amount: number;
   platform_fee_amount: number;
+  payment_fee_amount: number;
   anticipation_fee_amount: number;
   payment_method: string;
   anticipation_enabled: boolean;
@@ -65,8 +66,9 @@ const TransferTimingModal = ({
   const { ready, text } = timeUntilAvailable(earliest || null);
   const net = entry.pending_amount;
   const gross = pendingTxs.reduce((s, t) => s + (t.gross_amount || t.amount), 0);
-  const platformFee = pendingTxs.reduce((s, t) => s + (t.platform_fee_amount || 0), 0);
-  const anticipationFee = pendingTxs.reduce((s, t) => s + (t.anticipation_fee_amount || 0), 0);
+        const platformFee = pendingTxs.reduce((s, t) => s + (t.platform_fee_amount || 0), 0);
+        const paymentFee = pendingTxs.reduce((s, t) => s + (t.payment_fee_amount || 0), 0);
+        const anticipationFee = pendingTxs.reduce((s, t) => s + (t.anticipation_fee_amount || 0), 0);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -87,6 +89,12 @@ const TransferTimingModal = ({
             <div className="flex justify-between text-sm text-red-600">
               <span>(-) Comissão da plataforma</span>
               <span>- {fmt(platformFee)}</span>
+            </div>
+          )}
+          {paymentFee > 0 && (
+            <div className="flex justify-between text-sm text-red-600">
+              <span>(-) Taxa de transação ({pendingTxs[0]?.payment_method === "pix" ? "PIX" : "Cartão"})</span>
+              <span>- {fmt(paymentFee)}</span>
             </div>
           )}
           {anticipationFee > 0 && (
@@ -170,9 +178,9 @@ const AdminWallet = () => {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+      const { data, error } = await supabase
       .from("wallet_transactions")
-      .select("id, professional_id, amount, gross_amount, platform_fee_amount, anticipation_fee_amount, payment_method, anticipation_enabled, description, status, created_at, transferred_at, available_at, asaas_transfer_id")
+      .select("id, professional_id, amount, gross_amount, platform_fee_amount, payment_fee_amount, anticipation_fee_amount, payment_method, anticipation_enabled, description, status, created_at, transferred_at, available_at, asaas_transfer_id")
       .order("created_at", { ascending: false });
 
     if (error) { toast({ title: "Erro ao carregar carteiras", variant: "destructive" }); setLoading(false); return; }
@@ -219,6 +227,7 @@ const AdminWallet = () => {
         amount: Number(tx.amount),
         gross_amount: Number(tx.gross_amount || tx.amount),
         platform_fee_amount: Number(tx.platform_fee_amount || 0),
+        payment_fee_amount: Number(tx.payment_fee_amount || 0),
         anticipation_fee_amount: Number(tx.anticipation_fee_amount || 0),
         payment_method: tx.payment_method || "pix",
         anticipation_enabled: tx.anticipation_enabled || false,
@@ -425,8 +434,14 @@ const AdminWallet = () => {
                                 </div>
                                 {tx.platform_fee_amount > 0 && (
                                   <div className="flex justify-between text-red-600">
-                                    <span>(-) Comissão plataforma</span>
+                                    <span>(-) Comissão da plataforma</span>
                                     <span>- {fmt(tx.platform_fee_amount)}</span>
+                                  </div>
+                                )}
+                                {tx.payment_fee_amount > 0 && (
+                                  <div className="flex justify-between text-red-600">
+                                    <span>(-) Taxa de transação ({tx.payment_method === "pix" ? "PIX" : "Cartão"})</span>
+                                    <span>- {fmt(tx.payment_fee_amount)}</span>
                                   </div>
                                 )}
                                 {tx.anticipation_fee_amount > 0 && (
@@ -436,7 +451,7 @@ const AdminWallet = () => {
                                   </div>
                                 )}
                                 <div className="flex justify-between font-bold text-emerald-700 border-t pt-1">
-                                  <span>Valor líquido</span>
+                                  <span>Valor líquido ao profissional</span>
                                   <span>{fmt(tx.amount)}</span>
                                 </div>
                               </div>

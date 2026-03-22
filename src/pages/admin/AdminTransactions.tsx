@@ -328,17 +328,17 @@ const FinancialConfig = () => {
           <h2 className="font-semibold text-foreground text-sm">Comissão da plataforma</h2>
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Comissão (%)</label>
-            <input type="number" value={settings.commission_pct || "10"} onChange={(e) => set("commission_pct", e.target.value)} className={inputCls} />
+            <input type="number" step="0.01" min="0" value={settings.commission_pct || "10"} onChange={(e) => set("commission_pct", e.target.value)} className={inputCls} />
           </div>
         </div>
 
         <div className="bg-card border rounded-xl p-4 space-y-3">
           <h2 className="font-semibold text-foreground text-sm">Taxas de Pagamento</h2>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX (%)</label><input type="number" value={settings.pix_fee_pct || "0"} onChange={(e) => set("pix_fee_pct", e.target.value)} className={inputCls} /></div>
-            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX fixo (R$)</label><input type="number" value={settings.pix_fee_fixed || "0"} onChange={(e) => set("pix_fee_fixed", e.target.value)} className={inputCls} /></div>
-            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão à vista (%)</label><input type="number" value={settings.card_fee_pct || "0"} onChange={(e) => set("card_fee_pct", e.target.value)} className={inputCls} /></div>
-            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão fixo (R$)</label><input type="number" value={settings.card_fee_fixed || "0"} onChange={(e) => set("card_fee_fixed", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX (%)</label><input type="number" step="0.01" min="0" value={settings.pix_fee_pct || "0"} onChange={(e) => set("pix_fee_pct", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIX fixo (R$)</label><input type="number" step="0.01" min="0" value={settings.pix_fee_fixed || "0"} onChange={(e) => set("pix_fee_fixed", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão à vista (%)</label><input type="number" step="0.01" min="0" value={settings.card_fee_pct || "0"} onChange={(e) => set("card_fee_pct", e.target.value)} className={inputCls} /></div>
+            <div><label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cartão fixo (R$)</label><input type="number" step="0.01" min="0" value={settings.card_fee_fixed || "0"} onChange={(e) => set("card_fee_fixed", e.target.value)} className={inputCls} /></div>
           </div>
         </div>
 

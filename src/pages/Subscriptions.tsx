@@ -12,53 +12,49 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { formatCpf, formatCep, validateCpf } from "@/lib/formatters";
 import { getProductIdForPlan } from "@/lib/iap-config";
 
-const planDetails = [
-  {
-    id: "free",
+interface PlanFeature { text: string; inherited: boolean; }
+const planDetails: Record<string, { icon: any; color: string; features: PlanFeature[] }> = {
+  free: {
     icon: Zap,
     color: "text-muted-foreground",
     features: [
-      "Até 3 chamadas por conta",
-      "Acesso básico à plataforma",
-      "Apenas cobrança presencial",
+      { text: "Até 3 chamadas por conta", inherited: false },
+      { text: "Acesso básico à plataforma", inherited: false },
+      { text: "Apenas cobrança presencial", inherited: false },
     ],
   },
-  {
-    id: "pro",
+  pro: {
     icon: Star,
     color: "text-primary",
     features: [
-      "Chamadas ilimitadas",
-      "Receba pagamentos pelo app",
-      "Suporte no app",
+      { text: "Chamadas ilimitadas", inherited: false },
+      { text: "Receba pagamentos pelo app", inherited: false },
+      { text: "Suporte no app", inherited: false },
     ],
   },
-  {
-    id: "vip",
+  vip: {
     icon: Crown,
     color: "text-amber-500",
-    popular: true,
-    recommended: true,
     features: [
-      "Tudo do Pro",
-      "Selo de verificado",
-      "Aparece em destaque na Home",
+      { text: "Tudo do Pro", inherited: true },
+      { text: "Selo de verificado", inherited: false },
+      { text: "Aparece em destaque na Home", inherited: false },
+      { text: "Fotos de serviços no perfil", inherited: false },
     ],
   },
-  {
-    id: "business",
+  business: {
     icon: Building2,
     color: "text-violet-500",
     features: [
-      "Tudo do VIP",
-      "Consultoria personalizada",
-      "Suporte 24h",
-      "Catálogo de produtos",
-      "Publicar vagas de emprego",
-      "Acesso VIP ao Chamô Event",
+      { text: "Tudo do VIP", inherited: true },
+      { text: "Consultoria personalizada", inherited: false },
+      { text: "Suporte 24h", inherited: false },
+      { text: "Catálogo de produtos", inherited: false },
+      { text: "Publicar vagas de emprego", inherited: false },
+      { text: "Acesso VIP ao Chamô Event", inherited: false },
     ],
   },
-];
+};
 
 const useIAPOnIOS = Capacitor.getPlatform() === "ios";
 
@@ -81,6 +77,7 @@ const Subscriptions = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [changing, setChanging] = useState<string | null>(null);
+  const [billingPeriod, setBillingPeriod] = useState<"monthly" | "semester" | "annual">("annual");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", address: "", cpf: "" });
@@ -418,7 +415,8 @@ const Subscriptions = () => {
         body: {
           userId: session.user.id,
           planId: selectedPlanId,
-          value: selectedPlan?.price_monthly || 0,
+          value: selectedPlan ? getTotalCharge(selectedPlan) : 0,
+          billingPeriod: billingPeriod,
           holderName: cardForm.name,
           number: cardForm.number.replace(/\s/g, ""),
           expiryMonth: expiryParts[0],
@@ -608,10 +606,38 @@ const Subscriptions = () => {
     return digits;
   };
 
+  const getDisplayMonthly = (p: { price_monthly: number; price_annual: number | null; price_semester: number | null }) => {
+    if (billingPeriod === "annual" && p.price_annual) return p.price_annual / 12;
+    if (billingPeriod === "semester" && p.price_semester) return p.price_semester / 6;
+    return p.price_monthly;
+  };
+
+  const getTotalCharge = (p: { price_monthly: number; price_annual: number | null; price_semester: number | null }) => {
+    if (billingPeriod === "annual" && p.price_annual) return p.price_annual;
+    if (billingPeriod === "semester" && p.price_semester) return p.price_semester;
+    return p.price_monthly;
+  };
+
+  const getSavingsPct = (p: { price_monthly: number; price_annual: number | null; price_semester: number | null }) => {
+    if (billingPeriod === "annual" && p.price_annual) {
+      const saved = ((p.price_monthly * 12 - p.price_annual) / (p.price_monthly * 12)) * 100;
+      return saved > 0 ? Math.round(saved) : 0;
+    }
+    if (billingPeriod === "semester" && p.price_semester) {
+      const saved = ((p.price_monthly * 6 - p.price_semester) / (p.price_monthly * 6)) * 100;
+      return saved > 0 ? Math.round(saved) : 0;
+    }
+    return 0;
+  };
+
   const formatPrice = (price: number) => {
     if (price === 0) return "Grátis";
     return `R$ ${price.toFixed(2).replace(".", ",")}/mês`;
   };
+
+  // Detecta se algum plano pago tem preço annual/semestral configurado
+  const hasAnnualPrices = plans.some(p => p.id !== "free" && p.price_annual);
+  const hasSemesterPrices = plans.some(p => p.id !== "free" && p.price_semester);
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId);
 
@@ -664,75 +690,179 @@ const Subscriptions = () => {
             <Link to="/home" className="text-primary text-sm font-medium hover:underline">Voltar ao início</Link>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {plansVisiveis.map((p) => {
-              const details = planDetails.find((d) => d.id === p.id);
-              if (!details) return null;
-              const isCurrent = currentPlan?.id === p.id;
-              const Icon = details.icon;
-              const isRecommended = (details as any).recommended;
-
-              const displayFeatures = planFeaturesDb[p.id] || details.features;
-
-              return (
-                <div
-                  key={p.id}
-                  className={`relative bg-card border-2 rounded-2xl p-5 shadow-card transition-all ${
-                    isRecommended ? "border-amber-500 ring-2 ring-amber-500/20 scale-[1.02]" : isCurrent ? "border-primary ring-2 ring-primary/20" : "border-border"
-                  }`}
+          <>
+            {/* Seletor de período — só aparece se algum plano tem preço anual ou semestral */}
+            {(hasAnnualPrices || hasSemesterPrices) && (
+              <div className="flex items-center justify-center gap-1 bg-muted rounded-xl p-1 mb-2">
+                <button
+                  onClick={() => setBillingPeriod("monthly")}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${billingPeriod === "monthly" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 >
-                  {isRecommended && (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-white text-[11px] font-bold uppercase tracking-wide shadow-lg">
-                      ⭐ Recomendado
-                    </span>
-                  )}
+                  Mensal
+                </button>
+                {hasSemesterPrices && (
+                  <button
+                    onClick={() => setBillingPeriod("semester")}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${billingPeriod === "semester" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Semestral
+                  </button>
+                )}
+                {hasAnnualPrices && (
+                  <button
+                    onClick={() => setBillingPeriod("annual")}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${billingPeriod === "annual" ? "bg-primary shadow text-white" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Anual 🏷️
+                  </button>
+                )}
+              </div>
+            )}
 
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-10 h-10 rounded-xl ${isRecommended ? "bg-amber-500/10" : "bg-accent"} flex items-center justify-center`}>
-                        <Icon className={`w-5 h-5 ${isRecommended ? "text-amber-500" : details.color}`} />
-                      </div>
-                      <div>
-                        <h3 className={`font-bold ${isRecommended ? "text-lg" : ""} text-foreground`}>{p.name}</h3>
-                        <p className={`font-semibold ${isRecommended ? "text-amber-500 text-lg" : "text-primary text-sm"}`}>{formatPrice(p.price_monthly)}</p>
-                      </div>
-                    </div>
-                    {isCurrent && (
-                      <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold">Atual</span>
+            <div className="flex flex-col gap-4">
+              {plansVisiveis.map((p) => {
+                const details = planDetails[p.id];
+                if (!details) return null;
+                const isCurrent = currentPlan?.id === p.id;
+                const isBusinessCurrent = currentPlan?.id === "business";
+                const Icon = details.icon;
+
+                // VIP só fica "Recomendado" se o usuário for Free ou Pro (não Business)
+                const isRecommended = p.id === "vip" && !isBusinessCurrent;
+                // Business fica em destaque premium se for o plano atual do usuário
+                const isBusinessPremium = p.id === "business" && isCurrent;
+
+                const dbFeats: string[] | undefined = planFeaturesDb[p.id];
+                // Pega features: se tem no DB (string[]), converte para PlanFeature
+                const displayFeatures: PlanFeature[] = dbFeats
+                  ? dbFeats.map(f => ({ text: f, inherited: f.startsWith("Tudo do") }))
+                  : details.features;
+
+                const savingsPct = getSavingsPct(p);
+                const monthlyDisplay = getDisplayMonthly(p);
+
+                return (
+                  <div
+                    key={p.id}
+                    className={`relative bg-card border-2 rounded-2xl p-5 shadow-card transition-all ${
+                      isBusinessPremium
+                        ? "border-violet-500 ring-2 ring-violet-500/20 scale-[1.02]"
+                        : isRecommended
+                        ? "border-amber-500 ring-2 ring-amber-500/20 scale-[1.02]"
+                        : isCurrent
+                        ? "border-primary ring-2 ring-primary/20"
+                        : "border-border"
+                    }`}
+                  >
+                    {/* Badge topo */}
+                    {isBusinessPremium && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-violet-600 to-purple-700 text-white text-[11px] font-bold uppercase tracking-wide shadow-lg">
+                        👑 Seu plano atual
+                      </span>
                     )}
-                  </div>
+                    {isRecommended && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-white text-[11px] font-bold uppercase tracking-wide shadow-lg">
+                        ⭐ Recomendado
+                      </span>
+                    )}
 
-                  <ul className="flex flex-col gap-1.5 mb-4">
-                    {displayFeatures.map((f, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Check className={`w-3.5 h-3.5 ${isRecommended ? "text-amber-500" : "text-primary"} flex-shrink-0`} />
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-
-                  {isCurrent ? (
-                    <div className="space-y-2">
-                      <button disabled className="w-full py-2.5 rounded-xl border text-sm font-medium text-muted-foreground cursor-default">Plano atual</button>
-                      {p.id !== "free" && (
-                        <button onClick={() => setCancelOpen(true)} className="w-full text-[11px] text-muted-foreground hover:text-destructive transition-colors">Cancelar assinatura</button>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                          isBusinessPremium ? "bg-violet-100" : isRecommended ? "bg-amber-500/10" : "bg-accent"
+                        }`}>
+                          <Icon className={`w-5 h-5 ${
+                            isBusinessPremium ? "text-violet-600" : isRecommended ? "text-amber-500" : details.color
+                          }`} />
+                        </div>
+                        <div>
+                          <h3 className={`font-bold ${isRecommended || isBusinessPremium ? "text-lg" : ""} text-foreground`}>{p.name}</h3>
+                          <div className="flex items-baseline gap-1.5">
+                            <p className={`font-bold ${
+                              isBusinessPremium ? "text-violet-600 text-lg" : isRecommended ? "text-amber-500 text-lg" : "text-primary text-sm"
+                            }`}>
+                              {p.price_monthly === 0 ? "Grátis" : `R$ ${monthlyDisplay.toFixed(2).replace(".", ",")}/mês`}
+                            </p>
+                            {savingsPct > 0 && (
+                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">
+                                -{savingsPct}%
+                              </span>
+                            )}
+                          </div>
+                          {billingPeriod !== "monthly" && p.price_monthly > 0 && (
+                            <p className="text-[10px] text-muted-foreground">
+                              {billingPeriod === "annual"
+                                ? `R$ ${(p.price_annual ?? p.price_monthly * 12).toFixed(2).replace(".", ",")} /ano`
+                                : `R$ ${(p.price_semester ?? p.price_monthly * 6).toFixed(2).replace(".", ",")} /semestre`}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {isCurrent && !isBusinessPremium && (
+                        <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold">Atual</span>
                       )}
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => handleSelectPlan(p.id)}
-                      disabled={changing !== null}
-                      className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
-                        isRecommended ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg" : p.price_monthly > (currentPlan?.price_monthly || 0) ? "bg-primary text-primary-foreground hover:bg-primary/90" : "border text-foreground hover:bg-muted"
-                      }`}
-                    >
-                      {changing === p.id ? "Processando..." : p.price_monthly > (currentPlan?.price_monthly || 0) ? "Fazer upgrade" : "Mudar plano"}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+
+                    {/* Lista de benefícios */}
+                    <ul className="flex flex-col mb-4">
+                      {displayFeatures.map((f, i) => (
+                        f.inherited ? (
+                          <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground py-0.5">
+                            <Check className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                            <span className="italic">{f.text}</span>
+                          </li>
+                        ) : (
+                          <li key={i} className={`flex items-center gap-2 text-sm py-0.5 ${
+                            isBusinessPremium ? "text-violet-700 font-medium"
+                              : isRecommended ? "text-foreground font-medium"
+                              : "text-foreground"
+                          }`}>
+                            <Check className={`w-3.5 h-3.5 flex-shrink-0 ${
+                              isBusinessPremium ? "text-violet-500"
+                                : isRecommended ? "text-amber-500"
+                                : "text-primary"
+                            }`} />
+                            {f.text}
+                          </li>
+                        )
+                      ))}
+                    </ul>
+
+                    {isCurrent ? (
+                      <div className="space-y-2">
+                        <button disabled className={`w-full py-2.5 rounded-xl text-sm font-semibold cursor-default ${
+                          isBusinessPremium
+                            ? "bg-gradient-to-r from-violet-500 to-purple-700 text-white opacity-80"
+                            : "border text-muted-foreground"
+                        }`}>
+                          {isBusinessPremium ? "👑 Plano atual" : "Plano atual"}
+                        </button>
+                        {p.id !== "free" && (
+                          <button onClick={() => setCancelOpen(true)} className="w-full text-[11px] text-muted-foreground hover:text-destructive transition-colors">Cancelar assinatura</button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleSelectPlan(p.id)}
+                        disabled={changing !== null}
+                        className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
+                          isRecommended
+                            ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg hover:opacity-90"
+                            : p.id === "business"
+                            ? "bg-gradient-to-r from-violet-500 to-purple-700 text-white shadow-lg hover:opacity-90"
+                            : p.price_monthly > (currentPlan?.price_monthly || 0)
+                            ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                            : "border text-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {changing === p.id ? "Processando..." : p.price_monthly > (currentPlan?.price_monthly || 0) ? "Fazer upgrade" : "Mudar plano"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
 
         <p className="text-xs text-muted-foreground text-center mt-6">Assinatura mensal com renovação automática. Cancele a qualquer momento.</p>
@@ -772,11 +902,23 @@ const Subscriptions = () => {
                     ) : loadingProducts ? (
                       <p className="text-sm text-muted-foreground">Carregando preço...</p>
                     ) : (
-                      <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                      <p className="text-xl font-bold text-foreground">R$ {getDisplayMonthly(selectedPlan).toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
                     );
                   })()}
                   {(!useIAPOnIOS || !isIAPAvailable) && (
-                    <p className="text-xl font-bold text-foreground">R$ {selectedPlan.price_monthly.toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                    <>
+                      <p className="text-xl font-bold text-foreground">R$ {getDisplayMonthly(selectedPlan).toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                      {billingPeriod !== "monthly" && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Total: R$ {getTotalCharge(selectedPlan).toFixed(2).replace(".", ",")} / {billingPeriod === "annual" ? "ano" : "semestre"}
+                        </p>
+                      )}
+                      <span className={`inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        billingPeriod === "annual" ? "bg-primary/10 text-primary" : billingPeriod === "semester" ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"
+                      }`}>
+                        {billingPeriod === "annual" ? "Cobrança anual" : billingPeriod === "semester" ? "Cobrança semestral" : "Cobrança mensal"}
+                      </span>
+                    </>
                   )}
                 </div>
 

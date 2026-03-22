@@ -282,17 +282,19 @@ export default function HomeProCarousel({
         )}
       </div>
 
-      {/* ── seta circular — centralizada verticalmente ── */}
+      {/* ── seta circular ── */}
       {hasAgenda && (
         <button
           type="button"
           onClick={() => goTo(slide === 0 ? 1 : 0)}
           className={`
-            absolute top-1/2 -translate-y-1/2 z-10
+            absolute z-10
             w-9 h-9 rounded-full bg-black/20 backdrop-blur-sm border border-white/25
             flex items-center justify-center
             hover:bg-black/30 active:scale-90 transition-all duration-300
-            ${slide === 0 ? "right-3" : "left-3"}
+            ${slide === 0
+              ? "right-3 top-1/2 -translate-y-1/2"
+              : "left-3 top-3"}
           `}
           aria-label={slide === 0 ? "Ver agenda" : "Ver carteira"}
         >

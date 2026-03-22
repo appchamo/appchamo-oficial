@@ -6,6 +6,8 @@ export interface Plan {
   id: string;
   name: string;
   price_monthly: number;
+  price_annual: number | null;
+  price_semester: number | null;
   max_calls: number;
   max_devices: number;
   has_verified_badge: boolean;

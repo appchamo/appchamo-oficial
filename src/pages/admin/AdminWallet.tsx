@@ -8,6 +8,7 @@ interface WalletEntry {
   professional_id: string;
   professional_name: string;
   professional_email: string;
+  professional_avatar: string | null;
   pix_key: string | null;
   pix_key_type: string | null;
   pending_amount: number;
@@ -192,13 +193,13 @@ const AdminWallet = () => {
     const userIds = (pros || []).map(p => p.user_id).filter(Boolean);
 
     const [{ data: profiles }, { data: fiscals }] = await Promise.all([
-      supabase.from("profiles").select("user_id, display_name, email").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, display_name, full_name, email, avatar_url").in("user_id", userIds),
       supabase.from("professional_fiscal_data").select("professional_id, pix_key, pix_key_type").in("professional_id", proIds),
     ]);
 
     const proByProId: Record<string, string> = {};
     (pros || []).forEach(p => { proByProId[p.id] = p.user_id; });
-    const profileByUserId: Record<string, { display_name: string; email: string }> = {};
+    const profileByUserId: Record<string, { display_name: string; full_name: string; email: string; avatar_url: string | null }> = {};
     (profiles || []).forEach(p => { profileByUserId[p.user_id] = p; });
     const fiscalByProId: Record<string, { pix_key: string; pix_key_type: string }> = {};
     (fiscals || []).forEach(f => { fiscalByProId[f.professional_id] = f; });
@@ -207,13 +208,15 @@ const AdminWallet = () => {
     for (const tx of (data || [])) {
       const pid = tx.professional_id;
       const userId = proByProId[pid];
-      const profile = profileByUserId[userId] || { display_name: "—", email: "—" };
+      const profile = profileByUserId[userId] || { display_name: "", full_name: "", email: "—", avatar_url: null };
       const fiscal = fiscalByProId[pid];
+      const resolvedName = profile.display_name || profile.full_name || "Profissional";
       if (!map[pid]) {
         map[pid] = {
           professional_id: pid,
-          professional_name: profile.display_name || "—",
+          professional_name: resolvedName,
           professional_email: profile.email || "—",
+          professional_avatar: profile.avatar_url || null,
           pix_key: fiscal?.pix_key || null,
           pix_key_type: fiscal?.pix_key_type || null,
           pending_amount: 0,
@@ -350,8 +353,19 @@ const AdminWallet = () => {
               return (
                 <div key={entry.professional_id} className="border rounded-xl overflow-hidden bg-white shadow-sm">
                   <div className="flex items-center gap-4 p-4">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <span className="text-primary font-bold text-sm">{entry.professional_name.slice(0, 2).toUpperCase()}</span>
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+                      {entry.professional_avatar ? (
+                        <img
+                          src={entry.professional_avatar}
+                          alt={entry.professional_name}
+                          className="w-full h-full object-cover"
+                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : (
+                        <span className="text-primary font-bold text-sm">
+                          {entry.professional_name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase() || "?"}
+                        </span>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm truncate">{entry.professional_name}</p>

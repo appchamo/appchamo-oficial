@@ -501,8 +501,15 @@ const TransactionsTab = ({ proId }: { proId: string }) => {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase.from("transactions").select("*").eq("professional_id", proId)
-        .gte("created_at", getDateFrom()).lte("created_at", getDateTo()).order("created_at", { ascending: false });
+      // Usa wallet_transactions pois tem RLS para o profissional.
+      // gross_amount = valor cobrado; amount = líquido após taxas
+      const { data } = await supabase
+        .from("wallet_transactions")
+        .select("id, gross_amount, amount, description, status, created_at, transferred_at, payment_method")
+        .eq("professional_id", proId)
+        .gte("created_at", getDateFrom())
+        .lte("created_at", getDateTo())
+        .order("created_at", { ascending: false });
       setTransactions(data || []);
       setLoading(false);
     };
@@ -515,16 +522,16 @@ const TransactionsTab = ({ proId }: { proId: string }) => {
       const d = new Date(t.created_at);
       const key = period === "day" ? d.toLocaleDateString("pt-BR") : `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
       if (!groups[key]) groups[key] = { total: 0, net: 0, count: 0 };
-      groups[key].total += Number(t.total_amount);
-      groups[key].net += Number(t.professional_net);
+      groups[key].total += Number(t.gross_amount || t.amount);
+      groups[key].net += Number(t.amount);
       groups[key].count += 1;
     }
     return Object.entries(groups).map(([label, data]) => ({ label, ...data }));
   };
 
   const grouped = groupByPeriod();
-  const totalNet = transactions.reduce((sum, t) => sum + Number(t.professional_net), 0);
-  const totalVolume = transactions.reduce((sum, t) => sum + Number(t.total_amount), 0);
+  const totalNet = transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+  const totalVolume = transactions.reduce((sum, t) => sum + Number(t.gross_amount || t.amount), 0);
   const pixHours = settings.transfer_period_pix_hours || "48";
   const cardDays = settings.transfer_period_card_days || "33";
 

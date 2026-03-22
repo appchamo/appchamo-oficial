@@ -206,7 +206,6 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
     <div className="bg-card border rounded-2xl p-5 shadow-card mb-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Package className="w-4 h-4 text-primary" />
           <h2 className="font-semibold text-foreground">Catálogo</h2>
           <Badge variant="secondary" className="text-[10px]">{visibleProducts.length}</Badge>
         </div>
@@ -269,52 +268,60 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
         </div>
       )}
 
-      {/* Product grid */}
+      {/* Carrossel 3 por vez */}
       {visibleProducts.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-4">Nenhum produto cadastrado.</p>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-            {visibleProducts.map(p => {
-              return (
-                <div key={p.id} className="border rounded-xl overflow-hidden bg-background flex flex-col h-full">
-                  <div className="relative pt-[100%] bg-muted">
-                    {p.image_url ? (
-                      <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Package className="w-8 h-8 text-muted-foreground/40" />
-                      </div>
-                    )}
+        <div
+          className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory"
+          style={{ scrollbarWidth: "none" }}
+        >
+          {visibleProducts.map(p => (
+            <div
+              key={p.id}
+              className="flex-shrink-0 snap-start border rounded-xl overflow-hidden bg-background flex flex-col"
+              style={{ width: "calc(33.33% - 6px)" }}
+            >
+              {/* Foto */}
+              <div className="relative bg-muted" style={{ aspectRatio: "1/1" }}>
+                {p.image_url ? (
+                  <img src={p.image_url} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Package className="w-6 h-6 text-muted-foreground/30" />
                   </div>
-                  
-                  <div className="p-2.5 flex flex-col flex-1">
-                    <p className="text-sm font-medium text-foreground line-clamp-2 leading-tight min-h-[40px]">{p.name}</p>
-                    <p className="text-sm font-bold text-primary mt-auto pt-2">
-                      {p.price > 0 ? `R$ ${Number(p.price).toFixed(2).replace(".", ",")}` : "Sob consulta"}
-                    </p>
-                    
-                    {/* Botão de Ação do Produto */}
-                    <div className="mt-3 pt-3 border-t">
-                      {isOwner ? (
-                        <div className="flex gap-1.5">
-                          <button onClick={() => handleEdit(p)} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[11px] font-medium hover:bg-muted transition-colors">
-                            <Pencil className="w-3 h-3" /> Editar
-                          </button>
-                          <button onClick={() => handleDelete(p.id)} className="flex items-center justify-center p-1.5 rounded-lg border text-destructive hover:bg-destructive/10 transition-colors">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button onClick={() => handleBuyClick(p)} className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-[11px] font-bold uppercase tracking-wider hover:bg-primary/90 transition-colors">
-                          <ShoppingBag className="w-3.5 h-3.5" /> 
-                          {p.external_url ? "Acessar Link" : "Comprar"}
-                        </button>
-                      )}
-                    </div>
+                )}
+              </div>
+
+              {/* Info */}
+              <div className="p-1.5 flex flex-col flex-1 gap-1">
+                <p className="text-[10px] font-medium text-foreground line-clamp-2 leading-tight">{p.name}</p>
+                <p className="text-[10px] font-bold text-primary">
+                  {p.price > 0 ? `R$ ${Number(p.price).toFixed(2).replace(".", ",")}` : "Consulte"}
+                </p>
+
+                {/* Ações */}
+                {isOwner ? (
+                  <div className="flex gap-1 mt-auto pt-1 border-t">
+                    <button onClick={() => handleEdit(p)} className="flex-1 flex items-center justify-center gap-0.5 py-1 rounded-md border text-[9px] font-medium hover:bg-muted transition-colors">
+                      <Pencil className="w-2.5 h-2.5" /> Editar
+                    </button>
+                    <button onClick={() => handleDelete(p.id)} className="flex items-center justify-center p-1 rounded-md border text-destructive hover:bg-destructive/10 transition-colors">
+                      <Trash2 className="w-2.5 h-2.5" />
+                    </button>
                   </div>
-                </div>
-              );
-            })}
+                ) : (
+                  <button
+                    onClick={() => handleBuyClick(p)}
+                    className="mt-auto w-full flex items-center justify-center gap-1 py-1.5 rounded-md bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wide hover:bg-primary/90 transition-colors"
+                  >
+                    <ShoppingBag className="w-2.5 h-2.5" />
+                    {p.external_url ? "Ver" : "Comprar"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

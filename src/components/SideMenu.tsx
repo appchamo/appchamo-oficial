@@ -35,11 +35,11 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
               ...(profile?.user_type === "company"
                 ? [
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },
-                    ...(plan?.id === "vip" || plan?.id === "pro" ? [{ icon: Image, label: "Serviços", path: "/my-services" }] : []),
+                    ...((plan?.id === "vip" || plan?.id === "pro" || plan?.id === "business") ? [{ icon: Image, label: "Fotos de Serviços", path: "/my-services" }] : []),
                   ]
                 : [
                     ...(canPostJobs ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }] : []),
-                    ...(plan?.id === "pro" || plan?.id === "vip" ? [{ icon: Image, label: "Serviços", path: "/my-services" }] : []),
+                    ...((plan?.id === "pro" || plan?.id === "vip" || plan?.id === "business") ? [{ icon: Image, label: "Fotos de Serviços", path: "/my-services" }] : []),
                   ]),
               // Catálogo de Produtos disponível para qualquer profissional/empresa no plano Business
               ...(isBusiness ? [{ icon: ShoppingBag, label: "Catálogo de Produtos", path: "/my-catalog" }] : []),

@@ -13,7 +13,7 @@ const MyServices = () => {
   const [proId, setProId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const canUseServices = plan?.id === "pro" || plan?.id === "vip";
+  const canUseServices = plan?.id === "pro" || plan?.id === "vip" || plan?.id === "business";
 
   useEffect(() => {
     if (!user) {

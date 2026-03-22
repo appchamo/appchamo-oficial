@@ -38,17 +38,32 @@ serve(async (req) => {
         .eq("asaas_payment_id", payment.id)
         .maybeSingle();
 
-      if (tx && tx.status !== "completed") {
-        // 1a. Atualiza status da transação
-        const { error: updErr } = await supabase
-          .from("transactions")
-          .update({ status: "completed" })
-          .eq("id", tx.id);
+      if (tx) {
+        // 1a. Atualiza status da transação (idempotente)
+        if (tx.status !== "completed") {
+          const { error: updErr } = await supabase
+            .from("transactions")
+            .update({ status: "completed" })
+            .eq("id", tx.id);
+          if (updErr) console.error("Transaction update error:", updErr);
+          else console.log("Transaction updated to completed:", payment.id);
+        } else {
+          console.log("Transaction already completed (polling beat webhook):", payment.id);
+        }
 
-        if (updErr) console.error("Transaction update error:", updErr);
-        else console.log("Transaction updated to completed:", payment.id);
+        // Verifica se wallet_transaction já existe (previne duplicata se webhook disparar duas vezes)
+        const { data: existingWallet } = await supabase
+          .from("wallet_transactions")
+          .select("id")
+          .eq("transaction_id", tx.id)
+          .maybeSingle();
 
-        // 1b. Insere mensagem de confirmação no chat (frontend Realtime a detecta em tempo real)
+        if (existingWallet) {
+          console.log("wallet_transaction already exists for transaction:", tx.id, "— skipping wallet insert");
+        }
+
+        // 1b. Insere mensagem de confirmação no chat e cria wallet_transaction
+        // Roda sempre, mas wallet insert é protegido pelo check acima
         if (tx.request_id && tx.client_id) {
           const totalStr = Number(tx.total_amount).toFixed(2).replace(".", ",");
 
@@ -189,34 +204,31 @@ serve(async (req) => {
                 availableAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
               }
 
-              // Registra na carteira do profissional
-              const { error: walletErr } = await supabase.from("wallet_transactions").insert({
-                professional_id: txFull.professional_id,
-                transaction_id: tx.id,
-                gross_amount: grossAmount,
-                platform_fee_amount: commissionAmount,   // só comissão
-                payment_fee_amount: paymentFeeAmount,    // taxa Asaas/gateway
-                anticipation_fee_amount: anticipationFeeAmount,
-                amount: netAmount,
-                payment_method: paymentMethod,
-                anticipation_enabled: anticipationEnabled,
-                description: `Serviço recebido via ${paymentMethod === "pix" ? "PIX" : "Cartão"}`,
-                status: "pending",
-                available_at: availableAt.toISOString(),
-              });
-              if (walletErr) console.error("wallet_transactions insert error:", walletErr);
-              else console.log("Carteira atualizada para profissional:", txFull.professional_id, "| Líquido:", netAmount);
+              // Registra na carteira do profissional (só se ainda não existir)
+              if (!existingWallet) {
+                const { error: walletErr } = await supabase.from("wallet_transactions").insert({
+                  professional_id: txFull.professional_id,
+                  transaction_id: tx.id,
+                  gross_amount: grossAmount,
+                  platform_fee_amount: commissionAmount,   // só comissão
+                  payment_fee_amount: paymentFeeAmount,    // taxa Asaas/gateway
+                  anticipation_fee_amount: anticipationFeeAmount,
+                  amount: netAmount,
+                  payment_method: paymentMethod,
+                  anticipation_enabled: anticipationEnabled,
+                  description: `Serviço recebido via ${paymentMethod === "pix" ? "PIX" : "Cartão"}`,
+                  status: "pending",
+                  available_at: availableAt.toISOString(),
+                });
+                if (walletErr) console.error("wallet_transactions insert error:", walletErr);
+                else console.log("Carteira atualizada para profissional:", txFull.professional_id, "| Líquido:", netAmount);
+              }
             }
           }
         }
-      } else if (!tx) {
-        // Pagamento avulso sem transação encontrada (fallback antigo)
-        const { error: updErr } = await supabase
-          .from("transactions")
-          .update({ status: "completed" })
-          .eq("asaas_payment_id", payment.id);
-        if (updErr) console.error("Transaction fallback update error:", updErr);
-        else console.log("Transaction (fallback) updated:", payment.id);
+      } else {
+        // Nenhuma transação encontrada para este payment_id (pagamento avulso ou assinatura)
+        console.log("No transaction found for payment:", payment.id, "— may be a subscription payment");
       }
 
       // 2. NOVA MÁGICA: Se o pagamento for de uma ASSINATURA, libera o plano na hora!

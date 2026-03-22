@@ -165,11 +165,90 @@ serve(async (req) => {
         const status = String(payment?.status || "").toUpperCase();
         const paid = status === "RECEIVED" || status === "CONFIRMED";
         if (paid) {
+          // Atualiza status da transação
           await supabase
             .from("transactions")
             .update({ status: "completed" })
             .eq("asaas_payment_id", payment_id)
             .eq("client_id", user.id);
+
+          // Fallback: cria wallet_transaction se o webhook não criou ainda
+          try {
+            const { data: txFull } = await supabase
+              .from("transactions")
+              .select("id, professional_id, total_amount, original_amount, professional_net, platform_fee, commission_fee, payment_fee")
+              .eq("asaas_payment_id", payment_id)
+              .maybeSingle();
+
+            if (txFull?.professional_id) {
+              const { data: existingWallet } = await supabase
+                .from("wallet_transactions")
+                .select("id")
+                .eq("transaction_id", txFull.id)
+                .maybeSingle();
+
+              if (!existingWallet) {
+                const { data: fiscal } = await supabase
+                  .from("professional_fiscal_data")
+                  .select("anticipation_enabled, payment_method")
+                  .eq("professional_id", txFull.professional_id)
+                  .maybeSingle();
+
+                const { data: settingsRows } = await supabase
+                  .from("platform_settings")
+                  .select("key, value")
+                  .in("key", ["transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct", "commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed"]);
+
+                const cfg: Record<string, number> = {};
+                (settingsRows || []).forEach((r: any) => { cfg[r.key] = parseFloat(r.value || "0"); });
+
+                const payMethod = fiscal?.payment_method || "pix";
+                const anticipationEnabled = fiscal?.anticipation_enabled || false;
+                const grossAmount = Number(txFull.total_amount);
+                const originalAmt = Number(txFull.original_amount || txFull.total_amount);
+                const commissionPct = cfg["commission_pct"] ?? 10;
+                const feePct = payMethod === "pix" ? (cfg["pix_fee_pct"] ?? 0) : (cfg["card_fee_pct"] ?? 0);
+                const feeFixed = payMethod === "pix" ? (cfg["pix_fee_fixed"] ?? 0) : (cfg["card_fee_fixed"] ?? 0);
+
+                const commissionFeeAmt = txFull.commission_fee != null ? Number(txFull.commission_fee) : Number((originalAmt * commissionPct / 100).toFixed(2));
+                const paymentFeeAmt = txFull.payment_fee != null ? Number(txFull.payment_fee) : Number((originalAmt * feePct / 100 + feeFixed).toFixed(2));
+                const professionalNetAmt = txFull.professional_net != null ? Number(txFull.professional_net) : Number((originalAmt - commissionFeeAmt - paymentFeeAmt).toFixed(2));
+
+                let anticipationFeeAmt = 0;
+                if (anticipationEnabled && payMethod !== "pix") {
+                  anticipationFeeAmt = Number((professionalNetAmt * (cfg["anticipation_fee_pct"] || 15) / 100).toFixed(2));
+                }
+                const netAmt = Number((professionalNetAmt - anticipationFeeAmt).toFixed(2));
+
+                let availableAt = new Date();
+                if (payMethod === "pix") {
+                  availableAt = new Date(Date.now() + (cfg["transfer_period_pix_hours"] || 12) * 3600000);
+                } else if (anticipationEnabled) {
+                  availableAt = new Date(Date.now() + (cfg["transfer_period_card_anticipated_days"] || 7) * 86400000);
+                } else {
+                  availableAt = new Date(Date.now() + (cfg["transfer_period_card_days"] || 32) * 86400000);
+                }
+
+                await supabase.from("wallet_transactions").insert({
+                  professional_id: txFull.professional_id,
+                  transaction_id: txFull.id,
+                  gross_amount: grossAmount,
+                  platform_fee_amount: commissionFeeAmt,
+                  payment_fee_amount: paymentFeeAmt,
+                  anticipation_fee_amount: anticipationFeeAmt,
+                  amount: netAmt,
+                  payment_method: payMethod,
+                  anticipation_enabled: anticipationEnabled,
+                  description: `Serviço recebido via ${payMethod === "pix" ? "PIX" : "Cartão"}`,
+                  status: "pending",
+                  available_at: availableAt.toISOString(),
+                });
+                console.log("wallet_transaction criada via fallback para profissional:", txFull.professional_id);
+              }
+            }
+          } catch (walletFallbackErr) {
+            console.error("Erro no fallback de wallet_transaction:", walletFallbackErr);
+          }
         }
         return new Response(JSON.stringify({ confirmed: paid }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

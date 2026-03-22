@@ -9,6 +9,34 @@ import SponsorStoryViewer, { SponsorStory } from "@/components/SponsorStoryViewe
 
 type UpgradeStep = "package" | "method" | "pix_form" | "pix_qr" | "card_form" | "success";
 
+/** Comprime imagem client-side para WebP leve mantendo boa qualidade visual */
+async function compressStoryImage(file: File, maxDim = 1080, quality = 0.82): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.imageSmoothingEnabled = true;
+      if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(file); return; }
+        const name = file.name.replace(/\.[^.]+$/, ".webp");
+        resolve(new File([blob], name, { type: "image/webp" }));
+      }, "image/webp", quality);
+    };
+    img.onerror = () => resolve(file);
+    img.src = url;
+  });
+}
+
 interface Sponsor {
   id: string;
   name: string;
@@ -50,6 +78,7 @@ const SponsorDashboard = () => {
   const [posting, setPosting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewStories, setPreviewStories] = useState<SponsorStory[] | null>(null);
+  const [compressingStory, setCompressingStory] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [selectedPack, setSelectedPack] = useState<"pack_14" | "pack_28" | null>(null);
   const [pack14Price, setPack14Price] = useState<string | null>(null);
@@ -146,14 +175,29 @@ const SponsorDashboard = () => {
     };
   }, [sponsor?.id]);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       toast({ title: "Somente imagens são permitidas", variant: "destructive" }); return;
     }
-    setNewFile(file);
+    // Preview imediato (antes de comprimir)
     setNewPreview(URL.createObjectURL(file));
+
+    // Comprime antes de armazenar (especialmente para arquivos pesados)
+    setCompressingStory(true);
+    try {
+      const compressed = await compressStoryImage(file);
+      const savedKB = Math.round((file.size - compressed.size) / 1024);
+      if (savedKB > 50) {
+        console.log(`[Story] Comprimida: ${(file.size / 1024).toFixed(0)}KB → ${(compressed.size / 1024).toFixed(0)}KB`);
+      }
+      setNewFile(compressed);
+    } catch {
+      setNewFile(file);
+    } finally {
+      setCompressingStory(false);
+    }
   };
 
   const handlePost = async () => {
@@ -512,7 +556,13 @@ const SponsorDashboard = () => {
               <p className="text-[11px] text-muted-foreground text-right mt-1">{newCaption.length}/150</p>
             </div>
             <p className="text-xs text-muted-foreground text-center">Esta novidade ficará ativa por 24 horas.</p>
-            <button onClick={handlePost} disabled={posting || !newFile} className="w-full py-3 rounded-2xl bg-primary text-primary-foreground font-bold text-sm disabled:opacity-50">
+            {compressingStory && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Otimizando imagem...
+              </div>
+            )}
+            <button onClick={handlePost} disabled={posting || !newFile || compressingStory} className="w-full py-3 rounded-2xl bg-primary text-primary-foreground font-bold text-sm disabled:opacity-50">
               {posting ? "Publicando..." : "Publicar Novidade"}
             </button>
           </div>

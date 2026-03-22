@@ -57,6 +57,15 @@ const SupportThread = () => {
     }
   };
 
+  /**
+   * Verifica se um atendente humano já participou da conversa.
+   * Usa o estado atual de `messages` como referência.
+   */
+  const hasHumanAgentReplied = (msgs: Message[]) =>
+    msgs.some(
+      (m) => m.sender_id !== SUPPORT_BOT_SENDER_ID && m.sender_id !== user?.id
+    );
+
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -200,9 +209,11 @@ const SupportThread = () => {
     setSending(false);
     if (newMsg) setMessages((prev) => [...prev, { ...newMsg, image_urls: null } as Message]);
 
-    // Pequena pausa para a mensagem ser gravada antes da função ler o histórico
-    await new Promise((r) => setTimeout(r, 800));
-    await invokeAI();
+    // Só aciona IA se nenhum atendente humano já respondeu neste ticket
+    if (!hasHumanAgentReplied(messages)) {
+      await new Promise((r) => setTimeout(r, 800));
+      await invokeAI();
+    }
   };
 
   // ✅ FUNÇÃO DE COMPRESSÃO ADICIONADA PARA O SUPORTE
@@ -352,8 +363,10 @@ const SupportThread = () => {
     }
     if (newMsg) setMessages((prev) => [...prev, { ...newMsg, image_urls: null } as Message]);
     setSending(false);
-    await new Promise((r) => setTimeout(r, 800));
-    await invokeAI();
+    if (!hasHumanAgentReplied(messages)) {
+      await new Promise((r) => setTimeout(r, 800));
+      await invokeAI();
+    }
   };
 
   const handleRequestHuman = async () => {
@@ -374,8 +387,11 @@ const SupportThread = () => {
     });
     toast({ title: "Solicitação enviada", description: "Um atendente será notificado em breve." });
     setRequestingHuman(false);
-    await new Promise((r) => setTimeout(r, 800));
-    await invokeAI();
+    // A IA ainda pode confirmar o pedido de humano (se nenhum agente respondeu ainda)
+    if (!hasHumanAgentReplied(messages)) {
+      await new Promise((r) => setTimeout(r, 800));
+      await invokeAI();
+    }
   };
 
   const renderContent = (msg: Message) => {

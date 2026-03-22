@@ -74,6 +74,18 @@ serve(async (req) => {
     // Não responde se o conteúdo for [CLOSED]
     if (last?.content === "[CLOSED]") return jsonResponse({ ok: true, skipped: "closed" });
 
+    // ── NOVO: Se um atendente humano já respondeu, IA fica em silêncio ──────
+    // Qualquer mensagem de sender que não seja o bot nem o usuário dono do ticket
+    // indica que um humano entrou na conversa.
+    const hasHumanAgent = list.some((m: any) =>
+      m.sender_id !== BOT_SENDER_ID && m.sender_id !== ticket.user_id
+    );
+    if (hasHumanAgent) {
+      console.log("Atendente humano detectado — IA desativada para o ticket:", ticket_id);
+      return jsonResponse({ ok: true, skipped: "human_agent_active" });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     /* ── 3. Detecta pedido de atendente humano ── */
     const lastContent = (last && !isBot(last.sender_id) ? last.content : "").toLowerCase();
     const wantsHuman = /atendente\s*humano|falar\s*com\s*(um\s*)?(atendente|humano|pessoa)|transferir/i.test(lastContent);

@@ -166,7 +166,7 @@ const Index = () => {
             <p className="text-xs font-bold text-white/40 uppercase tracking-widest">Baixe o aplicativo</p>
             <div className="flex flex-col sm:flex-row gap-3">
               <a
-                href="https://apps.apple.com/app/chamô/id6742879924"
+                href="https://apps.apple.com/br/app/cham%C3%B4-app/id6759582451"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 px-6 py-3.5 rounded-2xl font-semibold text-sm transition-all hover:scale-105 active:scale-95 shadow-xl"
@@ -179,7 +179,7 @@ const Index = () => {
                 </div>
               </a>
               <a
-                href="https://play.google.com/store/apps/details?id=com.appchamo.app"
+                href="https://play.google.com/store/apps/details?id=com.chamo.app&pcampaignid=web_share"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 px-6 py-3.5 rounded-2xl font-semibold text-sm transition-all hover:scale-105 active:scale-95 shadow-xl"

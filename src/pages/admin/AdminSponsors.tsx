@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Plus, ExternalLink, MoreHorizontal, Eye, EyeOff, Pencil, Trash2, Power, MapPin, Package } from "lucide-react";
+import { Plus, ExternalLink, MoreHorizontal, Eye, EyeOff, Pencil, Trash2, Power, MapPin, Package, Save, Loader2, Settings2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -75,6 +75,12 @@ const AdminSponsors = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loadingCities, setLoadingCities] = useState(false);
 
+  // Preços dos pacotes de novidades
+  const [pack14Price, setPack14Price] = useState("");
+  const [pack28Price, setPack28Price] = useState("");
+  const [contactWhatsapp, setContactWhatsapp] = useState("");
+  const [savingPrices, setSavingPrices] = useState(false);
+
   const fetchSponsors = async () => {
     const { data, error } = await supabase.from("sponsors").select("*").order("sort_order");
     if (error) { toast({ title: "Erro ao carregar", description: translateError(error.message), variant: "destructive" }); return; }
@@ -82,7 +88,31 @@ const AdminSponsors = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchSponsors(); }, []);
+  const fetchPackPrices = async () => {
+    const { data } = await supabase
+      .from("platform_settings")
+      .select("key, value")
+      .in("key", ["sponsor_pack_14_price", "sponsor_pack_28_price", "sponsor_contact_whatsapp"]);
+    if (data) {
+      for (const row of data) {
+        const v = typeof row.value === "string" ? row.value : String(row.value);
+        if (row.key === "sponsor_pack_14_price") setPack14Price(v);
+        if (row.key === "sponsor_pack_28_price") setPack28Price(v);
+        if (row.key === "sponsor_contact_whatsapp") setContactWhatsapp(v);
+      }
+    }
+  };
+
+  const handleSavePrices = async () => {
+    setSavingPrices(true);
+    await supabase.from("platform_settings").upsert({ key: "sponsor_pack_14_price", value: pack14Price as any }, { onConflict: "key" });
+    await supabase.from("platform_settings").upsert({ key: "sponsor_pack_28_price", value: pack28Price as any }, { onConflict: "key" });
+    await supabase.from("platform_settings").upsert({ key: "sponsor_contact_whatsapp", value: contactWhatsapp as any }, { onConflict: "key" });
+    toast({ title: "Preços dos pacotes salvos!" });
+    setSavingPrices(false);
+  };
+
+  useEffect(() => { fetchSponsors(); fetchPackPrices(); }, []);
 
   useEffect(() => {
     if ((form.location_scope !== "state" && form.location_scope !== "city") || !form.location_state) {
@@ -239,6 +269,58 @@ const AdminSponsors = () => {
 
   return (
     <AdminLayout title="Patrocinadores">
+      {/* Card de configuração dos pacotes de novidades */}
+      <div className="bg-card border rounded-xl p-4 mb-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Settings2 className="w-4 h-4 text-primary" />
+          <h2 className="font-semibold text-sm text-foreground">Pacotes de Novidades</h2>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Configure os preços dos pacotes adicionais que os patrocinadores podem adquirir quando atingem o limite gratuito (4/semana).
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Pacote 14/semana (R$)</label>
+            <input
+              type="number" step="0.01" min="0"
+              value={pack14Price}
+              onChange={(e) => setPack14Price(e.target.value)}
+              placeholder="Ex: 149.90"
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Pacote 28/semana (R$)</label>
+            <input
+              type="number" step="0.01" min="0"
+              value={pack28Price}
+              onChange={(e) => setPack28Price(e.target.value)}
+              placeholder="Ex: 249.90"
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">WhatsApp para contato</label>
+            <input
+              type="text"
+              value={contactWhatsapp}
+              onChange={(e) => setContactWhatsapp(e.target.value)}
+              placeholder="5565999999999"
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">Apenas números com DDI (ex: 5565...)</p>
+          </div>
+        </div>
+        <button
+          onClick={handleSavePrices}
+          disabled={savingPrices}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+        >
+          {savingPrices ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {savingPrices ? "Salvando..." : "Salvar preços"}
+        </button>
+      </div>
+
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-muted-foreground">{sponsors.length} patrocinadores</p>
         <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">

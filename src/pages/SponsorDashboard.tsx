@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon } from "lucide-react";
+import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, MessageCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import SponsorStoryViewer, { SponsorStory } from "@/components/SponsorStoryViewer";
 
@@ -48,6 +48,11 @@ const SponsorDashboard = () => {
   const [posting, setPosting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewStories, setPreviewStories] = useState<SponsorStory[] | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [selectedPack, setSelectedPack] = useState<"pack_14" | "pack_28" | null>(null);
+  const [pack14Price, setPack14Price] = useState<string | null>(null);
+  const [pack28Price, setPack28Price] = useState<string | null>(null);
+  const [contactWhatsapp, setContactWhatsapp] = useState<string | null>(null);
 
   const load = async () => {
     if (!user) return;
@@ -79,7 +84,23 @@ const SponsorDashboard = () => {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [user]);
+  useEffect(() => {
+    load();
+    // Carrega preços dos pacotes de novidades
+    supabase
+      .from("platform_settings")
+      .select("key, value")
+      .in("key", ["sponsor_pack_14_price", "sponsor_pack_28_price", "sponsor_contact_whatsapp"])
+      .then(({ data }) => {
+        if (!data) return;
+        for (const row of data) {
+          const v = typeof row.value === "string" ? row.value : String(row.value);
+          if (row.key === "sponsor_pack_14_price") setPack14Price(v);
+          if (row.key === "sponsor_pack_28_price") setPack28Price(v);
+          if (row.key === "sponsor_contact_whatsapp") setContactWhatsapp(v);
+        }
+      });
+  }, [user]);
 
   // Atualiza contadores em tempo real quando views/clicks chegam
   useEffect(() => {
@@ -264,9 +285,7 @@ const SponsorDashboard = () => {
             <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${quotaPercent}%` }} />
           </div>
           {weeklyUsed >= limit && (
-            <p className="text-xs text-destructive mt-2">
-              Limite semanal atingido.{sponsor.weekly_plan === "free" && " Fale com a equipe Chamô para ampliar."}
-            </p>
+            <p className="text-xs text-destructive mt-2 font-medium">Limite semanal atingido.</p>
           )}
         </div>
 
@@ -279,6 +298,17 @@ const SponsorDashboard = () => {
           <Plus className="w-5 h-5" />
           Lançar Novidade
         </button>
+
+        {/* Botão de upgrade — aparece quando o limite é atingido */}
+        {weeklyUsed >= limit && sponsor.weekly_plan !== "pack_28" && (
+          <button
+            onClick={() => { setSelectedPack(null); setUpgradeOpen(true); }}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-primary text-primary font-bold text-sm active:scale-[0.98] transition-transform"
+          >
+            <ShoppingCart className="w-4 h-4" />
+            Adquirir mais limites
+          </button>
+        )}
 
         {/* Preview como aparece na Home */}
         <div className="bg-card border rounded-2xl p-4">
@@ -403,6 +433,92 @@ const SponsorDashboard = () => {
       {previewStories && (
         <SponsorStoryViewer stories={previewStories} onClose={() => setPreviewStories(null)} />
       )}
+
+      {/* Modal de upgrade de plano */}
+      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-primary" /> Adquirir mais limites
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Escolha o pacote para ampliar suas novidades semanais:
+            </p>
+
+            {/* Opções de pacote */}
+            <div className="space-y-2">
+              {/* Pack 14 */}
+              {sponsor.weekly_plan !== "pack_14" && sponsor.weekly_plan !== "pack_28" && (
+                <button
+                  onClick={() => setSelectedPack("pack_14")}
+                  className={`w-full p-4 rounded-2xl border-2 text-left transition-colors ${selectedPack === "pack_14" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-sm text-foreground">Pacote 14 novidades/semana</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">14 publicações por semana</p>
+                    </div>
+                    <div className="text-right">
+                      {pack14Price ? (
+                        <p className="font-bold text-primary">R$ {parseFloat(pack14Price).toFixed(2).replace(".", ",")}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Sob consulta</p>
+                      )}
+                      {selectedPack === "pack_14" && <Check className="w-4 h-4 text-primary ml-auto mt-1" />}
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {/* Pack 28 */}
+              <button
+                onClick={() => setSelectedPack("pack_28")}
+                className={`w-full p-4 rounded-2xl border-2 text-left transition-colors ${selectedPack === "pack_28" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-sm text-foreground">Pacote 28 novidades/semana</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">28 publicações por semana</p>
+                    <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Mais popular</span>
+                  </div>
+                  <div className="text-right">
+                    {pack28Price ? (
+                      <p className="font-bold text-primary">R$ {parseFloat(pack28Price).toFixed(2).replace(".", ",")}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Sob consulta</p>
+                    )}
+                    {selectedPack === "pack_28" && <Check className="w-4 h-4 text-primary ml-auto mt-1" />}
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <p className="text-[11px] text-muted-foreground text-center">
+              Após o pagamento, nossa equipe ativará o pacote em até 24h.
+            </p>
+
+            {/* Botão de contato WhatsApp */}
+            <a
+              href={
+                contactWhatsapp
+                  ? `https://wa.me/${contactWhatsapp}?text=${encodeURIComponent(
+                      `Olá! Sou patrocinador ${sponsor.name} e quero adquirir o ${selectedPack === "pack_28" ? "Pacote 28" : "Pacote 14"} novidades/semana.`
+                    )}`
+                  : "#"
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => { if (!selectedPack) { toast({ title: "Selecione um pacote primeiro", variant: "destructive" }); } }}
+              className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-sm transition-colors ${selectedPack ? "bg-green-500 text-white hover:bg-green-600 active:scale-[0.98]" : "bg-muted text-muted-foreground cursor-default"}`}
+            >
+              <MessageCircle className="w-4 h-4" />
+              {selectedPack ? "Falar com a equipe no WhatsApp" : "Selecione um pacote acima"}
+            </a>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

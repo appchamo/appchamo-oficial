@@ -102,10 +102,12 @@ serve(async (req) => {
     const fcmUrl = `https://fcm.googleapis.com/v1/projects/${firebaseConfig.project_id}/messages:send`
     const title = record.title || "Chamô 🚀"
     const body = record.message || "Você tem uma nova atualização."
+    const imageUrl: string | null = record.image_url || null
     const dataPayload: Record<string, string> = {
       notification_id: String(record.id || ""),
       type: String(record.type || "general"),
       link: String(record.link || ""),
+      ...(imageUrl ? { image_url: imageUrl } : {}),
       ...(notificationSoundUrl ? { sound_url: notificationSoundUrl } : {})
     }
 
@@ -126,7 +128,7 @@ serve(async (req) => {
 
       if (isIos) {
         // iOS: badge = contagem real de não lidas (o app zera ao abrir Notificações)
-        message.apns = {
+        const apns: Record<string, unknown> = {
           headers: { "apns-push-type": "alert" },
           payload: {
             aps: {
@@ -136,8 +138,13 @@ serve(async (req) => {
             }
           }
         }
+        // Imagem na notificação iOS via fcm_options (exibe no lock screen sem NSE)
+        if (imageUrl) {
+          apns.fcm_options = { image: imageUrl }
+        }
+        message.apns = apns
       } else {
-        message.notification = { title, body }
+        message.notification = { title, body, ...(imageUrl ? { image: imageUrl } : {}) }
         message.android = {
           priority: "high",
           ttl: "3600s",
@@ -145,8 +152,9 @@ serve(async (req) => {
             title,
             body,
             channelId: "default_v2",
-            defaultSound: false, // usa o som do canal (chamo_notification) no app
+            defaultSound: false,
             defaultVibrateTimings: true,
+            ...(imageUrl ? { imageUrl } : {}),
           },
           data: dataPayload,
         }

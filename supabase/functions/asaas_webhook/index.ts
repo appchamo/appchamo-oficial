@@ -96,14 +96,18 @@ serve(async (req) => {
             if (msgErr) console.error("chat_messages insert error:", msgErr);
             else console.log("Mensagem de confirmação inserida no chat:", tx.request_id);
 
-            // 1c. Notificações
-            await supabase.from("notifications").insert({
-              user_id: tx.client_id,
-              title: "✅ Pagamento Confirmado",
-              message: `Seu pagamento via PIX de R$ ${totalStr} foi confirmado.`,
-              type: "success",
-              link: `/messages/${tx.request_id}`,
-            });
+            // 1c. Busca avatares para incluir nas notificações push
+            let clientAvatar: string | null = null;
+            let proAvatar: string | null = null;
+            let proUserId: string | null = null;
+
+            // Busca avatar do cliente
+            const { data: clientProfile } = await supabase
+              .from("profiles")
+              .select("avatar_url")
+              .eq("user_id", tx.client_id)
+              .maybeSingle();
+            clientAvatar = (clientProfile as any)?.avatar_url ?? null;
 
             if (txFull?.professional_id) {
               const { data: pro } = await supabase
@@ -111,19 +115,40 @@ serve(async (req) => {
                 .select("user_id")
                 .eq("id", txFull.professional_id)
                 .maybeSingle();
-
               if (pro?.user_id) {
-                const proMsg = professionalNetStr
-                  ? `Você vai receber R$ ${professionalNetStr} via PIX (líquido após taxas).`
-                  : `Você recebeu um pagamento via PIX de R$ ${totalStr}.`;
-                await supabase.from("notifications").insert({
-                  user_id: pro.user_id,
-                  title: "💰 Pagamento Recebido!",
-                  message: proMsg,
-                  type: "success",
-                  link: `/messages/${tx.request_id}`,
-                });
+                proUserId = pro.user_id;
+                const { data: proProfile } = await supabase
+                  .from("profiles")
+                  .select("avatar_url")
+                  .eq("user_id", pro.user_id)
+                  .maybeSingle();
+                proAvatar = (proProfile as any)?.avatar_url ?? null;
               }
+            }
+
+            // Notificação ao cliente: mostra o avatar do profissional (quem recebeu o pagamento)
+            await supabase.from("notifications").insert({
+              user_id: tx.client_id,
+              title: "✅ Pagamento Confirmado",
+              message: `Seu pagamento via PIX de R$ ${totalStr} foi confirmado.`,
+              type: "success",
+              link: `/messages/${tx.request_id}`,
+              image_url: proAvatar,
+            } as any);
+
+            if (proUserId) {
+              const proMsg = professionalNetStr
+                ? `Você vai receber R$ ${professionalNetStr} via PIX (líquido após taxas).`
+                : `Você recebeu um pagamento via PIX de R$ ${totalStr}.`;
+              // Notificação ao profissional: mostra o avatar do cliente (quem pagou)
+              await supabase.from("notifications").insert({
+                user_id: proUserId,
+                title: "💰 Pagamento Recebido!",
+                message: proMsg,
+                type: "success",
+                link: `/messages/${tx.request_id}`,
+                image_url: clientAvatar,
+              } as any);
 
               // Busca dados fiscais do profissional para verificar antecipação
               const { data: fiscal } = await supabase

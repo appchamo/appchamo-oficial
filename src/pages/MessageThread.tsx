@@ -197,8 +197,8 @@ const MessageThread = () => {
       // Garante status correto no banco
       await supabase.from("transactions").update({ status: "completed" }).eq("asaas_payment_id", paymentId);
 
-      await sendNotification(userId, "✅ Pagamento Aprovado", `Pagamento via PIX de R$ ${totalAmount.toFixed(2).replace(".", ",")} confirmado.`);
-      if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um pagamento via PIX de R$ ${totalAmount.toFixed(2).replace(".", ",")}!`);
+      await sendNotification(userId, "✅ Pagamento Aprovado", `Pagamento via PIX de R$ ${totalAmount.toFixed(2).replace(".", ",")} confirmado.`, null, otherParty.avatar_url ?? null);
+      if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você recebeu um pagamento via PIX de R$ ${totalAmount.toFixed(2).replace(".", ",")}!`, null, profile?.avatar_url ?? null);
 
       toast({ title: "Pagamento PIX confirmado!" });
       setPixOpen(false);
@@ -223,7 +223,7 @@ const MessageThread = () => {
     }
   }, []);
 
-  const sendNotification = async (targetId: string | null, title: string, msg: string, link: string | null = null) => {
+  const sendNotification = async (targetId: string | null, title: string, msg: string, link: string | null = null, imageUrl: string | null = null) => {
     if (!targetId) return;
     try {
       await supabase.from("notifications").insert({
@@ -232,19 +232,22 @@ const MessageThread = () => {
         message: msg,
         read: false,
         type: link ? "appointment" : "system",
-        link: link
+        link: link,
+        image_url: imageUrl
       } as any);
     } catch (err) {
       console.error("Erro ao enviar notificação:", err);
     }
   };
 
-  /** Push para o destinatário: "Fulano enviou uma mensagem para você" + preview (ex: "Oi"). No celular bloqueado só o título aparece. */
+  /** Push para o destinatário: "Fulano enviou uma mensagem para você" + preview.
+   *  A notificação inclui o avatar do REMETENTE para identificação visual. */
   const sendMessagePushNotification = async (recipientId: string | null, preview: string) => {
     if (!recipientId || !threadId) return;
     const senderName = profile?.full_name?.trim() || "Alguém";
     const title = `${senderName} enviou uma mensagem para você`;
     const body = preview.slice(0, 120);
+    const senderAvatar = profile?.avatar_url || null;
     try {
       await supabase.from("notifications").insert({
         user_id: recipientId,
@@ -252,7 +255,8 @@ const MessageThread = () => {
         message: body,
         read: false,
         type: "chat",
-        link: `/messages/${threadId}`
+        link: `/messages/${threadId}`,
+        image_url: senderAvatar
       } as any);
     } catch (err) {
       console.error("Erro ao enviar push de mensagem:", err);
@@ -503,8 +507,8 @@ const MessageThread = () => {
           if (params.selectedCouponId) {
             await supabase.from("coupons").update({ used: true } as any).eq("id", params.selectedCouponId);
           }
-          await sendNotification(params.userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${params.finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
-          if (params.chatProUserId) await sendNotification(params.chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNet.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`);
+          await sendNotification(params.userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${params.finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
+          if (params.chatProUserId) await sendNotification(params.chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNet.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`, null, profile?.avatar_url ?? null);
           await awardPostPaymentCoupon(parseFloat(params.paymentDataAmount));
           toast({ title: "Pagamento PIX confirmado!" });
           setPixOpen(false);
@@ -1331,8 +1335,8 @@ const MessageThread = () => {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
 
-              await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
-              if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetPoll.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`);
+              await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
+              if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetPoll.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`, null, profile?.avatar_url ?? null);
 
               await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
@@ -1370,8 +1374,8 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
-      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`);
-      await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetCard.toFixed(2).replace(".", ",")} via Cartão (líquido após taxas).`);
+      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
+      await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetCard.toFixed(2).replace(".", ",")} via Cartão (líquido após taxas).`, null, profile?.avatar_url ?? null);
 
       await awardPostPaymentCoupon(parseFloat(paymentData.amount));
 
@@ -1726,7 +1730,7 @@ const MessageThread = () => {
                 setRequestStatus("completed");
                 await markAppointmentDone();
                 if (chatProUserId) {
-                  await sendNotification(chatProUserId, "Chat encerrado", "O cliente encerrou a conversa.", `/messages/${threadId}`);
+                  await sendNotification(chatProUserId, "Chat encerrado", "O cliente encerrou a conversa.", `/messages/${threadId}`, profile?.avatar_url ?? null);
                 }
                 setClosingCall(false);
                 toast({ title: "Chat encerrado!" });
@@ -1751,7 +1755,7 @@ const MessageThread = () => {
                   setAppointment((a) => (a ? { ...a, status: "canceled" } : null));
                   const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", appointment.professional_id).single();
                   if ((pro as { user_id?: string })?.user_id)
-                    await sendNotification((pro as { user_id: string }).user_id, "Agendamento cancelado", "O cliente cancelou o agendamento.", `/messages/${threadId}`);
+                    await sendNotification((pro as { user_id: string }).user_id, "Agendamento cancelado", "O cliente cancelou o agendamento.", `/messages/${threadId}`, profile?.avatar_url ?? null);
                 }
                 await supabase.from("service_requests").update({ status: "cancelled" } as any).eq("id", threadId!);
                 setRequestStatus("cancelled");
@@ -1789,7 +1793,7 @@ const MessageThread = () => {
                   sender_id: userId,
                   content: "❌ Agendamento recusado pelo profissional."
                 });
-                await sendNotification(appointment.client_id, "Agendamento recusado", "O profissional recusou seu agendamento.", `/messages/${threadId}`);
+                await sendNotification(appointment.client_id, "Agendamento recusado", "O profissional recusou seu agendamento.", `/messages/${threadId}`, profile?.avatar_url ?? null);
                 toast({ title: "Agendamento recusado" });
               }}
               className="flex-1 min-w-[80px] py-2.5 rounded-xl border-2 border-destructive text-destructive font-semibold text-sm hover:bg-destructive/10 transition-colors">
@@ -1812,7 +1816,7 @@ const MessageThread = () => {
                   sender_id: userId,
                   content: "✅ Agendamento confirmado! Nos vemos no dia e horário combinados."
                 });
-                await sendNotification(appointment.client_id, "Agendamento confirmado", `${appointment.agenda_services?.name ?? "Serviço"} em ${format(new Date(appointment.appointment_date + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${appointment.start_time}`, `/messages/${threadId}`);
+                await sendNotification(appointment.client_id, "Agendamento confirmado", `${appointment.agenda_services?.name ?? "Serviço"} em ${format(new Date(appointment.appointment_date + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${appointment.start_time}`, `/messages/${threadId}`, profile?.avatar_url ?? null);
                 toast({ title: "Agendamento aceito!" });
               }}
               className="flex-1 min-w-[80px] py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
@@ -2883,7 +2887,7 @@ const MessageThread = () => {
               sender_id: userId,
               content: `📅 Agendamento remarcado para ${format(new Date(newDate + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${newStart}.`,
             });
-            await sendNotification(appointment.client_id, "Agendamento remarcado", `${serviceName} foi remarcado para ${format(new Date(newDate + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${newStart}.`, `/messages/${threadId}`);
+            await sendNotification(appointment.client_id, "Agendamento remarcado", `${serviceName} foi remarcado para ${format(new Date(newDate + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })} às ${newStart}.`, `/messages/${threadId}`, profile?.avatar_url ?? null);
           }}
         />
       )}

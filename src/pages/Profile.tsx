@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2 } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -45,6 +45,56 @@ const Profile = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
   const [proData, setProData] = useState<{ id: string; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
+
+  // ── Pendências de cadastro ──────────────────────────────────────────────────
+  const metaName = ((user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined)?.trim() || "";
+  const [pendingName, setPendingName] = useState("");
+  const [pendingPhone, setPendingPhone] = useState("");
+  const [pendingCpf, setPendingCpf] = useState("");
+  const [pendingCnpj, setPendingCnpj] = useState("");
+  const [savingPending, setSavingPending] = useState(false);
+
+  // Recalcula pendências sempre que o profile mudar
+  const missingName  = !!profile && !(profile.full_name || "").trim();
+  const missingPhone = !!profile && !(profile.phone || "").trim();
+  const missingCpf   = !!profile && profile.user_type === "company" && !(profile.cpf || "").trim() && !(profile.cnpj || "").trim();
+  const hasPending   = missingName || missingPhone || missingCpf;
+
+  useEffect(() => {
+    if (!profile) return;
+    if (missingName)  setPendingName(metaName);   // pré-preenche com OAuth se disponível
+    if (missingPhone) setPendingPhone(profile.phone || "");
+    if (missingCpf)   setPendingCpf(profile.cpf || "");
+  }, [profile?.full_name, profile?.phone, profile?.cpf, profile?.cnpj]);
+
+  const handleSavePending = async () => {
+    if (!user) return;
+    if (missingName && !pendingName.trim()) {
+      toast({ title: "Informe seu nome completo", variant: "destructive" }); return;
+    }
+    if (missingPhone && !pendingPhone.trim()) {
+      toast({ title: "Informe seu telefone", variant: "destructive" }); return;
+    }
+    if (missingCpf && !pendingCpf.trim() && !pendingCnpj.trim()) {
+      toast({ title: "Informe seu CPF ou CNPJ", variant: "destructive" }); return;
+    }
+    setSavingPending(true);
+    const payload: Record<string, string> = {};
+    if (missingName)  payload.full_name = pendingName.trim();
+    if (missingPhone) payload.phone     = pendingPhone.trim();
+    if (missingCpf) {
+      if (pendingCpf.trim())  payload.cpf  = pendingCpf.trim();
+      if (pendingCnpj.trim()) payload.cnpj = pendingCnpj.trim();
+    }
+    const { error } = await supabase.from("profiles").update(payload).eq("user_id", user.id);
+    setSavingPending(false);
+    if (error) { toast({ title: "Erro ao salvar", variant: "destructive" }); return; }
+    await refreshProfile();
+    // Atualiza campos de edição principal também
+    if (payload.full_name) setName(payload.full_name);
+    if (payload.phone) setPhone(payload.phone);
+    toast({ title: "Cadastro completado!", description: "Suas informações foram salvas com sucesso." });
+  };
 
   useEffect(() => {
     if (!user || !profile) return;
@@ -164,6 +214,87 @@ const Profile = () => {
             </button>
           )}
         </div>
+
+        {/* ── Pendências de cadastro ── */}
+        {hasPending && !editing && (
+          <div className="mb-4 rounded-2xl border-2 border-amber-300 bg-amber-50 overflow-hidden shadow-sm">
+            <div className="flex items-center gap-2 bg-amber-100 px-4 py-3 border-b border-amber-200">
+              <AlertCircle className="w-4.5 h-4.5 text-amber-600 shrink-0" />
+              <p className="text-sm font-bold text-amber-800">Cadastro incompleto</p>
+              <p className="text-xs text-amber-600 ml-1">— Preencha os campos abaixo</p>
+            </div>
+            <div className="p-4 space-y-3">
+              {missingName && (
+                <div>
+                  <label className="text-xs font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5" /> Nome completo <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={pendingName}
+                    onChange={e => setPendingName(e.target.value)}
+                    placeholder="Seu nome completo"
+                    className="w-full border border-amber-300 rounded-xl px-3 py-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-amber-400/50"
+                  />
+                </div>
+              )}
+              {missingPhone && (
+                <div>
+                  <label className="text-xs font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5" /> Telefone <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={pendingPhone}
+                    onChange={e => setPendingPhone(e.target.value)}
+                    placeholder="(00) 00000-0000"
+                    type="tel"
+                    className="w-full border border-amber-300 rounded-xl px-3 py-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-amber-400/50"
+                  />
+                </div>
+              )}
+              {missingCpf && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-amber-800 mb-1 block">CPF</label>
+                    <input
+                      value={pendingCpf}
+                      onChange={e => setPendingCpf(e.target.value)}
+                      placeholder="000.000.000-00"
+                      className="w-full border border-amber-300 rounded-xl px-3 py-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-amber-400/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-amber-800 mb-1 block">CNPJ</label>
+                    <input
+                      value={pendingCnpj}
+                      onChange={e => setPendingCnpj(e.target.value)}
+                      placeholder="00.000.000/0000-00"
+                      className="w-full border border-amber-300 rounded-xl px-3 py-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-amber-400/50"
+                    />
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={handleSavePending}
+                disabled={savingPending}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-60"
+              >
+                {savingPending ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                {savingPending ? "Salvando..." : "Salvar e concluir cadastro"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!hasPending && profile && (
+          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-center gap-2.5">
+            <CheckCircle2 className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
+            <p className="text-sm font-medium text-emerald-800">Cadastro completo</p>
+          </div>
+        )}
 
         <div className="bg-card border rounded-2xl p-5 shadow-card mb-4">
           <div className="flex items-start gap-4">

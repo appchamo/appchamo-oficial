@@ -422,23 +422,32 @@ const Home = () => {
     toast({ title: "Localização atualizada! Os profissionais dessa região serão exibidos." });
   };
 
-  // Checa se o cadastro está incompleto (nome, telefone e, se empresa, CPF/CNPJ)
+  // Checa se o cadastro está incompleto
+  // Considera nome do OAuth (user_metadata) como válido para não gerar falso-positivo
   useEffect(() => {
-    const fullName = (profile?.full_name || "").trim();
-    const phoneValue = (profile?.phone || "").trim();
-    const cpfValue = (profile?.cpf || "").trim();
-    const cnpjValue = (profile?.cnpj || "").trim();
-    const missingName = !fullName;
-    const missingPhone = !phoneValue;
-    const missingDoc = profile?.user_type === "company" && !cpfValue && !cnpjValue;
-    const needs = !!profile && (missingName || missingPhone || missingDoc);
+    if (!profile || !user) return;
+    const dbName   = (profile.full_name || "").trim();
+    const metaName = ((user.user_metadata?.full_name || user.user_metadata?.name) as string | undefined)?.trim() || "";
+    const effectiveName = dbName || metaName;
+
+    const missingName  = !effectiveName;
+    const missingPhone = !(profile.phone || "").trim();
+    const missingDoc   = profile.user_type === "company" && !(profile.cpf || "").trim() && !(profile.cnpj || "").trim();
+    const needs = missingName || missingPhone || missingDoc;
     setNeedsProfileCompletion(needs);
     try {
       localStorage.setItem("chamo_profile_needs_completion", needs ? "1" : "0");
     } catch {
       // ignore
     }
-  }, [profile?.full_name, profile?.phone, profile?.cpf, profile?.cnpj, profile?.user_type]);
+
+    // Se tem nome no OAuth mas não no DB, sincroniza silenciosamente
+    if (!dbName && metaName) {
+      supabase.from("profiles").update({ full_name: metaName }).eq("user_id", user.id).then(() => {
+        refreshProfile?.();
+      });
+    }
+  }, [profile?.full_name, profile?.phone, profile?.cpf, profile?.cnpj, profile?.user_type, user?.id]);
 
   const sectionComponents: Record<string, React.ReactNode> = {
     welcome: <HomeWelcome key="welcome" userName={userName} section={getSection("welcome")} />,

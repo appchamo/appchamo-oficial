@@ -13,16 +13,22 @@ serve(async (req) => {
     const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
     const ASAAS_BASE_URL = "https://api.asaas.com/v3";
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+    const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // Verifica se é admin
+    // Cliente com service_role para operações privilegiadas
+    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+    // Verifica se é admin usando o token do usuário
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
 
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+    // Cria cliente com o JWT do usuário para verificação
+    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
     if (authErr || !user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     if (user.email !== "admin@appchamo.com") return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: corsHeaders });
 

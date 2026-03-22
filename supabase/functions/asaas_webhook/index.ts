@@ -97,6 +97,17 @@ serve(async (req) => {
                   link: `/messages/${tx.request_id}`,
                 });
               }
+
+              // Registra na carteira do profissional
+              const { error: walletErr } = await supabase.from("wallet_transactions").insert({
+                professional_id: txFull.professional_id,
+                transaction_id: tx.id,
+                amount: tx.total_amount,
+                description: `Serviço recebido via PIX`,
+                status: "pending",
+              });
+              if (walletErr) console.error("wallet_transactions insert error:", walletErr);
+              else console.log("Carteira atualizada para profissional:", txFull.professional_id);
             }
           }
         }

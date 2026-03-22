@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Eye, Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText, Image } from "lucide-react";
+import { Eye, Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText, Image, Wallet } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -40,6 +40,7 @@ const ProfessionalDashboard = () => {
   const actions = [
     { icon: Pencil, label: "Editar perfil", description: "Atualize suas informações", path: "/profile" },
     { icon: DollarSign, label: "Financeiro", description: "Relatório de faturamento", path: "/pro/financeiro" },
+    { icon: Wallet, label: "Carteira", description: "Valores a receber e recebidos", path: "/pro/carteira" },
     { icon: CreditCard, label: "Minha assinatura", description: "Gerencie seu plano", path: "/subscriptions" },
     ...(plan?.id === "business" && profile?.user_type === "company"
       ? [{ icon: ShoppingBag, label: "Catálogo de Produtos", description: "Gerencie seus produtos e serviços", path: "/my-catalog" }]

@@ -72,6 +72,8 @@ const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
 const AdminPros = lazy(() => import("./pages/admin/AdminPros"));
 const AdminSponsors = lazy(() => import("./pages/admin/AdminSponsors"));
 const AdminTransactions = lazy(() => import("./pages/admin/AdminTransactions"));
+const AdminWallet = lazy(() => import("./pages/admin/AdminWallet"));
+const ProWallet = lazy(() => import("./pages/ProWallet"));
 const AdminReports = lazy(() => import("./pages/admin/AdminReports"));
 const AdminCoupons = lazy(() => import("./pages/admin/AdminCoupons"));
 const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
@@ -521,6 +523,7 @@ const AppContent = () => {
         <Route path="/pro" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro-dashboard" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro/financeiro" element={<ProtectedRoute><ProfessionalFinancial /></ProtectedRoute>} />
+        <Route path="/pro/carteira" element={<ProtectedRoute><ProWallet /></ProtectedRoute>} />
         <Route path="/pro/agenda" element={<ProtectedRoute><ProAgenda /></ProtectedRoute>} />
         <Route path="/pro/agenda/calendario" element={<ProtectedRoute><ProAgendaCalendar /></ProtectedRoute>} />
         <Route path="/meus-agendamentos" element={<ProtectedRoute><MeusAgendamentos /></ProtectedRoute>} />
@@ -547,6 +550,7 @@ const AppContent = () => {
         <Route path="/admin/pros" element={<ProtectedRoute><AdminPros /></ProtectedRoute>} />
         <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
         <Route path="/admin/transactions" element={<ProtectedRoute><AdminTransactions /></ProtectedRoute>} />
+        <Route path="/admin/wallet" element={<ProtectedRoute><AdminWallet /></ProtectedRoute>} />
         <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
         <Route path="/admin/coupons" element={<ProtectedRoute><AdminCoupons /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />

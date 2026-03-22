@@ -56,6 +56,12 @@ export const usePush = (userId?: string) => {
 
             console.log('☁️ [Push] Tentando salvar token para o dispositivo:', deviceId);
 
+            // Remove o token de QUALQUER outro usuário que tenha este mesmo dispositivo.
+            // Usa RPC com SECURITY DEFINER para bypasear a RLS (que só permite deletar próprios registros).
+            // Garante que ao trocar de conta no mesmo celular, o token anterior
+            // não continue disparando notificações para a conta antiga.
+            await supabase.rpc('claim_device_token', { p_token: token });
+
             const { error } = await supabase.from('user_devices').upsert(
               {
                 user_id: userId,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -27,6 +27,13 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ image_url: "", title: "", description: "" });
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const carouselRef = useRef<HTMLDivElement>(null);
+
+  const scrollCarousel = (dir: "left" | "right") => {
+    if (!carouselRef.current) return;
+    const w = carouselRef.current.offsetWidth;
+    carouselRef.current.scrollBy({ left: dir === "right" ? w * 0.85 : -w * 0.85, behavior: "smooth" });
+  };
 
   const fetchItems = async () => {
     const { data } = await supabase
@@ -159,7 +166,29 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
           </p>
         ) : (
           /* Carrossel 3 por vez */
+          <div className="relative">
+            {/* Seta esquerda */}
+            {items.length > 3 && (
+              <button
+                onClick={() => scrollCarousel("left")}
+                className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
+                aria-label="Anterior"
+              >
+                <ChevronLeft className="w-4 h-4 text-foreground" />
+              </button>
+            )}
+            {/* Seta direita */}
+            {items.length > 3 && (
+              <button
+                onClick={() => scrollCarousel("right")}
+                className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
+                aria-label="Próximo"
+              >
+                <ChevronRight className="w-4 h-4 text-foreground" />
+              </button>
+            )}
           <div
+            ref={carouselRef}
             className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory"
             style={{ scrollbarWidth: "none" }}
           >
@@ -211,6 +240,7 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
                 )}
               </div>
             ))}
+          </div>
           </div>
         )}
       </div>
@@ -269,17 +299,17 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
             </div>
           </div>
 
-          {/* Setas laterais para desktop */}
+          {/* Setas laterais */}
           {items.length > 1 && (
             <>
               <button
-                onClick={() => setExpandedIndex((expandedIndex - 1 + items.length) % items.length)}
+                onClick={(e) => { e.stopPropagation(); setExpandedIndex((expandedIndex - 1 + items.length) % items.length); }}
                 className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center hover:bg-white/20 transition-colors"
               >
                 <ChevronLeft className="w-5 h-5 text-white" />
               </button>
               <button
-                onClick={() => setExpandedIndex((expandedIndex + 1) % items.length)}
+                onClick={(e) => { e.stopPropagation(); setExpandedIndex((expandedIndex + 1) % items.length); }}
                 className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center hover:bg-white/20 transition-colors"
               >
                 <ChevronRight className="w-5 h-5 text-white" />

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, Package, X, Check, ShoppingBag, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, Pencil, Trash2, Package, X, Check, ShoppingBag, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -197,6 +197,13 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
     }
   };
 
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const scrollCarousel = (dir: "left" | "right") => {
+    if (!carouselRef.current) return;
+    const w = carouselRef.current.offsetWidth;
+    carouselRef.current.scrollBy({ left: dir === "right" ? w * 0.85 : -w * 0.85, behavior: "smooth" });
+  };
+
   const visibleProducts = isOwner ? products : products.filter(p => p.active);
 
   if (loading) return null;
@@ -274,7 +281,27 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
       {visibleProducts.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-4">Nenhum produto cadastrado.</p>
       ) : (
+        <div className="relative">
+          {visibleProducts.length > 3 && (
+            <button
+              onClick={() => scrollCarousel("left")}
+              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
+              aria-label="Anterior"
+            >
+              <ChevronLeft className="w-4 h-4 text-foreground" />
+            </button>
+          )}
+          {visibleProducts.length > 3 && (
+            <button
+              onClick={() => scrollCarousel("right")}
+              className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
+              aria-label="Próximo"
+            >
+              <ChevronRight className="w-4 h-4 text-foreground" />
+            </button>
+          )}
         <div
+          ref={carouselRef}
           className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory"
           style={{ scrollbarWidth: "none" }}
         >
@@ -324,6 +351,7 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
               </div>
             </div>
           ))}
+        </div>
         </div>
       )}
 

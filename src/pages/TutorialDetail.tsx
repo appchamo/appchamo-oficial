@@ -51,7 +51,7 @@ const TutorialDetail = () => {
     return (
       <AppLayout>
         <div className="max-w-screen-lg mx-auto px-4 py-5">
-          <Link to="/home" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors">
+          <Link to="/home" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-4 transition-colors">
             <ArrowLeft className="w-4 h-4" /> Voltar
           </Link>
           <p className="text-muted-foreground">Tutorial não encontrado.</p>
@@ -70,7 +70,7 @@ const TutorialDetail = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <Link to="/home" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors">
+        <Link to="/home" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-4 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </Link>
 

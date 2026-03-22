@@ -1,7 +1,7 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { useRefresh } from "@/contexts/RefreshContext";
-import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar, Share2 } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar, Share2, Building2 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -42,6 +42,7 @@ interface Review {
   comment: string | null;
   created_at: string;
   client_name: string;
+  client_avatar: string | null;
 }
 
 const availabilityOptions = [
@@ -70,6 +71,7 @@ const ProfessionalProfile = () => {
   const [professions, setProfessions] = useState<{ id: string; name: string; category_id: string }[]>([]);
   const [savingCategoryProfession, setSavingCategoryProfession] = useState(false);
   const [planId, setPlanId] = useState<string | null>(null);
+  const [reviewsVisible, setReviewsVisible] = useState(5);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -145,16 +147,17 @@ const ProfessionalProfile = () => {
           const clientIds = [...new Set(reviewsData.map((r: any) => r.client_id))];
           const { data: clientProfiles } = await supabase
             .from("profiles_public" as any)
-            .select("user_id, full_name")
-            .in("user_id", clientIds) as { data: { user_id: string; full_name: string }[] | null };
-          const nameMap = new Map((clientProfiles || []).map(p => [p.user_id, p.full_name]));
+            .select("user_id, full_name, avatar_url")
+            .in("user_id", clientIds) as { data: { user_id: string; full_name: string; avatar_url: string | null }[] | null };
+          const nameMap = new Map((clientProfiles || []).map(p => [p.user_id, { name: p.full_name, avatar: p.avatar_url }]));
 
           setReviews(reviewsData.map((r: any) => ({
             id: r.id,
             rating: r.rating,
             comment: r.comment,
             created_at: r.created_at,
-            client_name: nameMap.get(r.client_id) || "Cliente",
+            client_name: nameMap.get(r.client_id)?.name || "Cliente",
+            client_avatar: nameMap.get(r.client_id)?.avatar || null,
           })));
         }
       }
@@ -276,7 +279,7 @@ const ProfessionalProfile = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <Link to="/search" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors">
+        <Link to="/search" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-4 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </Link>
 
@@ -371,11 +374,15 @@ const ProfessionalProfile = () => {
                 </div>
               )}
               
-              <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold mt-0.5 ${
-                pro.user_type === "company" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-              }`}>
-                {pro.user_type === "company" ? "Empresa" : "Profissional"}
-              </span>
+              {pro.user_type === "company" ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-white text-xs font-bold mt-1 shadow-sm">
+                  <Building2 className="w-3 h-3" /> Empresa
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium mt-0.5 bg-muted text-muted-foreground">
+                  Profissional
+                </span>
+              )}
 
               {/* Availability Status */}
               <div className="flex items-center gap-1.5 mt-1.5">
@@ -509,41 +516,66 @@ const ProfessionalProfile = () => {
           <div className="flex items-center gap-2 mb-3">
             <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
             <h2 className="font-semibold text-foreground">Avaliações</h2>
-            <Badge variant="secondary" className="text-[10px]">{pro.total_reviews}</Badge>
+            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{pro.total_reviews}</span>
           </div>
 
           {/* Rating summary */}
-          <div className="flex items-center gap-3 mb-4 p-3 bg-muted/50 rounded-xl">
-            <div className="text-center">
-              <p className="text-3xl font-bold text-foreground">{Number(pro.rating).toFixed(1)}</p>
-              <div className="flex gap-0.5 mt-0.5">
+          <div className="flex items-center gap-4 mb-4 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+            <div className="text-center flex-shrink-0">
+              <p className="text-4xl font-extrabold text-foreground leading-none">{Number(pro.rating).toFixed(1)}</p>
+              <div className="flex gap-0.5 mt-1 justify-center">
                 {[1, 2, 3, 4, 5].map(s => (
-                  <Star key={s} className={`w-3 h-3 ${s <= Math.round(pro.rating) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+                  <Star key={s} className={`w-3.5 h-3.5 ${s <= Math.round(pro.rating) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
                 ))}
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">{pro.total_reviews} avaliações · {pro.total_services} serviços realizados</p>
+            <div>
+              <p className="text-sm font-semibold text-foreground">{pro.total_reviews} avaliações</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Baseado em avaliações de clientes</p>
+            </div>
           </div>
 
           {reviews.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">Nenhuma avaliação ainda.</p>
           ) : (
-            <div className="flex flex-col gap-3">
-              {reviews.map(r => (
-                <div key={r.id} className="border-t pt-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className="text-sm font-medium text-foreground">{r.client_name}</p>
-                    <div className="flex gap-0.5">
-                      {[1, 2, 3, 4, 5].map(s => (
-                        <Star key={s} className={`w-3 h-3 ${s <= r.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
-                      ))}
+            <>
+              <div className="flex flex-col gap-3">
+                {reviews.slice(0, reviewsVisible).map(r => {
+                  const initials = r.client_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                  return (
+                    <div key={r.id} className="border-t pt-3">
+                      <div className="flex items-center gap-2.5 mb-1.5">
+                        {r.client_avatar ? (
+                          <img src={r.client_avatar} alt={r.client_name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">{initials}</div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground leading-tight truncate">{r.client_name}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <div className="flex gap-0.5">
+                              {[1, 2, 3, 4, 5].map(s => (
+                                <Star key={s} className={`w-3 h-3 ${s <= r.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+                              ))}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground">{new Date(r.created_at).toLocaleDateString("pt-BR")}</span>
+                          </div>
+                        </div>
+                      </div>
+                      {r.comment && <p className="text-sm text-muted-foreground leading-relaxed pl-10">{r.comment}</p>}
                     </div>
-                  </div>
-                  {r.comment && <p className="text-sm text-muted-foreground">{r.comment}</p>}
-                  <p className="text-[10px] text-muted-foreground mt-1">{new Date(r.created_at).toLocaleDateString("pt-BR")}</p>
-                </div>
-              ))}
-            </div>
+                  );
+                })}
+              </div>
+              {reviews.length > reviewsVisible && (
+                <button
+                  onClick={() => setReviewsVisible(v => v + 5)}
+                  className="mt-4 w-full py-2.5 rounded-xl border text-sm font-semibold text-primary hover:bg-primary/5 transition-colors"
+                >
+                  Ver mais avaliações
+                </button>
+              )}
+            </>
           )}
         </div>
 

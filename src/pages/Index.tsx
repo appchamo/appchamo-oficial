@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { Shield, Star, Users, ChevronRight, Smartphone, Globe, CheckCircle } from "lucide-react";
+import { Shield, Star, Users, ChevronRight, Globe, CheckCircle, ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { Capacitor } from "@capacitor/core";
 
 // Ícones SVG das lojas (inline para evitar dependência extra)
 const AppStoreIcon = () => (
@@ -17,12 +18,76 @@ const PlayStoreIcon = () => (
 
 const Index = () => {
   const navigate = useNavigate();
+  const isNative = Capacitor.isNativePlatform();
+
+  const handleLoginClick = async () => {
+    localStorage.removeItem("signup_in_progress");
+    await supabase.auth.signOut();
+    navigate("/login");
+  };
 
   const handleWebAccess = async () => {
     localStorage.removeItem("signup_in_progress");
     await supabase.auth.signOut();
     navigate("/qr-auth");
   };
+
+  // ── No app nativo (iOS/Android): mostra tela de login/signup original ──────
+  if (isNative) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <header className="px-4 py-4 flex items-center justify-between max-w-screen-lg mx-auto w-full">
+          <span className="text-2xl font-extrabold text-gradient tracking-tight">Chamô</span>
+          <button onClick={handleLoginClick} className="text-sm font-medium text-primary hover:underline bg-transparent border-none cursor-pointer">
+            Entrar
+          </button>
+        </header>
+        <main className="flex-1 flex flex-col items-center justify-center px-4 text-center max-w-md mx-auto gap-6">
+          <h1 className="text-3xl font-extrabold text-foreground leading-tight">
+            Encontre profissionais de confiança <span className="text-gradient">perto de você</span>
+          </h1>
+          <p className="text-sm text-muted-foreground">Contrate com segurança e concorra a prêmios mensais.</p>
+          <button
+            onClick={() => navigate("/home")}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-primary/40 font-semibold text-sm text-primary hover:bg-primary/10 transition-colors"
+          >
+            Explorar o app sem cadastro
+          </button>
+          <div className="flex gap-3 w-full">
+            <button
+              onClick={() => navigate("/signup")}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors"
+            >
+              Criar conta <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleLoginClick}
+              className="flex-1 flex items-center justify-center py-3 rounded-xl border font-medium text-sm text-foreground hover:bg-muted transition-colors bg-transparent"
+            >
+              Entrar
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-3 w-full mt-4">
+            <div className="bg-card border rounded-xl p-3 text-center">
+              <Shield className="w-5 h-5 text-primary mx-auto mb-1" />
+              <p className="text-[10px] font-medium text-foreground">Pagamento seguro</p>
+            </div>
+            <div className="bg-card border rounded-xl p-3 text-center">
+              <Star className="w-5 h-5 text-primary mx-auto mb-1" />
+              <p className="text-[10px] font-medium text-foreground">Avaliações reais</p>
+            </div>
+            <div className="bg-card border rounded-xl p-3 text-center">
+              <Users className="w-5 h-5 text-primary mx-auto mb-1" />
+              <p className="text-[10px] font-medium text-foreground">Profissionais verificados</p>
+            </div>
+          </div>
+        </main>
+        <footer className="text-center py-4 border-t">
+          <p className="text-[10px] text-muted-foreground">© 2026 Chamô. Todos os direitos reservados.</p>
+        </footer>
+      </div>
+    );
+  }
 
   const features = [
     { icon: Shield, label: "Pagamento Seguro", desc: "Pague só quando o serviço for concluído" },

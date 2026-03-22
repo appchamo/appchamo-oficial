@@ -52,7 +52,7 @@ serve(async (req) => {
     // Soma o valor total das transações pendentes selecionadas
     const { data: walletTxs } = await supabase
       .from("wallet_transactions")
-      .select("id, amount")
+      .select("id, amount, gross_amount, platform_fee_amount, anticipation_fee_amount, anticipation_enabled, payment_method")
       .in("id", wallet_transaction_ids)
       .eq("professional_id", professional_id)
       .eq("status", "pending");
@@ -61,7 +61,14 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Nenhuma transação pendente encontrada" }), { status: 400, headers: corsHeaders });
     }
 
+    // O amount já é o valor líquido (professional_net - anticipation_fee)
+    // Calculado pelo webhook no momento do recebimento
     const totalAmount = walletTxs.reduce((sum, t) => sum + Number(t.amount), 0);
+    const totalGross = walletTxs.reduce((sum, t) => sum + Number(t.gross_amount || t.amount), 0);
+    const totalPlatformFee = walletTxs.reduce((sum, t) => sum + Number(t.platform_fee_amount || 0), 0);
+    const totalAnticipationFee = walletTxs.reduce((sum, t) => sum + Number(t.anticipation_fee_amount || 0), 0);
+
+    console.log(`Repasse: Bruto R$${totalGross.toFixed(2)} | Comissão plataforma R$${totalPlatformFee.toFixed(2)} | Taxa antecipação R$${totalAnticipationFee.toFixed(2)} | Líquido R$${totalAmount.toFixed(2)}`);
 
     // Mapeia tipo de chave PIX para o formato do Asaas
     const pixKeyTypeMap: Record<string, string> = {
@@ -133,6 +140,9 @@ serve(async (req) => {
       success: true,
       transfer_id: transferData.id,
       amount: totalAmount,
+      gross_amount: totalGross,
+      platform_fee: totalPlatformFee,
+      anticipation_fee: totalAnticipationFee,
       transactions_updated: walletTxs.length,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 

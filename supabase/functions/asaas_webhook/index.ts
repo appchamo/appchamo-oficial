@@ -98,16 +98,64 @@ serve(async (req) => {
                 });
               }
 
+              // Busca dados fiscais do profissional para verificar antecipação
+              const { data: fiscal } = await supabase
+                .from("professional_fiscal_data")
+                .select("anticipation_enabled, payment_method")
+                .eq("professional_id", txFull.professional_id)
+                .maybeSingle();
+
+              // Busca configurações de prazo de repasse
+              const { data: settings } = await supabase
+                .from("platform_settings")
+                .select("key, value")
+                .in("key", ["transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct"]);
+
+              const settingsMap: Record<string, number> = {};
+              (settings || []).forEach((s: any) => { settingsMap[s.key] = parseFloat(s.value) || 0; });
+
+              const anticipationEnabled = fiscal?.anticipation_enabled || false;
+              const paymentMethod = fiscal?.payment_method || "pix";
+              const professionalNet = Number(tx.total_amount) - (payment.platformFee || 0);
+
+              // Calcula taxa de antecipação se aplicável
+              let anticipationFeeAmount = 0;
+              if (anticipationEnabled && paymentMethod !== "pix") {
+                const anticipationFeePct = settingsMap["anticipation_fee_pct"] || 15;
+                anticipationFeeAmount = (professionalNet * anticipationFeePct) / 100;
+              }
+
+              const netAmount = professionalNet - anticipationFeeAmount;
+
+              // Calcula quando fica disponível para repasse
+              let availableAt = new Date();
+              if (paymentMethod === "pix") {
+                const hours = settingsMap["transfer_period_pix_hours"] || 12;
+                availableAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+              } else if (anticipationEnabled) {
+                const days = settingsMap["transfer_period_card_anticipated_days"] || 7;
+                availableAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+              } else {
+                const days = settingsMap["transfer_period_card_days"] || 32;
+                availableAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+              }
+
               // Registra na carteira do profissional
               const { error: walletErr } = await supabase.from("wallet_transactions").insert({
                 professional_id: txFull.professional_id,
                 transaction_id: tx.id,
-                amount: tx.total_amount,
-                description: `Serviço recebido via PIX`,
+                gross_amount: tx.total_amount,
+                platform_fee_amount: payment.platformFee || (tx.total_amount - professionalNet),
+                anticipation_fee_amount: anticipationFeeAmount,
+                amount: netAmount,
+                payment_method: paymentMethod,
+                anticipation_enabled: anticipationEnabled,
+                description: `Serviço recebido via ${paymentMethod === "pix" ? "PIX" : "Cartão"}`,
                 status: "pending",
+                available_at: availableAt.toISOString(),
               });
               if (walletErr) console.error("wallet_transactions insert error:", walletErr);
-              else console.log("Carteira atualizada para profissional:", txFull.professional_id);
+              else console.log("Carteira atualizada para profissional:", txFull.professional_id, "| Líquido:", netAmount);
             }
           }
         }

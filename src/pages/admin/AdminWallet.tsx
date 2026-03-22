@@ -135,7 +135,10 @@ const AdminWallet = () => {
       });
       if (error) throw new Error(error.message || "Erro ao repassar");
       if (data?.error) throw new Error(data.error);
-      toast({ title: `✅ Repasse de ${fmt(data.amount)} realizado!`, description: `ID Asaas: ${data.transfer_id}` });
+      const desc = data.platform_fee > 0
+        ? `Bruto: ${fmt(data.gross_amount)} | Comissão: ${fmt(data.platform_fee)}${data.anticipation_fee > 0 ? ` | Antecipação: ${fmt(data.anticipation_fee)}` : ""} | ID: ${data.transfer_id}`
+        : `ID Asaas: ${data.transfer_id}`;
+      toast({ title: `✅ Repasse de ${fmt(data.amount)} realizado!`, description: desc });
       load();
     } catch (err: any) {
       toast({ title: "Erro ao repassar", description: err.message, variant: "destructive" });

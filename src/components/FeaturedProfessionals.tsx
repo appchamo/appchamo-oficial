@@ -218,6 +218,11 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       const filtered = (userCity || userState)
         ? withLocation.filter((p) => sameCityState(userCity, userState, p._city, p._state))
         : withLocation;
+      // Ordem aleatória a cada carregamento
+      for (let i = filtered.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+      }
       const top10 = filtered.slice(0, 10).map(({ _city, _state, ...p }) => p);
 
       diagLog("info", "featured", "pros computed", { total: pros.length, filtered: filtered.length, shown: top10.length });

@@ -82,7 +82,13 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const [viewerStories, setViewerStories] = useState<SponsorStory[] | null>(null);
 
   const sponsors = useMemo(() => {
-    return allSponsors.filter((s) => sponsorMatchesLocation(s, userState, userCity));
+    const filtered = allSponsors.filter((s) => sponsorMatchesLocation(s, userState, userCity));
+    // Ordem aleatória a cada sessão
+    for (let i = filtered.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+    }
+    return filtered;
   }, [allSponsors, userState, userCity]);
 
   const pages = useMemo(() => {

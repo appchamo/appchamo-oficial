@@ -37,6 +37,11 @@ const QuickProfessionalsList = () => {
         ((profiles || []) as any[]).map((p) => [p.user_id, p])
       );
 
+      // Ordem aleatória a cada carregamento
+      for (let i = data.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [data[i], data[j]] = [data[j], data[i]];
+      }
       const list: QuickPro[] = data.slice(0, 5).map((p: any) => ({
         id: p.id,
         full_name: profileMap.get(p.user_id)?.full_name || "Profissional",

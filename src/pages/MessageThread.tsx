@@ -960,18 +960,50 @@ const MessageThread = () => {
 
   const calculateProfessionalReceive = (b: any) => {
     const amount = parseFloat(b.amount);
-    if (b.passFee) return amount; 
-    let fee = 0;
+    const commissionPct = parseFloat(feeSettings.commission_pct || "10");
+    const commission = parseFloat((amount * commissionPct / 100).toFixed(2));
+
+    // Comissão da plataforma é SEMPRE descontada do profissional
+    if (b.passFee) return parseFloat((amount - commission).toFixed(2));
+
+    let gatewayFee = 0;
     if (b.method === 'pix') {
-      fee = (amount * parseFloat(feeSettings.pix_fee_pct || "0") / 100) + parseFloat(feeSettings.pix_fee_fixed || "0");
+      gatewayFee = parseFloat(((amount * parseFloat(feeSettings.pix_fee_pct || "0") / 100) + parseFloat(feeSettings.pix_fee_fixed || "0")).toFixed(2));
     } else if (b.method === 'card') {
       const i = parseInt(b.installments || "1");
       const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
       const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
-      fee = (amount * feePct / 100) + feeFixed;
+      gatewayFee = parseFloat(((amount * feePct / 100) + feeFixed).toFixed(2));
     }
-    return amount - fee;
-  }
+    return parseFloat((amount - commission - gatewayFee).toFixed(2));
+  };
+
+  const calculateProfessionalReceiveBreakdown = (b: any) => {
+    const amount = parseFloat(b.amount);
+    const commissionPct = parseFloat(feeSettings.commission_pct || "10");
+    const commissionFee = parseFloat((amount * commissionPct / 100).toFixed(2));
+    let gatewayFee = 0;
+    let gatewayLabel = "";
+    if (!b.passFee) {
+      if (b.method === 'pix') {
+        const pct  = parseFloat(feeSettings.pix_fee_pct || "0");
+        const fixed = parseFloat(feeSettings.pix_fee_fixed || "0");
+        gatewayFee = parseFloat(((amount * pct / 100) + fixed).toFixed(2));
+        const parts: string[] = [];
+        if (pct > 0) parts.push(`${pct}%`);
+        if (fixed > 0) parts.push(`R$ ${fixed.toFixed(2).replace(".", ",")}`);
+        gatewayLabel = `PIX${parts.length ? ` (${parts.join(" + ")})` : ""}`;
+      } else if (b.method === 'card') {
+        const i = parseInt(b.installments || "1");
+        const feePct = i === 1 ? parseFloat(feeSettings.card_fee_pct || "0") : parseFloat(feeSettings[`installment_fee_${i}x`] || "0");
+        const feeFixed = i === 1 ? parseFloat(feeSettings.card_fee_fixed || "0") : 0;
+        gatewayFee = parseFloat(((amount * feePct / 100) + feeFixed).toFixed(2));
+        gatewayLabel = `Cartão${feePct > 0 ? ` (${feePct}%)` : ""}`;
+      }
+    }
+    const net = parseFloat((amount - commissionFee - gatewayFee).toFixed(2));
+    return { amount, commissionFee, commissionPct, gatewayFee, gatewayLabel, net, passFee: b.passFee };
+  };
 
   const formatCardNumber = (value: string) => {
     const digits = value.replace(/\D/g, "").slice(0, 16);
@@ -2204,28 +2236,44 @@ const MessageThread = () => {
       <Dialog open={!!viewingBilling} onOpenChange={(open) => !open && setViewingBilling(null)}>
         <DialogContent className="max-w-xs rounded-2xl">
           <DialogHeader><DialogTitle>Detalhes da Cobrança</DialogTitle></DialogHeader>
-          {viewingBilling && (
-            <div className="space-y-3 text-sm pt-2">
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-muted-foreground">Valor Base:</span>
-                <span className="font-bold">R$ {parseFloat(viewingBilling.amount).toFixed(2).replace(".", ",")}</span>
+          {viewingBilling && (() => {
+            const bd = calculateProfessionalReceiveBreakdown(viewingBilling);
+            const fmtR = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`;
+            return (
+              <div className="space-y-2 text-sm pt-2">
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-muted-foreground">Método:</span>
+                  <span className="font-semibold">{viewingBilling.method === 'pix' ? 'PIX' : `Cartão`}</span>
+                </div>
+                <div className="bg-muted/40 rounded-xl p-3 space-y-1.5">
+                  <div className="flex justify-between text-muted-foreground text-xs">
+                    <span>Valor cobrado (bruto)</span>
+                    <span>{fmtR(bd.amount)}</span>
+                  </div>
+                  <div className="flex justify-between text-red-500 text-xs">
+                    <span>(-) Comissão da plataforma ({bd.commissionPct}%)</span>
+                    <span>- {fmtR(bd.commissionFee)}</span>
+                  </div>
+                  {bd.gatewayFee > 0 && (
+                    <div className="flex justify-between text-red-500 text-xs">
+                      <span>(-) Taxa de transação {bd.gatewayLabel}</span>
+                      <span>- {fmtR(bd.gatewayFee)}</span>
+                    </div>
+                  )}
+                  {bd.passFee && (
+                    <div className="flex justify-between text-amber-600 text-xs">
+                      <span>Taxa de transação</span>
+                      <span>cobrada do cliente</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold text-emerald-700 border-t pt-1.5 text-sm">
+                    <span>Você receberá</span>
+                    <span>{fmtR(bd.net)}</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-muted-foreground">Método escolhido:</span>
-                <span className="font-semibold">{viewingBilling.method === 'pix' ? 'PIX' : `Cartão`}</span>
-              </div>
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-muted-foreground">Taxa do sistema:</span>
-                <span className="font-semibold text-amber-600">{viewingBilling.passFee ? 'Cliente vai pagar' : 'Você assumiu'}</span>
-              </div>
-              <div className="flex justify-between pt-1">
-                <span className="text-foreground font-bold">Você receberá:</span>
-                <span className="font-extrabold text-lg text-emerald-600">
-                  R$ {calculateProfessionalReceive(viewingBilling).toFixed(2).replace(".", ",")}
-                </span>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

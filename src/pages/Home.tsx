@@ -16,6 +16,8 @@ import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
 import HomeJobsBanner from "@/components/home/HomeJobsBanner";
 import HomeWelcome from "@/components/home/HomeWelcome";
+import HomeAlertCarousel from "@/components/home/HomeAlertCarousel";
+import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
@@ -452,7 +454,7 @@ const Home = () => {
   const sectionComponents: Record<string, React.ReactNode> = {
     welcome: <HomeWelcome key="welcome" userName={userName} section={getSection("welcome")} />,
     sponsors: <SponsorCarousel key={`sponsors-${contentSeed}`} section={getSection("sponsors")} />,
-    jobs: <HomeJobsBanner key="jobs" jobCount={jobCount} section={getSection("jobs")} />,
+    jobs: null,
     search: <HomeSearchBar key={`search-${profile?.address_city}-${profile?.address_state}`} section={getSection("search")} />,
     featured: <FeaturedProfessionals key={`featured-${contentSeed}`} section={getSection("featured")} />,
     categories: <CategoriesGrid key={`categories-${contentSeed}`} section={getSection("categories")} />,
@@ -628,33 +630,6 @@ const Home = () => {
             </Link>
           }
 
-          {hasUpcomingAppointment && !appointmentBannerDismissed && (
-            <div className="relative flex items-center gap-3 bg-primary/10 border border-primary/30 rounded-xl p-3.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setAppointmentBannerDismissed(true);
-                  localStorage.setItem("chamo_appointment_banner_dismissed", "1");
-                }}
-                className="absolute top-2 right-2 p-1 rounded-full hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Fechar aviso"
-              >
-                <X className="w-4 h-4" />
-              </button>
-              <Link
-                to={profile?.user_type === "professional" || profile?.user_type === "company" ? "/pro/agenda/calendario" : "/meus-agendamentos"}
-                className="flex items-center gap-3 flex-1 min-w-0 pr-6"
-                onClick={() => { setAppointmentBannerDismissed(true); localStorage.setItem("chamo_appointment_banner_dismissed", "1"); }}
-              >
-                <CalendarCheck className="w-5 h-5 text-primary flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground">Você tem agendamento</p>
-                  <p className="text-xs text-muted-foreground">Confira data, horário e opções</p>
-                </div>
-                <span className="text-xs font-semibold text-primary flex-shrink-0">Ver →</span>
-              </Link>
-            </div>
-          )}
 
           {sections.filter((s) => s.visible).map((section) => {
             const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
@@ -680,6 +655,23 @@ const Home = () => {
                 {block}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
                 {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
+                {section.id === "categories" && <QuickProfessionalsList />}
+                {section.id === "tutorials" && (
+                  <HomeAlertCarousel
+                    hasAppointment={hasUpcomingAppointment}
+                    appointmentDismissed={appointmentBannerDismissed}
+                    onDismissAppointment={() => {
+                      setAppointmentBannerDismissed(true);
+                      localStorage.setItem("chamo_appointment_banner_dismissed", "1");
+                    }}
+                    appointmentLink={
+                      profile?.user_type === "professional" || profile?.user_type === "company"
+                        ? "/pro/agenda/calendario"
+                        : "/meus-agendamentos"
+                    }
+                    jobCount={jobCount}
+                  />
+                )}
               </div>
             );
           })}

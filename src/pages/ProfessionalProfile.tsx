@@ -315,12 +315,6 @@ const ProfessionalProfile = () => {
                 ) : (
                   <>
                     <h1 className="text-lg font-bold text-foreground truncate">{name}</h1>
-                    {pro.verified && (
-                      <div className="relative flex-shrink-0">
-                        <div className="absolute -inset-1 bg-primary/20 rounded-full animate-pulse" />
-                        <BadgeCheck className="w-5 h-5 text-primary relative" />
-                      </div>
-                    )}
                     {isOwner && (
                       <>
                         <button onClick={() => { setEditNameValue(name); setEditingName(true); }} className="ml-1 p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0">
@@ -336,11 +330,19 @@ const ProfessionalProfile = () => {
                   </>
                 )}
               </div>
-              
+
               {!editingName && (
-                <p className="text-sm text-muted-foreground truncate">
-                  {pro.category_name}{pro.profession_name && pro.profession_name !== "—" ? ` · ${pro.profession_name}` : ""}
-                </p>
+                <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                  <p className="text-base font-semibold text-primary truncate">
+                    {pro.profession_name && pro.profession_name !== "—" ? pro.profession_name : pro.category_name}
+                  </p>
+                  {pro.verified && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold flex-shrink-0">
+                      <BadgeCheck className="w-3.5 h-3.5 fill-emerald-100" />
+                      Verificado
+                    </span>
+                  )}
+                </div>
               )}
 
               {isOwner && categories.length > 0 && (

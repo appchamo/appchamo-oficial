@@ -359,12 +359,14 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         ? pro.distance_km < 1 ? "Menos de 1 km" : `${Math.round(pro.distance_km)} km de você`
         : null;
     return (
-      <div
+      <Link
         key={pro.id}
-        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-3 flex-1 min-w-0 basis-0 overflow-hidden"
+        to={`/professional/${pro.id}`}
+        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-2.5 flex-1 min-w-0 basis-0 overflow-hidden active:scale-[0.97] transition-transform"
       >
-        <div className="flex flex-col gap-1 min-w-0">
-          <div className="w-14 h-14 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden self-start">
+        {/* Avatar com badge verificado sobreposto */}
+        <div className="relative self-start mb-0.5">
+          <div className="w-16 h-16 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden">
             {avatarSrc ? (
               <img
                 src={avatarSrc}
@@ -378,46 +380,41 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
             )}
           </div>
           {pro.verified && (
-            <div className="flex items-center gap-1 min-w-0">
-              <span className="text-[10px] font-semibold text-foreground truncate">Verificado</span>
-              <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                <BadgeCheck className="w-2.5 h-2.5 text-primary-foreground" />
-              </div>
+            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-white">
+              <BadgeCheck className="w-3 h-3 text-white" />
             </div>
           )}
         </div>
 
-        <p className="font-bold text-foreground text-sm truncate">{pro.full_name}</p>
-        <p className="text-xs text-muted-foreground truncate -mt-2">{pro.profession_name}</p>
+        <div className="min-w-0">
+          <p className="font-bold text-foreground text-sm truncate leading-tight">{pro.full_name}</p>
+          <p className="text-sm font-semibold text-primary truncate mt-0.5">{pro.profession_name}</p>
+          {pro.verified && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 mt-0.5">
+              <BadgeCheck className="w-3 h-3" /> Verificado
+            </span>
+          )}
+        </div>
 
         <div className="flex items-center gap-1">
-          <Star className="w-4 h-4 fill-primary text-primary flex-shrink-0" />
+          <Star className="w-3.5 h-3.5 fill-primary text-primary flex-shrink-0" />
           <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
-          <span className="text-xs text-muted-foreground">· {pro.total_services} serviços</span>
+          <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
         </div>
 
         {distanceText && (
-          <div className="flex items-center gap-1.5 text-sm text-foreground">
-            <MapPin className="w-4 h-4 text-primary flex-shrink-0" />
-            <span>{distanceText}</span>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <MapPin className="w-3 h-3 text-primary flex-shrink-0" />
+            <span className="truncate">{distanceText}</span>
           </div>
         )}
 
-        <div className="flex flex-col gap-2 mt-auto">
-          <Link
-            to={`/professional/${pro.id}`}
-            className="w-full text-center text-sm font-medium py-2.5 rounded-lg border border-primary text-primary hover:bg-accent transition-colors"
-          >
-            Ver perfil
-          </Link>
-          <Link
-            to={`/professional/${pro.id}`}
-            className="w-full text-center text-sm font-medium py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
+        <div className="mt-auto pt-1">
+          <div className="w-full text-center text-sm font-semibold py-2.5 rounded-lg bg-primary text-white">
             Contratar
-          </Link>
+          </div>
         </div>
-      </div>
+      </Link>
     );
   };
 

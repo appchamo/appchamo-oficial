@@ -123,7 +123,7 @@ const Support = () => {
   };
 
   const handleNewTicket = () => {
-    openTicketWithSubject("Nova solicitação", "Abertura de suporte", "Quero falar com um atendente humano");
+    openTicketWithSubject("Nova solicitação", "Abertura de suporte", "Preciso de ajuda");
   };
 
   if (loading) return (

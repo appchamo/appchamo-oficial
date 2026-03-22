@@ -629,7 +629,7 @@ const WalletTab = ({ proId }: { proId: string }) => {
 
   const loadWallet = async () => {
     const [{ data: fiscal }, { data: walletData }] = await Promise.all([
-      supabase.from("professional_fiscal_info").select("pix_key, pix_key_type").eq("professional_id", proId).maybeSingle(),
+      supabase.from("professional_fiscal_data").select("pix_key, pix_key_type").eq("professional_id", proId).maybeSingle(),
       supabase.from("wallet_transactions").select("id, amount, description, status, created_at, transferred_at")
         .eq("professional_id", proId).order("created_at", { ascending: false }),
     ]);

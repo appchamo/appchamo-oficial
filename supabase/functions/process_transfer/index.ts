@@ -34,7 +34,7 @@ serve(async (req) => {
 
     // Busca dados fiscais do profissional (chave PIX)
     const { data: fiscal } = await supabase
-      .from("professional_fiscal_info")
+      .from("professional_fiscal_data")
       .select("pix_key, pix_key_type, fiscal_name")
       .eq("professional_id", professional_id)
       .maybeSingle();

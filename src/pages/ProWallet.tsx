@@ -40,7 +40,7 @@ const ProWallet = () => {
 
       // Busca chave PIX
       const { data: fiscal } = await supabase
-        .from("professional_fiscal_info")
+        .from("professional_fiscal_data")
         .select("pix_key, pix_key_type")
         .eq("professional_id", pro.id)
         .maybeSingle();

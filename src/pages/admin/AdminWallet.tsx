@@ -61,7 +61,7 @@ const AdminWallet = () => {
 
     const [{ data: profiles }, { data: fiscals }] = await Promise.all([
       supabase.from("profiles").select("user_id, display_name, email").in("user_id", userIds),
-      supabase.from("professional_fiscal_info").select("professional_id, pix_key, pix_key_type").in("professional_id", proIds),
+      supabase.from("professional_fiscal_data").select("professional_id, pix_key, pix_key_type").in("professional_id", proIds),
     ]);
 
     // Mapas auxiliares

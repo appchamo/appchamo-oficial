@@ -744,14 +744,14 @@ const Subscriptions = () => {
                 return (
                   <div
                     key={p.id}
-                    className={`relative bg-card border-2 rounded-2xl p-5 shadow-card transition-all ${
+                    className={`relative border-2 rounded-2xl p-5 shadow-card transition-all ${
                       isBusinessPremium
-                        ? "border-violet-500 ring-2 ring-violet-500/20 scale-[1.02]"
+                        ? "bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30 border-violet-500 ring-2 ring-violet-500/30 scale-[1.02]"
                         : isRecommended
-                        ? "border-amber-500 ring-2 ring-amber-500/20 scale-[1.02]"
+                        ? "bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20 border-amber-500 ring-2 ring-amber-500/20 scale-[1.02]"
                         : isCurrent
-                        ? "border-primary ring-2 ring-primary/20"
-                        : "border-border"
+                        ? "bg-card border-primary ring-2 ring-primary/20"
+                        : "bg-card border-border"
                     }`}
                   >
                     {/* Badge topo */}
@@ -767,19 +767,29 @@ const Subscriptions = () => {
                     )}
 
                     <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          isBusinessPremium ? "bg-violet-100" : isRecommended ? "bg-amber-500/10" : "bg-accent"
+                      <div className="flex items-center gap-3">
+                        <div className={`relative w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg flex-shrink-0 ${
+                          p.id === "business"
+                            ? "bg-gradient-to-br from-violet-500 to-purple-700"
+                            : p.id === "vip"
+                            ? "bg-gradient-to-br from-amber-400 to-orange-500"
+                            : p.id === "pro"
+                            ? "bg-gradient-to-br from-orange-400 to-primary"
+                            : "bg-gradient-to-br from-slate-300 to-slate-400"
                         }`}>
-                          <Icon className={`w-5 h-5 ${
-                            isBusinessPremium ? "text-violet-600" : isRecommended ? "text-amber-500" : details.color
-                          }`} />
+                          {/* Reflexo interno */}
+                          <div className="absolute inset-0 rounded-2xl bg-white/20 [mask-image:linear-gradient(to_bottom,white_0%,transparent_60%)]" />
+                          <Icon className="w-6 h-6 text-white relative z-10" />
                         </div>
                         <div>
-                          <h3 className={`font-bold ${isRecommended || isBusinessPremium ? "text-lg" : ""} text-foreground`}>{p.name}</h3>
-                          <div className="flex items-baseline gap-1.5">
-                            <p className={`font-bold ${
-                              isBusinessPremium ? "text-violet-600 text-lg" : isRecommended ? "text-amber-500 text-lg" : "text-primary text-sm"
+                          <h3 className={`font-bold leading-tight ${
+                            isBusinessPremium ? "text-lg text-violet-700 dark:text-violet-400"
+                            : isRecommended ? "text-lg text-amber-600 dark:text-amber-400"
+                            : "text-base text-foreground"
+                          }`}>{p.name}</h3>
+                          <div className="flex items-baseline gap-1.5 mt-0.5">
+                            <p className={`font-extrabold tracking-tight ${
+                              isBusinessPremium ? "text-violet-600 text-xl" : isRecommended ? "text-amber-500 text-xl" : "text-primary text-base"
                             }`}>
                               {p.price_monthly === 0 ? "Grátis" : `R$ ${monthlyDisplay.toFixed(2).replace(".", ",")}/mês`}
                             </p>
@@ -790,7 +800,7 @@ const Subscriptions = () => {
                             )}
                           </div>
                           {billingPeriod !== "monthly" && p.price_monthly > 0 && (
-                            <p className="text-[10px] text-muted-foreground">
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
                               {billingPeriod === "annual"
                                 ? `R$ ${(p.price_annual ?? p.price_monthly * 12).toFixed(2).replace(".", ",")} /ano`
                                 : `R$ ${(p.price_semester ?? p.price_monthly * 6).toFixed(2).replace(".", ",")} /semestre`}

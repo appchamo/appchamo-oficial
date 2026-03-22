@@ -301,6 +301,34 @@ const AdminSettings = () => {
           </div>
         </div>
 
+        {/* Payment Policies */}
+        <div className="bg-card border rounded-xl p-5 space-y-4">
+          <h2 className="font-semibold text-foreground">Políticas de Pagamento</h2>
+          <p className="text-xs text-muted-foreground">
+            Exibidas para o cliente antes de confirmar o pagamento de um serviço. Use para informar sobre reembolsos,
+            responsabilidades e condições da transação.
+          </p>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Título das políticas</label>
+            <input
+              value={settings.payment_policy_title || "Políticas de Pagamento"}
+              onChange={(e) => set("payment_policy_title", e.target.value)}
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+              placeholder="Ex: Políticas de Pagamento e Garantias"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Conteúdo das políticas</label>
+            <textarea
+              value={settings.payment_policy || ""}
+              onChange={(e) => set("payment_policy", e.target.value)}
+              rows={8}
+              placeholder={"Ex:\n• O pagamento é processado somente após a confirmação do serviço prestado.\n• Em caso de disputa, entre em contato pelo suporte.\n• Reembolsos sujeitos à análise em até 7 dias úteis."}
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+            />
+          </div>
+        </div>
+
         {/* Home Stats */}
         <div className="bg-card border rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-foreground">Estatísticas da Home</h2>

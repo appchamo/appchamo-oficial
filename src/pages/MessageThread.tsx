@@ -85,6 +85,7 @@ const MessageThread = () => {
 
   // Payment state
   const [confirmServiceModal, setConfirmServiceModal] = useState<Message | null>(null);
+  const [showPaymentPolicy, setShowPaymentPolicy] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string; installments: string} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
@@ -2283,7 +2284,7 @@ const MessageThread = () => {
           <DialogHeader>
             <DialogTitle>Confirmar serviço</DialogTitle>
             <DialogDescription>
-              Você confirma que o serviço foi prestado?
+              Você confirma que o serviço foi prestado e deseja prosseguir com o pagamento?
             </DialogDescription>
           </DialogHeader>
           <div className="flex gap-3 mt-4">
@@ -2306,6 +2307,31 @@ const MessageThread = () => {
               Sim, foi prestado
             </Button>
           </div>
+          {feeSettings.payment_policy && (
+            <button
+              onClick={() => setShowPaymentPolicy(true)}
+              className="w-full mt-2 text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
+            >
+              📄 Ler políticas de pagamento
+            </button>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Políticas de Pagamento */}
+      <Dialog open={showPaymentPolicy} onOpenChange={setShowPaymentPolicy}>
+        <DialogContent className="max-w-sm max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{feeSettings.payment_policy_title || "Políticas de Pagamento"}</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto flex-1 pr-1">
+            <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+              {feeSettings.payment_policy || "Nenhuma política cadastrada."}
+            </p>
+          </div>
+          <Button variant="outline" className="mt-4 w-full" onClick={() => setShowPaymentPolicy(false)}>
+            Fechar
+          </Button>
         </DialogContent>
       </Dialog>
 

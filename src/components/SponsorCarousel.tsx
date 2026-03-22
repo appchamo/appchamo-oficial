@@ -80,6 +80,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const [loaded, setLoaded] = useState(false);
   const [activeStories, setActiveStories] = useState<Record<string, SponsorStory[]>>({});
   const [viewerStories, setViewerStories] = useState<SponsorStory[] | null>(null);
+  const [viewerStartIndex, setViewerStartIndex] = useState(0);
 
   const sponsors = useMemo(() => {
     const filtered = allSponsors.filter((s) => sponsorMatchesLocation(s, userState, userCity));
@@ -327,7 +328,12 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   const handleClick = (sponsor: Sponsor) => {
     const stories = activeStories[sponsor.id];
     if (stories && stories.length > 0) {
-      setViewerStories(stories);
+      // Monta lista plana de TODAS as stories de TODOS os patrocinadores (na ordem de exibição)
+      // para permitir navegação entre patrocinadores dentro do viewer
+      const allFlat = allSponsors.flatMap((sp) => activeStories[sp.id] || []);
+      const startIndex = allFlat.findIndex((s) => s.sponsor_id === sponsor.id);
+      setViewerStories(allFlat);
+      setViewerStartIndex(startIndex >= 0 ? startIndex : 0);
     } else {
       window.open(sponsor.link_url, "_blank");
       supabase.auth.getSession().then(({ data: { session } }) => {
@@ -423,7 +429,8 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
     {viewerStories && (
       <SponsorStoryViewer
         stories={viewerStories}
-        onClose={() => setViewerStories(null)}
+        initialIndex={viewerStartIndex}
+        onClose={() => { setViewerStories(null); setViewerStartIndex(0); }}
       />
     )}
     </>

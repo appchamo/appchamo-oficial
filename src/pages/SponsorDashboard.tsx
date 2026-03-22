@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, MessageCircle } from "lucide-react";
+import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, CreditCard, QrCode, Copy, Loader2, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import SponsorStoryViewer, { SponsorStory } from "@/components/SponsorStoryViewer";
+
+type UpgradeStep = "package" | "method" | "pix_form" | "pix_qr" | "card_form" | "success";
 
 interface Sponsor {
   id: string;
@@ -52,7 +54,23 @@ const SponsorDashboard = () => {
   const [selectedPack, setSelectedPack] = useState<"pack_14" | "pack_28" | null>(null);
   const [pack14Price, setPack14Price] = useState<string | null>(null);
   const [pack28Price, setPack28Price] = useState<string | null>(null);
-  const [contactWhatsapp, setContactWhatsapp] = useState<string | null>(null);
+  const [upgradeStep, setUpgradeStep] = useState<UpgradeStep>("package");
+  const [paymentMethod, setPaymentMethod] = useState<"PIX" | "CREDIT_CARD" | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [pixQrCode, setPixQrCode] = useState<string | null>(null);
+  const [pixCopyPaste, setPixCopyPaste] = useState<string | null>(null);
+  const [pixPaymentId, setPixPaymentId] = useState<string | null>(null);
+  const [pixAmount, setPixAmount] = useState<number>(0);
+  const [pollingInterval, setPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+  // Dados do pagador (PIX e Cartão)
+  const [payerName, setPayerName] = useState("");
+  const [payerEmail, setPayerEmail] = useState("");
+  const [payerCpf, setPayerCpf] = useState("");
+  // Dados do cartão
+  const [cardHolder, setCardHolder] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
 
   const load = async () => {
     if (!user) return;
@@ -90,14 +108,13 @@ const SponsorDashboard = () => {
     supabase
       .from("platform_settings")
       .select("key, value")
-      .in("key", ["sponsor_pack_14_price", "sponsor_pack_28_price", "sponsor_contact_whatsapp"])
+      .in("key", ["sponsor_pack_14_price", "sponsor_pack_28_price"])
       .then(({ data }) => {
         if (!data) return;
         for (const row of data) {
           const v = typeof row.value === "string" ? row.value : String(row.value);
           if (row.key === "sponsor_pack_14_price") setPack14Price(v);
           if (row.key === "sponsor_pack_28_price") setPack28Price(v);
-          if (row.key === "sponsor_contact_whatsapp") setContactWhatsapp(v);
         }
       });
   }, [user]);
@@ -189,6 +206,78 @@ const SponsorDashboard = () => {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/login");
+  };
+
+  const resetUpgradeModal = useCallback(() => {
+    setUpgradeStep("package");
+    setSelectedPack(null);
+    setPaymentMethod(null);
+    setPixQrCode(null);
+    setPixCopyPaste(null);
+    setPixPaymentId(null);
+    setProcessing(false);
+    if (pollingInterval) { clearInterval(pollingInterval); setPollingInterval(null); }
+  }, [pollingInterval]);
+
+  const selectedPackPrice = selectedPack === "pack_28" ? pack28Price : pack14Price;
+  const selectedPackAmount = selectedPackPrice ? parseFloat(selectedPackPrice) : 0;
+
+  const handleCreatePayment = async () => {
+    if (!sponsor || !selectedPack) return;
+    setProcessing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("create_sponsor_payment", {
+        body: {
+          sponsor_id: sponsor.id,
+          pack: selectedPack,
+          payment_method: paymentMethod,
+          holder_name: payerName || sponsor.name,
+          email: payerEmail,
+          cpf_cnpj: payerCpf,
+          ...(paymentMethod === "CREDIT_CARD" ? {
+            card: {
+              holderName: cardHolder,
+              number: cardNumber.replace(/\s/g, ""),
+              expiryMonth: cardExpiry.split("/")[0]?.trim(),
+              expiryYear: cardExpiry.split("/")[1]?.trim(),
+              ccv: cardCvv,
+            },
+          } : {}),
+        },
+      });
+
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+
+      if (paymentMethod === "PIX") {
+        setPixQrCode(data.pix_qr_code);
+        setPixCopyPaste(data.pix_copy_paste);
+        setPixPaymentId(data.payment_id);
+        setPixAmount(data.amount);
+        setUpgradeStep("pix_qr");
+
+        // Polling para verificar pagamento
+        const interval = setInterval(async () => {
+          const { data: check } = await supabase.functions.invoke("create_sponsor_payment", {
+            body: { action: "check_status", payment_id: data.payment_id },
+          });
+          if (check?.confirmed) {
+            clearInterval(interval);
+            setPollingInterval(null);
+            setUpgradeStep("success");
+            load();
+          }
+        }, 5000);
+        setPollingInterval(interval);
+      } else {
+        // Cartão: ativação imediata
+        setUpgradeStep("success");
+        load();
+      }
+    } catch (e: any) {
+      toast({ title: "Erro no pagamento", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const openPreview = (story: Story) => {
@@ -435,88 +524,194 @@ const SponsorDashboard = () => {
       )}
 
       {/* Modal de upgrade de plano */}
-      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={upgradeOpen} onOpenChange={(o) => { if (!o) resetUpgradeModal(); setUpgradeOpen(o); }}>
+        <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5 text-primary" /> Adquirir mais limites
+              {upgradeStep !== "package" && upgradeStep !== "success" && (
+                <button onClick={() => setUpgradeStep(upgradeStep === "method" ? "package" : upgradeStep === "pix_form" || upgradeStep === "card_form" ? "method" : "method")}
+                  className="p-1 rounded-lg hover:bg-muted">
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+              )}
+              <ShoppingCart className="w-5 h-5 text-primary" />
+              {upgradeStep === "success" ? "Pacote ativado!" : "Assinar pacote"}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Escolha o pacote para ampliar suas novidades semanais:
-            </p>
 
-            {/* Opções de pacote */}
-            <div className="space-y-2">
-              {/* Pack 14 */}
+          {/* STEP 1: Escolha do pacote */}
+          {upgradeStep === "package" && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Escolha o pacote de novidades mensais:</p>
               {sponsor.weekly_plan !== "pack_14" && sponsor.weekly_plan !== "pack_28" && (
-                <button
-                  onClick={() => setSelectedPack("pack_14")}
-                  className={`w-full p-4 rounded-2xl border-2 text-left transition-colors ${selectedPack === "pack_14" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
-                >
+                <button onClick={() => setSelectedPack("pack_14")}
+                  className={`w-full p-4 rounded-2xl border-2 text-left transition-colors ${selectedPack === "pack_14" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-bold text-sm text-foreground">Pacote 14 novidades/semana</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">14 publicações por semana</p>
+                      <p className="font-bold text-sm">14 novidades/semana</p>
+                      <p className="text-xs text-muted-foreground">Assinatura mensal</p>
                     </div>
-                    <div className="text-right">
-                      {pack14Price ? (
-                        <p className="font-bold text-primary">R$ {parseFloat(pack14Price).toFixed(2).replace(".", ",")}</p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">Sob consulta</p>
-                      )}
-                      {selectedPack === "pack_14" && <Check className="w-4 h-4 text-primary ml-auto mt-1" />}
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-primary">{pack14Price ? `R$ ${parseFloat(pack14Price).toFixed(2).replace(".", ",")}` : "—"}</p>
+                      {selectedPack === "pack_14" && <Check className="w-4 h-4 text-primary" />}
                     </div>
                   </div>
                 </button>
               )}
-
-              {/* Pack 28 */}
-              <button
-                onClick={() => setSelectedPack("pack_28")}
-                className={`w-full p-4 rounded-2xl border-2 text-left transition-colors ${selectedPack === "pack_28" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
-              >
+              <button onClick={() => setSelectedPack("pack_28")}
+                className={`w-full p-4 rounded-2xl border-2 text-left transition-colors ${selectedPack === "pack_28" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-bold text-sm text-foreground">Pacote 28 novidades/semana</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">28 publicações por semana</p>
-                    <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Mais popular</span>
+                    <p className="font-bold text-sm">28 novidades/semana</p>
+                    <p className="text-xs text-muted-foreground">Assinatura mensal</p>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 mt-1 inline-block">Mais popular</span>
                   </div>
-                  <div className="text-right">
-                    {pack28Price ? (
-                      <p className="font-bold text-primary">R$ {parseFloat(pack28Price).toFixed(2).replace(".", ",")}</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">Sob consulta</p>
-                    )}
-                    {selectedPack === "pack_28" && <Check className="w-4 h-4 text-primary ml-auto mt-1" />}
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-primary">{pack28Price ? `R$ ${parseFloat(pack28Price).toFixed(2).replace(".", ",")}` : "—"}</p>
+                    {selectedPack === "pack_28" && <Check className="w-4 h-4 text-primary" />}
+                  </div>
+                </div>
+              </button>
+              <button disabled={!selectedPack}
+                onClick={() => setUpgradeStep("method")}
+                className="w-full py-3.5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm disabled:opacity-40 transition-colors">
+                Continuar
+              </button>
+            </div>
+          )}
+
+          {/* STEP 2: Forma de pagamento */}
+          {upgradeStep === "method" && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Como deseja pagar?</p>
+              <button onClick={() => { setPaymentMethod("PIX"); setUpgradeStep("pix_form"); }}
+                className="w-full p-4 rounded-2xl border-2 border-border hover:border-primary/50 text-left transition-colors">
+                <div className="flex items-center gap-3">
+                  <QrCode className="w-8 h-8 text-green-600" />
+                  <div>
+                    <p className="font-bold text-sm">PIX</p>
+                    <p className="text-xs text-muted-foreground">QR code gerado na hora. Renova manualmente todo mês.</p>
+                  </div>
+                </div>
+              </button>
+              <button onClick={() => { setPaymentMethod("CREDIT_CARD"); setUpgradeStep("card_form"); }}
+                className="w-full p-4 rounded-2xl border-2 border-border hover:border-primary/50 text-left transition-colors">
+                <div className="flex items-center gap-3">
+                  <CreditCard className="w-8 h-8 text-blue-600" />
+                  <div>
+                    <p className="font-bold text-sm">Cartão de Crédito</p>
+                    <p className="text-xs text-muted-foreground">Cobrança automática todo mês. Cancele quando quiser.</p>
                   </div>
                 </div>
               </button>
             </div>
+          )}
 
-            <p className="text-[11px] text-muted-foreground text-center">
-              Após o pagamento, nossa equipe ativará o pacote em até 24h.
-            </p>
+          {/* STEP 3a: Dados para PIX */}
+          {upgradeStep === "pix_form" && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Informe seus dados para gerar o PIX:</p>
+              {[
+                { label: "Nome completo", value: payerName, set: setPayerName, placeholder: "Seu nome" },
+                { label: "E-mail", value: payerEmail, set: setPayerEmail, placeholder: "seu@email.com" },
+                { label: "CPF ou CNPJ", value: payerCpf, set: setPayerCpf, placeholder: "000.000.000-00" },
+              ].map(({ label, value, set, placeholder }) => (
+                <div key={label}>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{label}</label>
+                  <input value={value} onChange={(e) => set(e.target.value)} placeholder={placeholder}
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+              ))}
+              <button disabled={!payerName || !payerCpf || processing}
+                onClick={handleCreatePayment}
+                className="w-full py-3.5 rounded-2xl bg-green-500 text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2">
+                {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                {processing ? "Gerando PIX..." : "Gerar QR Code PIX"}
+              </button>
+            </div>
+          )}
 
-            {/* Botão de contato WhatsApp */}
-            <a
-              href={
-                contactWhatsapp
-                  ? `https://wa.me/${contactWhatsapp}?text=${encodeURIComponent(
-                      `Olá! Sou patrocinador ${sponsor.name} e quero adquirir o ${selectedPack === "pack_28" ? "Pacote 28" : "Pacote 14"} novidades/semana.`
-                    )}`
-                  : "#"
-              }
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => { if (!selectedPack) { toast({ title: "Selecione um pacote primeiro", variant: "destructive" }); } }}
-              className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-sm transition-colors ${selectedPack ? "bg-green-500 text-white hover:bg-green-600 active:scale-[0.98]" : "bg-muted text-muted-foreground cursor-default"}`}
-            >
-              <MessageCircle className="w-4 h-4" />
-              {selectedPack ? "Falar com a equipe no WhatsApp" : "Selecione um pacote acima"}
-            </a>
-          </div>
+          {/* STEP 3b: QR Code PIX */}
+          {upgradeStep === "pix_qr" && pixQrCode && (
+            <div className="space-y-4 text-center">
+              <p className="text-sm font-semibold">Escaneie o QR Code para pagar</p>
+              <p className="text-xs text-muted-foreground">Valor: <strong>R$ {pixAmount.toFixed(2).replace(".", ",")}</strong>/mês</p>
+              <div className="flex justify-center">
+                <img src={`data:image/png;base64,${pixQrCode}`} alt="PIX QR Code" className="w-48 h-48 rounded-2xl border" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Código PIX Copia e Cola:</p>
+                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
+                  <p className="flex-1 text-[10px] text-foreground truncate font-mono">{pixCopyPaste}</p>
+                  <button onClick={() => { navigator.clipboard.writeText(pixCopyPaste || ""); toast({ title: "Código copiado!" }); }}
+                    className="shrink-0 p-1 rounded-lg hover:bg-background transition-colors">
+                    <Copy className="w-3.5 h-3.5 text-primary" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
+                <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                <p className="text-xs text-blue-700 dark:text-blue-300">Aguardando confirmação do pagamento...</p>
+              </div>
+              <p className="text-[10px] text-muted-foreground">O plano será ativado automaticamente após o pagamento.</p>
+            </div>
+          )}
+
+          {/* STEP 3c: Dados do Cartão */}
+          {upgradeStep === "card_form" && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Dados do cartão de crédito:</p>
+              {[
+                { label: "Nome no cartão", value: cardHolder, set: setCardHolder, placeholder: "NOME SOBRENOME" },
+                { label: "Número do cartão", value: cardNumber, set: setCardNumber, placeholder: "0000 0000 0000 0000" },
+                { label: "CPF/CNPJ do titular", value: payerCpf, set: setPayerCpf, placeholder: "000.000.000-00" },
+                { label: "E-mail", value: payerEmail, set: setPayerEmail, placeholder: "seu@email.com" },
+              ].map(({ label, value, set, placeholder }) => (
+                <div key={label}>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{label}</label>
+                  <input value={value} onChange={(e) => set(e.target.value)} placeholder={placeholder}
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+              ))}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Validade (MM/AAAA)</label>
+                  <input value={cardExpiry} onChange={(e) => setCardExpiry(e.target.value)} placeholder="12/2028"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">CVV</label>
+                  <input value={cardCvv} onChange={(e) => setCardCvv(e.target.value)} placeholder="123" maxLength={4}
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Valor: R$ {selectedPackAmount.toFixed(2).replace(".", ",")}/mês • Renovação automática</p>
+              <button disabled={!cardHolder || !cardNumber || !cardExpiry || !cardCvv || !payerCpf || processing}
+                onClick={handleCreatePayment}
+                className="w-full py-3.5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2">
+                {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                {processing ? "Processando..." : `Assinar por R$ ${selectedPackAmount.toFixed(2).replace(".", ",")}/mês`}
+              </button>
+            </div>
+          )}
+
+          {/* STEP 4: Sucesso */}
+          {upgradeStep === "success" && (
+            <div className="space-y-4 text-center py-4">
+              <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto" />
+              <div>
+                <p className="font-bold text-lg text-foreground">Pacote ativado!</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Suas novidades semanais foram ampliadas.{" "}
+                  {selectedPack === "pack_28" ? "28" : "14"} publicações por semana por 31 dias.
+                </p>
+              </div>
+              <button onClick={() => { resetUpgradeModal(); setUpgradeOpen(false); }}
+                className="w-full py-3.5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm">
+                Ótimo, continuar!
+              </button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

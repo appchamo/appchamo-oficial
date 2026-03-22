@@ -1,11 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Menu, Clock, Crown, Bell, LogIn, XCircle } from "lucide-react";
+import { Menu, Clock, Crown, Bell, LogIn, XCircle, CalendarCheck } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
 import { useAuth } from "@/hooks/useAuth";
 import { useMenu } from "@/contexts/MenuContext";
 import { supabase } from "@/integrations/supabase/client";
+
+type NextAppt = {
+  start_time: string;
+  minutesUntil: number;
+  link: string;
+};
+
+function computeMinutesUntil(dateStr: string, timeStr: string): number {
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  const [h, m] = timeStr.slice(0, 5).split(":").map(Number);
+  const apptMs = new Date(y, mo - 1, d, h, m, 0).getTime();
+  return Math.floor((apptMs - Date.now()) / 60000);
+}
 
 const Header = () => {
   const { menuOpen, setMenuOpen } = useMenu();
@@ -19,6 +32,8 @@ const Header = () => {
   const [subStatus, setSubStatus] = useState<string | null>(null);
   
   const [unreadCount, setUnreadCount] = useState(0);
+  const [nextAppt, setNextAppt] = useState<NextAppt | null>(null);
+  const nextApptDataRef = useRef<{ dateStr: string; timeStr: string; link: string } | null>(null);
   const notifSoundRef = useRef<HTMLAudioElement | null>(null);
   const prevUnreadRef = useRef<number>(0);
   const initialLoadRef = useRef(true);
@@ -168,6 +183,58 @@ const Header = () => {
     };
   }, [user, playNotificationSound]);
 
+  // Próximo compromisso (< 24h) — para clientes e usuários com agendamentos
+  const fetchNextAppt = useCallback(async () => {
+    if (!user?.id) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    // Busca como cliente
+    const { data: asClient } = await supabase
+      .from("agenda_appointments")
+      .select("appointment_date, start_time, chat_request_id")
+      .eq("client_id", user.id)
+      .in("status", ["pending", "confirmed"])
+      .gte("appointment_date", today)
+      .lte("appointment_date", tomorrow)
+      .order("appointment_date").order("start_time")
+      .limit(10);
+
+    const rows = asClient || [];
+    // Filtra apenas os que estão dentro das próximas 24h e ainda não começaram
+    for (const r of rows) {
+      const mins = computeMinutesUntil(r.appointment_date, r.start_time);
+      if (mins > 0 && mins <= 24 * 60) {
+        const link = r.chat_request_id ? `/messages/${r.chat_request_id}` : "/meus-agendamentos";
+        nextApptDataRef.current = { dateStr: r.appointment_date, timeStr: r.start_time.slice(0, 5), link };
+        setNextAppt({ start_time: r.start_time.slice(0, 5), minutesUntil: mins, link });
+        return;
+      }
+    }
+    nextApptDataRef.current = null;
+    setNextAppt(null);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchNextAppt();
+    // Re-busca a cada 5 minutos
+    const fetchInterval = setInterval(fetchNextAppt, 5 * 60 * 1000);
+    // Atualiza o contador a cada 1 minuto
+    const tickInterval = setInterval(() => {
+      if (!nextApptDataRef.current) return;
+      const { dateStr, timeStr, link } = nextApptDataRef.current;
+      const mins = computeMinutesUntil(dateStr, timeStr);
+      if (mins > 0 && mins <= 24 * 60) {
+        setNextAppt({ start_time: timeStr, minutesUntil: mins, link });
+      } else {
+        nextApptDataRef.current = null;
+        setNextAppt(null);
+      }
+    }, 60 * 1000);
+    return () => { clearInterval(fetchInterval); clearInterval(tickInterval); };
+  }, [user?.id, fetchNextAppt]);
+
   const isPro = profile && profile.user_type !== "client";
 
   // Regra de Exibição dos Selos
@@ -233,6 +300,32 @@ const Header = () => {
                 <span className="text-[11px] font-semibold">{showPlanBadge ? planName : "Planos"}</span>
               </button>
             )}
+
+            {/* Próximo compromisso — aparece < 24h antes */}
+            {user && nextAppt && (() => {
+              const mins = nextAppt.minutesUntil;
+              const isUrgent = mins <= 60;
+              const isSoon = mins <= 180;
+              const label = mins < 60
+                ? `Em ${mins}min`
+                : `${nextAppt.start_time}`;
+              const colorClasses = isUrgent
+                ? "bg-rose-500/10 border-rose-400/40 text-rose-600"
+                : isSoon
+                ? "bg-amber-500/10 border-amber-400/40 text-amber-700"
+                : "bg-emerald-500/10 border-emerald-400/40 text-emerald-700";
+              const iconColor = isUrgent ? "text-rose-500" : isSoon ? "text-amber-500" : "text-emerald-500";
+              return (
+                <button
+                  onClick={() => navigate(nextAppt.link)}
+                  title={`Próximo compromisso às ${nextAppt.start_time}`}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl border text-[11px] font-bold transition-all active:scale-95 ${colorClasses} ${isUrgent ? "animate-pulse" : ""}`}
+                >
+                  <CalendarCheck className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+                  <span className="leading-none">{label}</span>
+                </button>
+              );
+            })()}
 
             {user && (
               <button

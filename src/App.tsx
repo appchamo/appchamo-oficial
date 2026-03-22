@@ -63,6 +63,8 @@ const HowToHire = lazy(() => import("./pages/HowToHire"));
 const HowToPay = lazy(() => import("./pages/HowToPay"));
 const Subscriptions = lazy(() => import("./pages/Subscriptions"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const QrAuthWeb = lazy(() => import("./pages/QrAuthWeb"));
+const QrScannerApp = lazy(() => import("./pages/QrScannerApp"));
 const JobApply = lazy(() => import("./pages/JobApply"));
 const BusinessCheckout = lazy(() => import("./pages/BusinessCheckout"));
 
@@ -541,6 +543,10 @@ const AppContent = () => {
         <Route path="/how-to-pay" element={<ProtectedRoute><HowToPay /></ProtectedRoute>} />
         <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
         <Route path="/checkout/business" element={<BusinessCheckout />} />
+
+        {/* QR Login */}
+        <Route path="/qr-auth" element={<QrAuthWeb />} />
+        <Route path="/qr-scan" element={<ProtectedRoute><QrScannerApp /></ProtectedRoute>} />
 
         {/* Painel do Patrocinador */}
         <Route path="/sponsor/dashboard" element={<ProtectedRoute><SponsorDashboard /></ProtectedRoute>} />

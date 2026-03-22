@@ -8,7 +8,7 @@ export function normalizeLocation(value: string | null | undefined): string {
     .trim()
     .toLowerCase()
     .normalize("NFD")
-    .replace(/\u0300-\u036f/g, "");
+    .replace(/[\u0300-\u036f]/g, ""); // Fix: brackets required for Unicode range
 }
 
 /** Nome completo do estado (normalizado) -> sigla UF. Usado para aceitar "Minas Gerais" ou "MG". */
@@ -40,12 +40,24 @@ export function sameCityState(
   const uS = normalizeStateToUF(userState);
   const pC = normalizeLocation(proCity);
   const pS = normalizeStateToUF(proState);
+
+  // Usuário sem localização: exibe todos
   if (!uC && !uS) return true;
-  if (uS && pS !== uS) return false;
-  if (uC && pC !== uC) {
-    // Profissional com mesmo estado mas cidade vazia: mostrar (evita sumir quem não preencheu cidade).
-    if (pS === uS && !pC) return true;
-    return false;
-  }
+
+  // Profissional sem nenhuma localização cadastrada: exibe (não penalizar quem não preencheu)
+  if (!pC && !pS) return true;
+
+  // Estado diferente: filtra fora
+  if (uS && pS && pS !== uS) return false;
+
+  // Profissional sem cidade mas mesmo estado: exibe
+  if (!pC && pS === uS) return true;
+
+  // Profissional sem estado mas mesma cidade: exibe
+  if (!pS && pC === uC) return true;
+
+  // Cidade diferente: filtra fora
+  if (uC && pC && pC !== uC) return false;
+
   return true;
 }

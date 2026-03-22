@@ -114,7 +114,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     const gen = loadGenRef.current;
     setProsLoaded(false);
 
-    const timeoutMs = Capacitor.isNativePlatform() ? 10_000 : 8_000;
+    const timeoutMs = Capacitor.isNativePlatform() ? 12_000 : 9_000;
 
     const watchdog = setTimeout(() => {
       if (loadGenRef.current !== gen) return;
@@ -132,16 +132,96 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     }, timeoutMs);
 
     try {
-      diagLog("info", "featured", "pros fetch start");
+      diagLog("info", "featured", "pros fetch start", { city: userCity, state: userState });
 
-      const { data: pros, error: prosErr } = await supabase
+      // ── Passo 1: filtro de localização SERVER-SIDE ──────────────────────────
+      // Se o usuário tem cidade/estado definido, buscamos primeiro os user_ids
+      // de profissionais que estão nessa localização, para depois buscar apenas eles.
+      let locationUserIds: string[] | null = null;
+
+      if (userCity || userState) {
+        try {
+          let locQuery = supabase
+            .from("profiles")
+            .select("user_id")
+            .limit(200);
+
+          // Usa ilike para ser case-insensitive e aguentar variações de acento
+          if (userCity) locQuery = locQuery.ilike("address_city", userCity);
+          if (userState) {
+            // Aceita tanto sigla quanto nome completo (guardado como sigla ou nome)
+            const uf = userState.length === 2 ? userState.toUpperCase() : userState;
+            locQuery = locQuery.or(`address_state.ilike.${uf},address_state.ilike.${userState}`);
+          }
+
+          const { data: locProfiles } = await locQuery;
+          if (locProfiles && locProfiles.length > 0) {
+            locationUserIds = locProfiles.map((p: any) => p.user_id);
+          } else {
+            // Sem profissionais encontrados na cidade — cai no fallback (estado)
+            locationUserIds = [];
+          }
+        } catch {
+          diagLog("warn", "featured", "location pre-filter failed, fallback to all");
+          locationUserIds = null;
+        }
+      }
+
+      // ── Passo 2: busca profissionais ──────────────────────────────────────
+      // Removido .eq("verified", true): mostra todos os aprovados, não só verificados.
+      // O badge "Verificado" ainda aparece no card quando verified === true.
+      let prosQuery = supabase
         .from("professionals")
         .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
         .eq("active", true)
         .eq("profile_status", "approved")
-        .neq("availability_status", "unavailable")
-        .eq("verified", true)
-        .limit(40);
+        .neq("availability_status", "unavailable");
+
+      if (locationUserIds && locationUserIds.length > 0) {
+        // Filtro server-side por cidade/estado
+        prosQuery = prosQuery.in("user_id", locationUserIds);
+      }
+      // Se locationUserIds === [] (ninguém na cidade), buscamos do estado/geral abaixo
+      prosQuery = prosQuery.limit(60);
+
+      const { data: pros, error: prosErr } = await prosQuery;
+
+      // Fallback 1: nenhum pro na cidade → busca do mesmo estado sem filtro de cidade
+      let finalPros = pros;
+      if ((!finalPros || finalPros.length === 0) && locationUserIds !== null && locationUserIds.length === 0 && userState) {
+        diagLog("info", "featured", "city fallback: fetching state-level pros");
+        const uf = userState.length === 2 ? userState.toUpperCase() : userState;
+        const { data: stateProfiles } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .or(`address_state.ilike.${uf},address_state.ilike.${userState}`)
+          .limit(200);
+        const stateIds = (stateProfiles || []).map((p: any) => p.user_id);
+        if (stateIds.length > 0) {
+          const { data: statePros } = await supabase
+            .from("professionals")
+            .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
+            .eq("active", true)
+            .eq("profile_status", "approved")
+            .neq("availability_status", "unavailable")
+            .in("user_id", stateIds)
+            .limit(60);
+          finalPros = statePros;
+        }
+      }
+
+      // Fallback 2: ainda vazio → mostra todos aprovados
+      if (!finalPros || finalPros.length === 0) {
+        diagLog("info", "featured", "global fallback: no location filter");
+        const { data: allPros } = await supabase
+          .from("professionals")
+          .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
+          .eq("active", true)
+          .eq("profile_status", "approved")
+          .neq("availability_status", "unavailable")
+          .limit(60);
+        finalPros = allPros;
+      }
 
       clearTimeout(watchdog);
       if (loadGenRef.current !== gen) return;
@@ -150,25 +230,20 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         diagLog("error", "featured", "pros fetch error", { message: prosErr.message });
         hangRetryRef.current += 1;
         loadGenRef.current += 1;
-        if (hangRetryRef.current <= 3) {
-          setTimeout(() => loadPros(), 1_200);
-        } else {
-          hangRetryRef.current = 0;
-          setProfessionals([]);
-          setProsLoaded(true);
-        }
+        if (hangRetryRef.current <= 3) setTimeout(() => loadPros(), 1_200);
+        else { hangRetryRef.current = 0; setProfessionals([]); setProsLoaded(true); }
         return;
       }
 
-      if (!pros || pros.length === 0) {
-        diagLog("warn", "featured", "no pros returned");
+      if (!finalPros || finalPros.length === 0) {
+        diagLog("warn", "featured", "no pros after all fallbacks");
         hangRetryRef.current = 0;
         setProfessionals([]);
         setProsLoaded(true);
         return;
       }
 
-      const userIds = pros.map((p) => p.user_id);
+      const userIds = finalPros.map((p) => p.user_id);
 
       let profilesRes: { data: unknown[] | null; error: unknown };
       let locationsRes: { data: unknown[] | null; error: unknown };
@@ -196,7 +271,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         ((locationsRes.data || []) as { user_id: string; latitude: number | null; longitude: number | null; address_city: string | null; address_state: string | null }[]).map((p) => [p.user_id, p])
       );
 
-      const withLocation = pros.map((p) => {
+      const withLocation = finalPros.map((p) => {
         const loc = locationMap.get(p.user_id);
         return {
           id: p.id,
@@ -216,22 +291,18 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         };
       });
 
-      const filtered = (userCity || userState)
-        ? withLocation.filter((p) => sameCityState(userCity, userState, p._city, p._state))
-        : withLocation;
-
       // Critério 1: mais serviços → Critério 2: maior rating → Critério 3: quem se cadastrou primeiro
-      filtered.sort((a, b) => {
+      withLocation.sort((a, b) => {
         if (b.total_services !== a.total_services) return b.total_services - a.total_services;
         if (b.rating !== a.rating) return b.rating - a.rating;
         const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
         const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return tA - tB; // mais antigo aparece primeiro
+        return tA - tB;
       });
 
-      const top10 = filtered.slice(0, 10).map(({ _city, _state, ...p }) => p);
+      const top10 = withLocation.slice(0, 10).map(({ _city, _state, ...p }) => p);
 
-      diagLog("info", "featured", "pros computed", { total: pros.length, filtered: filtered.length, shown: top10.length });
+      diagLog("info", "featured", "pros computed", { total: finalPros.length, shown: top10.length });
       if (loadGenRef.current !== gen) return;
       hangRetryRef.current = 0;
       setProfessionals(top10);
@@ -241,13 +312,8 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         diagLog("error", "featured", "pros load threw", { e: String(e) });
         hangRetryRef.current += 1;
         loadGenRef.current += 1;
-        if (hangRetryRef.current <= 3) {
-          setTimeout(() => loadPros(), 1_200);
-        } else {
-          hangRetryRef.current = 0;
-          setProfessionals([]);
-          setProsLoaded(true);
-        }
+        if (hangRetryRef.current <= 3) setTimeout(() => loadPros(), 1_200);
+        else { hangRetryRef.current = 0; setProfessionals([]); setProsLoaded(true); }
       }
     } finally {
       if (loadGenRef.current === gen) setProsLoaded(true);

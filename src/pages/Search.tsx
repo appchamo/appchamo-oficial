@@ -273,7 +273,9 @@ const Search = () => {
       if (filterCity) {
         const pCity = normalizeLocation(p.city);
         const fCity = normalizeLocation(filterCity);
-        if (!pCity || pCity !== fCity) return false;
+        // Só filtra fora quem tem cidade cadastrada e é diferente da cidade filtrada.
+        // Profissional sem cidade (pCity vazio) não é filtrado — endereço pode estar incompleto.
+        if (pCity && pCity !== fCity) return false;
       }
 
       if (filterCategory && p.category_id !== filterCategory) return false;

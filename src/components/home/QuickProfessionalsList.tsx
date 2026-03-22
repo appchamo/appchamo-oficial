@@ -10,24 +10,71 @@ interface QuickPro {
   avatar_url: string | null;
 }
 
+const LOCATION_CACHE_KEY = "chamo_user_location_v1";
+
+function getCachedCity(): string | null {
+  try {
+    const raw = localStorage.getItem(LOCATION_CACHE_KEY);
+    if (!raw) return null;
+    const { city, ts } = JSON.parse(raw);
+    if (Date.now() - ts > 5 * 60 * 1000) return null;
+    return city ?? null;
+  } catch { return null; }
+}
+
 const QuickProfessionalsList = () => {
   const [pros, setPros] = useState<QuickPro[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase
+      // Tenta filtrar por cidade do usuário para relevância local
+      const cachedCity = getCachedCity();
+      let locationUserIds: string[] | null = null;
+
+      if (cachedCity) {
+        const { data: locProfiles } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .ilike("address_city", cachedCity)
+          .limit(150);
+        if (locProfiles && locProfiles.length > 0) {
+          locationUserIds = locProfiles.map((p: any) => p.user_id);
+        }
+      }
+
+      let query = supabase
         .from("professionals")
         .select("id, user_id, professions:profession_id(name), categories(name)")
         .eq("active", true)
         .eq("profile_status", "approved")
         .neq("availability_status", "unavailable")
-        .order("rating", { ascending: false })
-        .limit(10);
+        .order("rating", { ascending: false });
 
-      if (!data || data.length === 0) { setLoaded(true); return; }
+      if (locationUserIds && locationUserIds.length > 0) {
+        query = query.in("user_id", locationUserIds);
+      }
+      query = query.limit(20);
 
-      const userIds = data.map((p: any) => p.user_id);
+      const { data } = await query;
+
+      // Fallback: se não encontrou nenhum na cidade, busca todos
+      let finalData = data;
+      if (!finalData || finalData.length === 0) {
+        const { data: fallback } = await supabase
+          .from("professionals")
+          .select("id, user_id, professions:profession_id(name), categories(name)")
+          .eq("active", true)
+          .eq("profile_status", "approved")
+          .neq("availability_status", "unavailable")
+          .order("rating", { ascending: false })
+          .limit(20);
+        finalData = fallback;
+      }
+
+      if (!finalData || finalData.length === 0) { setLoaded(true); return; }
+
+      const userIds = finalData.map((p: any) => p.user_id);
       const { data: profiles } = await supabase
         .from("profiles_public" as any)
         .select("user_id, full_name, avatar_url")
@@ -38,11 +85,11 @@ const QuickProfessionalsList = () => {
       );
 
       // Ordem aleatória a cada carregamento
-      for (let i = data.length - 1; i > 0; i--) {
+      for (let i = finalData.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [data[i], data[j]] = [data[j], data[i]];
+        [finalData[i], finalData[j]] = [finalData[j], finalData[i]];
       }
-      const list: QuickPro[] = data.slice(0, 5).map((p: any) => ({
+      const list: QuickPro[] = finalData.slice(0, 5).map((p: any) => ({
         id: p.id,
         full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
         profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",

@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, LayoutDashboard, Crown, Pencil, ArrowLeft, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Crown, Pencil, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Link, useNavigate } from "react-router-dom";
@@ -452,10 +452,9 @@ const Profile = () => {
 
         <div className="flex flex-col gap-2">
           {[
-            { icon: LayoutDashboard, label: "Painel do Cliente", path: "/client" },
             ...((profile.user_type === "professional" || profile.user_type === "company") ? [{ icon: Briefcase, label: "Painel Profissional", path: "/pro" }] : []),
             { icon: CalendarCheck, label: "Meus agendamentos", path: "/meus-agendamentos" },
-            { icon: Crown, label: "Planos e Assinatura", path: "/subscriptions" },
+            ...((profile.user_type === "professional" || profile.user_type === "company") ? [{ icon: Crown, label: "Planos e Assinatura", path: "/subscriptions" }] : []),
             { icon: Ticket, label: "Meus Cupons", path: "/coupons" },
           ].map((item) => (
             <Link key={item.label} to={item.path} className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 transition-all">
@@ -464,6 +463,17 @@ const Profile = () => {
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </Link>
           ))}
+
+          {/* Logar via Web — abre o scanner de QR Code */}
+          <Link to="/qr-scan" className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-xl p-4 hover:border-primary/40 hover:bg-primary/10 transition-all">
+            <QrCode className="w-5 h-5 text-primary" />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-foreground block">Logar via Web</span>
+              <span className="text-xs text-muted-foreground">Escaneie o QR Code no site</span>
+            </div>
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          </Link>
+
           <button onClick={() => setPasswordOpen(true)} className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 transition-all w-full text-left">
             <Lock className="w-5 h-5 text-primary" />
             <span className="flex-1 text-sm font-medium text-foreground">Alterar senha</span>

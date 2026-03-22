@@ -18,6 +18,7 @@ import HomeJobsBanner from "@/components/home/HomeJobsBanner";
 import HomeWelcome from "@/components/home/HomeWelcome";
 import HomeAlertCarousel from "@/components/home/HomeAlertCarousel";
 import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
+import ProAgendaTodayCard from "@/components/home/ProAgendaTodayCard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
@@ -103,7 +104,8 @@ function HomeHeavyPlaceholder({ kind, title }: { kind: "sponsors" | "featured" |
 const Home = () => {
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
   const location = useLocation();
-  const { isFreePlan, callsRemaining, loading: subLoading } = useSubscription();
+  const { isFreePlan, callsRemaining, loading: subLoading, plan } = useSubscription();
+  const isBusiness = plan?.id === "business";
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
   const isRefreshing = useIsRefreshing();
   const navigate = useNavigate();
@@ -114,6 +116,7 @@ const Home = () => {
   const isPro = profile?.user_type === "professional" || profile?.user_type === "company";
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletLoaded, setWalletLoaded] = useState(false);
+  const [proId, setProId] = useState<string | null>(null);
   const [hasUpcomingAppointment, setHasUpcomingAppointment] = useState(false);
   const [appointmentBannerDismissed, setAppointmentBannerDismissed] = useState(() =>
     localStorage.getItem("chamo_appointment_banner_dismissed") === "1"
@@ -161,6 +164,7 @@ const Home = () => {
     const fetchWallet = async () => {
       const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
       if (!pro?.id) return;
+      setProId(pro.id);
       const { data } = await supabase
         .from("wallet_transactions")
         .select("amount")
@@ -582,6 +586,10 @@ const Home = () => {
               </div>
             </div>
           ) : null}
+
+          {user && isPro && isBusiness && proId && (
+            <ProAgendaTodayCard professionalId={proId} />
+          )}
 
           {user && needsProfileCompletion && (
             <Link

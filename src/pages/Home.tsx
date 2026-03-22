@@ -634,7 +634,8 @@ const Home = () => {
           {sections.filter((s) => s.visible).map((section) => {
             const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
             const isWelcomeCollapsed = section.id === "welcome";
-            const minHeight = isWelcomeCollapsed || isJobsEmpty ? "" : (sectionMinHeights[section.id] || "");
+            const blockIsNull = block === null || block === undefined;
+            const minHeight = isWelcomeCollapsed || isJobsEmpty || blockIsNull ? "" : (sectionMinHeights[section.id] || "");
             const heavyDefer =
               Capacitor.isNativePlatform() &&
               !heavySectionsReady &&
@@ -652,25 +653,32 @@ const Home = () => {
               );
             return (
               <div key={section.id} className={`w-full ${minHeight}`}>
+                {/* Carrossel de alertas aparece ACIMA dos tutoriais */}
+                {section.id === "tutorials" && (
+                  <div className="mb-3">
+                    <HomeAlertCarousel
+                      hasAppointment={hasUpcomingAppointment}
+                      appointmentDismissed={appointmentBannerDismissed}
+                      onDismissAppointment={() => {
+                        setAppointmentBannerDismissed(true);
+                        localStorage.setItem("chamo_appointment_banner_dismissed", "1");
+                      }}
+                      appointmentLink={
+                        profile?.user_type === "professional" || profile?.user_type === "company"
+                          ? "/pro/agenda/calendario"
+                          : "/meus-agendamentos"
+                      }
+                      jobCount={jobCount}
+                    />
+                  </div>
+                )}
                 {block}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
                 {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
-                {section.id === "categories" && <QuickProfessionalsList />}
-                {section.id === "tutorials" && (
-                  <HomeAlertCarousel
-                    hasAppointment={hasUpcomingAppointment}
-                    appointmentDismissed={appointmentBannerDismissed}
-                    onDismissAppointment={() => {
-                      setAppointmentBannerDismissed(true);
-                      localStorage.setItem("chamo_appointment_banner_dismissed", "1");
-                    }}
-                    appointmentLink={
-                      profile?.user_type === "professional" || profile?.user_type === "company"
-                        ? "/pro/agenda/calendario"
-                        : "/meus-agendamentos"
-                    }
-                    jobCount={jobCount}
-                  />
+                {section.id === "categories" && (
+                  <div className="mt-3">
+                    <QuickProfessionalsList />
+                  </div>
                 )}
               </div>
             );

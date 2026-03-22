@@ -48,6 +48,15 @@ const SupportThread = () => {
     }
   }, []);
 
+  /** Chama a edge function de IA sem verificação de JWT duplicada */
+  const invokeAI = async () => {
+    try {
+      await supabase.functions.invoke("support-ai-reply", { body: { ticket_id: ticketId } });
+    } catch (e) {
+      console.error("[Suporte IA] Falha:", e);
+    }
+  };
+
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -107,16 +116,7 @@ const SupportThread = () => {
     invokedAiForHumanRef.current = true;
     (async () => {
       await new Promise((r) => setTimeout(r, 800));
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) return;
-        await supabase.functions.invoke("support-ai-reply", {
-          body: { ticket_id: ticketId },
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-      } catch {
-        // silencioso
-      }
+      await invokeAI();
     })();
   }, [user, ticketId, ticketSubject, messages, loading]);
 
@@ -202,21 +202,7 @@ const SupportThread = () => {
 
     // Pequena pausa para a mensagem ser gravada antes da função ler o histórico
     await new Promise((r) => setTimeout(r, 800));
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        console.warn("[Suporte IA] Sem sessão; não é possível chamar a função.");
-        return;
-      }
-      const { data, error: fnError } = await supabase.functions.invoke("support-ai-reply", {
-        body: { ticket_id: ticketId },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (fnError) console.error("[Suporte IA] Erro na função:", fnError);
-      else if (data?.error) console.error("[Suporte IA] Resposta da função:", data.error);
-    } catch (e) {
-      console.error("[Suporte IA] Falha ao chamar função:", e);
-    }
+    await invokeAI();
   };
 
   // ✅ FUNÇÃO DE COMPRESSÃO ADICIONADA PARA O SUPORTE
@@ -367,17 +353,7 @@ const SupportThread = () => {
     if (newMsg) setMessages((prev) => [...prev, { ...newMsg, image_urls: null } as Message]);
     setSending(false);
     await new Promise((r) => setTimeout(r, 800));
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        await supabase.functions.invoke("support-ai-reply", {
-          body: { ticket_id: ticketId },
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-      }
-    } catch {
-      // silencioso
-    }
+    await invokeAI();
   };
 
   const handleRequestHuman = async () => {
@@ -398,18 +374,8 @@ const SupportThread = () => {
     });
     toast({ title: "Solicitação enviada", description: "Um atendente será notificado em breve." });
     setRequestingHuman(false);
-    // Disparar a IA para responder "Entendido, em breve um atendente entrará em contato, aguarde."
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        await supabase.functions.invoke("support-ai-reply", {
-          body: { ticket_id: ticketId },
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-      }
-    } catch {
-      // silencioso
-    }
+    await new Promise((r) => setTimeout(r, 800));
+    await invokeAI();
   };
 
   const renderContent = (msg: Message) => {

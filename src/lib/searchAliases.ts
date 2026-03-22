@@ -152,9 +152,8 @@ export const SEARCH_ALIASES: Record<string, string[]> = {
 
   // —— Variações e termos comuns (typos / como as pessoas buscam) ——
   eletrisista: ["eletricista", "eletrica"],
-  encanador: ["encanador", "encanamento", "hidraulica", "encanador"],
   hidraulico: ["hidraulica", "encanador", "encanamento"],
-  pintura: ["pintura", "pintor", "residencial", "automotiva"],
+  "pintura automotiva": ["pintura", "pintor", "residencial", "automotiva"],
   moveis: ["moveis", "marcenaria", "marceneiro", "armario"],
   armario: ["armario", "marcenaria", "marceneiro", "moveis planejados"],
   portao: ["portao", "serralheiro", "serralheria", "automatizacao"],

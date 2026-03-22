@@ -170,7 +170,9 @@ const SubscriberDetail = ({ sub, onClose }: { sub: Subscriber; onClose: () => vo
 const FinancialConfig = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [planPrices, setPlanPrices] = useState<Record<string, string>>({});
-  const [planFeatures, setPlanFeatures] = useState<Record<string, string[]>>({});
+  const [planPricesAnnual, setPlanPricesAnnual] = useState<Record<string, string>>({});
+  const [planPricesSemester, setPlanPricesSemester] = useState<Record<string, string>>({});
+  const [planFeatures, setPlanFeatures] = useState<Record<string, string[]>>({}); 
   const [expandedPlan, setExpandedPlan] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -196,15 +198,21 @@ const FinancialConfig = () => {
         setSettings(map);
       }
 
-      const { data: plansData } = await supabase.from("plans").select("id, price_monthly, features");
+      const { data: plansData } = await supabase.from("plans").select("id, price_monthly, price_annual, price_semester, features");
       if (plansData) {
         const plansMap: Record<string, string> = {};
+        const annualMap: Record<string, string> = {};
+        const semesterMap: Record<string, string> = {};
         const featsMap: Record<string, string[]> = {};
-        plansData.forEach(p => {
+        plansData.forEach((p: any) => {
           plansMap[p.id] = p.price_monthly.toString().replace('.', ',');
+          annualMap[p.id] = p.price_annual ? p.price_annual.toString().replace('.', ',') : "";
+          semesterMap[p.id] = p.price_semester ? p.price_semester.toString().replace('.', ',') : "";
           featsMap[p.id] = p.features && p.features.length > 0 ? p.features : defaultFeatures[p.id as keyof typeof defaultFeatures];
         });
         setPlanPrices(plansMap);
+        setPlanPricesAnnual(annualMap);
+        setPlanPricesSemester(semesterMap);
         setPlanFeatures(featsMap);
       }
 
@@ -215,6 +223,8 @@ const FinancialConfig = () => {
 
   const set = (key: string, value: string) => setSettings(prev => ({ ...prev, [key]: value }));
   const setPlanPrice = (id: string, value: string) => setPlanPrices(prev => ({ ...prev, [id]: value }));
+  const setPlanPriceAnnual = (id: string, value: string) => setPlanPricesAnnual(prev => ({ ...prev, [id]: value }));
+  const setPlanPriceSemester = (id: string, value: string) => setPlanPricesSemester(prev => ({ ...prev, [id]: value }));
   const toggleExpand = (id: string) => setExpandedPlan(prev => ({ ...prev, [id]: !prev[id] }));
   const addFeature = (id: string) => setPlanFeatures(prev => ({ ...prev, [id]: [...(prev[id] || []), ""] }));
   const updateFeature = (id: string, index: number, value: string) => {
@@ -254,6 +264,18 @@ const FinancialConfig = () => {
             const numericPrice = parseFloat(rawValue);
             if (!isNaN(numericPrice)) updateData.price_monthly = numericPrice;
         }
+        // Preço anual
+        if (planId !== 'free') {
+          const annualRaw = String(planPricesAnnual[planId] || "").replace(',', '.');
+          const annualNum = parseFloat(annualRaw);
+          updateData.price_annual = isNaN(annualNum) || annualRaw === "" ? null : annualNum;
+        }
+        // Preço semestral
+        if (planId !== 'free') {
+          const semRaw = String(planPricesSemester[planId] || "").replace(',', '.');
+          const semNum = parseFloat(semRaw);
+          updateData.price_semester = isNaN(semNum) || semRaw === "" ? null : semNum;
+        }
 
         // Benefícios (Limpa campos vazios antes de salvar)
         if(planFeatures[planId] !== undefined) {
@@ -280,9 +302,28 @@ const FinancialConfig = () => {
     return (
       <div className="space-y-3 pb-6 border-b last:border-0 last:pb-0 border-border">
         {id !== 'free' && (
-           <div>
+           <div className="space-y-2">
              <label className={`text-xs font-bold ${color} mb-1.5 block`}>{name}</label>
-             <input type="text" placeholder="Ex: 99,90" value={planPrices[id] || ""} onChange={(e) => setPlanPrice(id, e.target.value)} className={inputCls} />
+             <div className="grid grid-cols-3 gap-2">
+               <div>
+                 <label className="text-[10px] text-muted-foreground font-medium mb-1 block">Mensal (R$)</label>
+                 <input type="text" placeholder="Ex: 39,90" value={planPrices[id] || ""} onChange={(e) => setPlanPrice(id, e.target.value)} className={inputCls} />
+               </div>
+               <div>
+                 <label className="text-[10px] text-muted-foreground font-medium mb-1 block">Semestral total (R$)</label>
+                 <input type="text" placeholder="Ex: 199,00" value={planPricesAnnual[id] !== undefined ? planPricesSemester[id] || "" : ""} onChange={(e) => setPlanPriceSemester(id, e.target.value)} className={inputCls} />
+                 {planPricesSemester[id] && !isNaN(parseFloat(String(planPricesSemester[id]).replace(',', '.'))) && (
+                   <p className="text-[9px] text-emerald-600 mt-0.5">= R$ {(parseFloat(String(planPricesSemester[id]).replace(',', '.')) / 6).toFixed(2).replace('.', ',')}/mês</p>
+                 )}
+               </div>
+               <div>
+                 <label className="text-[10px] text-muted-foreground font-medium mb-1 block">Anual total (R$)</label>
+                 <input type="text" placeholder="Ex: 359,00" value={planPricesAnnual[id] || ""} onChange={(e) => setPlanPriceAnnual(id, e.target.value)} className={inputCls} />
+                 {planPricesAnnual[id] && !isNaN(parseFloat(String(planPricesAnnual[id]).replace(',', '.'))) && (
+                   <p className="text-[9px] text-emerald-600 mt-0.5">= R$ {(parseFloat(String(planPricesAnnual[id]).replace(',', '.')) / 12).toFixed(2).replace('.', ',')}/mês</p>
+                 )}
+               </div>
+             </div>
            </div>
         )}
         {id === 'free' && (

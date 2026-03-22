@@ -9,15 +9,11 @@ import ImageCropUpload from "@/components/ImageCropUpload";
 import { iconMap } from "@/components/PlatformStats";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-interface PlanPricing { id: string; name: string; price_monthly: number; price_annual: number | null; price_semester: number | null; }
-
 const AdminSettings = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [statsRows, setStatsRows] = useState<any[]>([]);
-  const [planPricing, setPlanPricing] = useState<PlanPricing[]>([]);
-  const [savingPlans, setSavingPlans] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
@@ -46,10 +42,9 @@ const AdminSettings = () => {
 
   useEffect(() => {
     const fetchAll = async () => {
-      const [{ data: settingsData }, { data: statsData }, { data: plansData }] = await Promise.all([
+      const [{ data: settingsData }, { data: statsData }] = await Promise.all([
         supabase.from("platform_settings").select("*"),
         supabase.from("platform_stats").select("*").order("sort_order"),
-        supabase.from("plans").select("id, name, price_monthly, price_annual, price_semester").order("sort_order"),
       ]);
       if (settingsData) {
         const map: Record<string, string> = {};
@@ -60,27 +55,10 @@ const AdminSettings = () => {
         setSettings(map);
       }
       if (statsData) setStatsRows(statsData);
-      if (plansData) setPlanPricing(plansData as PlanPricing[]);
       setLoading(false);
     };
     fetchAll();
   }, []);
-
-  const handleSavePlans = async () => {
-    setSavingPlans(true);
-    for (const p of planPricing) {
-      await supabase.from("plans").update({
-        price_annual: p.price_annual || null,
-        price_semester: p.price_semester || null,
-      }).eq("id", p.id);
-    }
-    toast({ title: "Preços dos planos salvos!" });
-    setSavingPlans(false);
-  };
-
-  const updatePlanPrice = (id: string, field: "price_annual" | "price_semester", value: string) => {
-    setPlanPricing(prev => prev.map(p => p.id === id ? { ...p, [field]: value === "" ? null : parseFloat(value) } : p));
-  };
 
   const set = (key: string, value: string) => setSettings(prev => ({ ...prev, [key]: value }));
 
@@ -259,58 +237,6 @@ const AdminSettings = () => {
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
           </div>
-        </div>
-
-        {/* Plan Pricing */}
-        <div className="bg-card border rounded-xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-foreground">Preços dos Planos (Anual / Semestral)</h2>
-            <button onClick={handleSavePlans} disabled={savingPlans}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {savingPlans ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-              Salvar preços
-            </button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Deixe em branco para não oferecer a opção. O preço anual dividido por 12 será mostrado como "a partir de R$/mês" para o usuário.
-          </p>
-          {planPricing.filter(p => p.id !== "free").map(p => (
-            <div key={p.id} className="border rounded-xl p-4 space-y-3">
-              <p className="text-sm font-semibold text-foreground">{p.name} <span className="text-xs text-muted-foreground font-normal">(mensal: R$ {p.price_monthly.toFixed(2).replace(".", ",")})</span></p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Preço Anual (total R$)</label>
-                  <input
-                    type="number" step="0.01" min="0"
-                    value={p.price_annual ?? ""}
-                    onChange={(e) => updatePlanPrice(p.id, "price_annual", e.target.value)}
-                    placeholder={`Ex: ${(p.price_monthly * 12 * 0.9).toFixed(2)}`}
-                    className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                  {p.price_annual && (
-                    <p className="text-[10px] text-emerald-600 mt-1">
-                      = R$ {(p.price_annual / 12).toFixed(2).replace(".", ",")}/mês · Economia de {Math.round(((p.price_monthly * 12 - p.price_annual) / (p.price_monthly * 12)) * 100)}%
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Preço Semestral (total R$)</label>
-                  <input
-                    type="number" step="0.01" min="0"
-                    value={p.price_semester ?? ""}
-                    onChange={(e) => updatePlanPrice(p.id, "price_semester", e.target.value)}
-                    placeholder={`Ex: ${(p.price_monthly * 6 * 0.95).toFixed(2)}`}
-                    className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                  {p.price_semester && (
-                    <p className="text-[10px] text-emerald-600 mt-1">
-                      = R$ {(p.price_semester / 6).toFixed(2).replace(".", ",")}/mês · Economia de {Math.round(((p.price_monthly * 6 - p.price_semester) / (p.price_monthly * 6)) * 100)}%
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
 
         {/* Raffle */}

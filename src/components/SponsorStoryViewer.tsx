@@ -34,11 +34,29 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
   const currentIndexRef = useRef(currentIndex);
 
   const current = stories[currentIndex];
+  const [imgLoaded, setImgLoaded] = useState(false);
 
   // Mantém currentIndexRef atualizado
   useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
+
+  // Reseta o estado de carregamento ao trocar de story
+  useEffect(() => {
+    setImgLoaded(false);
+  }, [currentIndex]);
+
+  // Pré-carrega as próximas 2 imagens em background
+  useEffect(() => {
+    const urls = [
+      stories[currentIndex + 1]?.photo_url,
+      stories[currentIndex + 2]?.photo_url,
+    ].filter(Boolean) as string[];
+    urls.forEach((url) => {
+      const img = new Image();
+      img.src = url;
+    });
+  }, [currentIndex, stories]);
 
   // Sincroniza isPausedRef
   useEffect(() => {
@@ -192,11 +210,24 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
         onTouchCancel={() => setIsPaused(false)}
         onContextMenu={(e) => e.preventDefault()}
       >
+        {/* Skeleton enquanto imagem carrega */}
+        {!imgLoaded && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black">
+            <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+          </div>
+        )}
         <img
+          key={current.photo_url}
           src={current.photo_url}
           alt="Novidade"
           className="w-full h-full object-contain pointer-events-none"
           draggable={false}
+          onLoad={() => setImgLoaded(true)}
+          style={{
+            opacity: imgLoaded ? 1 : 0,
+            transition: "opacity 0.2s ease",
+            willChange: "opacity",
+          }}
         />
 
         {/* Indicador de pausa */}

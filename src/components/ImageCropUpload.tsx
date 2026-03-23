@@ -13,9 +13,9 @@ interface ImageCropUploadProps {
   bucketPath?: string;
   currentImage?: string | null;
   label?: string;
-  /** Dimensão máxima (px) da imagem final. Default: 800 */
+  /** Dimensão máxima (px) da imagem final. Default: 600 */
   maxSize?: number;
-  /** Qualidade WebP 0–1. Default: 0.80 */
+  /** Qualidade WebP 0–1. Default: 0.72 */
   quality?: number;
 }
 
@@ -32,8 +32,8 @@ function createImage(url: string): Promise<HTMLImageElement> {
 async function getCroppedImg(
   imageSrc: string,
   pixelCrop: Area,
-  maxSize = 800,
-  quality = 0.80,
+  maxSize = 600,
+  quality = 0.72,
 ): Promise<Blob> {
   const image = await createImage(imageSrc);
 
@@ -68,8 +68,8 @@ const ImageCropUpload = ({
   bucketPath = "general",
   currentImage,
   label = "Upload imagem",
-  maxSize = 800,
-  quality = 0.80,
+  maxSize = 600,
+  quality = 0.72,
 }: ImageCropUploadProps) => {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });

@@ -483,9 +483,9 @@ const Profile = () => {
             <LogOut className="w-5 h-5 text-destructive" />
             <span className="flex-1 text-sm font-medium text-destructive">Sair da conta</span>
           </button>
-          <button onClick={() => setDeleteOpen(true)} className="flex items-center gap-3 bg-card border border-destructive/20 rounded-xl p-4 hover:border-destructive/50 transition-all w-full text-left">
-            <Trash2 className="w-5 h-5 text-destructive" />
-            <span className="flex-1 text-sm font-medium text-destructive">Excluir minha conta</span>
+          <button onClick={() => setDeleteOpen(true)} className="flex items-center gap-2 justify-center w-full py-3 text-xs text-muted-foreground/50 hover:text-destructive/60 transition-colors">
+            <Trash2 className="w-3.5 h-3.5" />
+            Excluir minha conta
           </button>
         </div>
 

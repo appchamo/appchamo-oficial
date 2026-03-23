@@ -121,13 +121,11 @@ const SponsorDashboard = () => {
     const allStories = (st || []) as Story[];
     setStories(allStories);
 
-    const startOfWeek = new Date();
-    const day = startOfWeek.getDay();
-    const diff = (day === 0 ? -6 : 1 - day);
-    startOfWeek.setDate(startOfWeek.getDate() + diff);
-    startOfWeek.setHours(0, 0, 0, 0);
-    const usedThisWeek = allStories.filter((s) => new Date(s.created_at) >= startOfWeek).length;
-    setWeeklyUsed(usedThisWeek);
+    // Conta via banco usando fuso America/Sao_Paulo para evitar bugs de meia-noite
+    const { data: weekData } = await supabase.rpc("get_sponsor_weekly_used" as any, {
+      p_sponsor_id: sp.id,
+    });
+    setWeeklyUsed(typeof weekData === "number" ? weekData : 0);
     setLoading(false);
   };
 

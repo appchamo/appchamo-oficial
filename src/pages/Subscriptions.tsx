@@ -60,7 +60,7 @@ const useIAPOnIOS = Capacitor.getPlatform() === "ios";
 
 const Subscriptions = () => {
   const navigate = useNavigate();
-  const { plan: currentPlan, plans, loading, changePlan, callsUsed, callsRemaining, isFreePlan, refetch } = useSubscription();
+  const { plan: currentPlan, plans, loading, changePlan, scheduleCancel, callsUsed, callsRemaining, isFreePlan, refetch, subscription: currentSubscription } = useSubscription();
   const { user, profile } = useAuth();
   const {
     isIAPAvailable,
@@ -302,10 +302,12 @@ const Subscriptions = () => {
   const handleCancelSubscription = async () => {
     if (!user) return;
     setCancelling(true);
-    const ok = await changePlan("free");
+    const ok = await scheduleCancel();
     if (ok) {
-      await supabase.from("profiles").update({ user_type: "professional" }).eq("user_id", user.id);
-      toast({ title: "Assinatura cancelada", description: "Você voltou para o plano Grátis." });
+      toast({
+        title: "Cancelamento agendado",
+        description: "Você continuará com os benefícios do plano atual até o fim do período pago. Depois voltará ao plano Grátis.",
+      });
     } else {
       toast({ title: "Erro ao cancelar assinatura.", variant: "destructive" });
     }
@@ -412,6 +414,10 @@ const Subscriptions = () => {
         user_id: session.user.id,
         plan_id: selectedPlanId,
         status: "ACTIVE",
+        billing_period: billingPeriod,
+        cancel_at_period_end: false,
+        period_ends_at: null,
+        started_at: new Date().toISOString(),
         business_cnpj: businessData.cnpj || null,
         business_address: fullAddress || null,
         business_proof_url: proofUrl || null
@@ -480,15 +486,23 @@ const Subscriptions = () => {
     try {
       const result = await purchase(planId, billingPeriod);
       if (!result) {
+        // null = usuário cancelou o dialog da Apple OU Apple mostrou "Você já é assinante"
+        // Tenta restaurar a compra existente automaticamente
         setProcessing(false);
+        toast({
+          title: "Verificando assinatura existente...",
+          description: "Aguarde um momento.",
+        });
+        await handleRestorePurchases();
         return;
       }
       if (Capacitor.getPlatform() === "ios") {
-        if (result.isActive === false) {
+        // Aceitar mesmo se isActive for undefined/null (upgrades dentro do grupo)
+        if (result.isActive === false && result.subscriptionState !== "subscribed") {
           toast({
-            title: "Assinatura não ativa",
+            title: "Assinatura não confirmada",
             description:
-              "A App Store não confirmou uma assinatura paga ativa. Se o pagamento foi recusado, atualize o cartão em Ajustes → Assinaturas.",
+              "A App Store não confirmou uma assinatura ativa. Verifique em Ajustes → Assinaturas ou use «Restaurar compras».",
             variant: "destructive",
           });
           setProcessing(false);
@@ -857,7 +871,16 @@ const Subscriptions = () => {
                         }`}>
                           {isBusinessPremium ? "👑 Plano atual" : "Plano atual"}
                         </button>
-                        {p.id !== "free" && (
+                        {p.id !== "free" && currentSubscription?.cancel_at_period_end && currentSubscription?.period_ends_at ? (
+                          <div className="text-center space-y-1">
+                            <p className="text-[11px] text-amber-600 font-medium">
+                              ⏳ Cancela em {Math.max(0, Math.ceil((new Date(currentSubscription.period_ends_at).getTime() - Date.now()) / 86400000))} dia(s)
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Acesso até {new Date(currentSubscription.period_ends_at).toLocaleDateString("pt-BR")}
+                            </p>
+                          </div>
+                        ) : p.id !== "free" && (
                           <button onClick={() => setCancelOpen(true)} className="w-full text-[11px] text-muted-foreground hover:text-destructive transition-colors">Cancelar assinatura</button>
                         )}
                       </div>
@@ -1018,30 +1041,54 @@ const Subscriptions = () => {
                       </div>
                     )}
                     <p className="text-[10px] text-muted-foreground text-center">
-                      Assinatura mensal, renovação automática.{" "}
+                      {billingPeriod === "annual"
+                        ? "Assinatura anual, renovação automática."
+                        : billingPeriod === "semester"
+                        ? "Assinatura semestral, renovação automática."
+                        : "Assinatura mensal, renovação automática."}{" "}
                       <Link to="/terms-of-use" className="text-primary hover:underline">Termos de Uso (EULA)</Link>
                       {" · "}
                       <Link to="/privacy" className="text-primary hover:underline">Política de Privacidade</Link>
                     </p>
-                    <button
-                      onClick={handleIAPPurchase}
-                      disabled={
-                        processing ||
-                        purchasing ||
-                        loadingProducts ||
-                        (selectedPlanId === "business" && (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile)) ||
-                        !products.some((p) => getProductIdForPlan(selectedPlanId!) === p.identifier)
-                      }
-                      className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {processing || purchasing ? (
-                        <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</>
-                      ) : loadingProducts || !products.some((p) => getProductIdForPlan(selectedPlanId!) === p.identifier) ? (
-                        <>Aguardando preços da App Store...</>
-                      ) : (
-                        <>Assinar com Apple</>
-                      )}
-                    </button>
+                    {(() => {
+                      const iapId = getProductIdForPlan(selectedPlanId!, billingPeriod);
+                      const iapAvailable = products.some(p => p.identifier === iapId);
+                      return (
+                        <>
+                          {!loadingProducts && !iapAvailable && (
+                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-center">
+                              <p className="text-xs font-medium text-amber-700">
+                                Este produto ainda não está disponível na App Store.
+                              </p>
+                              <p className="text-[10px] text-muted-foreground mt-1">
+                                Os planos semestral e anual estarão ativos após aprovação da Apple.
+                              </p>
+                            </div>
+                          )}
+                          <button
+                            onClick={handleIAPPurchase}
+                            disabled={
+                              processing ||
+                              purchasing ||
+                              loadingProducts ||
+                              !iapAvailable ||
+                              (selectedPlanId === "business" && (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile))
+                            }
+                            className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                            {processing || purchasing ? (
+                              <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Processando...</>
+                            ) : loadingProducts ? (
+                              <>Carregando...</>
+                            ) : !iapAvailable ? (
+                              <>Indisponível na App Store</>
+                            ) : (
+                              <>Assinar com Apple</>
+                            )}
+                          </button>
+                        </>
+                      );
+                    })()}
                     <button
                       type="button"
                       onClick={handleRestorePurchases}
@@ -1205,12 +1252,23 @@ const Subscriptions = () => {
 
         <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
           <DialogContent className="max-w-sm">
-            <DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-destructive" /> Cancelar assinatura</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Cancelar assinatura</DialogTitle></DialogHeader>
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">Ao cancelar, você voltará para o plano <strong>Grátis</strong>.</p>
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-2">
+                <p className="text-sm font-medium text-foreground">Sem reembolso — mas você não perde o que pagou.</p>
+                <p className="text-sm text-muted-foreground">
+                  Ao confirmar, seu plano <strong>{currentPlan?.name}</strong> continuará ativo até o fim do período pago
+                  {currentSubscription?.started_at ? (() => {
+                    const days = currentSubscription.billing_period === "annual" ? 365 : currentSubscription.billing_period === "semester" ? 180 : 30;
+                    const ends = new Date(new Date(currentSubscription.started_at).getTime() + days * 86400000);
+                    return ` (${ends.toLocaleDateString("pt-BR")})`;
+                  })() : ""}
+                  . Depois disso, voltará automaticamente ao plano <strong>Grátis</strong>.
+                </p>
+              </div>
               <div className="flex gap-2">
-                <button onClick={() => setCancelOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Mantêr plano</button>
-                <button onClick={handleCancelSubscription} disabled={cancelling} className="flex-1 py-2.5 rounded-xl bg-destructive text-white font-semibold text-sm">Confirmar Cancelamento</button>
+                <button onClick={() => setCancelOpen(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Manter plano</button>
+                <button onClick={handleCancelSubscription} disabled={cancelling} className="flex-1 py-2.5 rounded-xl bg-destructive text-white font-semibold text-sm disabled:opacity-50">{cancelling ? "Cancelando..." : "Confirmar cancelamento"}</button>
               </div>
             </div>
           </DialogContent>

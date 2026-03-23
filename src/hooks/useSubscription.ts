@@ -25,6 +25,9 @@ export interface Subscription {
   status: string;
   started_at: string;
   expires_at: string | null;
+  cancel_at_period_end: boolean;
+  period_ends_at: string | null;
+  billing_period: "monthly" | "semester" | "annual";
 }
 
 export function useSubscription() {
@@ -61,10 +64,16 @@ export function useSubscription() {
         }
         if (!cancelled) setCallsUsed(receivedCount);
 
+        // Expira assinaturas canceladas cujo período já passou
+        await supabase.rpc("expire_cancelled_subscriptions" as any);
+
         const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
         if (sub && !cancelled) {
+          // Se marcado para cancelar mas ainda dentro do período, mostra o plano atual
+          // Se o período já expirou (a função acima resolveu), mostra free
+          const effectivePlanId = sub.plan_id;
           setSubscription(sub as Subscription);
-          setPlan(plansList.find((p) => p.id === sub.plan_id) || null);
+          setPlan(plansList.find((p) => p.id === effectivePlanId) || null);
         } else if (!sub && !cancelled) {
           const { data: newSub } = await supabase
             .from("subscriptions")
@@ -135,6 +144,32 @@ export function useSubscription() {
     return true;
   };
 
+  /** Agenda cancelamento no fim do período — usuário continua no plano até period_ends_at */
+  const scheduleCancel = useCallback(async () => {
+    if (!user || !subscription) return false;
+
+    // Calcula o fim do período baseado em started_at + duração do billing_period
+    const startedAt = new Date(subscription.started_at);
+    const periodDays =
+      subscription.billing_period === "annual"   ? 365 :
+      subscription.billing_period === "semester" ? 180 : 30;
+    const periodEndsAt = new Date(startedAt.getTime() + periodDays * 24 * 60 * 60 * 1000);
+
+    // Se o período já passou, desce direto para free
+    if (periodEndsAt <= new Date()) {
+      return changePlan("free");
+    }
+
+    const { error } = await supabase
+      .from("subscriptions")
+      .update({ cancel_at_period_end: true, period_ends_at: periodEndsAt.toISOString() })
+      .eq("user_id", user.id);
+
+    if (error) return false;
+    setSubscription(prev => prev ? { ...prev, cancel_at_period_end: true, period_ends_at: periodEndsAt.toISOString() } : prev);
+    return true;
+  }, [user, subscription, changePlan]);
+
   const refetch = useCallback(async () => {
     if (!user) return;
     const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
@@ -150,5 +185,5 @@ export function useSubscription() {
     }
   }, [user, plans]);
 
-  return { subscription, plan, plans, callsUsed, callsRemaining, canMakeCall, isFreePlan, loading, changePlan, refetch };
+  return { subscription, plan, plans, callsUsed, callsRemaining, canMakeCall, isFreePlan, loading, changePlan, scheduleCancel, refetch };
 }

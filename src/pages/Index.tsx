@@ -31,7 +31,7 @@ const AppStoreBadge = () => (
         <path d="M24.769 20.301c-.03-3.21 2.62-4.77 2.74-4.847-1.497-2.187-3.823-2.486-4.644-2.512-1.964-.2-3.85 1.17-4.847 1.17-.999 0-2.528-1.148-4.16-1.115-2.129.032-4.099 1.25-5.19 3.156-2.228 3.855-.568 9.558 1.594 12.688 1.057 1.536 2.309 3.257 3.957 3.194 1.594-.065 2.195-1.03 4.125-1.03 1.929 0 2.494 1.03 4.19.994 1.712-.028 2.8-1.56 3.853-3.1 1.208-1.783 1.712-3.503 1.744-3.592-.038-.015-3.343-1.28-3.362-5.006z"/>
         <path d="M21.67 11.174c.877-1.062 1.47-2.54 1.308-4.011-1.265.052-2.797.842-3.705 1.903-.812.942-1.525 2.447-1.333 3.889 1.41.11 2.845-.716 3.73-1.781z"/>
         {/* Download on the */}
-        <text x="37" y="14" fontSize="7" fontFamily="Arial" letterSpacing="0.5" fill="#fff" opacity="0.8">Download on the</text>
+        <text x="37" y="14" fontSize="7" fontFamily="Arial" letterSpacing="0.5" fill="#fff" opacity="0.8">Baixar na</text>
         <text x="37" y="27" fontSize="14" fontFamily="Arial" fontWeight="bold" fill="#fff">App Store</text>
       </g>
     </g>
@@ -61,7 +61,7 @@ const GooglePlayBadge = () => (
       <path d="M1 1.27l9.9 9.9 1.46-1.46L1.5 1.7A.5.5 0 011 1.27zM10.9 13.17l7.54 4.53-5.18-5.18-2.36.65z" fill="rgba(0,0,0,0.15)"/>
     </g>
     <g fill="#fff" fontFamily="Arial">
-      <text x="36" y="15" fontSize="7" letterSpacing="0.3" opacity="0.8">GET IT ON</text>
+      <text x="36" y="15" fontSize="7" letterSpacing="0.3" opacity="0.8">Disponível no</text>
       <text x="36" y="28" fontSize="14" fontWeight="bold">Google Play</text>
     </g>
   </svg>

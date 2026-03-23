@@ -241,26 +241,33 @@ const ProfessionalProfile = () => {
     toast({ title: "Profissão atualizada!" });
   };
 
+  const profileLink = pro?.slug ? `https://appchamo.com/professional/${pro.slug}` : null;
+
+  // Botão compartilhar (ícone no header) — abre menu nativo de compartilhamento
   const handleShareLink = async () => {
-    if (!pro?.slug) return;
-    const link = `https://appchamo.com/professional/${pro.slug}`;
+    if (!profileLink) return;
     if (navigator.share) {
       try {
-        await navigator.share({ title: pro.full_name, text: `Veja o perfil de ${pro.full_name} no Chamô`, url: link });
+        // Só passa URL para o sistema nativo não juntar textos extras ao copiar
+        await navigator.share({ title: `${pro!.full_name} no Chamô`, url: profileLink });
         return;
       } catch {
-        // user cancelled or not supported — fall through to copy
+        // cancelado ou não suportado — cai para cópia
       }
     }
-    try {
-      await navigator.clipboard.writeText(link);
-      toast({ title: "Link copiado!", description: link });
-    } catch {
-      toast({ title: link, description: "Copie o link acima manualmente" });
-    }
+    handleCopyLink();
   };
 
-  const handleCopyLink = () => handleShareLink();
+  // Botão "Copiar" — sempre copia só o link puro para a área de transferência
+  const handleCopyLink = async () => {
+    if (!profileLink) return;
+    try {
+      await navigator.clipboard.writeText(profileLink);
+      toast({ title: "Link copiado!", description: profileLink });
+    } catch {
+      toast({ title: "Seu link:", description: profileLink });
+    }
+  };
 
   const handleCall = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -441,7 +448,14 @@ const ProfessionalProfile = () => {
                       onClick={handleCopyLink}
                       className="text-xs text-primary font-semibold hover:underline flex-shrink-0"
                     >
-                      Copiar
+                      Copiar link
+                    </button>
+                    <button
+                      onClick={handleShareLink}
+                      className="text-xs text-muted-foreground hover:text-primary flex-shrink-0"
+                      title="Compartilhar"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

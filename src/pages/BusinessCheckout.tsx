@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, CreditCard, Building2, Upload, Loader2, Check, FileText, Clock, ShieldCheck, Lock, ChevronRight, Crown } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,14 +13,49 @@ const formatCVV = (val: string) => val.replace(/\D/g, "").slice(0, 4);
 
 const BusinessCheckout = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Dados de preço/período recebidos da tela de planos
+  const navState = (location.state as {
+    billingPeriod?: "monthly" | "semester" | "annual";
+    totalCharge?: number | null;
+    monthlyEquiv?: number | null;
+    priceMonthly?: number | null;
+    priceAnnual?: number | null;
+    priceSemester?: number | null;
+  } | null) ?? {};
+
+  const billingPeriod: "monthly" | "semester" | "annual" = navState.billingPeriod ?? "monthly";
+  // Valor que será cobrado: total anual, total semestral ou mensalidade
+  const totalCharge = navState.totalCharge ?? navState.priceMonthly ?? 250;
+  // Equivalente mensal para exibição
+  const monthlyEquiv = navState.monthlyEquiv ?? navState.priceMonthly ?? 250;
+
+  const periodLabel = billingPeriod === "annual" ? "ano" : billingPeriod === "semester" ? "semestre" : "mês";
+  const periodBadge = billingPeriod === "annual" ? "Cobrança anual" : billingPeriod === "semester" ? "Cobrança semestral" : "Cobrança mensal";
+
   const [loading, setLoading] = useState(false);
   const [searchingCep, setSearchingCep] = useState(false);
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const [cpf, setCpf] = useState("");
+  const [billingCep, setBillingCep] = useState("");
+  const [billingAddressNumber, setBillingAddressNumber] = useState("");
 
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "" });
   const [businessData, setBusinessData] = useState({ 
     cnpj: "", cep: "", street: "", number: "", neighborhood: "", city: "", state: "" 
   });
+
+  // Carrega CEP e número do perfil do usuário
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: p } = await supabase.from("profiles").select("address_zip, address_number").eq("user_id", user.id).maybeSingle();
+      if (p?.address_zip) setBillingCep(String(p.address_zip).replace(/\D/g, "").replace(/^(\d{5})(\d{3})/, "$1-$2"));
+      if (p?.address_number) setBillingAddressNumber(p.address_number);
+    })();
+  }, []);
 
   const handleCepChange = async (value: string) => {
     const rawCep = value.replace(/\D/g, "");
@@ -38,23 +73,92 @@ const BusinessCheckout = () => {
   };
 
   const handleSubscribe = async () => {
-    if (!proofFile || !cardForm.number || !businessData.cnpj) {
-      toast({ title: "Ops!", description: "Preencha os dados e anexe o PDF do CNPJ.", variant: "destructive" });
+    if (!cardForm.number || !cardForm.name || !cardForm.expiry || !cardForm.cvv) {
+      toast({ title: "Preencha todos os dados do cartão", variant: "destructive" });
       return;
     }
+    if (!businessData.cnpj || !businessData.cep || !businessData.number || !proofFile) {
+      toast({ title: "Ops!", description: "CNPJ, CEP, Número e Comprovante são obrigatórios.", variant: "destructive" });
+      return;
+    }
+    const postalDigits = (billingCep || businessData.cep).replace(/\D/g, "");
+    const addrNum = (billingAddressNumber || businessData.number).trim();
+    if (postalDigits.length !== 8 || !addrNum) {
+      toast({ title: "Endereço de cobrança incompleto", description: "Preencha CEP (8 dígitos) e número.", variant: "destructive" });
+      return;
+    }
+
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não identificado.");
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+        session = refreshed;
+      }
+      if (!session) throw new Error("Usuário não identificado. Faça login novamente.");
+      const user = session.user;
+
+      // Upload do comprovante
       const filePath = `business-proofs/${user.id}/${Date.now()}.pdf`;
-      await supabase.storage.from("business-proofs").upload(filePath, proofFile);
+      const { error: uploadError } = await supabase.storage.from("business-proofs").upload(filePath, proofFile!);
+      if (uploadError) throw new Error("Erro ao enviar o comprovante.");
       const { data: urlData } = supabase.storage.from("business-proofs").getPublicUrl(filePath);
-      const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state}`;
-      await supabase.from("subscriptions").upsert({
-        user_id: user.id, plan_id: "business", status: "PENDING",
-        business_cnpj: businessData.cnpj, business_address: fullAddress, business_proof_url: urlData.publicUrl
+      const proofUrl = urlData.publicUrl;
+
+      const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
+
+      // Registra no banco
+      const { error: upsertError } = await supabase.from("subscriptions").upsert({
+        user_id: user.id,
+        plan_id: "business",
+        status: "ACTIVE",
+        business_cnpj: businessData.cnpj,
+        business_address: fullAddress,
+        business_proof_url: proofUrl,
+      }, { onConflict: "user_id" });
+      if (upsertError) throw new Error("Erro ao registrar assinatura.");
+
+      // Busca dados do perfil para o Asaas
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("full_name, email, cpf, cnpj, phone")
+        .eq("user_id", user.id)
+        .single();
+
+      const cpfCnpjValue = cpf.replace(/\D/g, "") || profileData?.cpf?.replace(/\D/g, "") || profileData?.cnpj?.replace(/\D/g, "") || "";
+      const expiryParts = cardForm.expiry.split("/");
+
+      // Chama a edge function com o valor correto para o período selecionado
+      const res = await supabase.functions.invoke("create_subscription", {
+        body: {
+          userId: user.id,
+          planId: "business",
+          value: totalCharge,
+          billingPeriod,
+          holderName: cardForm.name,
+          number: cardForm.number.replace(/\s/g, ""),
+          expiryMonth: expiryParts[0],
+          expiryYear: `20${expiryParts[1]}`,
+          ccv: cardForm.cvv,
+          email: profileData?.email || user.email || "",
+          cpfCnpj: cpfCnpjValue,
+          postalCode: postalDigits,
+          addressNumber: addrNum,
+          phone: profileData?.phone || "",
+          cnpjBusiness: businessData.cnpj,
+          addressBusiness: fullAddress,
+          proofUrl,
+        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
-      toast({ title: "Tudo pronto!", description: "Sua assinatura está em análise." });
+
+      const apiErr = res.data?.error;
+      if (res.error || apiErr) {
+        const msg = typeof apiErr === "string" ? apiErr : apiErr ? JSON.stringify(apiErr) : res.error?.message;
+        throw new Error(msg || "Erro no processamento do pagamento.");
+      }
+
+      toast({ title: "Plano Business ativado! 🚀", description: "Seu pagamento foi processado e os benefícios já estão disponíveis." });
       navigate("/profile");
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
@@ -79,13 +183,25 @@ const BusinessCheckout = () => {
         </header>
 
         <div className="space-y-4">
-          {/* Header de Preço - Estilo das Subscriptions */}
+          {/* Header de Preço dinâmico */}
           <div className="bg-accent border rounded-2xl p-5 text-center">
             <p className="text-xs font-bold text-muted-foreground uppercase mb-1">Total a pagar</p>
             <div className="flex items-baseline justify-center gap-1">
-              <span className="text-3xl font-black text-foreground">R$ 250,00</span>
-              <span className="text-sm font-medium text-muted-foreground">/mês</span>
+              <span className="text-3xl font-black text-foreground">
+                R$ {totalCharge.toFixed(2).replace(".", ",")}
+              </span>
+              <span className="text-sm font-medium text-muted-foreground">/{periodLabel}</span>
             </div>
+            {billingPeriod !== "monthly" && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Equivale a R$ {monthlyEquiv.toFixed(2).replace(".", ",")}/mês
+              </p>
+            )}
+            <span className={`inline-block mt-2 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+              billingPeriod === "annual" ? "bg-primary/10 text-primary" : billingPeriod === "semester" ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"
+            }`}>
+              {periodBadge}
+            </span>
           </div>
 
           {/* Dados da Empresa */}
@@ -163,6 +279,19 @@ const BusinessCheckout = () => {
 
             <form autoComplete="on" className="space-y-3" onSubmit={(e) => e.preventDefault()}>
               <div>
+                <label htmlFor="biz-cpf" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">CPF do titular *</label>
+                <input
+                  id="biz-cpf"
+                  placeholder="000.000.000-00"
+                  value={cpf}
+                  maxLength={14}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="w-full p-3.5 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary/20 text-sm font-mono"
+                  onChange={(e) => setCpf(e.target.value.replace(/\D/g, "").replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4").slice(0, 14))}
+                />
+              </div>
+              <div>
                 <label htmlFor="biz-cc-name" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">Nome no cartão</label>
                 <input
                   id="biz-cc-name"
@@ -217,6 +346,36 @@ const BusinessCheckout = () => {
                 </div>
               </div>
             </form>
+          </section>
+
+          {/* Endereço de cobrança (CEP já vem do perfil, mas pode ser editado) */}
+          <section className="bg-card border border-border rounded-2xl p-5 shadow-sm space-y-3">
+            <p className="text-[10px] font-bold text-muted-foreground uppercase">Endereço de cobrança</p>
+            <p className="text-[11px] text-muted-foreground">Obrigatório pela operadora do cartão. Use o mesmo endereço do CNPJ acima.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="biz-billing-cep" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">CEP *</label>
+                <input
+                  id="biz-billing-cep"
+                  value={billingCep}
+                  onChange={(e) => setBillingCep(formatCEP(e.target.value))}
+                  placeholder="00000-000"
+                  maxLength={9}
+                  inputMode="numeric"
+                  className="w-full p-3.5 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary/20 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label htmlFor="biz-billing-num" className="text-[10px] font-bold text-muted-foreground uppercase ml-1 mb-1 block">Número *</label>
+                <input
+                  id="biz-billing-num"
+                  value={billingAddressNumber}
+                  onChange={(e) => setBillingAddressNumber(e.target.value)}
+                  placeholder="123"
+                  className="w-full p-3.5 border rounded-xl bg-background outline-none focus:ring-2 focus:ring-primary/20 text-sm"
+                />
+              </div>
+            </div>
           </section>
 
           <button 

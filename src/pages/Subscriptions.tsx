@@ -242,9 +242,19 @@ const Subscriptions = () => {
       });
       return;
     }
-    // No iOS usamos IAP para todos os planos pagos (incluindo Business); na web Business vai para checkout
+    // No iOS usamos IAP para todos os planos pagos (incluindo Business); na web/Android Business vai para checkout
     if (planId === "business" && !useIAPOnIOS) {
-      navigate("/checkout/business");
+      const businessPlan = plans.find(p => p.id === "business");
+      navigate("/checkout/business", {
+        state: {
+          billingPeriod,
+          totalCharge: businessPlan ? getTotalCharge(businessPlan) : null,
+          monthlyEquiv: businessPlan ? getDisplayMonthly(businessPlan) : null,
+          priceMonthly: businessPlan?.price_monthly ?? null,
+          priceAnnual: businessPlan?.price_annual ?? null,
+          priceSemester: businessPlan?.price_semester ?? null,
+        }
+      });
       return;
     }
 

@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Crown, Pencil, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Crown, Pencil, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2 } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Link, useNavigate } from "react-router-dom";
@@ -45,7 +45,7 @@ const Profile = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
-  const [proData, setProData] = useState<{ id: string; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
+  const [proData, setProData] = useState<{ id: string; slug: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
   const metaName = ((user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined)?.trim() || "";
@@ -102,12 +102,13 @@ const Profile = () => {
       const loadPro = async () => {
         const { data } = await supabase
           .from("professionals")
-          .select("id, experience, services, bio, rating, total_services, total_reviews, verified, availability_status, categories(name)")
+          .select("id, slug, experience, services, bio, rating, total_services, total_reviews, verified, availability_status, categories(name)")
           .eq("user_id", user.id)
           .maybeSingle();
         if (data) {
           setProData({
             ...data,
+            slug: data.slug || null,
             category_name: (data.categories as any)?.name || "Sem categoria",
             availability_status: data.availability_status || "available"
           });
@@ -170,6 +171,23 @@ const Profile = () => {
     if (error) { toast({ title: "Erro ao atualizar status", variant: "destructive" }); return; }
     setProData({ ...proData, availability_status: status });
     toast({ title: "Status atualizado!" });
+  };
+
+  const handleShareProfile = async () => {
+    if (!proData?.slug) return;
+    const link = `https://appchamo.com/professional/${proData.slug}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `${profile?.full_name || "Meu perfil"} no Chamô`, url: link });
+        return;
+      } catch { /* cancelado */ }
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      toast({ title: "Link copiado!", description: link });
+    } catch {
+      toast({ title: "Seu link:", description: link });
+    }
   };
 
   const handleLogout = async () => {
@@ -344,7 +362,18 @@ const Profile = () => {
                 </div>
               ) : (
                 <>
-                  <h2 className="text-lg font-bold text-foreground">{profile.full_name || "Usuário"}</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-foreground">{profile.full_name || "Usuário"}</h2>
+                    {proData?.slug && (
+                      <button
+                        onClick={handleShareProfile}
+                        className="text-muted-foreground hover:text-primary transition-colors"
+                        title="Compartilhar perfil"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5"><Mail className="w-3.5 h-3.5" /> {profile.email}</p>
                   {profile.phone && <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5"><Phone className="w-3.5 h-3.5" /> {profile.phone}</p>}
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1.5 gap-1 ${profile.user_type === "company" ? "bg-primary/10 text-primary" : profile.user_type === "professional" ? "bg-amber-500/10 text-amber-600" : "bg-muted text-muted-foreground"}`}>

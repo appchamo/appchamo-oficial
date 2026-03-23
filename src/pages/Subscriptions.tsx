@@ -478,7 +478,7 @@ const Subscriptions = () => {
     }
     setProcessing(true);
     try {
-      const result = await purchase(planId);
+      const result = await purchase(planId, billingPeriod);
       if (!result) {
         setProcessing(false);
         return;
@@ -916,13 +916,18 @@ const Subscriptions = () => {
                 <div className="bg-muted/50 rounded-xl p-3 text-center">
                   <p className="text-xs text-muted-foreground">Plano {selectedPlan.name}</p>
                   {useIAPOnIOS && isIAPAvailable && (() => {
-                    const iapProduct = products.find(p => getProductIdForPlan(selectedPlanId!) === p.identifier);
+                    const iapProductId = getProductIdForPlan(selectedPlanId!, billingPeriod);
+                    const iapProduct = products.find(p => iapProductId === p.identifier);
+                    const periodSuffix = billingPeriod === "annual" ? "/ano" : "/mês";
                     return iapProduct ? (
-                      <p className="text-xl font-bold text-foreground">{iapProduct.priceString}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                      <p className="text-xl font-bold text-foreground">{iapProduct.priceString}<span className="text-sm font-normal text-muted-foreground">{periodSuffix}</span></p>
                     ) : loadingProducts ? (
                       <p className="text-sm text-muted-foreground">Carregando preço...</p>
                     ) : (
-                      <p className="text-xl font-bold text-foreground">R$ {getDisplayMonthly(selectedPlan).toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+                      <p className="text-xl font-bold text-foreground">
+                        R$ {(billingPeriod === "annual" ? getTotalCharge(selectedPlan) : getDisplayMonthly(selectedPlan)).toFixed(2).replace(".", ",")}
+                        <span className="text-sm font-normal text-muted-foreground">{periodSuffix}</span>
+                      </p>
                     );
                   })()}
                   {(!useIAPOnIOS || !isIAPAvailable) && (

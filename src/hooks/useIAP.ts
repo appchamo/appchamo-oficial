@@ -3,8 +3,11 @@ import { Capacitor } from "@capacitor/core";
 import {
   IAP_PRODUCT_IDS,
   IAP_PAID_PLANS,
+  getAllProductIds,
   getPlanIdFromProductId,
+  parsePlanFromProductId,
   type IAPPlanId,
+  type IAPBillingPeriod,
 } from "@/lib/iap-config";
 
 /** Produto retornado pela loja (título e preço devem vir daqui - exigência Apple). */
@@ -21,6 +24,7 @@ export interface IAPPurchaseResult {
   transactionId: string;
   productIdentifier: string;
   planId: string;
+  billingPeriod: IAPBillingPeriod;
   receipt?: string;
   jwsRepresentation?: string;
   verificationData?: string;
@@ -51,7 +55,7 @@ export function useIAP() {
       const { isBillingSupported } = await NativePurchases.isBillingSupported();
       if (!isBillingSupported) return [];
 
-      const productIds = IAP_PAID_PLANS.map((p) => IAP_PRODUCT_IDS[p]);
+      const productIds = getAllProductIds();
       const { products: raw } = await NativePurchases.getProducts({
         productIdentifiers: productIds,
         productType: PURCHASE_TYPE.SUBS,
@@ -75,9 +79,14 @@ export function useIAP() {
   }, []);
 
   const purchase = useCallback(
-    async (planId: IAPPlanId): Promise<IAPPurchaseResult | null> => {
+    async (
+      planId: IAPPlanId,
+      billingPeriod: "monthly" | "semester" | "annual" = "monthly"
+    ): Promise<IAPPurchaseResult | null> => {
       if (!isNative) return null;
-      const productId = IAP_PRODUCT_IDS[planId];
+
+      const iapPeriod: IAPBillingPeriod = billingPeriod as IAPBillingPeriod;
+      const productId = IAP_PRODUCT_IDS[planId][iapPeriod];
       if (!productId) return null;
 
       setPurchasing(true);
@@ -91,7 +100,7 @@ export function useIAP() {
           quantity: 1,
         };
         if (isAndroid) {
-          options.planIdentifier = "monthly";
+          options.planIdentifier = iapPeriod; // "monthly" ou "annual"
         }
         const result = await NativePurchases.purchaseProduct(options);
 
@@ -100,6 +109,7 @@ export function useIAP() {
           transactionId: result.transactionId ?? "",
           productIdentifier: result.productIdentifier ?? productId,
           planId,
+          billingPeriod: iapPeriod,
           receipt: result.receipt,
           jwsRepresentation: (result as { jwsRepresentation?: string })
             .jwsRepresentation,
@@ -137,22 +147,26 @@ export function useIAP() {
       const platform = isIOS ? "ios" : "android";
       const results: IAPPurchaseResult[] = (purchases || [])
         .filter((p: any) => {
-          const planId = getPlanIdFromProductId(p.productIdentifier ?? "");
-          if (!planId) return false;
+          const parsed = parsePlanFromProductId(p.productIdentifier ?? "");
+          if (!parsed) return false;
           if (isAndroid) {
             return p.purchaseState === "PURCHASED" || p.purchaseState === "1";
           }
           return p.isActive !== false;
         })
-        .map((p: any) => ({
-          transactionId: p.transactionId ?? "",
-          productIdentifier: p.productIdentifier ?? "",
-          planId: getPlanIdFromProductId(p.productIdentifier ?? "") ?? "",
-          receipt: p.receipt,
-          verificationData: p.verificationData,
-          purchaseToken: p.purchaseToken,
-          platform,
-        }))
+        .map((p: any) => {
+          const parsed = parsePlanFromProductId(p.productIdentifier ?? "");
+          return {
+            transactionId: p.transactionId ?? "",
+            productIdentifier: p.productIdentifier ?? "",
+            planId: parsed?.planId ?? "",
+            billingPeriod: parsed?.billingPeriod ?? "monthly",
+            receipt: p.receipt,
+            verificationData: p.verificationData,
+            purchaseToken: p.purchaseToken,
+            platform,
+          } as IAPPurchaseResult;
+        })
         .filter((r) => r.planId && r.transactionId);
       return results;
     } catch (e) {

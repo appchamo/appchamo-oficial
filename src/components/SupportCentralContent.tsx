@@ -1,4 +1,4 @@
-import { HelpCircle, Send, ArrowLeft, Clock, XCircle, FileText, AlertTriangle, MessageSquare, CheckCircle2, Eye, Search } from "lucide-react";
+import { HelpCircle, Send, ArrowLeft, Clock, XCircle, FileText, AlertTriangle, MessageSquare, CheckCircle2, Eye, Search, Bot } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -383,6 +383,8 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
           {messages.map((msg) => {
             const isBot = isSupportBotMessage(msg.sender_id);
             const isAdmin = !isBot && msg.sender_id === adminId;
+            // No painel admin: bot e admin ficam à direita; cliente fica à esquerda
+            const showOnRight = isAdmin || isBot;
             const isSystem = msg.content.startsWith("[CLOSED]");
             if (isSystem) {
               return (
@@ -397,17 +399,38 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
               );
             }
             return (
-              <div key={msg.id} className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}>
+              <div key={msg.id} className={`flex items-end gap-2 ${showOnRight ? "justify-end" : "justify-start"}`}>
+                {/* Avatar do cliente (esquerda) */}
+                {!showOnRight && (
+                  <div className="w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0 mb-1">
+                    <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
+                  </div>
+                )}
+
                 <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
                   isAdmin
-                    ? "bg-primary text-primary-foreground rounded-br-md"
-                    : "bg-amber-500/10 border border-amber-500/20 rounded-bl-md text-foreground"
+                    ? "bg-primary text-primary-foreground rounded-br-md"          // Admin: laranja/primário
+                    : isBot
+                    ? "bg-violet-500/15 border border-violet-400/30 rounded-br-md text-foreground" // Bot: roxo
+                    : "bg-muted/60 border rounded-bl-md text-foreground"           // Cliente: cinza
                 }`}>
-                  {renderContent(msg, isAdmin)}
+                  {isBot && (
+                    <p className="text-[9px] font-semibold text-violet-600 dark:text-violet-400 mb-1 flex items-center gap-1">
+                      <Bot className="w-2.5 h-2.5" /> Assistente Chamô
+                    </p>
+                  )}
+                  {renderContent(msg, isAdmin || isBot)}
                   <p className={`text-[10px] mt-1 ${isAdmin ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                     {new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </div>
+
+                {/* Avatar do bot (direita) */}
+                {isBot && (
+                  <div className="w-6 h-6 rounded-full bg-violet-500/15 flex items-center justify-center flex-shrink-0 mb-1">
+                    <Bot className="w-3.5 h-3.5 text-violet-600" />
+                  </div>
+                )}
               </div>
             );
           })}

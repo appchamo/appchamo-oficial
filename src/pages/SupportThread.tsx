@@ -2,12 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { useRefresh } from "@/contexts/RefreshContext";
 import { toast } from "@/hooks/use-toast";
 import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot, UserCircle, RefreshCw } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AudioPlayer from "@/components/AudioPlayer";
-import PullToRefresh from "@/components/PullToRefresh";
 import { isSupportBotMessage, SUPPORT_BOT_SENDER_ID } from "@/lib/supportBot";
 
 interface Message {
@@ -37,17 +35,8 @@ const SupportThread = () => {
   const [requestingHuman, setRequestingHuman] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const scrollContainerRef = useRef<HTMLElement | null>(null);
-  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const setScrollRef = useCallback((el: HTMLElement | null) => {
-    try {
-      (scrollContainerRef as { current: HTMLElement | null }).current = el;
-      setScrollContainerEl(el);
-    } catch {
-      setScrollContainerEl(null);
-    }
-  }, []);
 
   /** Chama a edge function de IA sem verificação de JWT duplicada */
   const invokeAI = async () => {
@@ -107,8 +96,6 @@ const SupportThread = () => {
     if (!user || !ticketId) return;
     loadThread();
   }, [user, ticketId, loadThread]);
-
-  useRefresh(() => loadThread());
 
   // Preencher campo de mensagem quando veio de um botão de assunto
   useEffect(() => {
@@ -487,9 +474,8 @@ const SupportThread = () => {
         </div>
       </header>
 
-      <PullToRefresh scrollContainerRef={scrollContainerRef} scrollContainer={scrollContainerEl}>
       <main
-        ref={setScrollRef}
+        ref={scrollContainerRef}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full flex flex-col"
       >
         {/* Empurra mensagens para baixo quando há poucas */}
@@ -563,7 +549,6 @@ const SupportThread = () => {
         <div ref={bottomRef} />
         </div>
       </main>
-      </PullToRefresh>
 
       {!isClosed && (
         <div

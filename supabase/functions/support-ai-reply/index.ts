@@ -1,10 +1,12 @@
 /**
  * support-ai-reply
- * Usa a OpenAI Chat Completions API (gpt-4o-mini) — mais rápida e confiável.
- * Cada chamada envia o histórico da conversa para a IA responder em contexto.
+ * - Mensagens de texto: GPT-4o-mini responde em texto
+ * - Mensagens de áudio [AUDIO:url:seconds]: Whisper transcreve → GPT responde → ElevenLabs sintetiza → bot envia áudio
  *
  * Secrets necessários no Supabase:
- *   OPENAI_API_KEY  — chave da API OpenAI
+ *   OPENAI_API_KEY       — chave da API OpenAI (GPT + Whisper)
+ *   ELEVENLABS_API_KEY   — chave da API ElevenLabs
+ *   ELEVENLABS_VOICE_ID  — ID da voz ElevenLabs (ex: "pNInz6obpgDQGcFmaJgB")
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -26,6 +28,70 @@ function jsonResponse(body: object, status = 200) {
   });
 }
 
+// ── Transcreve áudio via OpenAI Whisper ────────────────────────────────────
+async function transcribeAudio(audioUrl: string, openaiKey: string): Promise<string | null> {
+  try {
+    const audioRes = await fetch(audioUrl);
+    if (!audioRes.ok) throw new Error(`Falha ao baixar áudio: ${audioRes.status}`);
+    const audioBlob = await audioRes.blob();
+
+    const ext = audioUrl.includes(".webm") ? "webm" : audioUrl.includes(".mp4") ? "mp4" : "m4a";
+    const mimeType = ext === "webm" ? "audio/webm" : "audio/mp4";
+
+    const form = new FormData();
+    form.append("file", new File([audioBlob], `audio.${ext}`, { type: mimeType }));
+    form.append("model", "whisper-1");
+    form.append("language", "pt");
+
+    const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openaiKey}` },
+      body: form,
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("Whisper error:", err);
+      return null;
+    }
+    const data = await res.json();
+    return data.text ?? null;
+  } catch (e) {
+    console.error("transcribeAudio error:", e);
+    return null;
+  }
+}
+
+// ── Sintetiza voz via ElevenLabs ──────────────────────────────────────────
+async function synthesizeSpeech(text: string, elevenlabsKey: string, voiceId: string): Promise<Uint8Array | null> {
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      headers: {
+        "xi-api-key": elevenlabsKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("ElevenLabs error:", err);
+      return null;
+    }
+    const buffer = await res.arrayBuffer();
+    return new Uint8Array(buffer);
+  } catch (e) {
+    console.error("synthesizeSpeech error:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
@@ -39,6 +105,9 @@ serve(async (req) => {
       console.error("OPENAI_API_KEY não configurado");
       return jsonResponse({ error: "IA não configurada" }, 500);
     }
+
+    const elevenlabsKey = Deno.env.get("ELEVENLABS_API_KEY");
+    const elevenlabsVoiceId = Deno.env.get("ELEVENLABS_VOICE_ID") ?? "pNInz6obpgDQGcFmaJgB";
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -74,9 +143,7 @@ serve(async (req) => {
     // Não responde se o conteúdo for [CLOSED]
     if (last?.content === "[CLOSED]") return jsonResponse({ ok: true, skipped: "closed" });
 
-    // ── NOVO: Se um atendente humano já respondeu, IA fica em silêncio ──────
-    // Qualquer mensagem de sender que não seja o bot nem o usuário dono do ticket
-    // indica que um humano entrou na conversa.
+    // Se um atendente humano já respondeu, IA fica em silêncio
     const hasHumanAgent = list.some((m: any) =>
       m.sender_id !== BOT_SENDER_ID && m.sender_id !== ticket.user_id
     );
@@ -84,10 +151,30 @@ serve(async (req) => {
       console.log("Atendente humano detectado — IA desativada para o ticket:", ticket_id);
       return jsonResponse({ ok: true, skipped: "human_agent_active" });
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
-    /* ── 3. Detecta pedido de atendente humano ── */
-    const lastContent = (last && !isBot(last.sender_id) ? last.content : "").toLowerCase();
+    /* ── 3. Verifica se a última mensagem é um áudio ── */
+    const audioMatch = last?.content?.match(/\[AUDIO:(.+):(\d+)\]$/);
+    const isAudioMessage = !!audioMatch;
+    let userTextForAI = "";
+
+    if (isAudioMessage) {
+      const audioUrl = audioMatch![1];
+      console.log("Mensagem de áudio detectada, transcrevendo:", audioUrl);
+      const transcription = await transcribeAudio(audioUrl, openaiKey);
+      if (!transcription) {
+        // Não conseguiu transcrever — responde em texto pedindo para repetir
+        userTextForAI = "[O usuário enviou um áudio que não foi possível transcrever]";
+      } else {
+        console.log("Transcrição:", transcription);
+        userTextForAI = transcription;
+      }
+    }
+
+    /* ── 4. Detecta pedido de atendente humano ── */
+    const lastContent = isAudioMessage
+      ? userTextForAI
+      : (last && !isBot(last.sender_id) ? last.content : "").toLowerCase();
+
     const wantsHuman = /atendente\s*humano|falar\s*com\s*(um\s*)?(atendente|humano|pessoa)|transferir/i.test(lastContent);
 
     if (wantsHuman && !ticket.requested_human_at) {
@@ -116,11 +203,8 @@ serve(async (req) => {
       return jsonResponse({ ok: true, requested_human: true });
     }
 
-    /* ── 4. Monta histórico para a IA ── */
-    const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
-      {
-        role: "system",
-        content: `Você é o Chamô, assistente virtual do app Chamô — plataforma que conecta clientes a profissionais e empresas de serviços.
+    /* ── 5. Monta histórico para o GPT ── */
+    const systemPrompt = `Você é o Chamô, assistente virtual do app Chamô — plataforma que conecta clientes a profissionais e empresas de serviços.
 
 Responda SEMPRE em português do Brasil, de forma amigável, clara e objetiva. Use no máximo 3-4 frases por resposta.
 
@@ -137,28 +221,36 @@ Regras:
 - Se o problema for muito específico (pagamento bloqueado, conta suspensa, fraude), indique falar com atendente humano
 - Seja empático e prestativo
 
-Assunto do ticket: ${ticket.subject || "Suporte geral"}`,
-      },
+Assunto do ticket: ${ticket.subject || "Suporte geral"}`;
+
+    const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      { role: "system", content: systemPrompt },
     ];
 
-    // Adiciona histórico (filtra mensagens de sistema e vazias)
+    // Histórico (filtra mensagens de sistema e vazias)
     for (const m of list) {
       const content = m.content?.trim();
       if (!content || content === "[CLOSED]") continue;
-      if (content.startsWith("[AUDIO:") || content.startsWith("[IMAGE:") || content.startsWith("[FILE:")) continue;
-      chatMessages.push({
-        role: isBot(m.sender_id) ? "assistant" : "user",
-        content,
-      });
+
+      // Áudio anterior: usa transcrição se disponível, senão indica
+      if (content.startsWith("[AUDIO:")) {
+        // Só processa o último áudio em tempo real; para histórico usa placeholder
+        if (m === last && isAudioMessage) {
+          chatMessages.push({ role: "user", content: userTextForAI });
+        } else {
+          chatMessages.push({ role: "user", content: "[usuário enviou um áudio]" });
+        }
+        continue;
+      }
+
+      if (content.startsWith("[IMAGE:") || content.startsWith("[FILE:")) continue;
+      chatMessages.push({ role: isBot(m.sender_id) ? "assistant" : "user", content });
     }
 
-    /* ── 5. Chama a OpenAI Chat Completions ── */
+    /* ── 6. Chama GPT ── */
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openaiKey}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: chatMessages,
@@ -174,16 +266,46 @@ Assunto do ticket: ${ticket.subject || "Suporte geral"}`,
     }
 
     const openaiData = await openaiRes.json();
-    const reply =
+    const replyText =
       openaiData?.choices?.[0]?.message?.content?.trim() ||
       "Desculpe, não consegui processar sua mensagem. Um atendente pode ajudar em breve!";
 
-    /* ── 6. Salva resposta no banco ── */
+    /* ── 7. Se mensagem foi áudio + ElevenLabs disponível → responde em áudio ── */
+    if (isAudioMessage && elevenlabsKey) {
+      console.log("Sintetizando resposta em áudio via ElevenLabs...");
+      const audioBytes = await synthesizeSpeech(replyText, elevenlabsKey, elevenlabsVoiceId);
+
+      if (audioBytes) {
+        const fileName = `audio/bot/${ticket_id}/${Date.now()}.mp3`;
+        const { error: uploadErr } = await supabase.storage
+          .from("uploads")
+          .upload(fileName, audioBytes, { contentType: "audio/mpeg", upsert: true });
+
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
+          // Estima duração: ~150 palavras/min, ~2.5 chars/palavra → chars / 375 segundos
+          const estimatedSeconds = Math.max(3, Math.round(replyText.length / 15));
+          await supabase.from("support_messages").insert({
+            ticket_id,
+            user_id: ticket.user_id,
+            sender_id: BOT_SENDER_ID,
+            content: `[AUDIO:${urlData.publicUrl}:${estimatedSeconds}]`,
+          });
+          console.log("Resposta em áudio inserida para ticket", ticket_id);
+          return jsonResponse({ ok: true, type: "audio" });
+        } else {
+          console.error("Erro ao fazer upload do áudio do bot:", uploadErr);
+          // Cai para resposta em texto
+        }
+      }
+    }
+
+    /* ── 8. Salva resposta em texto ── */
     const { error: insertErr } = await supabase.from("support_messages").insert({
       ticket_id,
       user_id: ticket.user_id,
       sender_id: BOT_SENDER_ID,
-      content: reply,
+      content: replyText,
     });
 
     if (insertErr) {
@@ -191,8 +313,8 @@ Assunto do ticket: ${ticket.subject || "Suporte geral"}`,
       return jsonResponse({ error: "Erro ao salvar resposta" }, 500);
     }
 
-    console.log("Resposta da IA inserida no ticket", ticket_id);
-    return jsonResponse({ ok: true });
+    console.log("Resposta de texto inserida para ticket", ticket_id);
+    return jsonResponse({ ok: true, type: "text" });
 
   } catch (err) {
     console.error("support-ai-reply erro:", err);

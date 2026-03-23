@@ -26,6 +26,7 @@ const SupportThread = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [ticketSubject, setTicketSubject] = useState<string | null>(null);
+  const [ticketUserId, setTicketUserId] = useState<string | null>(null);
   const invokedAiForHumanRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -81,12 +82,13 @@ const SupportThread = () => {
     try {
       const { data: ticket } = await supabase
         .from("support_tickets")
-        .select("protocol, requested_human_at, subject")
+        .select("protocol, requested_human_at, subject, user_id")
         .eq("id", ticketId)
         .single();
       if (ticket?.protocol) setSupportProtocol(ticket.protocol);
       setRequestedHumanAt((ticket as any)?.requested_human_at ?? null);
       setTicketSubject((ticket as any)?.subject ?? null);
+      setTicketUserId((ticket as any)?.user_id ?? null);
 
       const { data } = await supabase
         .from("support_messages")
@@ -343,6 +345,12 @@ const SupportThread = () => {
     await supabase.from("support_messages").insert({ user_id: user.id, sender_id: user.id, content: `[AUDIO:${urlData.publicUrl}:${recordingTime}]`, ticket_id: ticketId });
     setUploadingAudio(false);
     setRecordingTime(0);
+
+    // IA responde ao áudio (via Whisper + ElevenLabs)
+    if (!hasHumanAgentReplied(messages)) {
+      await new Promise((r) => setTimeout(r, 800));
+      await invokeAI();
+    }
   };
 
   const formatRecTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -488,26 +496,67 @@ const SupportThread = () => {
         <div className="flex-1" />
         <div className="flex flex-col gap-2 px-4 py-4">
         {messages.map((msg) => {
-          const isFromBot = isSupportBotMessage(msg.sender_id);
-          const isMine = !isFromBot && msg.sender_id != null && user?.id != null && String(msg.sender_id) === String(user.id);
+          const isBot = isSupportBotMessage(msg.sender_id);
+          const isMine = !isBot && msg.sender_id != null && user?.id != null && String(msg.sender_id) === String(user.id);
+          // Admin/agente vê: mensagens do cliente à esquerda, suas próprias + bot à direita
+          // Cliente vê: suas próprias mensagens à direita, bot + agente à esquerda
+          const isAdminView = ticketUserId != null && user?.id !== ticketUserId;
+          const showOnRight = isAdminView ? (isMine || isBot) : isMine;
+          // Mensagem de agente humano (não bot, não o próprio usuário logado)
+          const isHumanAgent = !isBot && !isMine;
+
           if (msg.content === "[CLOSED]") return (
             <div key={msg.id} className="flex justify-center my-2">
               <div className="bg-muted/50 border rounded-xl px-4 py-2 text-xs font-medium text-muted-foreground">✅ Chamado encerrado</div>
             </div>
           );
-          const isBot = isFromBot;
+
           return (
-            <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
-              {!isMine && (
-                <div className="w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center mt-1 flex-shrink-0" title={isBot ? "Assistente Chamô" : undefined}>
-                  {isBot ? <Bot className="w-4 h-4 text-amber-600" /> : <HelpCircle className="w-4 h-4 text-amber-600" />}
+            <div key={msg.id} className={`flex ${showOnRight ? "justify-end" : "justify-start"} gap-2`}>
+              {/* Avatar — lado esquerdo */}
+              {!showOnRight && (
+                <div
+                  className={`w-7 h-7 rounded-full flex items-center justify-center mt-1 flex-shrink-0 ${isBot ? "bg-violet-500/15" : "bg-amber-500/10"}`}
+                  title={isBot ? "Assistente IA Chamô" : "Atendente Chamô"}
+                >
+                  {isBot ? (
+                    <Bot className="w-4 h-4 text-violet-600" />
+                  ) : (
+                    <img src="/icon-192.png" alt="Chamô" className="w-7 h-7 rounded-full object-cover" />
+                  )}
                 </div>
               )}
-              <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${isMine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-amber-500/10 border border-amber-500/20 rounded-bl-md text-foreground"}`}>
-                {isBot && <p className="text-[9px] font-medium text-amber-700 dark:text-amber-400 mb-1">Assistente Chamô</p>}
+
+              {/* Bolha da mensagem */}
+              <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
+                showOnRight && isBot
+                  ? "bg-violet-500/15 border border-violet-400/30 rounded-br-md text-foreground"   // IA no admin: roxo
+                  : showOnRight && isMine
+                  ? "bg-primary text-primary-foreground rounded-br-md"                              // Próprio: azul/laranja
+                  : isHumanAgent
+                  ? "bg-amber-500/10 border border-amber-500/20 rounded-bl-md text-foreground"      // Atendente humano: âmbar
+                  : "bg-muted/60 border rounded-bl-md text-foreground"                              // Cliente (admin view)
+              }`}>
+                {isBot && (
+                  <p className="text-[9px] font-semibold text-violet-600 dark:text-violet-400 mb-1 flex items-center gap-1">
+                    <Bot className="w-2.5 h-2.5" /> Assistente Chamô
+                  </p>
+                )}
+                {isHumanAgent && !isAdminView && (
+                  <p className="text-[9px] font-semibold text-amber-700 dark:text-amber-400 mb-1">Atendente Chamô</p>
+                )}
                 {renderContent(msg)}
-                <p className={`text-[9px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
+                <p className={`text-[9px] mt-1 ${showOnRight && isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+                  {new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                </p>
               </div>
+
+              {/* Avatar — lado direito (IA no admin view) */}
+              {showOnRight && isBot && (
+                <div className="w-7 h-7 rounded-full bg-violet-500/15 flex items-center justify-center mt-1 flex-shrink-0" title="Assistente IA Chamô">
+                  <Bot className="w-4 h-4 text-violet-600" />
+                </div>
+              )}
             </div>
           );
         })}

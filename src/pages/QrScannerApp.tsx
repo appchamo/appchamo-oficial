@@ -1,7 +1,8 @@
 /**
  * QrScannerApp — Scanner de QR Code para "Logar via Web"
- * Usa getUserMedia + ZXingBrowser para leitura ao vivo.
- * Requer allowsInlineMediaPlayback: true no capacitor.config.ts (já configurado).
+ *
+ * - Nativo (Android/iOS): usa @capacitor-mlkit/barcode-scanning (câmera nativa, sem WebView)
+ * - Web: usa getUserMedia + @zxing/browser
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -9,6 +10,11 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
+import { Capacitor } from "@capacitor/core";
+import {
+  BarcodeScanner,
+  BarcodeFormat,
+} from "@capacitor-mlkit/barcode-scanning";
 import {
   CheckCircle2,
   AlertCircle,
@@ -22,6 +28,8 @@ const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qr-login`;
 
 type Stage = "idle" | "scanning" | "processing" | "success" | "error";
 
+const isNative = Capacitor.isNativePlatform();
+
 export default function QrScannerApp() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -33,8 +41,10 @@ export default function QrScannerApp() {
   const rafRef = useRef<number>(0);
   const handledRef = useRef(false);
   const scannerRef = useRef<any>(null);
+  const mlkitListenerRef = useRef<any>(null);
 
-  const stopCamera = useCallback(() => {
+  // ── Limpeza câmera web ──────────────────────────────────────────────────────
+  const stopWebCamera = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (scannerRef.current) {
       try { scannerRef.current.reset(); } catch { /* ignore */ }
@@ -44,17 +54,38 @@ export default function QrScannerApp() {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+    if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  useEffect(() => () => stopCamera(), [stopCamera]);
+  // ── Limpeza scanner nativo ──────────────────────────────────────────────────
+  const stopNativeScanner = useCallback(async () => {
+    try {
+      if (mlkitListenerRef.current) {
+        await mlkitListenerRef.current.remove();
+        mlkitListenerRef.current = null;
+      }
+      await BarcodeScanner.stopScan();
+    } catch { /* ignore */ }
+    // Restaura visibilidade do WebView
+    document.documentElement.classList.remove("qr-scanning");
+    document.body.classList.remove("qr-scanning");
+  }, []);
 
+  const stopCamera = useCallback(() => {
+    if (isNative) {
+      stopNativeScanner();
+    } else {
+      stopWebCamera();
+    }
+  }, [stopNativeScanner, stopWebCamera]);
+
+  useEffect(() => () => { stopCamera(); }, [stopCamera]);
+
+  // ── Processamento do token detectado ───────────────────────────────────────
   const handleTokenFound = useCallback(async (token: string) => {
     if (handledRef.current) return;
     handledRef.current = true;
-    stopCamera();
+    await stopCamera();
     setStage("processing");
 
     try {
@@ -86,23 +117,57 @@ export default function QrScannerApp() {
     }
   }, [user, navigate, stopCamera]);
 
-  const startCamera = useCallback(async () => {
+  // ── Scanner NATIVO (Android / iOS) via MLKit ───────────────────────────────
+  const startNativeScanner = useCallback(async () => {
     handledRef.current = false;
     setStage("scanning");
 
     try {
-      // Pede câmera traseira
+      // 1. Solicita permissão de câmera via API nativa
+      const perm = await BarcodeScanner.requestPermissions();
+      if (perm.camera !== "granted") {
+        setStage("error");
+        setErrorMsg(
+          "Permissão de câmera negada.\n\nVá em Ajustes > Aplicativos > Chamô > Permissões e habilite a Câmera, depois tente novamente."
+        );
+        return;
+      }
+
+      // 2. Esconde todo o WebView (exceto o overlay do scanner) para a câmera nativa aparecer atrás
+      document.documentElement.classList.add("qr-scanning");
+      document.body.classList.add("qr-scanning");
+
+      // 3. Inicia o scan nativo (câmera aparece atrás do HTML)
+      await BarcodeScanner.startScan({ formats: [BarcodeFormat.QrCode] });
+
+      // 4. Escuta leituras
+      mlkitListenerRef.current = await BarcodeScanner.addListener(
+        "barcodesScanned",
+        (result) => {
+          const raw = result.barcodes?.[0]?.rawValue;
+          if (raw) handleTokenFound(raw);
+        }
+      );
+    } catch (e: any) {
+      await stopNativeScanner();
+      setStage("error");
+      setErrorMsg("Não foi possível iniciar a câmera. Tente novamente.");
+      console.error("MLKit scanner error:", e);
+    }
+  }, [handleTokenFound, stopNativeScanner]);
+
+  // ── Scanner WEB via getUserMedia + ZXing ────────────────────────────────────
+  const startWebCamera = useCallback(async () => {
+    handledRef.current = false;
+    setStage("scanning");
+
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
 
       streamRef.current = stream;
-
       const video = videoRef.current;
       if (!video) return;
 
@@ -111,49 +176,45 @@ export default function QrScannerApp() {
       video.setAttribute("webkit-playsinline", "true");
       video.muted = true;
       video.autoplay = true;
-
       await video.play().catch(() => {});
 
-      // Aguarda vídeo pronto
       await new Promise<void>((resolve) => {
-        const check = () => {
-          if (video.readyState >= 2) resolve();
-          else setTimeout(check, 100);
-        };
+        const check = () => (video.readyState >= 2 ? resolve() : setTimeout(check, 100));
         check();
       });
 
-      // Usa ZXing para scan contínuo
       const { BrowserQRCodeReader } = await import("@zxing/browser");
       const reader = new BrowserQRCodeReader();
       scannerRef.current = reader;
 
       reader.decodeFromVideoElement(video, (result, err) => {
-        if (result) {
-          handleTokenFound(result.getText());
-        }
-        // ignora erros de "not found" que são normais entre frames
-        if (err && err.name !== "NotFoundException") {
-          console.warn("QR decode error:", err);
-        }
+        if (result) handleTokenFound(result.getText());
+        if (err && err.name !== "NotFoundException") console.warn("QR decode error:", err);
       });
     } catch (e: any) {
-      stopCamera();
+      stopWebCamera();
       setStage("error");
-      const msg = e?.message ?? "";
-      if (msg.includes("Permission") || msg.includes("NotAllowed") || msg.includes("denied")) {
-        setErrorMsg("Permissão de câmera negada. Vá em Ajustes > Chamô e habilite a câmera.");
+      const name = e?.name ?? "";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setErrorMsg("Permissão de câmera bloqueada. Clique no ícone de cadeado na barra de endereço e habilite a câmera.");
+      } else if (name === "NotFoundError") {
+        setErrorMsg("Câmera não encontrada neste dispositivo.");
       } else {
         setErrorMsg("Não foi possível abrir a câmera. Tente novamente.");
       }
     }
-  }, [handleTokenFound, stopCamera]);
+  }, [handleTokenFound, stopWebCamera]);
 
-  const handleClose = () => {
-    stopCamera();
+  const startCamera = useCallback(() => {
+    if (isNative) return startNativeScanner();
+    return startWebCamera();
+  }, [startNativeScanner, startWebCamera]);
+
+  const handleClose = useCallback(async () => {
+    await stopCamera();
     setStage("idle");
     handledRef.current = false;
-  };
+  }, [stopCamera]);
 
   return (
     <AppLayout>
@@ -162,13 +223,15 @@ export default function QrScannerApp() {
         <div className="flex items-center gap-3 mb-6">
           <button
             onClick={() => { handleClose(); navigate(-1); }}
-            className="p-2 rounded-xl hover:bg-muted transition-colors"
+            className="p-2 rounded-xl hover:bg-muted/80 transition-colors"
           >
-            <ArrowLeft className="w-5 h-5 text-foreground" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-foreground">Logar via Web</h1>
-            <p className="text-xs text-muted-foreground">Escaneie o QR Code em appchamo.com</p>
+            <h1 className="text-xl font-bold">Logar via Web</h1>
+            <p className="text-xs text-muted-foreground">
+              Escaneie o QR Code em appchamo.com
+            </p>
           </div>
         </div>
 
@@ -207,59 +270,75 @@ export default function QrScannerApp() {
           </div>
         )}
 
-        {/* ── SCANNING ── */}
-        {stage === "scanning" && (
+        {/* ── SCANNING (WEB) ── */}
+        {stage === "scanning" && !isNative && (
           <div className="flex flex-col items-center gap-4">
-            {/* Viewfinder */}
             <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-black shadow-2xl border-2 border-primary"
               style={{ aspectRatio: "1/1" }}>
               <video
                 ref={videoRef}
-                autoPlay
-                muted
-                playsInline
+                autoPlay muted playsInline
                 className="absolute inset-0 w-full h-full object-cover"
                 style={{ WebkitTransform: "scaleX(1)" } as React.CSSProperties}
               />
               <canvas ref={canvasRef} className="hidden" />
-
-              {/* Overlay escuro nas bordas */}
               <div className="absolute inset-0 pointer-events-none"
-                style={{
-                  background: "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.6) 100%)",
-                }}
+                style={{ background: "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.6) 100%)" }}
               />
-
-              {/* Frame do QR */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="relative w-52 h-52">
                   <div className="absolute top-0 left-0 w-10 h-10 border-t-4 border-l-4 border-primary rounded-tl-2xl" />
                   <div className="absolute top-0 right-0 w-10 h-10 border-t-4 border-r-4 border-primary rounded-tr-2xl" />
                   <div className="absolute bottom-0 left-0 w-10 h-10 border-b-4 border-l-4 border-primary rounded-bl-2xl" />
                   <div className="absolute bottom-0 right-0 w-10 h-10 border-b-4 border-r-4 border-primary rounded-br-2xl" />
-                  {/* Linha animada */}
-                  <div
-                    className="absolute left-2 right-2 h-0.5 bg-primary/80 rounded-full"
+                  <div className="absolute left-2 right-2 h-0.5 bg-primary/80 rounded-full"
                     style={{ animation: "scan-line 2s ease-in-out infinite", top: "50%" }}
                   />
                 </div>
               </div>
-
-              {/* Botão fechar */}
-              <button
-                onClick={handleClose}
-                className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center z-10"
-              >
+              <button onClick={handleClose}
+                className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center z-10">
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
-
             <p className="text-sm text-muted-foreground text-center max-w-xs">
-              Aponte para o QR Code exibido em{" "}
-              <strong className="text-foreground">appchamo.com</strong>
+              Aponte para o QR Code exibido em <strong className="text-foreground">appchamo.com</strong>
               <br />
               <span className="text-xs text-primary">Leitura automática ao detectar o código</span>
             </p>
+          </div>
+        )}
+
+        {/* ── SCANNING (NATIVO) — câmera atrás do WebView transparente ── */}
+        {stage === "scanning" && isNative && (
+          <div id="qr-native-overlay" className="fixed inset-0 z-50 flex flex-col">
+            {/* Frame/overlay por cima da câmera nativa */}
+            <div className="flex-1 flex items-center justify-center relative">
+              {/* Cantos do viewfinder */}
+              <div className="relative w-64 h-64">
+                <div className="absolute top-0 left-0 w-10 h-10 border-t-4 border-l-4 border-primary rounded-tl-2xl" />
+                <div className="absolute top-0 right-0 w-10 h-10 border-t-4 border-r-4 border-primary rounded-tr-2xl" />
+                <div className="absolute bottom-0 left-0 w-10 h-10 border-b-4 border-l-4 border-primary rounded-bl-2xl" />
+                <div className="absolute bottom-0 right-0 w-10 h-10 border-b-4 border-r-4 border-primary rounded-br-2xl" />
+                {/* Linha animada */}
+                <div className="absolute left-2 right-2 h-0.5 bg-primary/90 rounded-full"
+                  style={{ animation: "scan-line 2s ease-in-out infinite", top: "50%" }}
+                />
+              </div>
+            </div>
+
+            {/* Rodapé com instrução e botão fechar */}
+            <div className="pb-12 flex flex-col items-center gap-4">
+              <p className="text-sm text-white/80 text-center">
+                Aponte para o QR Code em <strong className="text-white">appchamo.com</strong>
+              </p>
+              <button
+                onClick={handleClose}
+                className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 text-white font-semibold text-sm active:scale-95 transition-transform"
+              >
+                <X className="w-4 h-4" /> Cancelar
+              </button>
+            </div>
           </div>
         )}
 
@@ -292,23 +371,50 @@ export default function QrScannerApp() {
               <AlertCircle className="w-14 h-14 text-rose-500" />
             </div>
             <h2 className="font-bold text-foreground text-xl">Algo deu errado</h2>
-            <p className="text-sm text-muted-foreground text-center max-w-xs leading-relaxed">{errorMsg}</p>
-            <button
-              onClick={startCamera}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm active:scale-95 transition-transform"
-            >
-              <QrCode className="w-4 h-4" />
-              Tentar novamente
-            </button>
+            <p className="text-sm text-muted-foreground text-center max-w-xs leading-relaxed whitespace-pre-line">
+              {errorMsg}
+            </p>
+            <div className="flex flex-col gap-2 w-full max-w-xs">
+              <button
+                onClick={startCamera}
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm active:scale-95 transition-transform"
+              >
+                <QrCode className="w-4 h-4" />
+                Tentar novamente
+              </button>
+              {isNative && (
+                <button
+                  onClick={() => BarcodeScanner.openSettings()}
+                  className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border text-foreground font-medium text-sm active:scale-95 transition-transform"
+                >
+                  Abrir Ajustes do app
+                </button>
+              )}
+            </div>
           </div>
         )}
       </main>
 
-      {/* Animação da linha de scan */}
       <style>{`
         @keyframes scan-line {
           0%, 100% { transform: translateY(-80px); opacity: 0.5; }
           50% { transform: translateY(80px); opacity: 1; }
+        }
+
+        /* Modo scanner nativo: esconde tudo do WebView,
+           só o overlay (#qr-native-overlay) fica visível */
+        html.qr-scanning,
+        html.qr-scanning body {
+          background: transparent !important;
+          background-color: transparent !important;
+        }
+        html.qr-scanning body > * {
+          visibility: hidden !important;
+          background: transparent !important;
+        }
+        html.qr-scanning body #qr-native-overlay,
+        html.qr-scanning body #qr-native-overlay * {
+          visibility: visible !important;
         }
       `}</style>
     </AppLayout>

@@ -21,15 +21,49 @@ const AVATARS = [
   "https://i.pravatar.cc/40?img=57",
 ];
 
-const AppStoreIcon = () => (
-  <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
-    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+/* Badge oficial App Store — ícone Apple preto em fundo branco */
+const AppStoreBadge = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 119.66407 40" className="h-[44px] w-auto flex-shrink-0">
+    <g>
+      <rect rx="5" ry="5" width="119.66407" height="40" fill="#000"/>
+      <g fill="#fff">
+        {/* Apple logo */}
+        <path d="M24.769 20.301c-.03-3.21 2.62-4.77 2.74-4.847-1.497-2.187-3.823-2.486-4.644-2.512-1.964-.2-3.85 1.17-4.847 1.17-.999 0-2.528-1.148-4.16-1.115-2.129.032-4.099 1.25-5.19 3.156-2.228 3.855-.568 9.558 1.594 12.688 1.057 1.536 2.309 3.257 3.957 3.194 1.594-.065 2.195-1.03 4.125-1.03 1.929 0 2.494 1.03 4.19.994 1.712-.028 2.8-1.56 3.853-3.1 1.208-1.783 1.712-3.503 1.744-3.592-.038-.015-3.343-1.28-3.362-5.006z"/>
+        <path d="M21.67 11.174c.877-1.062 1.47-2.54 1.308-4.011-1.265.052-2.797.842-3.705 1.903-.812.942-1.525 2.447-1.333 3.889 1.41.11 2.845-.716 3.73-1.781z"/>
+        {/* Download on the */}
+        <text x="37" y="14" fontSize="7" fontFamily="Arial" letterSpacing="0.5" fill="#fff" opacity="0.8">Download on the</text>
+        <text x="37" y="27" fontSize="14" fontFamily="Arial" fontWeight="bold" fill="#fff">App Store</text>
+      </g>
+    </g>
   </svg>
 );
 
-const PlayStoreIcon = () => (
-  <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
-    <path d="M3,20.5v-17c0-.83.94-1.3,1.6-.8l14,8.5c.6.37.6,1.23,0,1.6l-14,8.5C3.94,21.8,3,21.33,3,20.5ZM5,6.84v10.32L15.03,12Z"/>
+/* Badge oficial Google Play — colorido em fundo preto */
+const GooglePlayBadge = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 135 40" className="h-[44px] w-auto flex-shrink-0">
+    <rect rx="5" ry="5" width="135" height="40" fill="#000"/>
+    {/* Play triangle colorido */}
+    <path d="M11 8l18 12L11 32V8z" fill="#ea4335" opacity="0"/>
+    <g transform="translate(10,8)">
+      <path d="M1 1.27L18.44 12 1 22.73V1.27z" fill="url(#gp-grad)"/>
+      <defs>
+        <linearGradient id="gp-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#00d2ff"/>
+          <stop offset="50%" stopColor="#00b876"/>
+          <stop offset="100%" stopColor="#ffcc00"/>
+        </linearGradient>
+      </defs>
+      {/* 4 cores do ícone play */}
+      <path d="M1 1.27l9.9 9.9L1.5 1.7A.5.5 0 011 1.27z" fill="#4285f4"/>
+      <path d="M18.44 12l-7.54 4.53 2.36 2.36L18.44 12z" fill="#ea4335"/>
+      <path d="M1 22.73l9.4-9.4-2.36-2.36L1 22.73z" fill="#fbbc04"/>
+      <path d="M18.44 12L10.9 7.47 8.54 9.83 18.44 12z" fill="#34a853"/>
+      <path d="M1 1.27l9.9 9.9 1.46-1.46L1.5 1.7A.5.5 0 011 1.27zM10.9 13.17l7.54 4.53-5.18-5.18-2.36.65z" fill="rgba(0,0,0,0.15)"/>
+    </g>
+    <g fill="#fff" fontFamily="Arial">
+      <text x="36" y="15" fontSize="7" letterSpacing="0.3" opacity="0.8">GET IT ON</text>
+      <text x="36" y="28" fontSize="14" fontWeight="bold">Google Play</text>
+    </g>
   </svg>
 );
 
@@ -161,7 +195,7 @@ const Index = () => {
               <YouTubeIcon />
             </a>
             <a href={SOCIAL_LINKS.linkedin} target="_blank" rel="noopener noreferrer"
-              className="hidden sm:block text-white/60 hover:text-white transition-colors" title="LinkedIn">
+              className="text-white/60 hover:text-white transition-colors" title="LinkedIn">
               <LinkedInIcon />
             </a>
           </div>
@@ -202,32 +236,22 @@ const Index = () => {
           </p>
 
           {/* ── Botões de download — logo abaixo do subtítulo ── */}
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-row gap-3 flex-wrap">
             <a
               href="https://apps.apple.com/br/app/cham%C3%B4-app/id6759582451"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-3 px-5 py-3 rounded-2xl font-semibold text-sm transition-all hover:scale-105 active:scale-95 shadow-lg"
-              style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.25)", backdropFilter: "blur(10px)" }}
+              className="transition-all hover:scale-105 active:scale-95 hover:opacity-90"
             >
-              <AppStoreIcon />
-              <div className="text-left">
-                <p className="text-[10px] text-white/60 leading-none">Baixar na</p>
-                <p className="text-sm font-bold text-white leading-tight">App Store</p>
-              </div>
+              <AppStoreBadge />
             </a>
             <a
               href="https://play.google.com/store/apps/details?id=com.chamo.app&pcampaignid=web_share"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-3 px-5 py-3 rounded-2xl font-semibold text-sm transition-all hover:scale-105 active:scale-95 shadow-lg"
-              style={{ background: "linear-gradient(135deg, #f97316, #ea580c)", border: "1px solid rgba(255,255,255,0.1)" }}
+              className="transition-all hover:scale-105 active:scale-95 hover:opacity-90"
             >
-              <PlayStoreIcon />
-              <div className="text-left">
-                <p className="text-[10px] text-white/80 leading-none">Disponível no</p>
-                <p className="text-sm font-bold text-white leading-tight">Google Play</p>
-              </div>
+              <GooglePlayBadge />
             </a>
           </div>
 

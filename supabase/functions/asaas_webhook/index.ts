@@ -232,13 +232,13 @@ serve(async (req) => {
 
               let anticipationFeeAmount = 0;
               if (anticipationEnabled && paymentMethod !== "pix") {
-                // Usa o valor configurado em platform_settings; padrão 0 para não aplicar taxa indevida
+                // Antecipação calculada sobre o valor BRUTO (igual ao formulário de cobrança do app)
                 const anticipationFeePct = settingsMap["anticipation_fee_pct"] ?? 0;
-                anticipationFeeAmount = Number((professionalNet * anticipationFeePct / 100).toFixed(2));
-                console.log(`Antecipação: ${anticipationFeePct}% sobre R$${professionalNet} = R$${anticipationFeeAmount}`);
+                anticipationFeeAmount = Number((grossAmount * anticipationFeePct / 100).toFixed(2));
+                console.log(`Antecipação: ${anticipationFeePct}% sobre R$${grossAmount} = R$${anticipationFeeAmount}`);
               }
 
-              const netAmount = Number((professionalNet - anticipationFeeAmount).toFixed(2));
+              const netAmount = Number((grossAmount - commissionFeeCalc - paymentFeeCalc - anticipationFeeAmount).toFixed(2));
 
               let availableAt = new Date();
               if (paymentMethod === "pix") {
@@ -254,7 +254,7 @@ serve(async (req) => {
 
               console.log(`Wallet: grossAmount=${grossAmount}, commission=${commissionFeeCalc}, paymentFee=${paymentFeeCalc}, net=${professionalNet}, anticipation=${anticipationFeeAmount}, final=${netAmount}`);
 
-              // Usa upsert com ON CONFLICT DO NOTHING para ser à prova de race condition
+              // Upsert: cria ou atualiza registro (para corrigir valores calculados incorretamente antes)
               const { error: walletErr } = await supabase.from("wallet_transactions").upsert({
                 professional_id: txFull.professional_id,
                 transaction_id: tx.id,
@@ -268,7 +268,7 @@ serve(async (req) => {
                 description: `Serviço recebido via ${paymentMethod === "pix" ? "PIX" : "Cartão"}`,
                 status: "pending",
                 available_at: availableAt.toISOString(),
-              }, { onConflict: "transaction_id", ignoreDuplicates: true });
+              }, { onConflict: "transaction_id", ignoreDuplicates: false });
               if (walletErr) console.error("wallet_transactions upsert error:", walletErr);
               else console.log("Carteira atualizada para profissional:", txFull.professional_id, "| Líquido:", netAmount);
             }

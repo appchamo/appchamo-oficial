@@ -925,8 +925,9 @@ const MessageThread = () => {
 
     const methodLabel = billingMethod === "pix" ? "PIX" : `Cartão`;
     const feeText = passFeeToClient ? "\nTaxa: Por conta do cliente" : "";
+    const antText = (billingAnticipation && billingMethod === "card") ? "\nAntecipação: Sim (~7 dias úteis)" : "";
     
-    const billingContent = `💰 COBRANÇA\nValor base: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}${feeText}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}:${passFeeToClient ? "true" : "false"}]`;
+    const billingContent = `💰 COBRANÇA\nValor base: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}${feeText}${antText}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}:${passFeeToClient ? "true" : "false"}:${(billingAnticipation && billingMethod === "card") ? "true" : "false"}]`;
 
     const { error } = await supabase.from("chat_messages").insert({
       request_id: threadId,
@@ -947,14 +948,19 @@ const MessageThread = () => {
   };
 
   const parseBilling = (content: string) => {
+    // V4: com antecipação [COBRAR:amount:desc:method:installments:passFee:anticipation]
+    const matchV4 = content.match(/\[COBRAR:([0-9.]+):(.*):(\w+):(\d+):(true|false):(true|false)\]/);
+    if (matchV4) return { amount: matchV4[1], desc: matchV4[2], method: matchV4[3] as "pix" | "card", installments: matchV4[4], passFee: matchV4[5] === "true", anticipation: matchV4[6] === "true" };
+
+    // V3: sem antecipação
     const matchV3 = content.match(/\[COBRAR:([0-9.]+):(.*):(\w+):(\d+):(true|false)\]/);
-    if (matchV3) return { amount: matchV3[1], desc: matchV3[2], method: matchV3[3] as "pix" | "card", installments: matchV3[4], passFee: matchV3[5] === "true" };
+    if (matchV3) return { amount: matchV3[1], desc: matchV3[2], method: matchV3[3] as "pix" | "card", installments: matchV3[4], passFee: matchV3[5] === "true", anticipation: false };
 
     const matchNew = content.match(/\[COBRAR:([0-9.]+):(.*):(\w+):(\d+)\]/);
-    if (matchNew) return { amount: matchNew[1], desc: matchNew[2], method: matchNew[3] as "pix" | "card", installments: matchNew[4], passFee: false };
+    if (matchNew) return { amount: matchNew[1], desc: matchNew[2], method: matchNew[3] as "pix" | "card", installments: matchNew[4], passFee: false, anticipation: false };
 
     const match = content.match(/\[COBRAR:([0-9.]+):(.*)\]/);
-    if (match) return { amount: match[1], desc: match[2], method: null, installments: "1", passFee: false };
+    if (match) return { amount: match[1], desc: match[2], method: null, installments: "1", passFee: false, anticipation: false };
     
     return null;
   };
@@ -1151,8 +1157,13 @@ const MessageThread = () => {
         gatewayLabel = `Cartão${feePct > 0 ? ` (${feePct}%)` : ""}`;
       }
     }
-    const net = parseFloat((amount - commissionFee - gatewayFee).toFixed(2));
-    return { amount, commissionFee, commissionPct, gatewayFee, gatewayLabel, net, passFee: b.passFee };
+    // Taxa de antecipação (sobre valor bruto, igual ao formulário de cobrança)
+    const hasAnticipation = !!(b.anticipation && b.method === "card");
+    const anticipationPct = parseFloat(feeSettings.anticipation_fee_pct || "0");
+    const anticipationFee = hasAnticipation ? parseFloat((amount * anticipationPct / 100).toFixed(2)) : 0;
+
+    const net = parseFloat((amount - commissionFee - gatewayFee - anticipationFee).toFixed(2));
+    return { amount, commissionFee, commissionPct, gatewayFee, gatewayLabel, net, passFee: b.passFee, anticipationFee, anticipationPct, hasAnticipation };
   };
 
   const formatCardNumber = (value: string) => {
@@ -2556,15 +2567,23 @@ const MessageThread = () => {
           {viewingBilling && (() => {
             const bd = calculateProfessionalReceiveBreakdown(viewingBilling);
             const fmtR = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`;
+            const inst = parseInt(viewingBilling.installments || "1");
+            const methodLabel = viewingBilling.method === 'pix' ? 'PIX' : `Cartão${inst > 1 ? ` (${inst}x)` : ""}`;
             return (
               <div className="space-y-2 text-sm pt-2">
                 <div className="flex justify-between border-b pb-2">
                   <span className="text-muted-foreground">Método:</span>
-                  <span className="font-semibold">{viewingBilling.method === 'pix' ? 'PIX' : `Cartão`}</span>
+                  <span className="font-semibold">{methodLabel}</span>
                 </div>
+                {bd.hasAnticipation && (
+                  <div className="flex justify-between border-b pb-2">
+                    <span className="text-muted-foreground">Recebimento:</span>
+                    <span className="font-semibold text-primary">Antecipado (~7 dias úteis)</span>
+                  </div>
+                )}
                 <div className="bg-muted/40 rounded-xl p-3 space-y-1.5">
                   <div className="flex justify-between text-muted-foreground text-xs">
-                    <span>Valor cobrado (bruto)</span>
+                    <span>Valor do serviço</span>
                     <span>{fmtR(bd.amount)}</span>
                   </div>
                   <div className="flex justify-between text-red-500 text-xs">
@@ -2581,6 +2600,12 @@ const MessageThread = () => {
                     <div className="flex justify-between text-amber-600 text-xs">
                       <span>Taxa de transação</span>
                       <span>cobrada do cliente</span>
+                    </div>
+                  )}
+                  {bd.hasAnticipation && bd.anticipationFee > 0 && (
+                    <div className="flex justify-between text-red-500 text-xs">
+                      <span>(-) Taxa de antecipação ({bd.anticipationPct}% × {inst} {inst > 1 ? "parcelas" : "parcela"})</span>
+                      <span>- {fmtR(bd.anticipationFee)}</span>
                     </div>
                   )}
                   <div className="flex justify-between font-bold text-emerald-700 border-t pt-1.5 text-sm">

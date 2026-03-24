@@ -159,11 +159,44 @@ const BecomeProfessional = () => {
         }
       }
 
+      // ──────────────────────────────────────────────────
+      // PROMOÇÃO DE LANÇAMENTO: acesso antecipado Business
+      // Válido para cadastros até 14/04/2026
+      // ──────────────────────────────────────────────────
+      const EARLY_ACCESS_CUTOFF = new Date("2026-04-15T00:00:00");
+      const isEarlyAccess = new Date() < EARLY_ACCESS_CUTOFF;
+
+      if (isEarlyAccess && professionalId) {
+        // 1. Concede Business gratuito por 1 mês
+        const expiresAt = new Date();
+        expiresAt.setMonth(expiresAt.getMonth() + 1);
+
+        await supabase.from("subscriptions").upsert({
+          user_id: user.id,
+          plan_id: "business",
+          status: "ACTIVE",
+          expires_at: expiresAt.toISOString(),
+        }, { onConflict: "user_id" });
+
+        // 2. Aprova e ativa o profissional imediatamente (sem esperar admin)
+        await supabase.from("professionals").update({
+          profile_status: "approved",
+          active: true,
+          early_access: true,
+        } as any).eq("id", professionalId);
+
+        // 3. Sobe para "company" pois é Business
+        await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", user.id);
+
+        // 4. Marca que modal de early access deve ser mostrado
+        localStorage.setItem(`early_access_modal_${user.id}`, "pending");
+      }
+
       await refreshProfile();
 
       toast({
-        title: "Solicitação enviada!",
-        description: "Seu perfil profissional está em análise.",
+        title: isEarlyAccess ? "Bem-vindo ao Chamô Business! 🎉" : "Solicitação enviada!",
+        description: isEarlyAccess ? "Você ganhou acesso antecipado ao plano Business!" : "Seu perfil profissional está em análise.",
       });
 
       navigate("/home");

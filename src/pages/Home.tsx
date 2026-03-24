@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight } from "lucide-react";
+import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight, Crown, Sparkles, Building2, Star } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -126,6 +126,7 @@ const Home = () => {
   usePush(profile?.user_id || profile?.id); 
 
   const [needsFiscalSetup, setNeedsFiscalSetup] = useState(false);
+  const [earlyAccessModal, setEarlyAccessModal] = useState(false);
 
   const checkFiscalSetup = useCallback(async () => {
     if (!user?.id || profile?.user_type === "client") {
@@ -157,6 +158,22 @@ const Home = () => {
     const t = window.setTimeout(() => void checkFiscalSetup(), 200);
     return () => clearTimeout(t);
   }, [checkFiscalSetup]);
+
+  // Modal de acesso antecipado Business (promoção de lançamento)
+  useEffect(() => {
+    if (!user?.id || !isPro) return;
+    const storageKey = `early_access_modal_${user.id}`;
+    if (localStorage.getItem(storageKey) !== "pending") return;
+    // Verifica se o profissional tem early_access ativo
+    supabase.from("professionals").select("early_access").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+      if (data?.early_access) {
+        setEarlyAccessModal(true);
+        localStorage.setItem(storageKey, "shown");
+      } else {
+        localStorage.removeItem(storageKey);
+      }
+    });
+  }, [user?.id, isPro]);
 
   // Busca saldo da carteira para profissionais
   useEffect(() => {
@@ -741,6 +758,70 @@ const Home = () => {
             >
               {locationSaving ? "Salvando…" : "Confirmar"}
             </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ✨ Modal de Acesso Antecipado Business */}
+      <Dialog open={earlyAccessModal} onOpenChange={setEarlyAccessModal}>
+        <DialogContent className="max-w-sm p-0 overflow-hidden border-0 rounded-3xl shadow-2xl">
+          {/* Fundo gradiente premium */}
+          <div className="relative bg-gradient-to-br from-violet-600 via-purple-700 to-orange-500 px-6 pt-8 pb-6 text-white text-center overflow-hidden">
+            {/* Brilhos decorativos */}
+            <div className="absolute top-4 left-6 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+            <div className="absolute bottom-4 right-6 w-24 h-24 bg-orange-400/20 rounded-full blur-2xl" />
+            <div className="absolute top-0 right-0 w-16 h-16 bg-yellow-300/10 rounded-full blur-xl" />
+
+            {/* Ícone de coroa */}
+            <div className="relative inline-flex items-center justify-center w-20 h-20 rounded-full bg-white/15 border-2 border-white/30 mb-4 mx-auto">
+              <Crown className="w-10 h-10 text-yellow-300 drop-shadow-lg" />
+              <span className="absolute -top-1 -right-1 text-lg">✨</span>
+            </div>
+
+            <h2 className="text-2xl font-black mb-1 tracking-tight drop-shadow">Parabéns! 🎉</h2>
+            <p className="text-white/90 font-semibold text-base">Você ganhou acesso antecipado ao</p>
+            <div className="inline-flex items-center gap-2 mt-2 mb-4 px-4 py-1.5 rounded-full bg-white/20 border border-white/30">
+              <Building2 className="w-4 h-4 text-yellow-300" />
+              <span className="font-black text-lg tracking-wide text-yellow-300">Chamô Business</span>
+            </div>
+
+            {/* Benefícios */}
+            <div className="space-y-2 text-left bg-white/10 rounded-2xl p-4 mb-4">
+              {[
+                "Chamadas ilimitadas de clientes",
+                "Aparece em destaque na Home",
+                "Fotos de serviços no perfil",
+                "Suporte 24h prioritário",
+                "Publicar vagas de emprego",
+                "Catálogo de produtos",
+              ].map((item) => (
+                <div key={item} className="flex items-center gap-2 text-sm">
+                  <Star className="w-3.5 h-3.5 text-yellow-300 shrink-0 fill-yellow-300" />
+                  <span className="text-white/95">{item}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-white/15 border border-white/25 rounded-2xl p-3 mb-5">
+              <p className="text-xs text-white/80 leading-relaxed">
+                🎁 <strong className="text-white">1 mês grátis</strong> — você tem até{" "}
+                <strong className="text-yellow-300">14/04/2026</strong> de acesso total ao Business sem pagar nada.
+                Depois disso, basta manter seu plano para continuar crescendo! 🚀
+              </p>
+            </div>
+          </div>
+
+          {/* Botão fora do gradiente */}
+          <div className="px-6 py-5 bg-card">
+            <button
+              onClick={() => setEarlyAccessModal(false)}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-violet-600 to-orange-500 text-white font-black text-base tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all"
+            >
+              Começar agora! 🚀
+            </button>
+            <p className="text-center text-[10px] text-muted-foreground mt-2">
+              Acesso válido até 14/04/2026 · Sem cartão de crédito necessário
+            </p>
           </div>
         </DialogContent>
       </Dialog>

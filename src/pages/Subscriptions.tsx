@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin, Smartphone } from "lucide-react";
+import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin, Smartphone, CheckCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
@@ -84,6 +84,11 @@ const Subscriptions = () => {
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
   const [proStatusLoaded, setProStatusLoaded] = useState(false);
+  const [isEarlyAccess, setIsEarlyAccess] = useState(false);
+
+  // Datas da promoção de acesso antecipado
+  const EARLY_ACCESS_RELEASE = new Date("2026-04-15T00:00:00");
+  const plansUnlocked = new Date() >= EARLY_ACCESS_RELEASE;
   
   // Estado para armazenar os benefícios dinâmicos vindos do banco de dados
   const [planFeaturesDb, setPlanFeaturesDb] = useState<Record<string, string[]>>({});
@@ -166,10 +171,11 @@ const Subscriptions = () => {
       setProStatusLoaded(false);
       const { data: pro } = await supabase
         .from("professionals")
-        .select("profile_status")
+        .select("profile_status, early_access")
         .eq("user_id", user.id)
         .maybeSingle();
       setProStatus(pro?.profile_status ?? null);
+      setIsEarlyAccess(!!(pro as any)?.early_access);
 
       const { data: plansData } = await supabase.from("plans").select("id, features");
       if (plansData) {
@@ -214,6 +220,79 @@ const Subscriptions = () => {
 
   const isProOrCompany =
     profile && (profile.user_type === "professional" || profile.user_type === "company");
+
+  // Tela de bloqueio para profissionais com acesso antecipado (antes de 15/04)
+  if (isProOrCompany && proStatusLoaded && isEarlyAccess && !plansUnlocked) {
+    return (
+      <AppLayout>
+        <main className="max-w-screen-lg mx-auto px-4 py-8 flex flex-col items-center">
+          <Link to="/home" className="self-start inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6">
+            <ArrowLeft className="w-4 h-4" /> Voltar
+          </Link>
+
+          {/* Card de bloqueio premium */}
+          <div className="w-full max-w-md rounded-3xl overflow-hidden shadow-xl border border-violet-200 dark:border-violet-800">
+            {/* Header gradiente */}
+            <div className="relative bg-gradient-to-br from-violet-600 via-purple-700 to-orange-500 px-6 py-8 text-white text-center overflow-hidden">
+              <div className="absolute top-4 left-6 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+              <div className="absolute bottom-2 right-6 w-24 h-24 bg-orange-400/20 rounded-full blur-2xl" />
+              <div className="relative">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/15 border-2 border-white/30 mb-3 mx-auto">
+                  <Crown className="w-8 h-8 text-yellow-300" />
+                </div>
+                <h1 className="text-xl font-black mb-1">Você é Business!</h1>
+                <p className="text-white/85 text-sm">Seu acesso antecipado está ativo</p>
+              </div>
+            </div>
+
+            {/* Conteúdo */}
+            <div className="bg-card px-6 py-6 text-center space-y-4">
+              {/* Countdown visual */}
+              <div className="bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 rounded-2xl p-5">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Clock className="w-5 h-5 text-violet-500" />
+                  <span className="font-bold text-violet-700 dark:text-violet-400 text-sm">Planos disponíveis em</span>
+                </div>
+                <p className="text-4xl font-black text-violet-600 dark:text-violet-400">15/04</p>
+                <p className="text-xs text-muted-foreground mt-1">A partir de 15 de abril de 2026</p>
+              </div>
+
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Você está aproveitando o seu <strong className="text-foreground">1 mês grátis de Business</strong>.{" "}
+                A aba de planos ficará disponível a partir de <strong className="text-violet-600">15/04/2026</strong>,
+                quando você poderá escolher seu plano preferido para continuar crescendo. 🚀
+              </p>
+
+              {/* Benefícios ativos */}
+              <div className="text-left space-y-1.5 bg-muted/40 rounded-2xl p-4">
+                <p className="text-xs font-bold text-muted-foreground uppercase mb-2">Ativo agora no seu Business</p>
+                {[
+                  "Chamadas ilimitadas de clientes",
+                  "Destaque na página inicial",
+                  "Fotos de serviços no perfil",
+                  "Suporte 24h",
+                  "Vagas de emprego",
+                ].map((item) => (
+                  <div key={item} className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span className="text-foreground">{item}</span>
+                  </div>
+                ))}
+              </div>
+
+              <Link
+                to="/home"
+                className="block w-full py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-orange-500 text-white font-bold text-sm text-center hover:opacity-90 transition-opacity"
+              >
+                Voltar ao início
+              </Link>
+            </div>
+          </div>
+        </main>
+      </AppLayout>
+    );
+  }
+
   if (isProOrCompany && !proStatusLoaded) {
     return (
       <AppLayout>

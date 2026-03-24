@@ -126,6 +126,8 @@ const AdminPros = () => {
   const [bonusAmount, setBonusAmount] = useState("10");
   const [bonusSaving, setBonusSaving] = useState(false);
 
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc" | "plan_asc" | "plan_desc">("date_desc");
+
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [reviewsPro, setReviewsPro] = useState<Professional | null>(null);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -134,7 +136,7 @@ const AdminPros = () => {
   const [callsPro, setCallsPro] = useState<Professional | null>(null);
   const [callsData, setCallsData] = useState<{
     total: number; pending: number; accepted: number; paid: number; finished: number; cancelled: number;
-    items: { id: string; status: string; created_at: string; client_name: string; paid: boolean }[];
+    items: { id: string; status: string; created_at: string; client_name: string; paid: boolean; protocol: string | null }[];
   } | null>(null);
   const [callsLoading, setCallsLoading] = useState(false);
 
@@ -202,12 +204,26 @@ const AdminPros = () => {
 
   useEffect(() => { fetchPros(); fetchCategories(); fetchProfessions(); }, []);
 
-  const filtered = pros.filter((p) => {
-    const q = search.toLowerCase();
-    const matchesSearch = p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q);
-    const matchesTab = tab === "all" || p.profile_status === tab;
-    return matchesSearch && matchesTab;
-  });
+  const planOrder: Record<string, number> = { free: 0, pro: 1, vip: 2, business: 3 };
+
+  const filtered = pros
+    .filter((p) => {
+      const q = search.toLowerCase();
+      const matchesSearch = p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q);
+      const matchesTab = tab === "all" || p.profile_status === tab;
+      return matchesSearch && matchesTab;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case "name_asc":  return a.full_name.localeCompare(b.full_name, "pt-BR");
+        case "name_desc": return b.full_name.localeCompare(a.full_name, "pt-BR");
+        case "date_asc":  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case "date_desc": return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case "plan_asc":  return (planOrder[a.plan_id] ?? 0) - (planOrder[b.plan_id] ?? 0);
+        case "plan_desc": return (planOrder[b.plan_id] ?? 0) - (planOrder[a.plan_id] ?? 0);
+        default: return 0;
+      }
+    });
 
   const pendingCount = pros.filter(p => p.profile_status === "pending").length;
 
@@ -482,7 +498,7 @@ const AdminPros = () => {
 
     const { data: requests } = await supabase
       .from("service_requests")
-      .select("id, status, created_at, client_id")
+      .select("id, status, created_at, client_id, protocol")
       .eq("professional_id", pro.id)
       .order("created_at", { ascending: false });
 
@@ -511,6 +527,7 @@ const AdminPros = () => {
       created_at: r.created_at,
       client_name: nameMap.get(r.client_id) || "Cliente",
       paid: paidSet.has(r.id),
+      protocol: r.protocol || null,
     }));
 
     setCallsData({
@@ -669,6 +686,18 @@ const AdminPros = () => {
             placeholder="Buscar profissional..."
             className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
         </div>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+          className="border rounded-xl px-3 py-2.5 text-sm bg-card outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer"
+        >
+          <option value="date_desc">Data ↓ (mais recente)</option>
+          <option value="date_asc">Data ↑ (mais antigo)</option>
+          <option value="name_asc">Nome A → Z</option>
+          <option value="name_desc">Nome Z → A</option>
+          <option value="plan_asc">Plano ↑ (Grátis → Business)</option>
+          <option value="plan_desc">Plano ↓ (Business → Grátis)</option>
+        </select>
         <button onClick={() => { setBonusTarget("category"); setBonusOpen(true); }}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors whitespace-nowrap">
           <Gift className="w-4 h-4" /> Bonificar por categoria
@@ -1005,7 +1034,10 @@ const AdminPros = () => {
                         <div key={r.id} className="flex items-center justify-between gap-2 p-2.5 bg-muted/40 rounded-xl">
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-medium text-foreground truncate">{r.client_name}</p>
-                            <p className="text-[10px] text-muted-foreground">{new Date(r.created_at).toLocaleDateString("pt-BR")}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {new Date(r.created_at).toLocaleDateString("pt-BR")}
+                              {r.protocol && <span className="ml-1.5 font-mono text-primary/80">#{r.protocol}</span>}
+                            </p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {r.paid && (

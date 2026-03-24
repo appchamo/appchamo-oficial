@@ -29,6 +29,7 @@ interface Profile {
 
 const AdminUsers = () => {
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc">("date_desc");
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -47,9 +48,20 @@ const AdminUsers = () => {
 
   useEffect(() => { fetchUsers(); }, []);
 
-  const filtered = users.filter(
-    (u) => u.full_name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = users
+    .filter((u) =>
+      u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+      u.email?.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      switch (sortBy) {
+        case "name_asc":  return (a.full_name || "").localeCompare(b.full_name || "", "pt-BR");
+        case "name_desc": return (b.full_name || "").localeCompare(a.full_name || "", "pt-BR");
+        case "date_asc":  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case "date_desc": return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        default: return 0;
+      }
+    });
 
   const toggleBlock = async (user: Profile) => {
     const { error } = await supabase.from("profiles").update({ is_blocked: !user.is_blocked }).eq("id", user.id);
@@ -183,7 +195,7 @@ const AdminUsers = () => {
 
   return (
     <AdminLayout title="Usuários">
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
         <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
           <Search className="w-4 h-4 text-muted-foreground" />
           <input
@@ -192,6 +204,16 @@ const AdminUsers = () => {
             className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
           />
         </div>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+          className="border rounded-xl px-3 py-2.5 text-sm bg-card outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer"
+        >
+          <option value="date_desc">Data ↓ (mais recente)</option>
+          <option value="date_asc">Data ↑ (mais antigo)</option>
+          <option value="name_asc">Nome A → Z</option>
+          <option value="name_desc">Nome Z → A</option>
+        </select>
       </div>
 
       {loading ? (

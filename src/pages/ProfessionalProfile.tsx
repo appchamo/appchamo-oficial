@@ -34,6 +34,7 @@ interface ProData {
   user_type: string;
   agenda_enabled?: boolean;
   slug: string | null;
+  cover_image_url: string | null;
 }
 
 interface Review {
@@ -79,7 +80,7 @@ const ProfessionalProfile = () => {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
     const baseQuery = supabase
         .from("professionals")
-        .select("id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug");
+        .select("id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug, cover_image_url");
     const { data } = await (isUUID ? baseQuery.eq("id", id) : baseQuery.eq("slug", id)).maybeSingle();
         
       if (data) {
@@ -116,6 +117,7 @@ const ProfessionalProfile = () => {
           user_type: profileData?.user_type || "professional",
           agenda_enabled: !!(data as any).agenda_enabled,
           slug: (data as any).slug || null,
+          cover_image_url: (data as any).cover_image_url || null,
         });
         
         const { data: { user } } = await supabase.auth.getUser();
@@ -191,6 +193,14 @@ const ProfessionalProfile = () => {
     if (error) { toast({ title: "Erro ao salvar foto", variant: "destructive" }); return; }
     setPro(prev => prev ? { ...prev, avatar_url: url } : prev);
     toast({ title: "Foto atualizada!" });
+  };
+
+  const handleCoverUpload = async (url: string) => {
+    if (!pro) return;
+    const { error } = await supabase.from("professionals").update({ cover_image_url: url } as any).eq("id", pro.id);
+    if (error) { toast({ title: "Erro ao salvar capa", variant: "destructive" }); return; }
+    setPro(prev => prev ? { ...prev, cover_image_url: url } : prev);
+    toast({ title: "Capa atualizada!" });
   };
 
   const handleStatusChange = async (status: string) => {
@@ -294,11 +304,40 @@ const ProfessionalProfile = () => {
         {/* ── Main Card — Hero redesenhado ── */}
         <div className="bg-card border rounded-2xl shadow-card mb-4 overflow-hidden">
 
-          {/* Faixa decorativa topo */}
-          <div className="h-24 w-full relative" style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }}>
-            {/* ações do dono no canto superior direito */}
+          {/* ── Capa do perfil ── */}
+          <div className="h-40 w-full relative overflow-hidden">
+            {/* Imagem de capa ou gradiente padrão */}
+            {pro.cover_image_url ? (
+              <img
+                src={pro.cover_image_url}
+                alt="Capa"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }} />
+            )}
+            {/* Overlay escuro suave para não misturar com a foto do perfil */}
+            <div className="absolute inset-0 bg-black/25" />
+
+            {/* Botão upload da capa (só para o dono) */}
+            {isOwner && (
+              <div className="absolute bottom-2 right-2 z-10">
+                <ImageCropUpload
+                  onUpload={handleCoverUpload}
+                  aspect={16 / 6}
+                  shape="rect"
+                  bucketPath="professionals"
+                  currentImage={pro.cover_image_url || undefined}
+                  label="Alterar capa"
+                  maxSize={1200}
+                  quality={0.8}
+                />
+              </div>
+            )}
+
+            {/* Compartilhar (owner) */}
             {isOwner && pro.slug && (
-              <button onClick={handleShareLink} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors" title="Compartilhar perfil">
+              <button onClick={handleShareLink} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center hover:bg-black/50 transition-colors" title="Compartilhar perfil">
                 <Share2 className="w-4 h-4 text-white" />
               </button>
             )}

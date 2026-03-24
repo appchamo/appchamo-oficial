@@ -45,7 +45,7 @@ const Profile = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
-  const [proData, setProData] = useState<{ id: string; slug: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
+  const [proData, setProData] = useState<{ id: string; slug: string | null; cover_image_url: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
   const metaName = ((user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined)?.trim() || "";
@@ -102,13 +102,14 @@ const Profile = () => {
       const loadPro = async () => {
         const { data } = await supabase
           .from("professionals")
-          .select("id, slug, experience, services, bio, rating, total_services, total_reviews, verified, availability_status, categories(name)")
+          .select("id, slug, cover_image_url, experience, services, bio, rating, total_services, total_reviews, verified, availability_status, categories(name)")
           .eq("user_id", user.id)
           .maybeSingle();
         if (data) {
           setProData({
             ...data,
             slug: data.slug || null,
+            cover_image_url: (data as any).cover_image_url || null,
             category_name: (data.categories as any)?.name || "Sem categoria",
             availability_status: data.availability_status || "available"
           });
@@ -145,6 +146,14 @@ const Profile = () => {
     if (error) { toast({ title: "Erro ao salvar avatar", variant: "destructive" }); return; }
     await refreshProfile();
     toast({ title: "Avatar atualizado!" });
+  };
+
+  const handleCoverUpload = async (url: string) => {
+    if (!proData) return;
+    const { error } = await supabase.from("professionals").update({ cover_image_url: url } as any).eq("id", proData.id);
+    if (error) { toast({ title: "Erro ao salvar capa", variant: "destructive" }); return; }
+    setProData(prev => prev ? { ...prev, cover_image_url: url } : prev);
+    toast({ title: "Capa atualizada!" });
   };
 
   const handleSave = async () => {
@@ -334,19 +343,45 @@ const Profile = () => {
           </div>
         )}
 
-        <div className="bg-card border rounded-2xl p-5 shadow-card mb-4">
-          <div className="flex items-start gap-4">
+        <div className="bg-card border rounded-2xl shadow-card mb-4 overflow-hidden">
+          {/* Capa do perfil */}
+          {(profile.user_type === "professional" || profile.user_type === "company") && (
+            <div className="h-32 w-full relative overflow-hidden">
+              {proData?.cover_image_url ? (
+                <img src={proData.cover_image_url} alt="Capa" className="absolute inset-0 w-full h-full object-cover" />
+              ) : (
+                <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }} />
+              )}
+              <div className="absolute inset-0 bg-black/25" />
+              {editing && proData && (
+                <div className="absolute bottom-2 right-2 z-10">
+                  <ImageCropUpload
+                    onUpload={handleCoverUpload}
+                    aspect={16 / 6}
+                    shape="rect"
+                    bucketPath="professionals"
+                    currentImage={proData.cover_image_url || undefined}
+                    label="Alterar capa"
+                    maxSize={1200}
+                    quality={0.8}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="p-5">
+          <div className="flex items-start gap-4" style={{ marginTop: (profile.user_type === "professional" || profile.user_type === "company") ? "-2rem" : 0 }}>
             <div className="relative flex-shrink-0">
               {profile.avatar_url ? (
-                // ✨ APLICADO AQUI: Passamos a URL original para a função que devolve a URL minificada
                 <img 
                   src={getOptimizedAvatar(profile.avatar_url)} 
                   alt="Avatar" 
-                  className="w-20 h-20 rounded-2xl object-cover"
+                  className="w-20 h-20 rounded-2xl object-cover border-4 border-card shadow-lg"
                   loading="eager" 
                 />
               ) : (
-                <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center text-xl font-bold text-muted-foreground">{initials}</div>
+                <div className="w-20 h-20 rounded-2xl bg-muted border-4 border-card shadow-lg flex items-center justify-center text-xl font-bold text-muted-foreground">{initials}</div>
               )}
               {editing && (
                 <div className="absolute -bottom-1 -right-1">
@@ -477,6 +512,7 @@ const Profile = () => {
               <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5"><Save className="w-4 h-4" /> Salvar</button>
             </div>
           )}
+          </div>{/* fim p-5 */}
         </div>
 
         <div className="flex flex-col gap-2">

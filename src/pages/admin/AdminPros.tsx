@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2 } from "lucide-react";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -129,6 +129,14 @@ const AdminPros = () => {
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [reviewsPro, setReviewsPro] = useState<Professional | null>(null);
   const [reviews, setReviews] = useState<any[]>([]);
+
+  const [callsOpen, setCallsOpen] = useState(false);
+  const [callsPro, setCallsPro] = useState<Professional | null>(null);
+  const [callsData, setCallsData] = useState<{
+    total: number; pending: number; accepted: number; paid: number; finished: number; cancelled: number;
+    items: { id: string; status: string; created_at: string; client_name: string; paid: boolean }[];
+  } | null>(null);
+  const [callsLoading, setCallsLoading] = useState(false);
 
   const fetchCategories = async () => {
     const { data } = await supabase.from("categories").select("id, name").eq("active", true).order("sort_order");
@@ -466,6 +474,57 @@ const AdminPros = () => {
     }
   };
 
+  const openCalls = async (pro: Professional) => {
+    setCallsPro(pro);
+    setCallsOpen(true);
+    setCallsLoading(true);
+    setCallsData(null);
+
+    const { data: requests } = await supabase
+      .from("service_requests")
+      .select("id, status, created_at, client_id")
+      .eq("professional_id", pro.id)
+      .order("created_at", { ascending: false });
+
+    if (!requests || requests.length === 0) {
+      setCallsData({ total: 0, pending: 0, accepted: 0, paid: 0, finished: 0, cancelled: 0, items: [] });
+      setCallsLoading(false);
+      return;
+    }
+
+    const requestIds = requests.map((r: any) => r.id);
+    const clientIds = [...new Set(requests.map((r: any) => r.client_id))];
+
+    const [txRes, profilesRes] = await Promise.all([
+      supabase.from("transactions").select("request_id, status").in("request_id", requestIds),
+      supabase.from("profiles").select("user_id, full_name").in("user_id", clientIds),
+    ]);
+
+    const paidSet = new Set(
+      (txRes.data || []).filter((t: any) => t.status === "completed").map((t: any) => t.request_id)
+    );
+    const nameMap = new Map((profilesRes.data || []).map((p: any) => [p.user_id, p.full_name]));
+
+    const items = requests.map((r: any) => ({
+      id: r.id,
+      status: r.status,
+      created_at: r.created_at,
+      client_name: nameMap.get(r.client_id) || "Cliente",
+      paid: paidSet.has(r.id),
+    }));
+
+    setCallsData({
+      total: items.length,
+      pending: items.filter(r => r.status === "pending").length,
+      accepted: items.filter(r => r.status === "accepted").length,
+      paid: items.filter(r => r.paid).length,
+      finished: items.filter(r => r.status === "completed").length,
+      cancelled: items.filter(r => r.status === "cancelled").length,
+      items,
+    });
+    setCallsLoading(false);
+  };
+
   const openReviews = async (pro: Professional) => {
     setReviewsPro(pro);
     setReviewsOpen(true);
@@ -538,7 +597,12 @@ const AdminPros = () => {
                     </span>
                   </td>
                   <td className="p-3">
-                    <span className="text-xs font-medium text-foreground">{pro.calls_used}</span>
+                    <button
+                      onClick={() => openCalls(pro)}
+                      className="text-xs font-semibold text-primary underline underline-offset-2 hover:text-primary/80 transition-colors"
+                    >
+                      {pro.calls_used}
+                    </button>
                     {pro.bonus_calls > 0 && (
                       <span className="text-[10px] text-primary ml-1">(+{pro.bonus_calls} bônus)</span>
                     )}
@@ -890,6 +954,81 @@ const AdminPros = () => {
               {bonusSaving ? "Aplicando..." : "Conceder chamadas bônus"}
             </button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Chamadas */}
+      <Dialog open={callsOpen} onOpenChange={(o) => !o && setCallsOpen(false)}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PhoneCall className="w-5 h-5 text-primary" /> Chamadas — {callsPro?.full_name}
+            </DialogTitle>
+          </DialogHeader>
+          {callsLoading ? (
+            <div className="flex justify-center py-10">
+              <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+            </div>
+          ) : callsData ? (
+            <div className="space-y-4">
+              {/* Cards de resumo */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {[
+                  { label: "Total recebidas", value: callsData.total, color: "bg-muted text-foreground" },
+                  { label: "Pendentes", value: callsData.pending, color: "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400" },
+                  { label: "Aceitas", value: callsData.accepted, color: "bg-primary/10 text-primary" },
+                  { label: "Com pagamento", value: callsData.paid, color: "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" },
+                  { label: "Encerradas", value: callsData.finished, color: "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400" },
+                  { label: "Canceladas", value: callsData.cancelled, color: "bg-destructive/10 text-destructive" },
+                ].map((c) => (
+                  <div key={c.label} className={`rounded-xl p-3 ${c.color}`}>
+                    <p className="text-xl font-bold">{c.value}</p>
+                    <p className="text-[10px] font-medium mt-0.5 opacity-80">{c.label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Lista de chamadas */}
+              {callsData.items.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-bold text-muted-foreground uppercase">Histórico</p>
+                  <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                    {callsData.items.map((r) => {
+                      const statusConfig: Record<string, { label: string; cls: string }> = {
+                        pending:   { label: "Pendente",   cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+                        accepted:  { label: "Aceita",     cls: "bg-primary/10 text-primary" },
+                        completed: { label: "Encerrada",  cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+                        cancelled: { label: "Cancelada",  cls: "bg-destructive/10 text-destructive" },
+                      };
+                      const sc = statusConfig[r.status] || { label: r.status, cls: "bg-muted text-muted-foreground" };
+                      return (
+                        <div key={r.id} className="flex items-center justify-between gap-2 p-2.5 bg-muted/40 rounded-xl">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-foreground truncate">{r.client_name}</p>
+                            <p className="text-[10px] text-muted-foreground">{new Date(r.created_at).toLocaleDateString("pt-BR")}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {r.paid && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                💰 Pago
+                              </span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold ${sc.cls}`}>
+                              {sc.label}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {callsData.items.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">Nenhuma chamada encontrada.</p>
+              )}
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
 

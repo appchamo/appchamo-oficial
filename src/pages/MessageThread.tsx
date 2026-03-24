@@ -66,7 +66,7 @@ const MessageThread = () => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
-  const [proSlug, setProSlug] = useState<string | null>(null);
+  const [proSlug, setProSlug] = useState<string | null>(null); // guarda o ID do profissional para navegação
   /** user_id do destinatário (quem recebe a mensagem) — usado para push de nova mensagem */
   const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
 
@@ -385,7 +385,7 @@ const MessageThread = () => {
         const isClient = req.client_id === user.id;
 
         // ⚡ Paraleliza tudo que depende de req + user
-        const proQuery = supabase.from("professionals").select("user_id, availability_status, slug").eq("id", req.professional_id).maybeSingle();
+        const proQuery = supabase.from("professionals").select("id, user_id, availability_status, slug").eq("id", req.professional_id).maybeSingle();
         const reviewCountQuery = (isClient && (req.status === "completed" || req.status === "closed"))
           ? supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId).eq("client_id", user.id)
           : Promise.resolve({ count: null });
@@ -403,7 +403,8 @@ const MessageThread = () => {
         if (pro) {
           if (isClient) {
             setProAvailabilityStatus((pro as any).availability_status || "available");
-            setProSlug((pro as any).slug || null);
+            // Usa o ID do profissional para navegar até o perfil (rota /professional/:id)
+            setProSlug((pro as any).id || null);
           }
           if (!isClient && pro.user_id === user.id) {
             setIsProfessional(true);
@@ -1833,7 +1834,7 @@ const MessageThread = () => {
           {/* Avatar + nome clicáveis para abrir perfil do profissional */}
           <button
             className="flex items-center gap-3 flex-1 min-w-0 text-left"
-            onClick={() => { if (!isProfessional && proSlug) navigate(`/p/${proSlug}`); }}
+            onClick={() => { if (!isProfessional && proSlug) navigate(`/professional/${proSlug}`); }}
             style={{ cursor: !isProfessional && proSlug ? "pointer" : "default" }}
           >
             {otherParty.avatar_url ? (

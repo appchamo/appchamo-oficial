@@ -90,7 +90,7 @@ const MessageThread = () => {
   const [confirmServiceModal, setConfirmServiceModal] = useState<Message | null>(null);
   const [showPaymentPolicy, setShowPaymentPolicy] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string; installments: string} | null>(null);
+  const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string; installments: string; anticipation: boolean} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [cardStep, setCardStep] = useState(false);
@@ -969,7 +969,7 @@ const MessageThread = () => {
     await loadFeeSettings();
     const billing = parseBilling(msg.content);
     if (!billing) return;
-    setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id, installments: billing.installments });
+    setPaymentData({ amount: billing.amount, desc: billing.desc, msgId: msg.id, installments: billing.installments, anticipation: billing.anticipation ?? false });
 
     setClientPassFee(billing.passFee);
     setPaymentMethod(billing.method);
@@ -1355,6 +1355,7 @@ const MessageThread = () => {
             request_id: threadId,
             amount: finalAmount,
             original_amount: parseFloat(paymentData.amount), // valor original sem desconto de cupom
+            anticipation: paymentData.anticipation === true,  // flag por cobrança
             installment_count: parseInt(installments),
             credit_card: {
               holder_name: cardForm.name,

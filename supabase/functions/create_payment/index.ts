@@ -266,9 +266,11 @@ serve(async (req) => {
     }
     // original_amount: valor original antes do cupom — usado para calcular professional_net
     // amount: valor que o cliente efetivamente paga (pode ter desconto de cupom ou já inclui taxas de cartão)
-    const originalAmountRaw = body.original_amount ?? amount;
-    const installmentCount  = Math.max(1, parseInt(body.installment_count || "1"));
-    const isCreditCard      = !!(body.credit_card && body.credit_card.number);
+    // anticipation: flag por cobrança — profissional escolheu receber antecipado nesta cobrança
+    const originalAmountRaw  = body.original_amount ?? amount;
+    const installmentCount   = Math.max(1, parseInt(body.installment_count || "1"));
+    const isCreditCard       = !!(body.credit_card && body.credit_card.number);
+    const anticipationChosen = !!(body.anticipation) && isCreditCard;
 
     // ===============================
     // Buscar service request
@@ -323,14 +325,19 @@ serve(async (req) => {
     const totalAmount    = Number(amount);
     const originalAmount = Number(originalAmountRaw);
 
-    const settingsKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed"];
+    const settingsKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed", "anticipation_fee_pct", "anticipation_mode", "anticipation_monthly_rate"];
     const { data: settingsRows } = await supabase
       .from("platform_settings")
       .select("key, value")
       .in("key", settingsKeys);
 
     const cfg: Record<string, number> = {};
-    (settingsRows || []).forEach(r => { cfg[r.key] = parseFloat(r.value || "0"); });
+    const cfgStr: Record<string, string> = {};
+    (settingsRows || []).forEach((r: any) => {
+      const raw = typeof r.value === "string" ? r.value : JSON.stringify(r.value).replace(/^"|"$/g, "");
+      cfgStr[r.key] = raw;
+      cfg[r.key] = parseFloat(raw) || 0;
+    });
 
     const commissionPct  = cfg["commission_pct"] ?? 10;
     const feePct         = isCreditCard ? (cfg["card_fee_pct"] ?? 0) : (cfg["pix_fee_pct"] ?? 0);
@@ -339,7 +346,21 @@ serve(async (req) => {
     // Taxas calculadas sobre o valor ORIGINAL (profissional não é penalizado pelo cupom)
     const commissionFee   = Number((originalAmount * commissionPct / 100).toFixed(2));
     const paymentFee      = Number((originalAmount * feePct / 100 + feeFixed).toFixed(2));
-    const platformFee     = Number((commissionFee + paymentFee).toFixed(2));
+
+    // Taxa de antecipação — só aplica se profissional escolheu antecipação nesta cobrança
+    let anticipationFee = 0;
+    if (anticipationChosen) {
+      const antMode = cfgStr["anticipation_mode"] || "simple";
+      if (antMode === "monthly") {
+        const monthlyRate = cfg["anticipation_monthly_rate"] || 1.15;
+        anticipationFee = Number((originalAmount * monthlyRate / 100 * installmentCount).toFixed(2));
+      } else {
+        const antPct = cfg["anticipation_fee_pct"] || 0;
+        anticipationFee = Number((originalAmount * antPct / 100).toFixed(2));
+      }
+    }
+
+    const platformFee     = Number((commissionFee + paymentFee + anticipationFee).toFixed(2));
     const professionalNet = Number((originalAmount - platformFee).toFixed(2));
 
     // ===============================
@@ -387,7 +408,7 @@ serve(async (req) => {
 
       const confirmed = asaasPayment.status === "CONFIRMED" || asaasPayment.status === "RECEIVED";
 
-      // Salvar transação
+      // Salvar transação (inclui anticipation_enabled para o webhook usar)
       const { error: insertErr } = await supabase.from("transactions").insert({
         client_id: user.id,
         professional_id: professionalId,
@@ -398,6 +419,7 @@ serve(async (req) => {
         commission_fee: commissionFee,
         payment_fee: paymentFee,
         professional_net: professionalNet,
+        anticipation_enabled: anticipationChosen,
         asaas_payment_id: asaasPayment.id,
         status: confirmed ? "completed" : "pending",
       });
@@ -453,6 +475,7 @@ serve(async (req) => {
         commission_fee: commissionFee,
         payment_fee: paymentFee,
         professional_net: professionalNet,
+        anticipation_enabled: false,
         asaas_payment_id: asaasPayment.id,
         pix_qr_code: pixData.encodedImage,
         pix_copy_paste: pixData.payload,

@@ -80,7 +80,7 @@ serve(async (req) => {
           if (tx.client_id) {
             const { data: txFull } = await supabase
               .from("transactions")
-              .select("professional_id, professional_net, original_amount")
+              .select("professional_id, professional_net, original_amount, anticipation_enabled")
               .eq("id", tx.id)
               .maybeSingle();
 
@@ -198,14 +198,22 @@ serve(async (req) => {
                 .in("key", [
                   "transfer_period_pix_hours", "transfer_period_card_days",
                   "transfer_period_card_anticipated_days", "anticipation_fee_pct",
+                  "anticipation_mode", "anticipation_monthly_rate",
                   "commission_pct", "pix_fee_pct", "pix_fee_fixed",
                   "card_fee_pct", "card_fee_fixed",
                 ]);
 
               const settingsMap: Record<string, number> = {};
-              (settings || []).forEach((s: any) => { settingsMap[s.key] = parseFloat(s.value) || 0; });
+              const settingsStr: Record<string, string> = {};
+              (settings || []).forEach((s: any) => {
+                // Lida com JSONB: valor pode ser string com aspas ou número
+                const raw = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
+                settingsStr[s.key] = raw;
+                settingsMap[s.key] = parseFloat(raw) || 0;
+              });
 
-              const anticipationEnabled = fiscal?.anticipation_enabled || false;
+              // anticipation_enabled vem da transação (escolha por cobrança), não do cadastro fiscal
+              const anticipationEnabled = txFull?.anticipation_enabled ?? fiscal?.anticipation_enabled ?? false;
               // Método de pagamento: detecta pelo billingType do Asaas (mais confiável)
               const asaasBillingTypeWallet = String(payment.billingType || "PIX").toUpperCase();
               const paymentMethod = (asaasBillingTypeWallet === "CREDIT_CARD" || asaasBillingTypeWallet === "DEBIT_CARD") ? "card" : "pix";
@@ -233,9 +241,17 @@ serve(async (req) => {
               let anticipationFeeAmount = 0;
               if (anticipationEnabled && paymentMethod !== "pix") {
                 // Antecipação calculada sobre o valor BRUTO (igual ao formulário de cobrança do app)
-                const anticipationFeePct = settingsMap["anticipation_fee_pct"] ?? 0;
-                anticipationFeeAmount = Number((grossAmount * anticipationFeePct / 100).toFixed(2));
-                console.log(`Antecipação: ${anticipationFeePct}% sobre R$${grossAmount} = R$${anticipationFeeAmount}`);
+                const antMode = settingsStr["anticipation_mode"] || "simple";
+                if (antMode === "monthly") {
+                  const monthlyRate = settingsMap["anticipation_monthly_rate"] || 1.15;
+                  // Para parcelamento: número de parcelas armazenado não está disponível aqui, usa 1
+                  anticipationFeeAmount = Number((grossAmount * monthlyRate / 100).toFixed(2));
+                  console.log(`Antecipação mensal: ${monthlyRate}%/mês sobre R$${grossAmount} = R$${anticipationFeeAmount}`);
+                } else {
+                  const anticipationFeePct = settingsMap["anticipation_fee_pct"] ?? 0;
+                  anticipationFeeAmount = Number((grossAmount * anticipationFeePct / 100).toFixed(2));
+                  console.log(`Antecipação simples: ${anticipationFeePct}% sobre R$${grossAmount} = R$${anticipationFeeAmount}`);
+                }
               }
 
               const netAmount = Number((grossAmount - commissionFeeCalc - paymentFeeCalc - anticipationFeeAmount).toFixed(2));

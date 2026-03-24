@@ -13,13 +13,15 @@ interface WalletTx {
   created_at: string;
   transferred_at: string | null;
   available_at: string | null;
+  payment_method: string | null;
+  anticipation_enabled: boolean;
 }
 
 /** Retorna texto legível do tempo restante até available_at */
 const timeUntilAvailable = (available_at: string | null): string | null => {
   if (!available_at) return null;
   const diff = new Date(available_at).getTime() - Date.now();
-  if (diff <= 0) return "Disponível";
+  if (diff <= 0) return "Disponível agora";
   const totalMin = Math.ceil(diff / 60000);
   const hours = Math.floor(totalMin / 60);
   const mins = totalMin % 60;
@@ -28,6 +30,25 @@ const timeUntilAvailable = (available_at: string | null): string | null => {
   if (days >= 1) return `Disponível em ${days}d${remHours > 0 ? ` ${remHours}h` : ""}`;
   if (hours >= 1) return `Disponível em ${hours}h${mins > 0 ? ` ${mins}min` : ""}`;
   return `Disponível em ${totalMin}min`;
+};
+
+/** Calcula available_at quando o campo está nulo no banco (registros antigos) */
+const calcAvailableAt = (
+  tx: { created_at: string; payment_method: string | null; anticipation_enabled: boolean },
+  settings: Record<string, number>
+): string => {
+  const base = new Date(tx.created_at).getTime();
+  const method = tx.payment_method || "pix";
+  if (method === "pix") {
+    const hours = settings["transfer_period_pix_hours"] || 12;
+    return new Date(base + hours * 3600 * 1000).toISOString();
+  }
+  if (tx.anticipation_enabled) {
+    const days = settings["transfer_period_card_anticipated_days"] || 7;
+    return new Date(base + days * 86400 * 1000).toISOString();
+  }
+  const days = settings["transfer_period_card_days"] || 32;
+  return new Date(base + days * 86400 * 1000).toISOString();
 };
 
 const fmt = (v: number) =>
@@ -41,6 +62,7 @@ const ProWallet = () => {
   const [pixKey, setPixKey] = useState<string | null>(null);
   const [pixKeyType, setPixKeyType] = useState<string | null>(null);
   const [tab, setTab] = useState<"pending" | "transferred">("pending");
+  const [periodSettings, setPeriodSettings] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!user) return;
@@ -63,14 +85,33 @@ const ProWallet = () => {
       setPixKey(fiscal?.pix_key || null);
       setPixKeyType(fiscal?.pix_key_type || null);
 
+      // Busca configurações de período de repasse da plataforma
+      const { data: settings } = await supabase
+        .from("platform_settings")
+        .select("key, value")
+        .in("key", [
+          "transfer_period_pix_hours",
+          "transfer_period_card_days",
+          "transfer_period_card_anticipated_days",
+        ]);
+      const sMap: Record<string, number> = {};
+      (settings || []).forEach((s: any) => { sMap[s.key] = parseFloat(s.value) || 0; });
+      setPeriodSettings(sMap);
+
       // Busca transações da carteira
       const { data: txs } = await supabase
         .from("wallet_transactions")
-        .select("id, amount, description, status, created_at, transferred_at, available_at")
+        .select("id, amount, description, status, created_at, transferred_at, available_at, payment_method, anticipation_enabled")
         .eq("professional_id", pro.id)
         .order("created_at", { ascending: false });
 
-      setTransactions((txs || []).map(t => ({ ...t, amount: Number(t.amount), available_at: (t as any).available_at || null })));
+      setTransactions((txs || []).map(t => ({
+        ...t,
+        amount: Number(t.amount),
+        available_at: (t as any).available_at || null,
+        payment_method: (t as any).payment_method || null,
+        anticipation_enabled: (t as any).anticipation_enabled || false,
+      })));
       setLoading(false);
     };
     load();
@@ -85,9 +126,15 @@ const ProWallet = () => {
         // Recarrega ao detectar mudança
         supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle().then(({ data: pro }) => {
           if (!pro) return;
-          supabase.from("wallet_transactions").select("id, amount, description, status, created_at, transferred_at, available_at")
+          supabase.from("wallet_transactions").select("id, amount, description, status, created_at, transferred_at, available_at, payment_method, anticipation_enabled")
             .eq("professional_id", pro.id).order("created_at", { ascending: false })
-            .then(({ data: txs }) => setTransactions((txs || []).map(t => ({ ...t, amount: Number(t.amount), available_at: (t as any).available_at || null }))));
+            .then(({ data: txs }) => setTransactions((txs || []).map(t => ({
+              ...t,
+              amount: Number(t.amount),
+              available_at: (t as any).available_at || null,
+              payment_method: (t as any).payment_method || null,
+              anticipation_enabled: (t as any).anticipation_enabled || false,
+            }))));
         });
       })
       .subscribe();
@@ -140,8 +187,7 @@ const ProWallet = () => {
             <p className="text-xs text-amber-600 mt-0.5">{pending.length} pagamento{pending.length !== 1 ? "s" : ""}</p>
             {(() => {
               const nextAvailable = pending
-                .map(t => t.available_at)
-                .filter(Boolean)
+                .map(t => t.available_at || calcAvailableAt(t, periodSettings))
                 .sort()[0];
               const label = timeUntilAvailable(nextAvailable || null);
               if (!label) return null;
@@ -187,11 +233,13 @@ const ProWallet = () => {
                     {new Date(tx.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
                     {tx.transferred_at && ` · Recebido em ${new Date(tx.transferred_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`}
                   </p>
-                  {tx.status === "pending" && tx.available_at && (() => {
-                    const label = timeUntilAvailable(tx.available_at);
-                    const isReady = label === "Disponível";
+                  {tx.status === "pending" && (() => {
+                    const effectiveAt = tx.available_at || calcAvailableAt(tx, periodSettings);
+                    const label = timeUntilAvailable(effectiveAt);
+                    if (!label) return null;
+                    const isReady = label === "Disponível agora";
                     return (
-                      <p className={`text-[10px] mt-0.5 flex items-center gap-1 ${isReady ? "text-emerald-600" : "text-amber-600"}`}>
+                      <p className={`text-[10px] mt-0.5 flex items-center gap-1 font-medium ${isReady ? "text-emerald-600" : "text-amber-600"}`}>
                         <Timer className="w-3 h-3" /> {label}
                       </p>
                     );

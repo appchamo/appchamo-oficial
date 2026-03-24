@@ -1157,13 +1157,28 @@ const MessageThread = () => {
         gatewayLabel = `Cartão${feePct > 0 ? ` (${feePct}%)` : ""}`;
       }
     }
-    // Taxa de antecipação (sobre valor bruto, igual ao formulário de cobrança)
+    // Taxa de antecipação — usa a mesma função do formulário de cobrança para consistência
     const hasAnticipation = !!(b.anticipation && b.method === "card");
-    const anticipationPct = parseFloat(feeSettings.anticipation_fee_pct || "0");
-    const anticipationFee = hasAnticipation ? parseFloat((amount * anticipationPct / 100).toFixed(2)) : 0;
+    const inst = parseInt(b.installments || "1");
+    const anticipationFee = hasAnticipation ? calcAnticipationFee(amount, inst) : 0;
+
+    // Label descritivo da taxa (respeita o modo: simples ou mensal)
+    const antMode = feeSettings.anticipation_mode || "simple";
+    let anticipationLabel = "";
+    let anticipationPct = 0;
+    if (hasAnticipation) {
+      if (antMode === "monthly") {
+        const monthlyRate = parseFloat(feeSettings.anticipation_monthly_rate || "1.15");
+        anticipationPct = monthlyRate;
+        anticipationLabel = `${monthlyRate}% a.m. × ${inst} ${inst > 1 ? "parcelas" : "parcela"}`;
+      } else {
+        anticipationPct = parseFloat(feeSettings.anticipation_fee_pct || "0");
+        anticipationLabel = `${anticipationPct}% × ${inst} ${inst > 1 ? "parcelas" : "parcela"}`;
+      }
+    }
 
     const net = parseFloat((amount - commissionFee - gatewayFee - anticipationFee).toFixed(2));
-    return { amount, commissionFee, commissionPct, gatewayFee, gatewayLabel, net, passFee: b.passFee, anticipationFee, anticipationPct, hasAnticipation };
+    return { amount, commissionFee, commissionPct, gatewayFee, gatewayLabel, net, passFee: b.passFee, anticipationFee, anticipationPct, anticipationLabel, hasAnticipation };
   };
 
   const formatCardNumber = (value: string) => {
@@ -2604,7 +2619,7 @@ const MessageThread = () => {
                   )}
                   {bd.hasAnticipation && bd.anticipationFee > 0 && (
                     <div className="flex justify-between text-red-500 text-xs">
-                      <span>(-) Taxa de antecipação ({bd.anticipationPct}% × {inst} {inst > 1 ? "parcelas" : "parcela"})</span>
+                      <span>(-) Taxa de antecipação ({bd.anticipationLabel || `${bd.anticipationPct}%`})</span>
                       <span>- {fmtR(bd.anticipationFee)}</span>
                     </div>
                   )}

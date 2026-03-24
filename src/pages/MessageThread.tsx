@@ -1353,6 +1353,17 @@ const MessageThread = () => {
           if (fnRes.status === 401) throw new Error("Sessão expirada. Faça login novamente e tente o pagamento.");
           throw new Error(res.data?.message || res.data?.error || res.error?.message || "Erro ao processar pagamento");
         }
+
+        // Verifica se o Asaas realmente confirmou a cobrança no cartão
+        if (!res.data?.confirmed) {
+          const asaasStatus = res.data?.status || "";
+          const msg = asaasStatus === "AWAITING_RISK_ANALYSIS"
+            ? "Pagamento em análise de risco. Aguarde a confirmação por e-mail."
+            : asaasStatus === "PENDING"
+            ? "Pagamento pendente de confirmação. Verifique com seu banco."
+            : "Pagamento recusado. Verifique os dados do cartão e tente novamente.";
+          throw new Error(msg);
+        }
       } else if (paymentMethod === "pix") {
         const { data: profile } = await supabase.
         from("profiles").

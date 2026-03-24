@@ -265,8 +265,10 @@ serve(async (req) => {
       throw new Error("request_id and amount required");
     }
     // original_amount: valor original antes do cupom — usado para calcular professional_net
-    // amount: valor que o cliente efetivamente paga (pode ter desconto de cupom)
+    // amount: valor que o cliente efetivamente paga (pode ter desconto de cupom ou já inclui taxas de cartão)
     const originalAmountRaw = body.original_amount ?? amount;
+    const installmentCount  = Math.max(1, parseInt(body.installment_count || "1"));
+    const isCreditCard      = !!(body.credit_card && body.credit_card.number);
 
     // ===============================
     // Buscar service request
@@ -291,40 +293,37 @@ serve(async (req) => {
     const professionalId = serviceReq.professional_id;
 
     // ===============================
-    // Reutilizar pagamento pendente
+    // Reutilizar pagamento pendente (apenas PIX)
     // ===============================
-    const { data: existingTx } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("request_id", request_id)
-      .eq("status", "pending")
-      .maybeSingle();
+    if (!isCreditCard) {
+      const { data: existingTx } = await supabase
+        .from("transactions")
+        .select("*")
+        .eq("request_id", request_id)
+        .eq("status", "pending")
+        .maybeSingle();
 
-    if (existingTx) {
-      return new Response(
-        JSON.stringify({
-          success: true,
-          payment_id: existingTx.asaas_payment_id,
-          pix_qr_code: existingTx.pix_qr_code,
-          pix_copy_paste: existingTx.pix_copy_paste,
-          reused: true,
-        }),
-        {
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      if (existingTx) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            payment_id: existingTx.asaas_payment_id,
+            pix_qr_code: existingTx.pix_qr_code,
+            pix_copy_paste: existingTx.pix_copy_paste,
+            reused: true,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // ===============================
     // Cálculos — lê configurações da plataforma
     // ===============================
-    const totalAmount    = Number(amount);           // valor que o Asaas cobra do cliente (pode ser com desconto)
-    const originalAmount = Number(originalAmountRaw); // valor original sem desconto de cupom
+    const totalAmount    = Number(amount);
+    const originalAmount = Number(originalAmountRaw);
 
-    const settingsKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed"];
+    const settingsKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed"];
     const { data: settingsRows } = await supabase
       .from("platform_settings")
       .select("key, value")
@@ -333,36 +332,149 @@ serve(async (req) => {
     const cfg: Record<string, number> = {};
     (settingsRows || []).forEach(r => { cfg[r.key] = parseFloat(r.value || "0"); });
 
-    const commissionPct = cfg["commission_pct"] ?? 10;
-    const pixFeePct    = cfg["pix_fee_pct"] ?? 0;
-    const pixFeeFixed  = cfg["pix_fee_fixed"] ?? 0;
+    const commissionPct  = cfg["commission_pct"] ?? 10;
+    const feePct         = isCreditCard ? (cfg["card_fee_pct"] ?? 0) : (cfg["pix_fee_pct"] ?? 0);
+    const feeFixed       = isCreditCard ? (cfg["card_fee_fixed"] ?? 0) : (cfg["pix_fee_fixed"] ?? 0);
 
     // Taxas calculadas sobre o valor ORIGINAL (profissional não é penalizado pelo cupom)
-    const commissionFee  = Number((originalAmount * commissionPct / 100).toFixed(2));
-    const paymentFee     = Number((originalAmount * pixFeePct / 100 + pixFeeFixed).toFixed(2));
-    const platformFee    = Number((commissionFee + paymentFee).toFixed(2));
+    const commissionFee   = Number((originalAmount * commissionPct / 100).toFixed(2));
+    const paymentFee      = Number((originalAmount * feePct / 100 + feeFixed).toFixed(2));
+    const platformFee     = Number((commissionFee + paymentFee).toFixed(2));
     const professionalNet = Number((originalAmount - platformFee).toFixed(2));
 
     // ===============================
     // Customer
     // ===============================
-    const customerId = await findOrCreateCustomer(
-      supabase,
-      user.id
-    );
+    const customerId = await findOrCreateCustomer(supabase, user.id);
 
     // ===============================
-    // Criar pagamento PIX
+    // CARTÃO DE CRÉDITO
+    // ===============================
+    if (isCreditCard) {
+      const cc   = body.credit_card;
+      const chi  = body.credit_card_holder_info || {};
+
+      const cardPayload: Record<string, unknown> = {
+        customer: customerId,
+        billingType: "CREDIT_CARD",
+        value: totalAmount,
+        dueDate: new Date().toISOString().split("T")[0],
+        description: `Pagamento serviço #${request_id.slice(0, 8)} - Chamô`,
+        creditCard: {
+          holderName: cc.holder_name,
+          number: String(cc.number).replace(/\s/g, ""),
+          expiryMonth: String(cc.expiry_month).padStart(2, "0"),
+          expiryYear: String(cc.expiry_year),
+          ccv: String(cc.cvv),
+        },
+        creditCardHolderInfo: {
+          name: chi.name || cc.holder_name,
+          email: chi.email || "",
+          cpfCnpj: String(chi.cpf_cnpj || "").replace(/\D/g, ""),
+          postalCode: String(chi.postal_code || "").replace(/\D/g, ""),
+          addressNumber: String(chi.address_number || ""),
+          ...(chi.phone ? { phone: String(chi.phone).replace(/\D/g, "") } : {}),
+        },
+      };
+
+      if (installmentCount > 1) {
+        cardPayload.installmentCount = installmentCount;
+        cardPayload.installmentValue = Number((totalAmount / installmentCount).toFixed(2));
+      }
+
+      const asaasPayment = await asaasRequest("/payments", "POST", cardPayload);
+      console.log("Asaas card payment created:", asaasPayment.id, "status:", asaasPayment.status);
+
+      const confirmed = asaasPayment.status === "CONFIRMED" || asaasPayment.status === "RECEIVED";
+
+      // Salvar transação
+      const { error: insertErr } = await supabase.from("transactions").insert({
+        client_id: user.id,
+        professional_id: professionalId,
+        request_id: request_id,
+        total_amount: totalAmount,
+        original_amount: originalAmount,
+        platform_fee: platformFee,
+        commission_fee: commissionFee,
+        payment_fee: paymentFee,
+        professional_net: professionalNet,
+        asaas_payment_id: asaasPayment.id,
+        status: confirmed ? "completed" : "pending",
+      });
+
+      if (insertErr) throw new Error(insertErr.message);
+
+      // Se já confirmado aqui (cobrança instantânea), cria wallet_transaction imediatamente
+      if (confirmed && professionalId) {
+        const { data: fiscal } = await supabase
+          .from("professional_fiscal_data")
+          .select("anticipation_enabled, payment_method")
+          .eq("professional_id", professionalId)
+          .maybeSingle();
+
+        const { data: settingsAll } = await supabase
+          .from("platform_settings")
+          .select("key, value")
+          .in("key", ["transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct"]);
+
+        const cfgAll: Record<string, number> = {};
+        (settingsAll || []).forEach((r: any) => { cfgAll[r.key] = parseFloat(r.value || "0"); });
+
+        const anticipationEnabled = fiscal?.anticipation_enabled || false;
+        let anticipationFeeAmt = 0;
+        if (anticipationEnabled) {
+          anticipationFeeAmt = Number((professionalNet * (cfgAll["anticipation_fee_pct"] || 15) / 100).toFixed(2));
+        }
+        const netAmt = Number((professionalNet - anticipationFeeAmt).toFixed(2));
+        const cardDays = anticipationEnabled
+          ? (cfgAll["transfer_period_card_anticipated_days"] || 7)
+          : (cfgAll["transfer_period_card_days"] || 32);
+        const availableAt = new Date(Date.now() + cardDays * 86400000).toISOString();
+
+        const { data: newTx } = await supabase
+          .from("transactions")
+          .select("id")
+          .eq("asaas_payment_id", asaasPayment.id)
+          .maybeSingle();
+
+        if (newTx?.id) {
+          await supabase.from("wallet_transactions").upsert({
+            professional_id: professionalId,
+            transaction_id: newTx.id,
+            gross_amount: totalAmount,
+            platform_fee_amount: commissionFee,
+            payment_fee_amount: paymentFee,
+            anticipation_fee_amount: anticipationFeeAmt,
+            amount: netAmt,
+            payment_method: "card",
+            anticipation_enabled: anticipationEnabled,
+            description: "Serviço recebido via Cartão",
+            status: "pending",
+            available_at: availableAt,
+          }, { onConflict: "transaction_id", ignoreDuplicates: true });
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          confirmed,
+          payment_id: asaasPayment.id,
+          status: asaasPayment.status,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ===============================
+    // PIX
     // ===============================
     const asaasPayment = await asaasRequest("/payments", "POST", {
       customer: customerId,
       billingType: "PIX",
       value: totalAmount,
       dueDate: new Date().toISOString().split("T")[0],
-      description: `Pagamento serviço #${request_id.slice(
-        0,
-        8
-      )} - Chamô`,
+      description: `Pagamento serviço #${request_id.slice(0, 8)} - Chamô`,
     });
 
     const pixData = await asaasRequest(
@@ -375,7 +487,7 @@ serve(async (req) => {
     }
 
     // ===============================
-    // Salvar transaction
+    // Salvar transaction (PIX)
     // ===============================
     const { error: insertError } = await supabase
       .from("transactions")
@@ -406,12 +518,7 @@ serve(async (req) => {
         pix_qr_code: pixData.encodedImage,
         pix_copy_paste: pixData.payload,
       }),
-      {
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
     console.error("create_payment error:", error.message);

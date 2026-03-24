@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Wallet, Clock, CheckCircle2, TrendingUp, AlertCircle, Loader2 } from "lucide-react";
+import { Wallet, Clock, CheckCircle2, TrendingUp, AlertCircle, Loader2, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,7 +12,23 @@ interface WalletTx {
   status: string;
   created_at: string;
   transferred_at: string | null;
+  available_at: string | null;
 }
+
+/** Retorna texto legível do tempo restante até available_at */
+const timeUntilAvailable = (available_at: string | null): string | null => {
+  if (!available_at) return null;
+  const diff = new Date(available_at).getTime() - Date.now();
+  if (diff <= 0) return "Disponível";
+  const totalMin = Math.ceil(diff / 60000);
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  if (days >= 1) return `Disponível em ${days}d${remHours > 0 ? ` ${remHours}h` : ""}`;
+  if (hours >= 1) return `Disponível em ${hours}h${mins > 0 ? ` ${mins}min` : ""}`;
+  return `Disponível em ${totalMin}min`;
+};
 
 const fmt = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -50,11 +66,11 @@ const ProWallet = () => {
       // Busca transações da carteira
       const { data: txs } = await supabase
         .from("wallet_transactions")
-        .select("id, amount, description, status, created_at, transferred_at")
+        .select("id, amount, description, status, created_at, transferred_at, available_at")
         .eq("professional_id", pro.id)
         .order("created_at", { ascending: false });
 
-      setTransactions((txs || []).map(t => ({ ...t, amount: Number(t.amount) })));
+      setTransactions((txs || []).map(t => ({ ...t, amount: Number(t.amount), available_at: (t as any).available_at || null })));
       setLoading(false);
     };
     load();
@@ -69,9 +85,9 @@ const ProWallet = () => {
         // Recarrega ao detectar mudança
         supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle().then(({ data: pro }) => {
           if (!pro) return;
-          supabase.from("wallet_transactions").select("id, amount, description, status, created_at, transferred_at")
+          supabase.from("wallet_transactions").select("id, amount, description, status, created_at, transferred_at, available_at")
             .eq("professional_id", pro.id).order("created_at", { ascending: false })
-            .then(({ data: txs }) => setTransactions((txs || []).map(t => ({ ...t, amount: Number(t.amount) }))));
+            .then(({ data: txs }) => setTransactions((txs || []).map(t => ({ ...t, amount: Number(t.amount), available_at: (t as any).available_at || null }))));
         });
       })
       .subscribe();
@@ -122,6 +138,19 @@ const ProWallet = () => {
             <p className="text-xs text-amber-700 font-medium flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> A Receber</p>
             <p className="text-xl font-bold text-amber-800 mt-1">{fmt(pendingTotal)}</p>
             <p className="text-xs text-amber-600 mt-0.5">{pending.length} pagamento{pending.length !== 1 ? "s" : ""}</p>
+            {(() => {
+              const nextAvailable = pending
+                .map(t => t.available_at)
+                .filter(Boolean)
+                .sort()[0];
+              const label = timeUntilAvailable(nextAvailable || null);
+              if (!label) return null;
+              return (
+                <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                  <Timer className="w-3 h-3" /> {label}
+                </p>
+              );
+            })()}
           </div>
           <div className="rounded-xl border bg-emerald-50 border-emerald-200 p-4">
             <p className="text-xs text-emerald-700 font-medium flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5" /> Já Recebido</p>
@@ -151,15 +180,24 @@ const ProWallet = () => {
         ) : (
           <div className="space-y-2">
             {displayed.map(tx => (
-              <div key={tx.id} className="flex items-center justify-between border rounded-xl px-4 py-3 bg-white">
-                <div>
+              <div key={tx.id} className="flex items-start justify-between border rounded-xl px-4 py-3 bg-white gap-3">
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{tx.description}</p>
                   <p className="text-xs text-muted-foreground">
                     {new Date(tx.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
                     {tx.transferred_at && ` · Recebido em ${new Date(tx.transferred_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`}
                   </p>
+                  {tx.status === "pending" && tx.available_at && (() => {
+                    const label = timeUntilAvailable(tx.available_at);
+                    const isReady = label === "Disponível";
+                    return (
+                      <p className={`text-[10px] mt-0.5 flex items-center gap-1 ${isReady ? "text-emerald-600" : "text-amber-600"}`}>
+                        <Timer className="w-3 h-3" /> {label}
+                      </p>
+                    );
+                  })()}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
                   <span className={`font-bold ${tx.status === "pending" ? "text-amber-700" : "text-emerald-700"}`}>{fmt(tx.amount)}</span>
                   {tx.status === "pending" ? (
                     <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pendente</span>

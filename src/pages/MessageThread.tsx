@@ -62,6 +62,7 @@ const MessageThread = () => {
   const [sending, setSending] = useState(false);
   const [otherParty, setOtherParty] = useState<OtherParty>({ name: "Chat", avatar_url: null });
   const [isProfessional, setIsProfessional] = useState(false);
+  const [proAvailabilityStatus, setProAvailabilityStatus] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
@@ -147,6 +148,8 @@ const MessageThread = () => {
     couponDiscount: { type: string; value: number } | null; selectedCouponId: string | null;
     paymentDataAmount: string;
   } | null>(null);
+  /** Guard: evita que Realtime + polling confirmem o pagamento duas vezes. */
+  const pixConfirmFiredRef = useRef(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -165,6 +168,18 @@ const MessageThread = () => {
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
   const hasPaymentConfirmed = messages.some(m => m.content && m.content.includes("PAGAMENTO CONFIRMADO"));
+
+  // Detecta se profissional não respondeu o cliente há mais de 4h
+  const canCloseByDelay = (() => {
+    if (isProfessional || isChatFinished || !userId) return false;
+    const realMsgs = messages.filter(m => !m.id.startsWith("temp-"));
+    if (realMsgs.length === 0) return false;
+    const last = realMsgs[realMsgs.length - 1];
+    // Última mensagem deve ser do cliente (eu), não do profissional
+    if (last.sender_id !== userId) return false;
+    const elapsed = Date.now() - new Date(last.created_at).getTime();
+    return elapsed >= 4 * 60 * 60 * 1000; // 4 horas em ms
+  })();
 
   /**
    * Quando o Realtime traz uma nova mensagem "PAGAMENTO CONFIRMADO" enquanto o modal PIX está aberto,
@@ -369,7 +384,7 @@ const MessageThread = () => {
         const isClient = req.client_id === user.id;
 
         // ⚡ Paraleliza tudo que depende de req + user
-        const proQuery = supabase.from("professionals").select("user_id").eq("id", req.professional_id).maybeSingle();
+        const proQuery = supabase.from("professionals").select("user_id, availability_status").eq("id", req.professional_id).maybeSingle();
         const reviewCountQuery = (isClient && (req.status === "completed" || req.status === "closed"))
           ? supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId).eq("client_id", user.id)
           : Promise.resolve({ count: null });
@@ -385,6 +400,7 @@ const MessageThread = () => {
         setAppointment(appRes.data ? (appRes.data as any) : null);
 
         if (pro) {
+          if (isClient) setProAvailabilityStatus((pro as any).availability_status || "available");
           if (!isClient && pro.user_id === user.id) {
             setIsProfessional(true);
             setChatProUserId(user.id);
@@ -500,6 +516,9 @@ const MessageThread = () => {
           if (payload.new?.status !== "completed") return;
           const params = pixConfirmParamsRef.current;
           if (!params) return;
+          // Guard: evita confirmação dupla (polling + realtime)
+          if (pixConfirmFiredRef.current) return;
+          pixConfirmFiredRef.current = true;
           if (pixIntervalRef.current) {
             clearInterval(pixIntervalRef.current);
             pixIntervalRef.current = null;
@@ -1404,6 +1423,7 @@ const MessageThread = () => {
         setProcessingPayment(false);
         setPaymentOpen(false);
         pixDismissedByUserRef.current = false; // novo pagamento criado — permite abertura automática
+        pixConfirmFiredRef.current = false; // reseta guard de duplicação para novo pagamento
         setPixOpen(true);
         setPixCopied(false);
 
@@ -1415,6 +1435,10 @@ const MessageThread = () => {
               body: { action: "check_payment_status", payment_id: res.data.payment_id }
             });
             if (check.data?.confirmed) {
+              // Guard: evita confirmação dupla (polling + realtime)
+              if (pixConfirmFiredRef.current) return;
+              pixConfirmFiredRef.current = true;
+
               if (pixIntervalRef.current) clearInterval(pixIntervalRef.current);
               pixIntervalRef.current = null;
               setPixPolling(false);
@@ -1785,7 +1809,21 @@ const MessageThread = () => {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
-            <p className="text-[10px] text-muted-foreground">online</p>
+            {!isProfessional && proAvailabilityStatus ? (
+              <p className={`text-[10px] font-medium ${
+                proAvailabilityStatus === "available" ? "text-green-500" :
+                proAvailabilityStatus === "quotes_only" ? "text-amber-500" :
+                proAvailabilityStatus === "busy" ? "text-orange-500" :
+                "text-destructive"
+              }`}>
+                {proAvailabilityStatus === "available" ? "● Disponível" :
+                 proAvailabilityStatus === "quotes_only" ? "● Somente orçamentos" :
+                 proAvailabilityStatus === "busy" ? "● Agenda fechada" :
+                 "● Indisponível"}
+              </p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">online</p>
+            )}
           </div>
           {isProfessional && !isChatFinished && requestStatus === "accepted" &&
           <>
@@ -1842,10 +1880,58 @@ const MessageThread = () => {
               <LogOut className="w-3.5 h-3.5" /> Encerrar chat
             </button>
           }
+          {canCloseByDelay && (
+            <button
+              onClick={async () => {
+                if (!userId || !threadId) return;
+                setClosingCall(true);
+                await supabase.from("chat_messages").insert({
+                  request_id: threadId,
+                  sender_id: userId,
+                  content: "⏰ Chat encerrado pelo cliente por demora na resposta."
+                });
+                await supabase.from("service_requests").update({ status: "cancelled" } as any).eq("id", threadId);
+                setRequestStatus("cancelled");
+                if (chatProUserId) {
+                  await sendNotification(
+                    chatProUserId,
+                    "⚠️ Você perdeu um cliente por demora",
+                    "O cliente encerrou o chat pois você não respondeu em mais de 4 horas.",
+                    `/messages/${threadId}`,
+                    profile?.avatar_url ?? null
+                  );
+                }
+                setClosingCall(false);
+                toast({ title: "Chat encerrado por demora.", description: "O profissional foi notificado." });
+              }}
+              disabled={closingCall}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-100 text-orange-600 text-xs font-semibold hover:bg-orange-200 transition-colors dark:bg-orange-900/20 dark:text-orange-400">
+              <LogOut className="w-3.5 h-3.5" /> Encerrar por demora
+            </button>
+          )}
         </div>
       </header>
 
       <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
+        {/* Banner de aviso: profissional sem resposta há +2h (antes das 4h) */}
+        {(() => {
+          if (isProfessional || isChatFinished || !userId || canCloseByDelay) return null;
+          const realMsgs = messages.filter(m => !m.id.startsWith("temp-"));
+          if (realMsgs.length === 0) return null;
+          const last = realMsgs[realMsgs.length - 1];
+          if (last.sender_id !== userId) return null;
+          const elapsed = Date.now() - new Date(last.created_at).getTime();
+          if (elapsed < 2 * 60 * 60 * 1000) return null;
+          const hoursLeft = Math.max(0, Math.ceil((4 * 60 * 60 * 1000 - elapsed) / (60 * 60 * 1000)));
+          return (
+            <div className="flex items-start gap-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-2xl px-4 py-3 mb-1">
+              <span className="text-orange-500 text-base mt-0.5">⏳</span>
+              <p className="text-xs text-orange-700 dark:text-orange-300 leading-relaxed">
+                O profissional ainda não respondeu. Se ele não responder em mais {hoursLeft}h, você poderá encerrar o chat por demora.
+              </p>
+            </div>
+          );
+        })()}
         {!isProfessional && requestStatus === "pending" && !isChatFinished &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 shadow-sm">
             <p className="text-sm font-semibold text-foreground text-center">Aguardando resposta</p>

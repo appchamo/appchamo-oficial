@@ -73,17 +73,6 @@ serve(async (req) => {
           console.log("Transaction already completed (polling beat webhook):", payment.id);
         }
 
-        // Verifica se wallet_transaction já existe
-        const { data: existingWallet } = await supabase
-          .from("wallet_transactions")
-          .select("id")
-          .eq("transaction_id", tx.id)
-          .maybeSingle();
-
-        if (existingWallet) {
-          console.log("wallet_transaction already exists for transaction:", tx.id, "— skipping wallet insert");
-        }
-
         // 1b. Chat e wallet
         if (tx.request_id && tx.client_id) {
           const totalStr = Number(tx.total_amount).toFixed(2).replace(".", ",");
@@ -103,16 +92,27 @@ serve(async (req) => {
               ? `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX\nRecebe: R$ ${professionalNetStr}`
               : `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX`;
 
-            const { error: msgErr } = await supabase
+            // Verifica se mensagem de confirmação já existe (evita duplicata entre PAYMENT_RECEIVED e PAYMENT_CONFIRMED)
+            const { data: existingMsg } = await supabase
               .from("chat_messages")
-              .insert({
-                request_id: tx.request_id,
-                sender_id: tx.client_id,
-                content: confirmContent,
-              });
+              .select("id")
+              .eq("request_id", tx.request_id)
+              .like("content", "✅ PAGAMENTO CONFIRMADO%")
+              .maybeSingle();
 
-            if (msgErr) console.error("chat_messages insert error:", msgErr);
-            else console.log("Mensagem de confirmação inserida no chat:", tx.request_id);
+            if (existingMsg) {
+              console.log("Mensagem de confirmação já existe no chat:", tx.request_id, "— skipping");
+            } else {
+              const { error: msgErr } = await supabase
+                .from("chat_messages")
+                .insert({
+                  request_id: tx.request_id,
+                  sender_id: tx.client_id,
+                  content: confirmContent,
+                });
+              if (msgErr) console.error("chat_messages insert error:", msgErr);
+              else console.log("Mensagem de confirmação inserida no chat:", tx.request_id);
+            }
 
             // Avatares
             let clientAvatar: string | null = null;
@@ -247,24 +247,24 @@ serve(async (req) => {
                 availableAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
               }
 
-              if (!existingWallet) {
-                const { error: walletErr } = await supabase.from("wallet_transactions").insert({
-                  professional_id: txFull.professional_id,
-                  transaction_id: tx.id,
-                  gross_amount: grossAmount,
-                  platform_fee_amount: commissionAmount,
-                  payment_fee_amount: paymentFeeAmount,
-                  anticipation_fee_amount: anticipationFeeAmount,
-                  amount: netAmount,
-                  payment_method: paymentMethod,
-                  anticipation_enabled: anticipationEnabled,
-                  description: `Serviço recebido via ${paymentMethod === "pix" ? "PIX" : "Cartão"}`,
-                  status: "pending",
-                  available_at: availableAt.toISOString(),
-                });
-                if (walletErr) console.error("wallet_transactions insert error:", walletErr);
-                else console.log("Carteira atualizada para profissional:", txFull.professional_id, "| Líquido:", netAmount);
-              }
+              // Usa upsert com ON CONFLICT DO NOTHING para ser à prova de race condition
+              // (PAYMENT_RECEIVED e PAYMENT_CONFIRMED podem chegar simultaneamente)
+              const { error: walletErr } = await supabase.from("wallet_transactions").upsert({
+                professional_id: txFull.professional_id,
+                transaction_id: tx.id,
+                gross_amount: grossAmount,
+                platform_fee_amount: commissionAmount,
+                payment_fee_amount: paymentFeeAmount,
+                anticipation_fee_amount: anticipationFeeAmount,
+                amount: netAmount,
+                payment_method: paymentMethod,
+                anticipation_enabled: anticipationEnabled,
+                description: `Serviço recebido via ${paymentMethod === "pix" ? "PIX" : "Cartão"}`,
+                status: "pending",
+                available_at: availableAt.toISOString(),
+              }, { onConflict: "transaction_id", ignoreDuplicates: true });
+              if (walletErr) console.error("wallet_transactions upsert error:", walletErr);
+              else console.log("Carteira atualizada para profissional:", txFull.professional_id, "| Líquido:", netAmount);
             }
           }
         }

@@ -15,6 +15,10 @@ import {
   BarcodeScanner,
   BarcodeFormat,
 } from "@capacitor-mlkit/barcode-scanning";
+
+// MLKit funciona bem só no Android; iOS usa getUserMedia + ZXing
+const platform = Capacitor.getPlatform(); // 'android' | 'ios' | 'web'
+
 import {
   CheckCircle2,
   AlertCircle,
@@ -29,6 +33,8 @@ const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qr-login`;
 type Stage = "idle" | "scanning" | "processing" | "success" | "error";
 
 const isNative = Capacitor.isNativePlatform();
+// Só usa MLKit no Android; iOS usa câmera web (WebView tem suporte nativo)
+const useMLKit = platform === "android";
 
 export default function QrScannerApp() {
   const navigate = useNavigate();
@@ -72,7 +78,7 @@ export default function QrScannerApp() {
   }, []);
 
   const stopCamera = useCallback(() => {
-    if (isNative) {
+    if (useMLKit) {
       stopNativeScanner();
     } else {
       stopWebCamera();
@@ -206,7 +212,7 @@ export default function QrScannerApp() {
   }, [handleTokenFound, stopWebCamera]);
 
   const startCamera = useCallback(() => {
-    if (isNative) return startNativeScanner();
+    if (useMLKit) return startNativeScanner();
     return startWebCamera();
   }, [startNativeScanner, startWebCamera]);
 
@@ -270,8 +276,8 @@ export default function QrScannerApp() {
           </div>
         )}
 
-        {/* ── SCANNING (WEB) ── */}
-        {stage === "scanning" && !isNative && (
+        {/* ── SCANNING (WEB / iOS) ── */}
+        {stage === "scanning" && !useMLKit && (
           <div className="flex flex-col items-center gap-4">
             <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-black shadow-2xl border-2 border-primary"
               style={{ aspectRatio: "1/1" }}>
@@ -309,8 +315,8 @@ export default function QrScannerApp() {
           </div>
         )}
 
-        {/* ── SCANNING (NATIVO) — câmera atrás do WebView transparente ── */}
-        {stage === "scanning" && isNative && (
+        {/* ── SCANNING (NATIVO Android) — câmera atrás do WebView transparente ── */}
+        {stage === "scanning" && useMLKit && (
           <div id="qr-native-overlay" className="fixed inset-0 z-50 flex flex-col">
             {/* Frame/overlay por cima da câmera nativa */}
             <div className="flex-1 flex items-center justify-center relative">
@@ -382,7 +388,7 @@ export default function QrScannerApp() {
                 <QrCode className="w-4 h-4" />
                 Tentar novamente
               </button>
-              {isNative && (
+              {useMLKit && (
                 <button
                   onClick={() => BarcodeScanner.openSettings()}
                   className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border text-foreground font-medium text-sm active:scale-95 transition-transform"

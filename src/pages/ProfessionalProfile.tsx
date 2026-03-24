@@ -296,8 +296,8 @@ const ProfessionalProfile = () => {
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <Link to="/search" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-4 transition-colors">
+      <main className="max-w-screen-lg mx-auto px-4 pt-2 pb-5">
+        <Link to="/search" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-2 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </Link>
 

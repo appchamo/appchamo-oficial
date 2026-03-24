@@ -389,7 +389,7 @@ const Profile = () => {
                 </div>
               )}
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0" style={{ paddingTop: (profile.user_type === "professional" || profile.user_type === "company") ? "2rem" : 0 }}>
               {editing ? (
                 <div className="space-y-2">
                   <input value={name} onChange={(e) => setName(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="Nome completo" />

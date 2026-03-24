@@ -66,6 +66,7 @@ const MessageThread = () => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
+  const [proSlug, setProSlug] = useState<string | null>(null);
   /** user_id do destinatário (quem recebe a mensagem) — usado para push de nova mensagem */
   const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
 
@@ -384,7 +385,7 @@ const MessageThread = () => {
         const isClient = req.client_id === user.id;
 
         // ⚡ Paraleliza tudo que depende de req + user
-        const proQuery = supabase.from("professionals").select("user_id, availability_status").eq("id", req.professional_id).maybeSingle();
+        const proQuery = supabase.from("professionals").select("user_id, availability_status, slug").eq("id", req.professional_id).maybeSingle();
         const reviewCountQuery = (isClient && (req.status === "completed" || req.status === "closed"))
           ? supabase.from("reviews").select("*", { count: "exact", head: true }).eq("request_id", threadId).eq("client_id", user.id)
           : Promise.resolve({ count: null });
@@ -400,7 +401,10 @@ const MessageThread = () => {
         setAppointment(appRes.data ? (appRes.data as any) : null);
 
         if (pro) {
-          if (isClient) setProAvailabilityStatus((pro as any).availability_status || "available");
+          if (isClient) {
+            setProAvailabilityStatus((pro as any).availability_status || "available");
+            setProSlug((pro as any).slug || null);
+          }
           if (!isClient && pro.user_id === user.id) {
             setIsProfessional(true);
             setChatProUserId(user.id);
@@ -1782,57 +1786,67 @@ const MessageThread = () => {
         className="flex-shrink-0 z-30 bg-card/95 backdrop-blur-md border-b"
         style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
+        {/* ── Linha superior: voltar + avatar/nome ── */}
         <div className="flex items-center gap-3 px-4 py-2.5 max-w-screen-lg mx-auto">
           <Link to="/messages" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </Link>
-          {otherParty.avatar_url ? (
-            <img
-              src={otherParty.avatar_url}
-              alt={otherParty.name}
-              loading="eager"
-              className="w-9 h-9 rounded-full object-cover"
-              onError={(e) => {
-                const t = e.currentTarget;
-                t.onerror = null;
-                t.style.display = "none";
-                const fb = t.nextElementSibling as HTMLElement | null;
-                if (fb) fb.style.display = "flex";
-              }}
-            />
-          ) : null}
-          <div
-            className="w-9 h-9 rounded-full bg-primary/10 items-center justify-center text-xs font-bold text-primary"
-            style={{ display: otherParty.avatar_url ? "none" : "flex" }}
+
+          {/* Avatar + nome clicáveis para abrir perfil do profissional */}
+          <button
+            className="flex items-center gap-3 flex-1 min-w-0 text-left"
+            onClick={() => { if (!isProfessional && proSlug) navigate(`/p/${proSlug}`); }}
+            style={{ cursor: !isProfessional && proSlug ? "pointer" : "default" }}
           >
-            {otherInitials}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
-            {!isProfessional && proAvailabilityStatus ? (
-              <p className={`text-[10px] font-medium ${
-                proAvailabilityStatus === "available" ? "text-green-500" :
-                proAvailabilityStatus === "quotes_only" ? "text-amber-500" :
-                proAvailabilityStatus === "busy" ? "text-orange-500" :
-                "text-destructive"
-              }`}>
-                {proAvailabilityStatus === "available" ? "● Disponível" :
-                 proAvailabilityStatus === "quotes_only" ? "● Somente orçamentos" :
-                 proAvailabilityStatus === "busy" ? "● Agenda fechada" :
-                 "● Indisponível"}
-              </p>
-            ) : (
-              <p className="text-[10px] text-muted-foreground">online</p>
-            )}
-          </div>
-          {isProfessional && !isChatFinished && requestStatus === "accepted" &&
-          <>
-              <button
-              onClick={async () => {await loadFeeSettings();setBillingOpen(true);}}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-primary text-primary-foreground">
-                <BadgeDollarSign className="w-3.5 h-3.5" /> Cobrar
-              </button>
-              <button
+            {otherParty.avatar_url ? (
+              <img
+                src={otherParty.avatar_url}
+                alt={otherParty.name}
+                loading="eager"
+                className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                onError={(e) => {
+                  const t = e.currentTarget;
+                  t.onerror = null;
+                  t.style.display = "none";
+                  const fb = t.nextElementSibling as HTMLElement | null;
+                  if (fb) fb.style.display = "flex";
+                }}
+              />
+            ) : null}
+            <div
+              className="w-9 h-9 rounded-full bg-primary/10 items-center justify-center text-xs font-bold text-primary flex-shrink-0"
+              style={{ display: otherParty.avatar_url ? "none" : "flex" }}
+            >
+              {otherInitials}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
+              {!isProfessional && proAvailabilityStatus ? (
+                <p className={`text-[10px] font-medium ${
+                  proAvailabilityStatus === "available" ? "text-green-500" :
+                  proAvailabilityStatus === "quotes_only" ? "text-amber-500" :
+                  proAvailabilityStatus === "busy" ? "text-orange-500" :
+                  "text-destructive"
+                }`}>
+                  {proAvailabilityStatus === "available" ? "● Disponível" :
+                   proAvailabilityStatus === "quotes_only" ? "● Somente orçamentos" :
+                   proAvailabilityStatus === "busy" ? "● Agenda fechada" :
+                   "● Indisponível"}
+                </p>
+              ) : null}
+            </div>
+          </button>
+        </div>
+
+        {/* ── Barra de ações: botões maiores abaixo da linha do perfil ── */}
+        {isProfessional && !isChatFinished && requestStatus === "accepted" && (
+          <div className="flex gap-2.5 px-4 pb-3 max-w-screen-lg mx-auto">
+            <button
+              onClick={async () => { await loadFeeSettings(); setBillingOpen(true); }}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold bg-primary text-primary-foreground shadow-sm active:scale-95 transition-transform">
+              <BadgeDollarSign className="w-4.5 h-4.5" /> Cobrar
+            </button>
+            <button
               onClick={async () => {
                 if (!userId || !threadId) return;
                 setClosingCall(true);
@@ -1844,19 +1858,19 @@ const MessageThread = () => {
                 await supabase.from("service_requests").update({ status: "completed" } as any).eq("id", threadId);
                 setRequestStatus("completed");
                 await markAppointmentDone();
-
                 await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
-
                 setClosingCall(false);
                 toast({ title: "Chamada encerrada!" });
               }}
               disabled={closingCall}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors">
-                <LogOut className="w-3.5 h-3.5" /> Encerrar
-              </button>
-            </>
-          }
-          {!isProfessional && !isChatFinished && requestStatus === "accepted" && hasPaymentConfirmed &&
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold bg-destructive/10 text-destructive border border-destructive/20 active:scale-95 transition-transform">
+              <LogOut className="w-4.5 h-4.5" /> Encerrar
+            </button>
+          </div>
+        )}
+
+        {!isProfessional && !isChatFinished && requestStatus === "accepted" && hasPaymentConfirmed && !canCloseByDelay && (
+          <div className="px-4 pb-3 max-w-screen-lg mx-auto">
             <button
               onClick={async () => {
                 if (!userId || !threadId) return;
@@ -1876,11 +1890,14 @@ const MessageThread = () => {
                 toast({ title: "Chat encerrado!" });
               }}
               disabled={closingCall}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors">
-              <LogOut className="w-3.5 h-3.5" /> Encerrar chat
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold bg-destructive/10 text-destructive border border-destructive/20 active:scale-95 transition-transform">
+              <LogOut className="w-4.5 h-4.5" /> Encerrar chat
             </button>
-          }
-          {canCloseByDelay && (
+          </div>
+        )}
+
+        {canCloseByDelay && (
+          <div className="px-4 pb-3 max-w-screen-lg mx-auto">
             <button
               onClick={async () => {
                 if (!userId || !threadId) return;
@@ -1905,11 +1922,11 @@ const MessageThread = () => {
                 toast({ title: "Chat encerrado por demora.", description: "O profissional foi notificado." });
               }}
               disabled={closingCall}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-100 text-orange-600 text-xs font-semibold hover:bg-orange-200 transition-colors dark:bg-orange-900/20 dark:text-orange-400">
-              <LogOut className="w-3.5 h-3.5" /> Encerrar por demora
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold bg-orange-100 text-orange-600 border border-orange-200 active:scale-95 transition-transform dark:bg-orange-900/20 dark:text-orange-400">
+              <LogOut className="w-4.5 h-4.5" /> Encerrar por demora
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </header>
 
       <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">

@@ -62,6 +62,7 @@ const ProfessionalProfile = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [callDialogOpen, setCallDialogOpen] = useState(false);
   const [agendaDialogOpen, setAgendaDialogOpen] = useState(false);
+  const [avatarLightbox, setAvatarLightbox] = useState(false);
 
   // Estado para edição do nome
   const [editingName, setEditingName] = useState(false);
@@ -290,203 +291,239 @@ const ProfessionalProfile = () => {
           <ArrowLeft className="w-4 h-4" /> Voltar
         </Link>
 
-        {/* Main Card */}
-        <div className="bg-card border rounded-2xl p-5 shadow-card mb-4">
-          <div className="flex items-start gap-4">
-            <div className="relative flex-shrink-0">
-              {avatarUrl ? (
-                <img src={avatarUrl} alt={name} className="w-20 h-20 rounded-2xl object-cover" />
-              ) : (
-                <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center text-xl font-bold text-muted-foreground">{initials}</div>
-              )}
-              {isOwner && (
-                <div className="absolute -bottom-1 -right-1">
-                  <ImageCropUpload onUpload={handlePhotoUpload} aspect={1} shape="round" bucketPath="professionals" currentImage={avatarUrl} label="" />
-                </div>
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                {editingName ? (
-                  <div className="flex items-center gap-2 w-full">
-                    <input
-                      value={editNameValue}
-                      onChange={(e) => setEditNameValue(e.target.value)}
-                      className="flex-1 border rounded-lg px-2 py-1 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                      autoFocus
+        {/* ── Main Card — Hero redesenhado ── */}
+        <div className="bg-card border rounded-2xl shadow-card mb-4 overflow-hidden">
+
+          {/* Faixa decorativa topo */}
+          <div className="h-24 w-full relative" style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }}>
+            {/* ações do dono no canto superior direito */}
+            {isOwner && pro.slug && (
+              <button onClick={handleShareLink} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors" title="Compartilhar perfil">
+                <Share2 className="w-4 h-4 text-white" />
+              </button>
+            )}
+          </div>
+
+          <div className="px-5 pb-5">
+            {/* Avatar — sobrepõe a faixa */}
+            <div className="flex items-end justify-between -mt-12 mb-3">
+              <div className="relative">
+                <button
+                  className="block focus:outline-none group"
+                  onClick={() => avatarUrl && setAvatarLightbox(true)}
+                  title={avatarUrl ? "Ver foto" : undefined}
+                  style={{ cursor: avatarUrl ? "pointer" : "default" }}
+                >
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={name}
+                      className="w-24 h-24 rounded-2xl object-cover border-4 border-card shadow-lg group-hover:brightness-90 transition-all"
                     />
-                    <button onClick={handleNameSave} className="p-1.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => setEditingName(false)} className="p-1.5 bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 transition-colors">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                  ) : (
+                    <div className="w-24 h-24 rounded-2xl bg-muted border-4 border-card shadow-lg flex items-center justify-center text-2xl font-bold text-muted-foreground">
+                      {initials}
+                    </div>
+                  )}
+                </button>
+                {isOwner && (
+                  <div className="absolute -bottom-1 -right-1">
+                    <ImageCropUpload onUpload={handlePhotoUpload} aspect={1} shape="round" bucketPath="professionals" currentImage={avatarUrl} label="" />
                   </div>
-                ) : (
-                  <>
-                    <h1 className="text-lg font-bold text-foreground truncate">{name}</h1>
-                    {isOwner && (
-                      <>
-                        <button onClick={() => { setEditNameValue(name); setEditingName(true); }} className="ml-1 p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        {pro.slug && (
-                          <button onClick={handleShareLink} className="p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0" title="Compartilhar perfil">
-                            <Share2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </>
                 )}
               </div>
 
-              {!editingName && (
-                <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                  <p className="text-base font-semibold text-primary truncate">
-                    {pro.profession_name && pro.profession_name !== "—" ? pro.profession_name : pro.category_name}
-                  </p>
-                  {pro.verified && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold flex-shrink-0">
-                      <BadgeCheck className="w-3.5 h-3.5 fill-emerald-100" />
-                      Verificado
-                    </span>
-                  )}
-                </div>
-              )}
+              {/* Rating — canto direito, mesma linha do avatar */}
+              <div className="flex items-center gap-1.5 mb-1">
+                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                <span className="font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
+                <span className="text-xs text-muted-foreground">({pro.total_reviews})</span>
+              </div>
+            </div>
 
-              {isOwner && categories.length > 0 && (
-                <div className="flex flex-wrap gap-2 items-center mt-1.5">
-                  <select
-                    value={pro.category_id || ""}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                    disabled={savingCategoryProfession}
-                    className="border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={pro.profession_id || ""}
-                    onChange={(e) => handleProfessionChange(e.target.value)}
-                    disabled={savingCategoryProfession}
-                    className="border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                  >
-                    <option value="">— Profissão —</option>
-                    {professions.filter((pr) => pr.category_id === (pro.category_id || "")).map((pr) => (
-                      <option key={pr.id} value={pr.id}>{pr.name}</option>
-                    ))}
-                  </select>
-                </div>
+            {/* Nome + edição */}
+            {editingName ? (
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  value={editNameValue}
+                  onChange={(e) => setEditNameValue(e.target.value)}
+                  className="flex-1 border rounded-lg px-2 py-1 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  autoFocus
+                />
+                <button onClick={handleNameSave} className="p-1.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => setEditingName(false)} className="p-1.5 bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 transition-colors">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-1">
+                <h1 className="text-xl font-bold text-foreground leading-tight">{name}</h1>
+                {isOwner && (
+                  <button onClick={() => { setEditNameValue(name); setEditingName(true); }} className="p-1 text-muted-foreground hover:text-primary transition-colors flex-shrink-0">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Profissão */}
+            {!editingName && (
+              <p className="text-sm font-semibold text-primary mb-2">
+                {pro.profession_name && pro.profession_name !== "—" ? pro.profession_name : pro.category_name}
+              </p>
+            )}
+
+            {/* Badges — TODOS na mesma linha */}
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              {pro.verified && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
+                  <BadgeCheck className="w-3.5 h-3.5 fill-emerald-100" /> Verificado
+                </span>
               )}
-              
               {pro.user_type === "company" ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-white text-xs font-bold mt-1 shadow-sm">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-white text-xs font-bold shadow-sm">
                   <Building2 className="w-3 h-3" /> Empresa
                 </span>
               ) : (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium mt-0.5 bg-muted text-muted-foreground">
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground">
                   Profissional
                 </span>
               )}
-
-              {/* Availability Status */}
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <currentAvailability.icon className={`w-3 h-3 ${currentAvailability.color} fill-current`} />
-                <span className={`text-xs font-medium ${currentAvailability.color}`}>{currentAvailability.label}</span>
-              </div>
-
               {isOwner && pro.profile_status !== "approved" && (
-                <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                  pro.profile_status === "pending" ? "bg-muted text-muted-foreground" : "bg-destructive/10 text-destructive"
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                  pro.profile_status === "pending" ? "bg-amber-100 text-amber-700" : "bg-destructive/10 text-destructive"
                 }`}>
                   {pro.profile_status === "pending" ? "Em análise" : "Reprovado"}
                 </span>
               )}
-              <div className="flex items-center gap-3 mt-2 text-sm">
-                <span className="flex items-center gap-1">
-                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                  <strong>{Number(pro.rating).toFixed(1)}</strong>
-                </span>
-                <span className="text-muted-foreground">{pro.total_services} serviços</span>
-                <span className="text-muted-foreground">{pro.total_reviews} avaliações</span>
-              </div>
             </div>
-          </div>
 
-          {/* Owner: change availability */}
-          {isOwner && (
-            <div className="mt-4 pt-3 border-t space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status de disponibilidade</label>
-                <Select value={pro.availability_status} onValueChange={handleStatusChange}>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availabilityOptions.map(o => (
-                      <SelectItem key={o.value} value={o.value}>
-                        <span className="flex items-center gap-2">
-                          <o.icon className={`w-3 h-3 ${o.color} fill-current`} />
-                          {o.label}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {pro.slug && (
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Seu link público</label>
-                  <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
-                    <span className="text-xs text-muted-foreground flex-1 truncate">
-                      appchamo.com/professional/{pro.slug}
-                    </span>
-                    <button
-                      onClick={handleCopyLink}
-                      className="text-xs text-primary font-semibold hover:underline flex-shrink-0"
-                    >
-                      Copiar link
-                    </button>
-                    <button
-                      onClick={handleShareLink}
-                      className="text-xs text-muted-foreground hover:text-primary flex-shrink-0"
-                      title="Compartilhar"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
+            {/* Disponibilidade + serviços */}
+            <div className="flex items-center gap-3 text-xs text-muted-foreground mb-1">
+              <span className={`flex items-center gap-1 font-medium ${currentAvailability.color}`}>
+                <currentAvailability.icon className={`w-3 h-3 fill-current`} />
+                {currentAvailability.label}
+              </span>
+              <span>·</span>
+              <span>{pro.total_services} serviços</span>
             </div>
-          )}
 
-          {!isOwner && pro.availability_status !== "unavailable" && (
-            <div className="mt-5 flex flex-col gap-2">
-              {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
-                <button
-                  onClick={() => setAgendaDialogOpen(true)}
-                  className="w-full py-3 rounded-xl border-2 border-primary text-primary font-bold text-sm hover:bg-primary/10 transition-colors flex items-center justify-center gap-2"
+            {/* Edição de categoria/profissão (owner) */}
+            {isOwner && categories.length > 0 && (
+              <div className="flex flex-wrap gap-2 items-center mt-2">
+                <select
+                  value={pro.category_id || ""}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  disabled={savingCategoryProfession}
+                  className="border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
                 >
-                  <Calendar className="w-4 h-4" />
-                  Agendar Serviço
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={pro.profession_id || ""}
+                  onChange={(e) => handleProfessionChange(e.target.value)}
+                  disabled={savingCategoryProfession}
+                  className="border rounded-lg px-2 py-1 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="">— Profissão —</option>
+                  {professions.filter((pr) => pr.category_id === (pro.category_id || "")).map((pr) => (
+                    <option key={pr.id} value={pr.id}>{pr.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Owner: status + link público */}
+            {isOwner && (
+              <div className="mt-4 pt-3 border-t space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status de disponibilidade</label>
+                  <Select value={pro.availability_status} onValueChange={handleStatusChange}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availabilityOptions.map(o => (
+                        <SelectItem key={o.value} value={o.value}>
+                          <span className="flex items-center gap-2">
+                            <o.icon className={`w-3 h-3 ${o.color} fill-current`} />
+                            {o.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {pro.slug && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Seu link público</label>
+                    <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
+                      <span className="text-xs text-muted-foreground flex-1 truncate">appchamo.com/professional/{pro.slug}</span>
+                      <button onClick={handleCopyLink} className="text-xs text-primary font-semibold hover:underline flex-shrink-0">Copiar link</button>
+                      <button onClick={handleShareLink} className="text-xs text-muted-foreground hover:text-primary flex-shrink-0" title="Compartilhar">
+                        <Share2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Botões de ação (visitante) */}
+            {!isOwner && pro.availability_status !== "unavailable" && (
+              <div className="mt-4 flex flex-col gap-2">
+                {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
+                  <button
+                    onClick={() => setAgendaDialogOpen(true)}
+                    className="w-full py-3 rounded-xl border-2 border-primary text-primary font-bold text-sm hover:bg-primary/10 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Calendar className="w-4 h-4" /> Agendar Serviço
+                  </button>
+                )}
+                <button onClick={handleCall} className="w-full py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2">
+                  CHAMAR
                 </button>
-              )}
-              <button onClick={handleCall} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors flex items-center justify-center">
-                CHAMAR
+              </div>
+            )}
+            {!isOwner && pro.availability_status === "unavailable" && (
+              <div className="mt-4">
+                <div className="w-full py-3 rounded-xl bg-muted text-muted-foreground font-medium text-sm text-center">
+                  Profissional indisponível no momento
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Lightbox da foto do perfil */}
+        {avatarLightbox && avatarUrl && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-8"
+            onClick={() => setAvatarLightbox(false)}
+          >
+            <div
+              className="relative max-w-sm w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={avatarUrl}
+                alt={name}
+                className="w-full rounded-2xl shadow-2xl object-cover"
+                style={{ maxHeight: "70vh", objectFit: "contain" }}
+              />
+              <button
+                onClick={() => setAvatarLightbox(false)}
+                className="absolute -top-3 -right-3 w-9 h-9 rounded-full bg-white shadow-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-4 h-4 text-foreground" />
               </button>
             </div>
-          )}
-          {!isOwner && pro.availability_status === "unavailable" && (
-            <div className="mt-5">
-              <div className="w-full py-3 rounded-xl bg-muted text-muted-foreground font-medium text-sm text-center">
-                Profissional indisponível no momento
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Experiência, Serviços e Sobre */}
         {(pro.experience || (pro.services && pro.services.length > 0) || pro.bio) && (

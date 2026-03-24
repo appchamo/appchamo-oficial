@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -28,6 +28,23 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
   const [form, setForm] = useState({ image_url: "", title: "", description: "" });
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const carouselRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateArrows = useCallback(() => {
+    const el = carouselRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.offsetWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    const el = carouselRef.current;
+    if (!el) return;
+    updateArrows();
+    el.addEventListener("scroll", updateArrows, { passive: true });
+    return () => el.removeEventListener("scroll", updateArrows);
+  }, [items, updateArrows]);
 
   const scrollCarousel = (dir: "left" | "right") => {
     if (!carouselRef.current) return;
@@ -167,26 +184,26 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
         ) : (
           /* Carrossel 3 por vez */
           <div className="relative">
-            {/* Seta esquerda */}
-            {items.length > 3 && (
-              <button
-                onClick={() => scrollCarousel("left")}
-                className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
-                aria-label="Anterior"
-              >
-                <ChevronLeft className="w-4 h-4 text-foreground" />
-              </button>
-            )}
-            {/* Seta direita */}
-            {items.length > 3 && (
-              <button
-                onClick={() => scrollCarousel("right")}
-                className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
-                aria-label="Próximo"
-              >
-                <ChevronRight className="w-4 h-4 text-foreground" />
-              </button>
-            )}
+            {/* Seta esquerda — visível só quando há conteúdo à esquerda */}
+            <button
+              onClick={() => scrollCarousel("left")}
+              aria-label="Anterior"
+              className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center transition-all duration-200 ${
+                canScrollLeft ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+              }`}
+            >
+              <ChevronLeft className="w-4 h-4 text-foreground" />
+            </button>
+            {/* Seta direita — visível só quando há conteúdo à direita */}
+            <button
+              onClick={() => scrollCarousel("right")}
+              aria-label="Próximo"
+              className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 z-10 w-7 h-7 rounded-full bg-white border shadow-md flex items-center justify-center transition-all duration-200 ${
+                canScrollRight ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+              }`}
+            >
+              <ChevronRight className="w-4 h-4 text-foreground" />
+            </button>
           <div
             ref={carouselRef}
             className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory"

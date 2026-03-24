@@ -171,12 +171,10 @@ Deno.serve(async (req) => {
               continue;
             }
 
-            // Usamos o getPublicUrl oficial para garantir que funcione em qualquer região
-            const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(filePath);
-
+            // Grava apenas o path no bucket (igual upload-document) — URLs públicas quebram createSignedUrl no admin
             await supabase.from("professional_documents").insert({
               professional_id: proData.id,
-              file_url: publicUrl,
+              file_url: filePath,
               type: "identity",
               status: "pending",
             });

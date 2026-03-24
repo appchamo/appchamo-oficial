@@ -13,6 +13,46 @@ const ASAAS_ENV = Deno.env.get("ASAAS_ENV") ?? "sandbox";
 const ASAAS_BASE_URL = ASAAS_ENV === "production" ? "https://api.asaas.com/v3" : "https://api-sandbox.asaas.com/v3";
 const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
 
+const UPLOADS_BUCKET = "uploads";
+
+/**
+ * professional_documents.file_url pode ser:
+ * - path relativo: "documents/uuid/arquivo.pdf" (BecomeProfessional / upload-document)
+ * - URL pública: "https://....supabase.co/storage/v1/object/public/uploads/documents/..." (complete-signup antigo)
+ * createSignedUrl só aceita o path dentro do bucket.
+ */
+function normalizeUploadsStoragePath(raw: unknown): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) {
+    let p = s.replace(/^\/+/, "");
+    if (p.startsWith(`${UPLOADS_BUCKET}/`)) p = p.slice(UPLOADS_BUCKET.length + 1);
+    return p;
+  }
+  try {
+    const u = new URL(s);
+    const pathname = u.pathname;
+    const pub = `/object/public/${UPLOADS_BUCKET}/`;
+    const sig = `/object/sign/${UPLOADS_BUCKET}/`;
+    let i = pathname.indexOf(pub);
+    if (i !== -1) {
+      return decodeURIComponent(pathname.slice(i + pub.length).replace(/^\/+/, ""));
+    }
+    i = pathname.indexOf(sig);
+    if (i !== -1) {
+      return decodeURIComponent(pathname.slice(i + sig.length).replace(/^\/+/, ""));
+    }
+    // Alguns proxies / formatos alternativos
+    const m = pathname.match(/\/(?:object\/(?:public|sign)\/)?uploads\/(.+)$/);
+    if (m) return decodeURIComponent(m[1]);
+  } catch {
+    /* ignore */
+  }
+  const loose = s.match(/\/object\/(?:public|sign)\/uploads\/(.+?)(?:\?|$)/);
+  if (loose) return decodeURIComponent(loose[1]);
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -400,18 +440,26 @@ serve(async (req) => {
       const { filePath } = body;
       if (!filePath) throw new Error("filePath é obrigatório.");
 
-      const { data, error } = await supabase.storage
-        .from("uploads")
-        .createSignedUrl(filePath, 3600);
-
-      if (error || !data?.signedUrl) {
-        console.warn("[sign_document_url] error:", error?.message, "path:", filePath);
+      const normalized = normalizeUploadsStoragePath(filePath);
+      if (!normalized) {
+        console.warn("[sign_document_url] could not normalize path:", filePath);
         return new Response(JSON.stringify({ signedUrl: null, notFound: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      console.log("[sign_document_url] OK, path:", filePath);
+      const { data, error } = await supabase.storage
+        .from(UPLOADS_BUCKET)
+        .createSignedUrl(normalized, 3600);
+
+      if (error || !data?.signedUrl) {
+        console.warn("[sign_document_url] error:", error?.message, "raw:", filePath, "normalized:", normalized);
+        return new Response(JSON.stringify({ signedUrl: null, notFound: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      console.log("[sign_document_url] OK, normalized:", normalized);
       return new Response(JSON.stringify({ signedUrl: data.signedUrl, notFound: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

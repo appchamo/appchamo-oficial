@@ -84,13 +84,22 @@ serve(async (req) => {
               .eq("id", tx.id)
               .maybeSingle();
 
+            // Detecta método de pagamento a partir do evento Asaas
+            const asaasBillingType = String(payment.billingType || "PIX").toUpperCase();
+            const isCardPayment = asaasBillingType === "CREDIT_CARD" || asaasBillingType === "DEBIT_CARD";
+            const methodLabel = isCardPayment ? "Cartão" : "PIX";
+
+            // "Valor Pago" do ponto de vista do profissional = valor original sem desconto de cupom
+            const originalAmountForPro = Number(txFull?.original_amount || tx.total_amount);
+            const originalStr = originalAmountForPro.toFixed(2).replace(".", ",");
+
             const professionalNetStr = txFull?.professional_net
               ? Number(txFull.professional_net).toFixed(2).replace(".", ",")
               : null;
 
             const confirmContent = professionalNetStr
-              ? `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX\nRecebe: R$ ${professionalNetStr}`
-              : `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${totalStr}\nMétodo: PIX`;
+              ? `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${originalStr}\nMétodo: ${methodLabel}\nRecebe: R$ ${professionalNetStr}`
+              : `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${originalStr}\nMétodo: ${methodLabel}`;
 
             // Verifica se mensagem de confirmação já existe (evita duplicata entre PAYMENT_RECEIVED e PAYMENT_CONFIRMED)
             const { data: existingMsg } = await supabase
@@ -148,7 +157,7 @@ serve(async (req) => {
             await supabase.from("notifications").insert({
               user_id: tx.client_id,
               title: "✅ Pagamento Confirmado",
-              message: `Seu pagamento via PIX de R$ ${totalStr} foi confirmado.`,
+              message: `Seu pagamento via ${methodLabel} de R$ ${originalStr} foi confirmado.`,
               type: "success",
               link: `/messages/${tx.request_id}`,
               image_url: proAvatar,
@@ -156,8 +165,8 @@ serve(async (req) => {
 
             if (proUserId) {
               const proMsg = professionalNetStr
-                ? `Você vai receber R$ ${professionalNetStr} via PIX (líquido após taxas).`
-                : `Você recebeu um pagamento via PIX de R$ ${totalStr}.`;
+                ? `Você vai receber R$ ${professionalNetStr} via ${methodLabel} (líquido após taxas).`
+                : `Você recebeu um pagamento via ${methodLabel} de R$ ${originalStr}.`;
               await supabase.from("notifications").insert({
                 user_id: proUserId,
                 title: "💰 Pagamento Recebido!",
@@ -197,40 +206,36 @@ serve(async (req) => {
               (settings || []).forEach((s: any) => { settingsMap[s.key] = parseFloat(s.value) || 0; });
 
               const anticipationEnabled = fiscal?.anticipation_enabled || false;
-              const paymentMethod = fiscal?.payment_method || "pix";
-              const grossAmount = Number(tx.total_amount);
+              // Método de pagamento: detecta pelo billingType do Asaas (mais confiável)
+              const asaasBillingTypeWallet = String(payment.billingType || "PIX").toUpperCase();
+              const paymentMethod = (asaasBillingTypeWallet === "CREDIT_CARD" || asaasBillingTypeWallet === "DEBIT_CARD") ? "card" : "pix";
+
+              // Sempre usar o valor ORIGINAL do serviço (sem desconto de cupom)
+              // O profissional não deve ser penalizado pelo desconto dado pela plataforma
+              const grossAmount = Number(txFull?.original_amount || tx.original_amount || tx.total_amount);
 
               const commissionPct = settingsMap["commission_pct"] ?? 10;
               let paymentFeePct = 0;
               let paymentFeeFixed = 0;
               if (paymentMethod === "pix") {
-                paymentFeePct  = settingsMap["pix_fee_pct"] ?? 0;
+                paymentFeePct   = settingsMap["pix_fee_pct"] ?? 0;
                 paymentFeeFixed = settingsMap["pix_fee_fixed"] ?? 0;
               } else {
-                paymentFeePct  = settingsMap["card_fee_pct"] ?? 0;
+                paymentFeePct   = settingsMap["card_fee_pct"] ?? 0;
                 paymentFeeFixed = settingsMap["card_fee_fixed"] ?? 0;
               }
+
+              // Recalcula sempre a partir do valor original (ignora professional_net armazenado que pode estar errado)
               const commissionFeeCalc = Number((grossAmount * commissionPct / 100).toFixed(2));
               const paymentFeeCalc    = Number((grossAmount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
-
-              const { data: txDetail } = await supabase
-                .from("transactions")
-                .select("professional_net, platform_fee")
-                .eq("id", tx.id)
-                .maybeSingle();
-
-              const professionalNet = txDetail?.professional_net != null
-                ? Number(txDetail.professional_net)
-                : Number((grossAmount - commissionFeeCalc - paymentFeeCalc).toFixed(2));
-
-              const totalStoredFee = txDetail?.platform_fee != null ? Number(txDetail.platform_fee) : (commissionFeeCalc + paymentFeeCalc);
-              const paymentFeeAmount  = paymentFeeCalc;
-              const commissionAmount  = Number((totalStoredFee - paymentFeeAmount).toFixed(2));
+              const professionalNet   = Number((grossAmount - commissionFeeCalc - paymentFeeCalc).toFixed(2));
 
               let anticipationFeeAmount = 0;
               if (anticipationEnabled && paymentMethod !== "pix") {
-                const anticipationFeePct = settingsMap["anticipation_fee_pct"] || 15;
+                // Usa o valor configurado em platform_settings; padrão 0 para não aplicar taxa indevida
+                const anticipationFeePct = settingsMap["anticipation_fee_pct"] ?? 0;
                 anticipationFeeAmount = Number((professionalNet * anticipationFeePct / 100).toFixed(2));
+                console.log(`Antecipação: ${anticipationFeePct}% sobre R$${professionalNet} = R$${anticipationFeeAmount}`);
               }
 
               const netAmount = Number((professionalNet - anticipationFeeAmount).toFixed(2));
@@ -247,14 +252,15 @@ serve(async (req) => {
                 availableAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
               }
 
+              console.log(`Wallet: grossAmount=${grossAmount}, commission=${commissionFeeCalc}, paymentFee=${paymentFeeCalc}, net=${professionalNet}, anticipation=${anticipationFeeAmount}, final=${netAmount}`);
+
               // Usa upsert com ON CONFLICT DO NOTHING para ser à prova de race condition
-              // (PAYMENT_RECEIVED e PAYMENT_CONFIRMED podem chegar simultaneamente)
               const { error: walletErr } = await supabase.from("wallet_transactions").upsert({
                 professional_id: txFull.professional_id,
                 transaction_id: tx.id,
                 gross_amount: grossAmount,
-                platform_fee_amount: commissionAmount,
-                payment_fee_amount: paymentFeeAmount,
+                platform_fee_amount: commissionFeeCalc,
+                payment_fee_amount: paymentFeeCalc,
                 anticipation_fee_amount: anticipationFeeAmount,
                 amount: netAmount,
                 payment_method: paymentMethod,

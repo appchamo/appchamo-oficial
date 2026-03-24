@@ -1328,6 +1328,7 @@ const MessageThread = () => {
             action: "create_service_payment",
             request_id: threadId,
             amount: finalAmount,
+            original_amount: parseFloat(paymentData.amount), // valor original sem desconto de cupom
             installment_count: parseInt(installments),
             credit_card: {
               holder_name: cardForm.name,
@@ -1496,14 +1497,13 @@ const MessageThread = () => {
         return;
       }
 
-      const finalAmount = getFinalAmountWithFee(parseInt(installments), "card");
-      const methodLabel = `Cartão de crédito (${installments}x)`;
-      const discountNote = couponDiscount ?
-      `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
-      "";
+      // Valor original do serviço (sem desconto de cupom — o profissional não precisa saber do desconto)
       const originalAmtCard = parseFloat(paymentData.amount);
-      const proNetCard = calcProfessionalNet(originalAmtCard, "card", parseInt(installments));
-      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: ${methodLabel}\nRecebe: R$ ${proNetCard.toFixed(2).replace(".", ",")}`;
+      const inst = parseInt(installments);
+      const methodLabel = inst > 1 ? `Cartão de crédito (${inst}x)` : "Cartão de crédito (1x)";
+      // Profissional recebe: valor original - comissão - taxa cartão
+      const proNetCard = calcProfessionalNet(originalAmtCard, "card", inst);
+      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${originalAmtCard.toFixed(2).replace(".", ",")}\nMétodo: ${methodLabel}\nRecebe: R$ ${proNetCard.toFixed(2).replace(".", ",")}`;
 
       await supabase.from("chat_messages").insert({
         request_id: threadId,
@@ -1515,7 +1515,7 @@ const MessageThread = () => {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
       }
 
-      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
+      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${originalAmtCard.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
       await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetCard.toFixed(2).replace(".", ",")} via Cartão (líquido após taxas).`, null, profile?.avatar_url ?? null);
 
       await awardPostPaymentCoupon(parseFloat(paymentData.amount));

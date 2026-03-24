@@ -404,56 +404,8 @@ serve(async (req) => {
 
       if (insertErr) throw new Error(insertErr.message);
 
-      // Se já confirmado aqui (cobrança instantânea), cria wallet_transaction imediatamente
-      if (confirmed && professionalId) {
-        const { data: fiscal } = await supabase
-          .from("professional_fiscal_data")
-          .select("anticipation_enabled, payment_method")
-          .eq("professional_id", professionalId)
-          .maybeSingle();
-
-        const { data: settingsAll } = await supabase
-          .from("platform_settings")
-          .select("key, value")
-          .in("key", ["transfer_period_card_days", "transfer_period_card_anticipated_days", "anticipation_fee_pct"]);
-
-        const cfgAll: Record<string, number> = {};
-        (settingsAll || []).forEach((r: any) => { cfgAll[r.key] = parseFloat(r.value || "0"); });
-
-        const anticipationEnabled = fiscal?.anticipation_enabled || false;
-        let anticipationFeeAmt = 0;
-        if (anticipationEnabled) {
-          anticipationFeeAmt = Number((professionalNet * (cfgAll["anticipation_fee_pct"] || 15) / 100).toFixed(2));
-        }
-        const netAmt = Number((professionalNet - anticipationFeeAmt).toFixed(2));
-        const cardDays = anticipationEnabled
-          ? (cfgAll["transfer_period_card_anticipated_days"] || 7)
-          : (cfgAll["transfer_period_card_days"] || 32);
-        const availableAt = new Date(Date.now() + cardDays * 86400000).toISOString();
-
-        const { data: newTx } = await supabase
-          .from("transactions")
-          .select("id")
-          .eq("asaas_payment_id", asaasPayment.id)
-          .maybeSingle();
-
-        if (newTx?.id) {
-          await supabase.from("wallet_transactions").upsert({
-            professional_id: professionalId,
-            transaction_id: newTx.id,
-            gross_amount: totalAmount,
-            platform_fee_amount: commissionFee,
-            payment_fee_amount: paymentFee,
-            anticipation_fee_amount: anticipationFeeAmt,
-            amount: netAmt,
-            payment_method: "card",
-            anticipation_enabled: anticipationEnabled,
-            description: "Serviço recebido via Cartão",
-            status: "pending",
-            available_at: availableAt,
-          }, { onConflict: "transaction_id", ignoreDuplicates: true });
-        }
-      }
+      // wallet_transaction é criada pelo asaas_webhook quando o evento PAYMENT_CONFIRMED chegar.
+      // Não criamos aqui para evitar race condition entre edge function e webhook.
 
       return new Response(
         JSON.stringify({

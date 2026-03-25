@@ -57,6 +57,7 @@ const BannerGroup = ({ banners, isMobile }: { banners: Banner[]; isMobile: boole
     <section className="w-full mt-[3%] mb-[3%]">
       <div
         ref={scrollRef}
+        data-tab-swipe-ignore
         className="flex overflow-x-auto overflow-y-hidden snap-x snap-mandatory scrollbar-hide"
         style={{ scrollBehavior: "smooth" }}
         onScroll={handleScroll}

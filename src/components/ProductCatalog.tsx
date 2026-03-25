@@ -302,6 +302,7 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
           )}
         <div
           ref={carouselRef}
+          data-tab-swipe-ignore
           className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory"
           style={{ scrollbarWidth: "none" }}
         >

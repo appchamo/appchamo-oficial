@@ -5,13 +5,14 @@ import { App as CapacitorApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
 import { syncAppIconBadge } from "@/lib/appBadge";
+import { MAIN_APP_TAB_PATHS } from "@/lib/mainAppTabs";
 
 const tabs = [
-  { icon: Home, label: "Início", path: "/home" },
-  { icon: Search, label: "Buscar", path: "/search" },
-  { icon: MessageSquare, label: "Chat", path: "/messages", badgeKey: "chat" as const },
-  { icon: Bell, label: "Notificações", path: "/notifications", badgeKey: "notifications" as const },
-  { icon: User, label: "Perfil", path: "/profile" },
+  { icon: Home, label: "Início", path: MAIN_APP_TAB_PATHS[0] },
+  { icon: Search, label: "Buscar", path: MAIN_APP_TAB_PATHS[1] },
+  { icon: MessageSquare, label: "Chat", path: MAIN_APP_TAB_PATHS[2], badgeKey: "chat" as const },
+  { icon: Bell, label: "Notificações", path: MAIN_APP_TAB_PATHS[3], badgeKey: "notifications" as const },
+  { icon: User, label: "Perfil", path: MAIN_APP_TAB_PATHS[4] },
 ];
 
 const BottomNav = () => {

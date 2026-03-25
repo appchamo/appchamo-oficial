@@ -414,7 +414,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     return (
       <section>
         <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Profissionais em destaque"}</h3>
-        <div className="flex gap-3 overflow-x-auto pb-2">
+        <div className="flex gap-3 overflow-x-auto pb-2" data-tab-swipe-ignore>
           {[1, 2].map((i) => (
             <div key={i} className="flex-shrink-0 w-[140px] rounded-2xl border bg-card p-3 space-y-2">
               <div className="w-14 h-14 rounded-full bg-muted animate-pulse mx-auto" />
@@ -504,6 +504,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
       <div
         ref={scrollRef}
+        data-tab-swipe-ignore
         className="flex overflow-x-auto overflow-y-hidden pb-2 scrollbar-hide snap-x snap-mandatory scroll-smooth"
         style={{ scrollBehavior: "smooth" }}
         onMouseEnter={() => setIsPaused(true)}

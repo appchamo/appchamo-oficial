@@ -367,6 +367,7 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
       <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">{title}</h3>
       <div
         ref={scrollRef}
+        data-tab-swipe-ignore
         className="flex overflow-x-auto overflow-y-hidden pb-2 scrollbar-hide border-0 shadow-none snap-x snap-mandatory scroll-smooth"
         style={{ scrollBehavior: "smooth" }}
         onMouseEnter={() => setIsPaused(true)}

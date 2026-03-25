@@ -80,6 +80,7 @@ const HomeAlertCarousel = ({
     <div className="w-full">
       <div
         ref={scrollRef}
+        data-tab-swipe-ignore
         className="flex overflow-x-auto overflow-y-hidden scrollbar-hide snap-x snap-mandatory"
         style={{ scrollBehavior: "smooth" }}
       >

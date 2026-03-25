@@ -5,7 +5,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { toast } from "@/hooks/use-toast";
 import {
-  Calendar,
   Loader2,
   Plus,
   Trash2,
@@ -18,6 +17,10 @@ import {
   Link2,
   Copy,
   Check,
+  ChevronRight,
+  Users,
+  ExternalLink,
+  CalendarCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -27,6 +30,7 @@ import { Link } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import ImageCropUpload from "@/components/ImageCropUpload";
+import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 
 const WEEKDAYS = [
   { value: 0, label: "Domingo" },
@@ -358,16 +362,18 @@ export default function ProAgenda() {
     );
   }
 
-  const agendaPublicPath = proSlug || professionalId || "";
-  const agendaPublicUrl =
-    typeof window !== "undefined" && agendaPublicPath ? `${window.location.origin}/agendar/${agendaPublicPath}` : "";
+  const profilePublicPath = proSlug || professionalId || "";
+  const profilePublicUrl = profilePublicPath ? getPublicProfessionalProfileUrl(profilePublicPath) : "";
 
-  const copyAgendaLink = async () => {
-    if (!agendaPublicUrl) return;
+  const copyProfileLink = async () => {
+    if (!profilePublicUrl) return;
     try {
-      await navigator.clipboard.writeText(agendaPublicUrl);
+      await navigator.clipboard.writeText(profilePublicUrl);
       setLinkCopied(true);
-      toast({ title: "Link copiado!", description: "Cole na bio do Instagram ou envie para seus clientes." });
+      toast({
+        title: "Link do perfil copiado!",
+        description: "Abre seu perfil no Chamô; o cliente toca em Agendar serviço para escolher horário.",
+      });
       window.setTimeout(() => setLinkCopied(false), 2000);
     } catch {
       toast({ title: "Não foi possível copiar", variant: "destructive" });
@@ -379,46 +385,56 @@ export default function ProAgenda() {
       <main className="max-w-screen-lg mx-auto px-4 py-6">
         {isBusiness && professionalId && (
           <section className="mb-6 rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-background to-amber-500/[0.06] p-4 sm:p-5 shadow-card">
-            <p className="text-xs font-bold text-primary uppercase tracking-wider mb-1">Link público da agenda</p>
-            <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
-              Qualquer pessoa com o link pode ver seus horários e agendar. Na hora de confirmar, o cliente entra no Chamô
-              (login ou cadastro) e volta para esta página.
-            </p>
-            <div className="flex items-center gap-2 rounded-xl border bg-background/90 px-3 py-2.5 mb-3">
-              <Link2 className="w-4 h-4 text-muted-foreground shrink-0" />
-              <p className="text-xs sm:text-sm font-mono truncate flex-1 text-foreground">{agendaPublicUrl || "…"}</p>
+            <div className="flex items-start gap-3 mb-3">
+              <div className="rounded-xl bg-primary/15 p-2.5 shrink-0">
+                <ExternalLink className="w-5 h-5 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-primary uppercase tracking-wider mb-1">Link público do seu perfil</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  É o mesmo link do perfil no Chamô. O cliente abre, vê suas informações e toca em{" "}
+                  <span className="font-semibold text-foreground">Agendar serviço</span>. Cole na bio (Instagram, TikTok)
+                  ou no WhatsApp — sempre em https.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border border-primary/15 bg-background/90 px-3 py-2.5 mb-3">
+              <Link2 className="w-4 h-4 text-primary/70 shrink-0" />
+              <p className="text-xs sm:text-sm font-mono truncate flex-1 text-foreground">{profilePublicUrl || "…"}</p>
             </div>
             <Button
               type="button"
               size="sm"
               className="rounded-xl gap-2"
-              onClick={copyAgendaLink}
-              disabled={!agendaPublicUrl}
+              onClick={copyProfileLink}
+              disabled={!profilePublicUrl}
             >
               {linkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              {linkCopied ? "Copiado!" : "Copiar link"}
+              {linkCopied ? "Copiado!" : "Copiar link do perfil"}
             </Button>
             {!agendaEnabled && (
               <p className="text-xs text-amber-700 dark:text-amber-400 mt-3 font-medium">
-                Ative a agenda abaixo para que o link permita agendamentos.
+                Ative a agenda abaixo para o botão de agendamento aparecer no seu perfil.
               </p>
             )}
           </section>
         )}
 
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-primary" />
-            Agenda
-          </h1>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="agenda-toggle" className="text-sm font-medium">Ativar agenda</Label>
-            <Switch
-              id="agenda-toggle"
-              checked={agendaEnabled}
-              onCheckedChange={handleToggleAgenda}
-              disabled={saving}
-            />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-4 border-b border-border/60">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-primary/12 p-2">
+              <CalendarCheck className="w-6 h-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-foreground tracking-tight">Configurar agenda</h1>
+              <p className="text-xs text-muted-foreground mt-0.5">Serviços, horários e atendentes</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 sm:shrink-0">
+            <Label htmlFor="agenda-toggle" className="text-sm font-medium whitespace-nowrap">
+              Ativar agenda
+            </Label>
+            <Switch id="agenda-toggle" checked={agendaEnabled} onCheckedChange={handleToggleAgenda} disabled={saving} />
           </div>
         </div>
 
@@ -427,33 +443,74 @@ export default function ProAgenda() {
         )}
 
         {/* Atendentes / Especialistas */}
-        <section className="bg-card border rounded-2xl p-4 mb-6">
-          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
-            <User className="w-4 h-4" />
-            Atendentes / Especialistas
-          </h2>
-          <p className="text-xs text-muted-foreground mb-3">Adicione os profissionais que atendem (ex.: barbeiros, médicos). Serviços e horários são configurados por atendente.</p>
-          <div className="flex flex-wrap gap-3 mb-3">
-            {atendentes.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 p-3 rounded-xl border bg-muted/20 w-full max-w-xs">
-                {a.photo_url ? (
-                  <img src={a.photo_url} alt="" className="w-12 h-12 rounded-full object-cover" />
-                ) : (
-                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center"><User className="w-6 h-6 text-primary" /></div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{a.name}</p>
-                  {a.description && <p className="text-xs text-muted-foreground line-clamp-2">{a.description}</p>}
-                </div>
-                <div className="flex gap-1">
-                  <Button size="sm" variant="outline" className="rounded-lg" onClick={() => setSelectedAtendenteId(a.id)}>Configurar</Button>
-                  <Button size="sm" variant="ghost" className="rounded-lg" onClick={() => openAtendenteDialog(a)}><Pencil className="w-3.5 h-3.5" /></Button>
-                  <Button size="sm" variant="ghost" className="text-destructive rounded-lg" onClick={() => deleteAtendente(a.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
-                </div>
+        <section className="rounded-2xl border border-border/80 bg-gradient-to-b from-card to-muted/20 shadow-card overflow-hidden mb-6">
+          <div className="px-4 sm:px-5 pt-4 pb-2 border-b border-border/60 bg-muted/30">
+            <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+              <div className="rounded-lg bg-primary/15 p-1.5">
+                <Users className="w-4 h-4 text-primary" />
               </div>
-            ))}
+              Atendentes e especialistas
+            </h2>
+            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed max-w-2xl">
+              Cada pessoa aparece na agenda do cliente com foto e nome. Configure serviços e horários por atendente.
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => openAtendenteDialog(null)} className="rounded-xl gap-1"><Plus className="w-4 h-4" /> Adicionar atendente</Button>
+          <div className="p-4 sm:p-5 space-y-3">
+            {atendentes.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-muted-foreground/25 bg-muted/20 py-10 px-4 text-center">
+                <User className="w-10 h-10 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-sm font-medium text-foreground">Nenhum atendente ainda</p>
+                <p className="text-xs text-muted-foreground mt-1">Adicione quem atende na sua equipe.</p>
+              </div>
+            ) : (
+              atendentes.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl border bg-background/80 shadow-sm hover:border-primary/25 transition-colors"
+                >
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="relative shrink-0">
+                      <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/30 to-amber-500/20 blur-sm scale-110" />
+                      {a.photo_url ? (
+                        <img
+                          src={a.photo_url}
+                          alt=""
+                          className="relative w-16 h-16 rounded-full object-cover ring-2 ring-background shadow-md"
+                        />
+                      ) : (
+                        <div className="relative w-16 h-16 rounded-full bg-primary/10 ring-2 ring-primary/20 flex items-center justify-center shadow-md">
+                          <User className="w-8 h-8 text-primary" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-foreground text-base leading-tight truncate">{a.name}</p>
+                      {a.description ? (
+                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{a.description}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/70 mt-1">Sem descrição — toque no lápis para editar.</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
+                    <Button size="sm" className="rounded-xl gap-1" onClick={() => setSelectedAtendenteId(a.id)}>
+                      Configurar agenda
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                    <Button size="sm" variant="outline" className="rounded-xl" onClick={() => openAtendenteDialog(a)}>
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-destructive rounded-xl" onClick={() => deleteAtendente(a.id)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+            <Button variant="outline" size="sm" onClick={() => openAtendenteDialog(null)} className="rounded-xl gap-1.5 w-full sm:w-auto border-primary/30">
+              <Plus className="w-4 h-4" /> Adicionar atendente
+            </Button>
+          </div>
         </section>
 
         <div className="mb-4">
@@ -471,9 +528,11 @@ export default function ProAgenda() {
         </div>
 
         {/* Serviços */}
-        <section className="bg-card border rounded-2xl p-4 mb-6">
-          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
-            <Clock className="w-4 h-4" />
+        <section className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 mb-6 shadow-sm">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2.5 mb-4">
+            <span className="rounded-lg bg-primary/12 p-2">
+              <Clock className="w-4 h-4 text-primary" />
+            </span>
             Serviços (duração)
           </h2>
           {services.map((s, idx) => (
@@ -521,8 +580,13 @@ export default function ProAgenda() {
         </section>
 
         {/* Horários semanais */}
-        <section className="bg-card border rounded-2xl p-4 mb-6">
-          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">Dias e horários de funcionamento</h2>
+        <section className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 mb-6 shadow-sm">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2.5 mb-4">
+            <span className="rounded-lg bg-amber-500/15 p-2">
+              <CalendarCheck className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+            </span>
+            Dias e horários de funcionamento
+          </h2>
           {rules.map((r, idx) => (
             <div key={r.id || idx} className="flex flex-wrap items-end gap-2 mb-3 p-3 rounded-xl bg-muted/30">
               <div className="w-32">
@@ -592,10 +656,12 @@ export default function ProAgenda() {
         </section>
 
         {/* Bloqueios */}
-        <section className="bg-card border rounded-2xl p-4">
-          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
-            <Lock className="w-4 h-4" />
-            Bloqueios (datas/horários indisponíveis)
+        <section className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2.5 mb-4">
+            <span className="rounded-lg bg-muted p-2">
+              <Lock className="w-4 h-4 text-muted-foreground" />
+            </span>
+            Bloqueios (indisponibilidade)
           </h2>
           {blocks.map((b, idx) => (
             <div key={b.id || idx} className="flex flex-wrap items-end gap-2 mb-3 p-3 rounded-xl bg-muted/30">

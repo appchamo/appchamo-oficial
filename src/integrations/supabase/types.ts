@@ -154,19 +154,37 @@ export type Database = {
       chat_read_status: {
         Row: {
           id: string
+          is_archived?: boolean
+          is_deleted?: boolean
+          is_pinned?: boolean
+          label_color?: string | null
+          label_text?: string | null
           last_read_at: string
+          manual_unread?: boolean
           request_id: string
           user_id: string
         }
         Insert: {
           id?: string
+          is_archived?: boolean
+          is_deleted?: boolean
+          is_pinned?: boolean
+          label_color?: string | null
+          label_text?: string | null
           last_read_at?: string
+          manual_unread?: boolean
           request_id: string
           user_id: string
         }
         Update: {
           id?: string
+          is_archived?: boolean
+          is_deleted?: boolean
+          is_pinned?: boolean
+          label_color?: string | null
+          label_text?: string | null
           last_read_at?: string
+          manual_unread?: boolean
           request_id?: string
           user_id?: string
         }
@@ -678,6 +696,9 @@ export type Database = {
           active: boolean
           agenda_enabled: boolean
           availability_status: string
+          avg_response_computed_at: string | null
+          avg_response_sample_count: number
+          avg_response_seconds: number | null
           bio: string | null
           bonus_calls: number
           category_id: string | null
@@ -698,6 +719,9 @@ export type Database = {
           active?: boolean
           agenda_enabled?: boolean
           availability_status?: string
+          avg_response_computed_at?: string | null
+          avg_response_sample_count?: number
+          avg_response_seconds?: number | null
           bio?: string | null
           bonus_calls?: number
           category_id?: string | null
@@ -718,6 +742,9 @@ export type Database = {
           active?: boolean
           agenda_enabled?: boolean
           availability_status?: string
+          avg_response_computed_at?: string | null
+          avg_response_sample_count?: number
+          avg_response_seconds?: number | null
           bio?: string | null
           bonus_calls?: number
           category_id?: string | null
@@ -938,6 +965,7 @@ export type Database = {
       }
       service_requests: {
         Row: {
+          accepted_at: string | null
           client_id: string
           created_at: string
           description: string | null
@@ -948,6 +976,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          accepted_at?: string | null
           client_id: string
           created_at?: string
           description?: string | null
@@ -958,6 +987,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          accepted_at?: string | null
           client_id?: string
           created_at?: string
           description?: string | null

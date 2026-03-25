@@ -10,6 +10,7 @@ import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 
 const availabilityOptions = [
   { value: "available", label: "Disponível", icon: Circle, color: "text-green-500" },
@@ -184,7 +185,7 @@ const Profile = () => {
 
   const handleShareProfile = async () => {
     if (!proData?.slug) return;
-    const link = `https://appchamo.com/professional/${proData.slug}`;
+    const link = getPublicProfessionalProfileUrl(proData.slug);
     if (navigator.share) {
       try {
         await navigator.share({ title: `${profile?.full_name || "Meu perfil"} no Chamô`, url: link });

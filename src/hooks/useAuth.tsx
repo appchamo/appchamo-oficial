@@ -167,6 +167,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Se a sessão chegou antes do trigger inserir o profile (corrida comum pós-OAuth),
         // não deslogar: o gate (`/post-login`) fará retry até o profile aparecer.
         if (!p) {
+          let recovered: Profile | null = null;
+          try {
+            const raw = localStorage.getItem("chamo_cached_profile");
+            if (raw) {
+              const c = JSON.parse(raw) as Profile;
+              if (c.user_id === userId) recovered = c;
+            }
+          } catch {
+            /* ignore */
+          }
+          // Mantém perfil em cache se o fetch falhou/timeout (rede lenta, JWT refresh) — evita sumir nome/foto na Home
+          if (recovered) {
+            setProfile(recovered);
+            try {
+              const rr = localStorage.getItem("chamo_cached_roles");
+              setRoles(rr ? (JSON.parse(rr) as AppRole[]) : []);
+            } catch {
+              setRoles([]);
+            }
+            window.setTimeout(() => {
+              void (async () => {
+                const {
+                  data: { session: cur },
+                } = await supabase.auth.getSession();
+                if (!cur?.user || cur.user.id !== userId) return;
+                const p2 = await fetchProfile(userId).catch(() => null);
+                if (p2) {
+                  setProfile(p2);
+                  localStorage.setItem("chamo_cached_profile", JSON.stringify(p2));
+                }
+              })();
+            }, 1800);
+            return;
+          }
           setProfile(null);
           setRoles([]);
           localStorage.removeItem("chamo_cached_profile");
@@ -336,7 +370,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch (_) {}
           setLoading(false);
         } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          loadUserData(sess ?? null);
+          // Refresh de token não deve refazer fetch do perfil: em rede lenta o timeout apagava profile/cache e “quebrava” a Home.
+          if (event === "TOKEN_REFRESHED") {
+            if (sess) {
+              setSession(sess);
+              setUser(sess.user);
+            }
+            setLoading(false);
+          } else {
+            loadUserData(sess ?? null);
+          }
 
           // Evita hard-reload por “hang” nos 2 min após login (iOS reprocessaria oauth?code= e trava).
           if (event === "SIGNED_IN" && Capacitor.isNativePlatform()) {

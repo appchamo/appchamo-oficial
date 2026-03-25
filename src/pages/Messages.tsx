@@ -2,8 +2,10 @@ import AppLayout from "@/components/AppLayout";
 import {
   MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle,
   Inbox, Mic, Package, CheckCheck, Trash2, XCircle, Search,
-  CheckSquare, Square, Check,
+  CheckSquare, Square, Check, X, Pin, Tag,
 } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
+import { Keyboard } from "@capacitor/keyboard";
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "@/hooks/use-toast";
@@ -20,6 +22,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
+type ThreadLabelColor = "blue" | "green" | "orange" | "red";
+
 interface Thread {
   id: string;
   professional_id: string;
@@ -35,7 +39,28 @@ interface Thread {
   unreadCount: number;
   is_archived: boolean;
   manual_unread: boolean;
+  is_pinned: boolean;
+  label_color: ThreadLabelColor | null;
+  label_text: string | null;
 }
+
+const MAX_PINNED_THREADS = 3;
+
+const sortThreadsByPinAndTime = (list: Thread[]) => {
+  const byTime = (a: Thread, b: Thread) =>
+    new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime();
+  const pinned = list.filter((t) => t.is_pinned).sort(byTime);
+  const rest = list.filter((t) => !t.is_pinned).sort(byTime);
+  return [...pinned, ...rest];
+};
+
+const labelColorPillClass = (c: ThreadLabelColor) =>
+  ({
+    blue: "bg-blue-600 text-white",
+    green: "bg-emerald-600 text-white",
+    orange: "bg-orange-500 text-white",
+    red: "bg-red-600 text-white",
+  })[c];
 
 // Cache em memória — lista aparece instantaneamente ao voltar para a tela
 let _threadsCache: Thread[] = [];
@@ -69,10 +94,20 @@ const Messages = () => {
   const [canceladosSelectMode, setCanceladosSelectMode] = useState(false);
   const [selectedCanceladosIds, setSelectedCanceladosIds] = useState<Set<string>>(new Set());
   const [deletingBatchIds, setDeletingBatchIds] = useState<string[] | null>(null);
+  const [threadMenuThread, setThreadMenuThread] = useState<Thread | null>(null);
+  const [labelModal, setLabelModal] = useState<{
+    thread: Thread;
+    step: "colors" | "text";
+    color: ThreadLabelColor | null;
+    text: string;
+  } | null>(null);
   const userIdRef = useRef<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const longPressTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const skipNextNavRef = useRef(false);
   const navigate = useNavigate();
 
-  const load = useCallback(async (isBackgroundUpdate = false) => {
+  const load = useCallback(async (isBackgroundUpdate = false, opts?: { widenFetch?: boolean }) => {
     if (!isBackgroundUpdate && _threadsCache.length === 0) setLoading(true);
 
     const { data: { session } } = await supabase.auth.getSession();
@@ -81,7 +116,9 @@ const Messages = () => {
     userIdRef.current = user.id;
 
     const PAGE_SIZE = 7;
-    const limitCount = (page + 1) * PAGE_SIZE;
+    const baseLimit = (page + 1) * PAGE_SIZE;
+    // Após mensagem em thread que ainda não estava na lista: busca janela maior para incluir conversa que subiu no ranking
+    const limitCount = opts?.widenFetch ? Math.max(baseLimit, PAGE_SIZE * 8) : baseLimit;
 
     const [
       { data: supportMsgs, count: totalSupport },
@@ -122,7 +159,7 @@ const Messages = () => {
 
     const proIdsUniq = [...new Set(unique.map((r: any) => r.professional_id))] as string[];
     const [{ data: readStatuses }, { data: allPros }] = await Promise.all([
-      supabase.from("chat_read_status" as any).select("request_id, last_read_at, is_archived, is_deleted, manual_unread").eq("user_id", user.id).in("request_id", threadIds),
+      supabase.from("chat_read_status" as any).select("request_id, last_read_at, is_archived, is_deleted, manual_unread, is_pinned, label_color, label_text").eq("user_id", user.id).in("request_id", threadIds),
       supabase.from("professionals").select("id, user_id").in("id", proIdsUniq),
     ]);
 
@@ -165,6 +202,7 @@ const Messages = () => {
       }));
     }
 
+    const allowedColors = new Set(["blue", "green", "orange", "red"]);
     const enriched: Thread[] = unique.map((req: any) => {
       const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
       if (statusData.is_deleted) return null as any;
@@ -172,6 +210,14 @@ const Messages = () => {
       const targetUserId = isClient ? proUserIdMap.get(req.professional_id) : req.client_id;
       const profile = targetUserId ? profileMap.get(targetUserId) : null;
       const sum = summaryByReq.get(req.id);
+      const rawColor = statusData.label_color as string | null | undefined;
+      const label_color: ThreadLabelColor | null =
+        rawColor && allowedColors.has(rawColor) ? (rawColor as ThreadLabelColor) : null;
+      const rawLabelText = statusData.label_text as string | null | undefined;
+      const label_text =
+        label_color && rawLabelText && String(rawLabelText).trim()
+          ? String(rawLabelText).trim().slice(0, 15)
+          : null;
       return {
         ...req,
         otherName: profile?.full_name || (isClient ? "Profissional" : "Cliente"),
@@ -181,12 +227,13 @@ const Messages = () => {
         unreadCount: sum?.unreadCount ?? 0,
         is_archived: statusData.is_archived,
         manual_unread: statusData.manual_unread,
+        is_pinned: !!statusData.is_pinned,
+        label_color: label_text ? label_color : null,
+        label_text,
       };
     }).filter((t) => t !== null) as Thread[];
 
-    const finalThreads = enriched.sort(
-      (a, b) => new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime()
-    );
+    const finalThreads = sortThreadsByPinAndTime(enriched);
     _threadsCache = finalThreads;
     setThreads(finalThreads);
     if (!isBackgroundUpdate) setLoading(false);
@@ -199,42 +246,42 @@ const Messages = () => {
   // SEM fazer refetch completo — como o WhatsApp
   // ─────────────────────────────────────────────────────────────────────
   const applyNewMessage = useCallback((payload: any) => {
-    const msg = payload.new as { id: string; request_id: string; sender_id: string; content: string; created_at: string };
+    const msg = payload?.new as {
+      id?: string;
+      request_id?: string;
+      sender_id?: string;
+      content?: string | null;
+      created_at?: string;
+      image_urls?: string[] | null;
+    };
+    if (!msg?.request_id || !msg.created_at) return;
+
     const uid = userIdRef.current;
+    const preview =
+      (msg.content && String(msg.content).trim()) ||
+      (Array.isArray(msg.image_urls) && msg.image_urls.length > 0 ? "📷 Foto" : "Nova mensagem");
 
     setThreads((prev) => {
       const idx = prev.findIndex((t) => t.id === msg.request_id);
       if (idx === -1) {
-        // Thread nova — faz um refetch leve em background
-        load(true);
+        void load(true, { widenFetch: true });
         return prev;
       }
 
       const updated = { ...prev[idx] };
-      updated.lastMessage = msg.content;
+      updated.lastMessage = preview;
       updated.lastMessageTime = msg.created_at;
-      // Incrementa não-lidos só se a mensagem não for minha
-      if (msg.sender_id !== uid) {
+      updated.updated_at = msg.created_at;
+      if (msg.sender_id && msg.sender_id !== uid) {
         updated.unreadCount = (updated.unreadCount || 0) + 1;
       }
 
       const next = [...prev];
       next.splice(idx, 1);
-      return [updated, ...next]; // move para o topo
+      const sorted = sortThreadsByPinAndTime([updated, ...next]);
+      _threadsCache = sorted;
+      return sorted;
     });
-
-    // Atualiza cache também
-    _threadsCache = _threadsCache.map((t) => {
-      if (t.id !== msg.request_id) return t;
-      return {
-        ...t,
-        lastMessage: msg.content,
-        lastMessageTime: msg.created_at,
-        unreadCount: msg.sender_id !== userIdRef.current ? (t.unreadCount || 0) + 1 : t.unreadCount,
-      };
-    }).sort((a, b) =>
-      new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime()
-    );
   }, [load]);
 
   useEffect(() => {
@@ -243,18 +290,23 @@ const Messages = () => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleFullReload = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => load(true), 300);
+      debounceTimer = setTimeout(() => void load(true), 120);
     };
 
-    const channel = supabase.channel("messages-list-realtime-v2")
-      // Mensagens novas → atualização incremental INSTANTÂNEA
+    const channel = supabase
+      .channel("messages-list-realtime-v3", { config: { broadcast: { self: false } } })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, applyNewMessage)
-      // Demais eventos → refetch com debounce curto
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_messages" }, scheduleFullReload)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_read_status" }, scheduleFullReload)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_read_status" }, scheduleFullReload)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "service_requests" }, scheduleFullReload)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests" }, scheduleFullReload)
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === "SUBSCRIBED") return;
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("[Messages] realtime:", status, err?.message ?? err);
+        }
+      });
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -320,6 +372,120 @@ const Messages = () => {
       setDeletingChatId(null);
       setThreads((prev) => prev.filter((t) => t.id !== chatId));
     } finally { setIsDeleting(false); }
+  };
+
+  const clearSearchAndBlur = useCallback(async () => {
+    setSearchChat("");
+    searchInputRef.current?.blur();
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await Keyboard.hide();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const disarmLongPress = (id: string) => {
+    const tid = longPressTimers.current.get(id);
+    if (tid) {
+      clearTimeout(tid);
+      longPressTimers.current.delete(id);
+    }
+  };
+
+  const armLongPress = (t: Thread) => {
+    disarmLongPress(t.id);
+    const timerId = window.setTimeout(() => {
+      longPressTimers.current.delete(t.id);
+      skipNextNavRef.current = true;
+      setThreadMenuThread(t);
+    }, 480);
+    longPressTimers.current.set(t.id, timerId);
+  };
+
+  const pinnedCountExcluding = (excludeId: string) =>
+    threads.filter((x) => x.is_pinned && x.id !== excludeId).length;
+
+  const handleTogglePin = async (t: Thread, nextPinned: boolean) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    if (nextPinned && pinnedCountExcluding(t.id) >= MAX_PINNED_THREADS) {
+      toast({
+        title: "Limite de 3 conversas fixadas",
+        description: "Desfixe uma conversa para fixar outra.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setThreads((prev) => {
+      const mapped = prev.map((x) => (x.id === t.id ? { ...x, is_pinned: nextPinned } : x));
+      const sorted = sortThreadsByPinAndTime(mapped);
+      _threadsCache = sorted;
+      return sorted;
+    });
+    setThreadMenuThread(null);
+    await supabase.from("chat_read_status" as any).upsert(
+      { request_id: t.id, user_id: user.id, last_read_at: new Date().toISOString(), is_pinned: nextPinned },
+      { onConflict: "request_id,user_id" },
+    );
+  };
+
+  const handleSaveThreadLabel = async () => {
+    if (!labelModal?.color) return;
+    const trimmed = labelModal.text.trim().slice(0, 15);
+    if (!trimmed) {
+      toast({ title: "Digite o texto do rótulo", variant: "destructive" });
+      return;
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const t = labelModal.thread;
+    const color = labelModal.color;
+    setThreads((prev) => {
+      const mapped = prev.map((x) =>
+        x.id === t.id ? { ...x, label_color: color, label_text: trimmed } : x,
+      );
+      const sorted = sortThreadsByPinAndTime(mapped);
+      _threadsCache = sorted;
+      return sorted;
+    });
+    setLabelModal(null);
+    await supabase.from("chat_read_status" as any).upsert(
+      {
+        request_id: t.id,
+        user_id: user.id,
+        last_read_at: new Date().toISOString(),
+        label_color: color,
+        label_text: trimmed,
+      },
+      { onConflict: "request_id,user_id" },
+    );
+  };
+
+  const handleRemoveThreadLabel = async (t: Thread) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setThreads((prev) => {
+      const mapped = prev.map((x) =>
+        x.id === t.id ? { ...x, label_color: null, label_text: null } : x,
+      );
+      const sorted = sortThreadsByPinAndTime(mapped);
+      _threadsCache = sorted;
+      return sorted;
+    });
+    setLabelModal(null);
+    setThreadMenuThread(null);
+    await supabase.from("chat_read_status" as any).upsert(
+      {
+        request_id: t.id,
+        user_id: user.id,
+        last_read_at: new Date().toISOString(),
+        label_color: null,
+        label_text: null,
+      },
+      { onConflict: "request_id,user_id" },
+    );
   };
 
   const handleBatchDeleteConfirm = async () => {
@@ -408,10 +574,8 @@ const Messages = () => {
   }
 
   const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
-  const threadsGeral = threads.filter((t) => !isCancelledOrRejected(t));
-  const threadsCancelados = threads.filter(isCancelledOrRejected).sort((a, b) =>
-    new Date(b.lastMessageTime || b.updated_at).getTime() - new Date(a.lastMessageTime || a.updated_at).getTime()
-  );
+  const threadsGeral = sortThreadsByPinAndTime(threads.filter((t) => !isCancelledOrRejected(t)));
+  const threadsCancelados = sortThreadsByPinAndTime(threads.filter(isCancelledOrRejected));
   const activeThreads = threadsGeral.filter((t) => !t.is_archived);
   const archivedThreads = threadsGeral.filter((t) => t.is_archived);
   const baseList = chatTab === "cancelados" ? threadsCancelados : showArchived ? archivedThreads : activeThreads;
@@ -443,7 +607,7 @@ const Messages = () => {
     const isSelected = selectedCanceladosIds.has(t.id);
 
     return (
-      <div className={`flex items-center gap-3 px-4 py-3 border-b border-border/50 last:border-b-0 active:bg-muted/60 transition-colors ${hasUnread ? "bg-primary/[0.04]" : ""}`}>
+      <div className={`flex items-center gap-3 px-4 py-3 border-b border-border/50 last:border-b-0 active:bg-muted/60 transition-colors select-none ${hasUnread ? "bg-primary/[0.04]" : ""}`}>
         {isCancelled && canceladosSelectMode && (
           <button type="button" onClick={() => toggleCanceladoSelection(t.id)} className="flex-shrink-0">
             {isSelected ? <CheckSquare className="w-5 h-5 text-primary" /> : <Square className="w-5 h-5 text-muted-foreground" />}
@@ -451,7 +615,15 @@ const Messages = () => {
         )}
 
         <div
+          onTouchStart={() => armLongPress(t)}
+          onTouchEnd={() => disarmLongPress(t.id)}
+          onTouchCancel={() => disarmLongPress(t.id)}
+          onTouchMove={() => disarmLongPress(t.id)}
           onClick={() => {
+            if (skipNextNavRef.current) {
+              skipNextNavRef.current = false;
+              return;
+            }
             if (isCancelled && canceladosSelectMode) { toggleCanceladoSelection(t.id); return; }
             if (hasUnread) handleMarkRead(t.id);
             navigate(`/messages/${t.id}`);
@@ -476,10 +648,17 @@ const Messages = () => {
 
           {/* Texto */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2 mb-0.5">
-              <p className={`text-[15px] truncate ${hasUnread ? "font-bold text-foreground" : "font-medium text-foreground"}`}>
-                {t.otherName}
-              </p>
+            <div className="flex items-center justify-between gap-2 mb-0.5 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <p className={`text-[15px] truncate ${hasUnread ? "font-bold text-foreground" : "font-medium text-foreground"}`}>
+                  {t.otherName}
+                </p>
+                {t.label_text && t.label_color ? (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 max-w-[100px] truncate ${labelColorPillClass(t.label_color)}`}>
+                    {t.label_text}
+                  </span>
+                ) : null}
+              </div>
               <span className={`text-[11px] flex-shrink-0 ${hasUnread ? "text-primary font-semibold" : "text-muted-foreground"}`}>
                 {timeLabel(t.lastMessageTime)}
               </span>
@@ -517,6 +696,25 @@ const Messages = () => {
               <DropdownMenuItem onClick={() => handleMarkUnread(t.id)} className="gap-2 cursor-pointer py-2.5">
                 <EyeOff className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm">Marcar como não lida</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => void handleTogglePin(t, !t.is_pinned)} className="gap-2 cursor-pointer py-2.5">
+                <Pin className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm">{t.is_pinned ? "Desfixar" : "Fixar no topo"}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  setLabelModal({
+                    thread: t,
+                    step: "colors",
+                    color: null,
+                    text: (t.label_text || "").slice(0, 15),
+                  })
+                }
+                className="gap-2 cursor-pointer py-2.5"
+              >
+                <Tag className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm">Rótulo</span>
               </DropdownMenuItem>
               {isChatFinished && (
                 <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2.5">
@@ -593,14 +791,28 @@ const Messages = () => {
           {((chatTab === "geral" && (activeThreads.length > 0 || archivedThreads.length > 0)) ||
             (chatTab === "cancelados" && threadsCancelados.length > 0)) && (
             <div className="relative mt-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               <input
+                ref={searchInputRef}
                 type="text"
+                inputMode="search"
+                enterKeyHint="search"
+                autoComplete="off"
                 value={searchChat}
                 onChange={(e) => setSearchChat(e.target.value)}
                 placeholder="Buscar conversa..."
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl border bg-muted/40 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:bg-background transition-colors"
+                className={`w-full pl-9 py-2.5 rounded-xl border bg-muted/40 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:bg-background transition-colors ${searchChat ? "pr-10" : "pr-3"}`}
               />
+              {searchChat.length > 0 && (
+                <button
+                  type="button"
+                  aria-label="Limpar busca"
+                  onClick={() => void clearSearchAndBlur()}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
           )}
 
@@ -748,6 +960,105 @@ const Messages = () => {
                 {isDeleting ? "Excluindo..." : "Excluir todas"}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={threadMenuThread !== null} onOpenChange={(open) => !open && setThreadMenuThread(null)}>
+          <DialogContent className="sm:max-w-sm rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="truncate pr-6">{threadMenuThread?.otherName}</DialogTitle>
+              <DialogDescription>Toque longo nesta conversa — fixar, desfixar ou definir rótulo.</DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="outline"
+                className="rounded-xl justify-start gap-2 h-11"
+                onClick={() => threadMenuThread && void handleTogglePin(threadMenuThread, !threadMenuThread.is_pinned)}
+              >
+                <Pin className="w-4 h-4" />
+                {threadMenuThread?.is_pinned ? "Desfixar" : "Fixar no topo"}
+              </Button>
+              <Button
+                variant="outline"
+                className="rounded-xl justify-start gap-2 h-11"
+                onClick={() => {
+                  if (!threadMenuThread) return;
+                  const tt = threadMenuThread;
+                  setThreadMenuThread(null);
+                  setLabelModal({
+                    thread: tt,
+                    step: "colors",
+                    color: null,
+                    text: (tt.label_text || "").slice(0, 15),
+                  });
+                }}
+              >
+                <Tag className="w-4 h-4" />
+                Rótulo
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={labelModal !== null} onOpenChange={(open) => !open && setLabelModal(null)}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            {labelModal?.step === "colors" && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Cor do rótulo</DialogTitle>
+                  <DialogDescription>Escolha uma cor para o rótulo desta conversa.</DialogDescription>
+                </DialogHeader>
+                <div className="grid grid-cols-2 gap-2 py-2">
+                  {(["blue", "green", "orange", "red"] as const).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`rounded-xl py-3 text-sm font-bold text-white shadow-sm active:scale-[0.98] transition-transform ${labelColorPillClass(c)}`}
+                      onClick={() => setLabelModal((m) => (m ? { ...m, step: "text", color: c } : null))}
+                    >
+                      {c === "blue" ? "Azul" : c === "green" ? "Verde" : c === "orange" ? "Laranja" : "Vermelho"}
+                    </button>
+                  ))}
+                </div>
+                {labelModal.thread.label_text && labelModal.thread.label_color ? (
+                  <Button
+                    variant="outline"
+                    className="w-full rounded-xl text-destructive border-destructive/30 hover:bg-destructive/10"
+                    onClick={() => void handleRemoveThreadLabel(labelModal.thread)}
+                  >
+                    Remover rótulo
+                  </Button>
+                ) : null}
+              </>
+            )}
+            {labelModal?.step === "text" && labelModal.color ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Texto do rótulo</DialogTitle>
+                  <DialogDescription>Até 15 caracteres.</DialogDescription>
+                </DialogHeader>
+                <input
+                  type="text"
+                  maxLength={15}
+                  value={labelModal.text}
+                  onChange={(e) =>
+                    setLabelModal((m) => (m ? { ...m, text: e.target.value.slice(0, 15) } : null))
+                  }
+                  className="w-full px-3 py-2.5 rounded-xl border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="Ex.: VIP, Retorno…"
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">{labelModal.text.trim().length}/15</p>
+                <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-between">
+                  <Button variant="outline" className="rounded-xl w-full sm:w-auto" onClick={() => setLabelModal((m) => (m ? { ...m, step: "colors" } : null))}>
+                    Voltar
+                  </Button>
+                  <Button className="rounded-xl w-full sm:w-auto" onClick={() => void handleSaveThreadLabel()}>
+                    Salvar
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : null}
           </DialogContent>
         </Dialog>
       </main>

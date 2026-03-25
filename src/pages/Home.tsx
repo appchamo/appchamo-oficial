@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import BenefitsPanel from "@/components/BenefitsPanel";
+import BenefitsPanel, { CHAMO_HOME_SILENT_TICKER } from "@/components/BenefitsPanel";
 import SponsorCarousel from "@/components/SponsorCarousel";
 import FeaturedProfessionals from "@/components/FeaturedProfessionals";
 import CategoriesGrid from "@/components/CategoriesGrid";
@@ -9,9 +9,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefreshAtKey, useIsRefreshing } from "@/contexts/RefreshContext";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight, Crown, Sparkles, Building2, Star } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
 import HomeJobsBanner from "@/components/home/HomeJobsBanner";
@@ -25,6 +25,7 @@ import { toast } from "@/hooks/use-toast";
 import { fetchViaCep } from "@/lib/viacep";
 import { diagLog } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
+import { isOverlayStackRoute } from "@/lib/mainAppTabs";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -102,6 +103,7 @@ function HomeHeavyPlaceholder({ kind, title }: { kind: "sponsors" | "featured" |
 }
 
 const Home = () => {
+  const location = useLocation();
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
   const { isFreePlan, callsRemaining, loading: subLoading, plan } = useSubscription();
   const isBusiness = plan?.id === "business";
@@ -239,9 +241,11 @@ const Home = () => {
   }, []);
 
   useEffect(() => {
-    supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => {
-      setJobCount(count || 0);
-    });
+    supabase
+      .from("job_postings")
+      .select("id", { count: "exact", head: true })
+      .eq("active", true)
+      .then(({ count }) => setJobCount(count || 0));
 
     const justSignedUp = localStorage.getItem("just_signed_up");
     if (justSignedUp === "true") {
@@ -294,6 +298,48 @@ const Home = () => {
     fetchUpcomingAppointments();
   }, [fetchUpcomingAppointments]);
 
+  /** Saldo (pro), vagas e painel de benefícios/sorteio — sem remontar a página (evita “piscada” ao voltar do perfil). */
+  const silentRefreshHomeTicker = useCallback(async () => {
+    try {
+      window.dispatchEvent(new Event(CHAMO_HOME_SILENT_TICKER));
+    } catch {
+      /* ignore */
+    }
+
+    const jobPromise = supabase
+      .from("job_postings")
+      .select("id", { count: "exact", head: true })
+      .eq("active", true)
+      .then(({ count }) => setJobCount(count ?? 0));
+
+    const walletPromise = (async () => {
+      if (!user?.id || !isPro) return;
+      const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+      if (!pro?.id) return;
+      const { data } = await supabase
+        .from("wallet_transactions")
+        .select("amount")
+        .eq("professional_id", pro.id)
+        .eq("status", "pending");
+      const total = (data || []).reduce((s, t) => s + Number((t as { amount: number }).amount), 0);
+      setWalletBalance(total);
+      setWalletLoaded(true);
+    })();
+
+    await Promise.all([jobPromise, walletPromise]);
+  }, [user?.id, isPro]);
+
+  const homeNavPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    const cur = location.pathname;
+    const prev = homeNavPathRef.current;
+    homeNavPathRef.current = cur;
+    if (cur !== "/home") return;
+    if (prev != null && prev !== "/home" && isOverlayStackRoute(prev)) {
+      void silentRefreshHomeTicker();
+    }
+  }, [location.pathname, silentRefreshHomeTicker]);
+
   // Voltar para a Home não refaz fetch aqui — só pull-to-refresh (useRefreshAtKey("/home")) ou montagem inicial.
   // A Home fica montada em cache (HomePersistentLayer); pathname global muda mesmo com display:none.
 
@@ -321,6 +367,13 @@ const Home = () => {
     const t = setTimeout(() => setHeavySectionsReady(true), ms);
     return () => clearTimeout(t);
   }, [user?.id]);
+
+  // Se o timer acima for cancelado (remontagens rápidas, corrida pós-login), não ficar eternamente no placeholder.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const failsafe = window.setTimeout(() => setHeavySectionsReady(true), 3200);
+    return () => clearTimeout(failsafe);
+  }, []);
 
   // ✅ Pós-OAuth: no web remonta seções; no nativo NÃO dar contentSeed cedo (disparava 3× montagem + trava).
   useEffect(() => {
@@ -352,10 +405,10 @@ const Home = () => {
   const onRefresh = async () => {
     if (Capacitor.isNativePlatform()) setHeavySectionsReady(true);
     setContentSeed((s) => s + 1);
-    const minDelay = new Promise(r => setTimeout(r, 400));
+    const minDelay = new Promise((r) => setTimeout(r, 400));
     await Promise.all([
+      silentRefreshHomeTicker(),
       refreshLayout(),
-      supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => setJobCount(count ?? 0)),
       user?.id ? fetchUpcomingAppointments() : Promise.resolve(),
     ]);
     await minDelay;
@@ -505,7 +558,7 @@ const Home = () => {
         <HomeSkeleton />
       ) : (
         <div
-          className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
+          className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
           {user && isPro && proId ? (

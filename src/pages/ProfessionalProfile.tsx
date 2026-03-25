@@ -1,17 +1,37 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
-import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar, Share2, Building2 } from "lucide-react";
+import {
+  ArrowLeft,
+  BadgeCheck,
+  Star,
+  Clock,
+  CalendarOff,
+  FileQuestion,
+  Circle,
+  Pencil,
+  Check,
+  X,
+  Calendar,
+  Share2,
+  Building2,
+  Loader2,
+  Timer,
+} from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ProductCatalog from "@/components/ProductCatalog";
 import ProfessionalServices from "@/components/ProfessionalServices";
 import ServiceRequestDialog from "@/components/ServiceRequestDialog";
 import AgendaBookingDialog from "@/components/AgendaBookingDialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
+import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
+import { useAuth } from "@/hooks/useAuth";
 
 interface ProData {
   id: string;
@@ -35,6 +55,9 @@ interface ProData {
   agenda_enabled?: boolean;
   slug: string | null;
   cover_image_url: string | null;
+  avg_response_seconds?: number | null;
+  avg_response_sample_count?: number;
+  avg_response_computed_at?: string | null;
 }
 
 interface Review {
@@ -57,11 +80,13 @@ const ProfessionalProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, profile: authProfile, loading: authLoading } = useAuth();
   const [pro, setPro] = useState<ProData | null>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [callDialogOpen, setCallDialogOpen] = useState(false);
+  const [profileGateOpen, setProfileGateOpen] = useState(false);
   const [agendaDialogOpen, setAgendaDialogOpen] = useState(false);
   const [avatarLightbox, setAvatarLightbox] = useState(false);
 
@@ -80,7 +105,9 @@ const ProfessionalProfile = () => {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
     const baseQuery = supabase
         .from("professionals")
-        .select("id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug, cover_image_url");
+        .select(
+          "id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug, cover_image_url, avg_response_seconds, avg_response_sample_count, avg_response_computed_at",
+        );
     const { data } = await (isUUID ? baseQuery.eq("id", id) : baseQuery.eq("slug", id)).maybeSingle();
         
       if (data) {
@@ -118,6 +145,9 @@ const ProfessionalProfile = () => {
           agenda_enabled: !!(data as any).agenda_enabled,
           slug: (data as any).slug || null,
           cover_image_url: (data as any).cover_image_url || null,
+          avg_response_seconds: (data as any).avg_response_seconds ?? null,
+          avg_response_sample_count: Number((data as any).avg_response_sample_count) || 0,
+          avg_response_computed_at: (data as any).avg_response_computed_at ?? null,
         });
         
         const { data: { user } } = await supabase.auth.getUser();
@@ -252,7 +282,9 @@ const ProfessionalProfile = () => {
     toast({ title: "Profissão atualizada!" });
   };
 
-  const profileLink = pro?.slug ? `https://appchamo.com/professional/${pro.slug}` : null;
+  const profilePathKey = pro && (pro.slug || id) ? (pro.slug || id)!.trim() : "";
+  const profileLink = profilePathKey ? getPublicProfessionalProfileUrl(profilePathKey) : null;
+  const profileLinkDisplay = profileLink ? profileLink.replace(/^https?:\/\//, "") : null;
 
   // Botão compartilhar (ícone no header) — abre menu nativo de compartilhamento
   const handleShareLink = async () => {
@@ -281,13 +313,44 @@ const ProfessionalProfile = () => {
   };
 
   const handleCall = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { navigate("/login", { state: { from: location.pathname } }); return; }
+    if (authLoading) {
+      toast({ title: "Aguarde", description: "Carregando seus dados…" });
+      return;
+    }
+    const u = user ?? (await supabase.auth.getUser()).data.user;
+    if (!u) { navigate("/login", { state: { from: location.pathname } }); return; }
+    const nameFromMeta = (u.user_metadata?.full_name ?? u.user_metadata?.name ?? "") as string;
+    const nameOk = (authProfile?.full_name?.trim() || nameFromMeta.trim()).length > 0;
+    const photoOk = !!(authProfile?.avatar_url && String(authProfile.avatar_url).trim());
+    if (!nameOk || !photoOk) {
+      setProfileGateOpen(true);
+      return;
+    }
     setCallDialogOpen(true);
   };
 
-  if (loading) return <AppLayout><main className="max-w-screen-lg mx-auto px-4 py-10 text-center text-muted-foreground">Carregando...</main></AppLayout>;
-  if (!pro) return <AppLayout><main className="max-w-screen-lg mx-auto px-4 py-10 text-center text-muted-foreground">Profissional não encontrado</main></AppLayout>;
+  if (loading) {
+    return (
+      <AppLayout>
+        <main className="max-w-screen-lg mx-auto px-4 py-16 flex flex-col items-center justify-center min-h-[45vh] gap-3">
+          <Loader2 className="w-10 h-10 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Carregando perfil…</p>
+        </main>
+      </AppLayout>
+    );
+  }
+  if (!pro) {
+    return (
+      <AppLayout>
+        <main className="max-w-screen-lg mx-auto px-4 py-12 text-center">
+          <p className="text-muted-foreground mb-4">Profissional não encontrado.</p>
+          <Link to="/search" className="text-sm font-semibold text-primary hover:underline">
+            Voltar à busca
+          </Link>
+        </main>
+      </AppLayout>
+    );
+  }
 
   const name = pro.full_name;
   const avatarUrl = pro.avatar_url;
@@ -297,8 +360,11 @@ const ProfessionalProfile = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 pt-2 pb-5">
-        <Link to="/search" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-2 transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Voltar
+        <Link
+          to="/search"
+          className="inline-flex items-center gap-2 text-sm font-semibold text-foreground bg-card border border-border/80 hover:border-primary/30 hover:bg-muted/50 px-3 py-2 rounded-xl mb-3 transition-colors shadow-sm"
+        >
+          <ArrowLeft className="w-4 h-4 shrink-0" /> Voltar
         </Link>
 
         {/* ── Main Card — Hero redesenhado ── */}
@@ -336,9 +402,15 @@ const ProfessionalProfile = () => {
             )}
 
             {/* Compartilhar (owner) */}
-            {isOwner && pro.slug && (
-              <button onClick={handleShareLink} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center hover:bg-black/50 transition-colors" title="Compartilhar perfil">
+            {isOwner && profileLink && (
+              <button
+                type="button"
+                onClick={handleShareLink}
+                className="absolute top-3 right-3 h-9 px-3 rounded-full bg-black/35 backdrop-blur-md flex items-center justify-center gap-1.5 hover:bg-black/50 transition-colors border border-white/10"
+                title="Compartilhar perfil"
+              >
                 <Share2 className="w-4 h-4 text-white" />
+                <span className="text-xs font-semibold text-white hidden sm:inline">Compartilhar</span>
               </button>
             )}
           </div>
@@ -372,11 +444,13 @@ const ProfessionalProfile = () => {
                 )}
               </div>
 
-              {/* Rating — canto direito, mesma linha do avatar */}
-              <div className="flex items-center gap-1.5 mb-1">
-                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+              {/* Avaliação + quantidade de serviços — canto direito, mesma linha do avatar */}
+              <div className="flex items-center gap-1.5 mb-1 flex-wrap justify-end max-w-[55%] text-xs text-muted-foreground">
+                <Star className="w-4 h-4 fill-amber-400 text-amber-400 shrink-0" />
                 <span className="font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
-                <span className="text-xs text-muted-foreground">({pro.total_reviews})</span>
+                <span>({pro.total_reviews})</span>
+                <span className="text-muted-foreground/80">·</span>
+                <span>{pro.total_services} serviços</span>
               </div>
             </div>
 
@@ -439,14 +513,28 @@ const ProfessionalProfile = () => {
               )}
             </div>
 
-            {/* Disponibilidade + serviços */}
-            <div className="flex items-center gap-3 text-xs text-muted-foreground mb-1">
+            {/* Disponibilidade + tempo médio de resposta (mesmo tamanho/peso do texto de disponibilidade) */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-1">
               <span className={`flex items-center gap-1 font-medium ${currentAvailability.color}`}>
                 <currentAvailability.icon className={`w-3 h-3 fill-current`} />
                 {currentAvailability.label}
               </span>
-              <span>·</span>
-              <span>{pro.total_services} serviços</span>
+              {(() => {
+                const avgLabel = formatAvgResponseSeconds(pro.avg_response_seconds ?? null);
+                const n = pro.avg_response_sample_count ?? 0;
+                if (!avgLabel || n < 1) return null;
+                return (
+                  <>
+                    <span className="text-muted-foreground/70" aria-hidden>
+                      ·
+                    </span>
+                    <span className="flex items-center gap-1 font-normal">
+                      <Timer className="w-3 h-3 shrink-0 opacity-70" aria-hidden />
+                      Tempo médio de resposta: {avgLabel}
+                    </span>
+                  </>
+                );
+              })()}
             </div>
 
             {/* Edição de categoria/profissão (owner) */}
@@ -497,14 +585,16 @@ const ProfessionalProfile = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                {pro.slug && (
+                {profileLink && profileLinkDisplay && (
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Seu link público</label>
-                    <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
-                      <span className="text-xs text-muted-foreground flex-1 truncate">appchamo.com/professional/{pro.slug}</span>
-                      <button onClick={handleCopyLink} className="text-xs text-primary font-semibold hover:underline flex-shrink-0">Copiar link</button>
-                      <button onClick={handleShareLink} className="text-xs text-muted-foreground hover:text-primary flex-shrink-0" title="Compartilhar">
-                        <Share2 className="w-3.5 h-3.5" />
+                    <div className="flex items-center gap-2 bg-muted/80 border border-border/60 rounded-xl px-3 py-2.5">
+                      <span className="text-xs text-foreground flex-1 truncate font-mono">{profileLinkDisplay}</span>
+                      <button type="button" onClick={handleCopyLink} className="text-xs text-primary font-bold hover:underline shrink-0">
+                        Copiar
+                      </button>
+                      <button type="button" onClick={handleShareLink} className="text-muted-foreground hover:text-primary shrink-0 p-1" title="Compartilhar">
+                        <Share2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -514,25 +604,34 @@ const ProfessionalProfile = () => {
 
             {/* Botões de ação (visitante) */}
             {!isOwner && pro.availability_status !== "unavailable" && (
-              <div className="mt-4 flex flex-col gap-2">
+              <div className="mt-5 rounded-2xl border border-border/70 bg-gradient-to-b from-muted/30 to-background p-4 space-y-3 shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground text-center">
+                  Próximo passo
+                </p>
                 {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
                   <button
+                    type="button"
                     onClick={() => setAgendaDialogOpen(true)}
-                    className="w-full py-3 rounded-xl border-2 border-primary text-primary font-bold text-sm hover:bg-primary/10 transition-colors flex items-center justify-center gap-2"
+                    className="w-full min-h-[48px] py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
                   >
-                    <Calendar className="w-4 h-4" /> Agendar Serviço
+                    <Calendar className="w-5 h-5 shrink-0" />
+                    Agendar serviço
                   </button>
                 )}
-                <button onClick={handleCall} className="w-full py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCall}
+                  className="w-full min-h-[48px] py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
+                >
                   CHAMAR
                 </button>
               </div>
             )}
             {!isOwner && pro.availability_status === "unavailable" && (
-              <div className="mt-4">
-                <div className="w-full py-3 rounded-xl bg-muted text-muted-foreground font-medium text-sm text-center">
-                  Profissional indisponível no momento
-                </div>
+              <div className="mt-5 rounded-2xl border border-dashed border-muted-foreground/30 bg-muted/40 px-4 py-4 text-center">
+                <CalendarOff className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-70" />
+                <p className="text-sm font-semibold text-foreground">Indisponível no momento</p>
+                <p className="text-xs text-muted-foreground mt-1">Este profissional não está aceitando contatos agora.</p>
               </div>
             )}
           </div>
@@ -685,8 +784,34 @@ const ProfessionalProfile = () => {
                 professionalName={pro.full_name}
                 professionalUserId={pro.user_id}
                 professionalAvatarUrl={pro.avatar_url}
+                loginRedirectPath={location.pathname}
               />
             )}
+
+            <Dialog open={profileGateOpen} onOpenChange={setProfileGateOpen}>
+              <DialogContent className="sm:max-w-md rounded-2xl">
+                <DialogHeader>
+                  <DialogTitle>Complete seu perfil</DialogTitle>
+                  <DialogDescription>
+                    Cadastre sua foto de perfil e seu nome para enviar uma chamada a um profissional.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
+                  <Button variant="outline" className="rounded-xl w-full sm:w-auto" onClick={() => setProfileGateOpen(false)}>
+                    Agora não
+                  </Button>
+                  <Button
+                    className="rounded-xl w-full sm:w-auto"
+                    onClick={() => {
+                      setProfileGateOpen(false);
+                      navigate("/profile");
+                    }}
+                  >
+                    Concluir cadastro
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </main>

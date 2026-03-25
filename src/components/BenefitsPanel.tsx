@@ -1,7 +1,10 @@
 import { Gift, Ticket, Timer, Percent } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+
+/** Disparado pela Home ao voltar de telas empilhadas (ex.: perfil) e no pull-to-refresh completo. */
+export const CHAMO_HOME_SILENT_TICKER = "chamo-home-silent-ticker";
 
 interface BenefitsPanelProps {
   section?: { title?: string };
@@ -12,36 +15,50 @@ const BenefitsPanel = ({ section }: BenefitsPanelProps) => {
   const [discountCouponCount, setDiscountCouponCount] = useState(0);
   const [nextDraw, setNextDraw] = useState<string | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) return;
+  const load = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) return;
 
-      // Count raffle coupons (not used)
-      const { count: raffleCount } = await supabase.from("coupons")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("coupon_type", "raffle")
-        .eq("used", false);
-      setRaffleCouponCount(raffleCount || 0);
+    const { count: raffleCount } = await supabase
+      .from("coupons")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("coupon_type", "raffle")
+      .eq("used", false);
+    setRaffleCouponCount(raffleCount || 0);
 
-      // Count active discount coupons (not used, not expired)
-      const { data: discountData } = await supabase.from("coupons")
-        .select("expires_at")
-        .eq("user_id", user.id)
-        .eq("coupon_type", "discount")
-        .eq("used", false);
-      const activeDiscounts = (discountData || []).filter(
-        (c: any) => !c.expires_at || new Date(c.expires_at) > new Date()
-      );
-      setDiscountCouponCount(activeDiscounts.length);
+    const { data: discountData } = await supabase
+      .from("coupons")
+      .select("expires_at")
+      .eq("user_id", user.id)
+      .eq("coupon_type", "discount")
+      .eq("used", false);
+    const activeDiscounts = (discountData || []).filter(
+      (c: { expires_at?: string | null }) => !c.expires_at || new Date(c.expires_at) > new Date(),
+    );
+    setDiscountCouponCount(activeDiscounts.length);
 
-      const { data: raffle } = await supabase.from("raffles").select("draw_date").eq("status", "upcoming").order("draw_date", { ascending: true }).limit(1).maybeSingle();
-      if (raffle) setNextDraw(raffle.draw_date);
-    };
-    load();
+    const { data: raffle } = await supabase
+      .from("raffles")
+      .select("draw_date")
+      .eq("status", "upcoming")
+      .order("draw_date", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (raffle) setNextDraw((raffle as { draw_date: string }).draw_date);
+    else setNextDraw(null);
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const onTick = () => void load();
+    window.addEventListener(CHAMO_HOME_SILENT_TICKER, onTick);
+    return () => window.removeEventListener(CHAMO_HOME_SILENT_TICKER, onTick);
+  }, [load]);
 
   const getCountdown = () => {
     if (!nextDraw) return "Em breve";

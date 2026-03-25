@@ -8,6 +8,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom";
+import { usePrevious } from "@/hooks/usePrevious";
+import { isMainAppTabPath, isOverlayStackRoute } from "@/lib/mainAppTabs";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
@@ -109,9 +111,15 @@ const PageFallback = () => (
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
+  const prevPathname = usePrevious(pathname);
   useEffect(() => {
+    const prev = prevPathname;
+    // Voltar de rota empilhada (ex.: perfil profissional) para uma aba principal: mantém a posição de scroll da Home.
+    if (prev != null && isOverlayStackRoute(prev) && isMainAppTabPath(pathname)) {
+      return;
+    }
     window.scrollTo(0, 0);
-  }, [pathname]);
+  }, [pathname, prevPathname]);
   return null;
 };
 

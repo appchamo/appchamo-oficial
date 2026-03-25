@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -11,11 +11,22 @@ import { Calendar } from "@/components/ui/calendar";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
-import { Loader2, User } from "lucide-react";
+import {
+  Loader2,
+  User,
+  CalendarDays,
+  Clock,
+  CheckCircle2,
+  ChevronRight,
+  Sparkles,
+  Building2,
+  Ban,
+} from "lucide-react";
 import { addDays, startOfToday, format, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { buildChatAppointmentRequestMessage } from "@/lib/chatAppointmentRequest";
 import { getCurrentPathForAuthReturn, setPostAuthRedirect } from "@/lib/chamoAuthReturn";
+import { cn } from "@/lib/utils";
 
 type Step = "atendente" | "service" | "date" | "time" | "confirm";
 
@@ -57,9 +68,7 @@ interface AgendaBookingDialogProps {
   professionalId: string;
   professionalName: string;
   professionalUserId: string;
-  /** Avatar do perfil do profissional (exibido em "Atendimento geral") */
   professionalAvatarUrl?: string | null;
-  /** Após login/cadastro, volta para este caminho (ex.: `/agendar/meu-slug`). Default: URL atual. */
   loginRedirectPath?: string;
 }
 
@@ -72,6 +81,13 @@ function minutesToTime(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function resolveUploadsUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith("http")) return url;
+  const base = import.meta.env.VITE_SUPABASE_URL || "";
+  return `${base}/storage/v1/object/public/uploads/${String(url).replace(/^\//, "")}`;
 }
 
 export default function AgendaBookingDialog({
@@ -99,6 +115,14 @@ export default function AgendaBookingDialog({
   const [slots, setSlots] = useState<string[]>([]);
   const [occupiedSlots, setOccupiedSlots] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
+
+  const hasAtendentes = atendentes.length > 0;
+  const stepFlow = useMemo(
+    () => (hasAtendentes ? (["atendente", "service", "date", "time", "confirm"] as const) : (["service", "date", "time", "confirm"] as const)),
+    [hasAtendentes],
+  );
+  const stepIndex = stepFlow.indexOf(step as (typeof stepFlow)[number]) + 1;
+  const stepTotal = stepFlow.length;
 
   useEffect(() => {
     if (!open || !professionalId) return;
@@ -129,18 +153,26 @@ export default function AgendaBookingDialog({
 
   const loadConfigForAtendente = async (atendenteId: string | null): Promise<void> => {
     if (!professionalId) return;
-    const svcQ = supabase.from("agenda_services").select("id, name, duration_minutes, active").eq("professional_id", professionalId).eq("active", true).order("name");
-    const rlsQ = supabase.from("agenda_availability_rules").select("id, weekday, start_time, end_time, slot_interval_minutes, capacity, break_start_time, break_end_time").eq("professional_id", professionalId);
-    const blkQ = supabase.from("agenda_availability_blocks").select("id, block_date, start_time, end_time").eq("professional_id", professionalId).gte("block_date", format(startOfToday(), "yyyy-MM-dd"));
-    if (atendenteId === null) {
-      svcQ.is("atendente_id", null);
-      rlsQ.is("atendente_id", null);
-      blkQ.is("atendente_id", null);
-    } else {
-      svcQ.eq("atendente_id", atendenteId);
-      rlsQ.eq("atendente_id", atendenteId);
-      blkQ.eq("atendente_id", atendenteId);
-    }
+    const baseSvc = supabase
+      .from("agenda_services")
+      .select("id, name, duration_minutes, active")
+      .eq("professional_id", professionalId)
+      .eq("active", true)
+      .order("name");
+    const baseRls = supabase
+      .from("agenda_availability_rules")
+      .select("id, weekday, start_time, end_time, slot_interval_minutes, capacity, break_start_time, break_end_time")
+      .eq("professional_id", professionalId);
+    const baseBlk = supabase
+      .from("agenda_availability_blocks")
+      .select("id, block_date, start_time, end_time")
+      .eq("professional_id", professionalId)
+      .gte("block_date", format(startOfToday(), "yyyy-MM-dd"));
+
+    const svcQ = atendenteId === null ? baseSvc.is("atendente_id", null) : baseSvc.eq("atendente_id", atendenteId);
+    const rlsQ = atendenteId === null ? baseRls.is("atendente_id", null) : baseRls.eq("atendente_id", atendenteId);
+    const blkQ = atendenteId === null ? baseBlk.is("atendente_id", null) : baseBlk.eq("atendente_id", atendenteId);
+
     const [{ data: svc }, { data: rls }, { data: blk }] = await Promise.all([svcQ, rlsQ, blkQ]);
     setServices((svc as AgendaService[]) || []);
     setRules((rls as AvailabilityRule[]) || []);
@@ -154,7 +186,9 @@ export default function AgendaBookingDialog({
     loadConfigForAtendente(selectedAtendenteId).then(() => {
       if (!cancelled) setLoading(false);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, professionalId, step, selectedAtendenteId]);
 
   const today = startOfToday();
@@ -166,7 +200,7 @@ export default function AgendaBookingDialog({
     if (!hasRule) return true;
     const dateStr = format(date, "yyyy-MM-dd");
     const fullyBlocked = blocks.some(
-      (b) => b.block_date === dateStr && b.start_time === "00:00" && b.end_time === "23:59"
+      (b) => b.block_date === dateStr && b.start_time === "00:00" && b.end_time === "23:59",
     );
     return fullyBlocked;
   };
@@ -319,7 +353,6 @@ export default function AgendaBookingDialog({
         content: msg,
       });
 
-      // Busca avatar do cliente para exibir na notificação do profissional
       const { data: clientPub } = await supabase
         .from("profiles_public" as any)
         .select("avatar_url")
@@ -340,10 +373,13 @@ export default function AgendaBookingDialog({
       navigate(`/messages/${requestId}`);
     } catch (err: unknown) {
       const msg = err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : "";
-      const isSlotTaken = msg.includes("duplicate") || msg.includes("unique") || (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23505");
+      const isSlotTaken =
+        msg.includes("duplicate") ||
+        msg.includes("unique") ||
+        (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23505");
       toast({
         title: isSlotTaken ? "Horário indisponível" : "Erro ao agendar",
-        description: isSlotTaken ? "Este horário já foi reservado. Escolha outro." : (err instanceof Error ? err.message : "Tente novamente."),
+        description: isSlotTaken ? "Este horário já foi reservado. Escolha outro." : err instanceof Error ? err.message : "Tente novamente.",
         variant: "destructive",
       });
     }
@@ -361,216 +397,347 @@ export default function AgendaBookingDialog({
     onOpenChange(val);
   };
 
-  const selectedAtendenteName = selectedAtendenteId === null
-    ? "Atendimento geral"
-    : atendentes.find((a) => a.id === selectedAtendenteId)?.name ?? null;
+  const selectedAtendenteName =
+    selectedAtendenteId === null ? "Atendimento geral" : atendentes.find((a) => a.id === selectedAtendenteId)?.name ?? null;
+
+  const proAvatar = resolveUploadsUrl(professionalAvatarUrl ?? null);
+  const sortedTimeSlots = [...slots, ...occupiedSlots].sort();
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="font-bold">Agendar Serviço</DialogTitle>
-          <DialogDescription>
-            {step === "atendente" && "Escolha com quem deseja ser atendido."}
-            {step === "service" && "Escolha o serviço desejado."}
-            {step === "date" && "Escolha a data."}
-            {step === "time" && "Escolha o horário disponível."}
-            {step === "confirm" && "Confirme o agendamento."}
-          </DialogDescription>
-        </DialogHeader>
-
-        {loading && (
-          <div className="flex justify-center py-8">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-lg rounded-3xl max-h-[92vh] overflow-y-auto border-border/80 shadow-elevated p-0 gap-0 overflow-hidden">
+        <div className="bg-gradient-to-br from-primary via-primary to-amber-600 text-primary-foreground px-5 pt-6 pb-5">
+          <DialogHeader className="text-left space-y-3">
+            <div className="flex items-center gap-2 text-primary-foreground/90">
+              <Sparkles className="w-4 h-4 shrink-0" />
+              <span className="text-[11px] font-bold uppercase tracking-widest">Reserva online</span>
+            </div>
+            <DialogTitle className="text-xl sm:text-2xl font-extrabold text-primary-foreground leading-tight pr-8">
+              Agendar com {professionalName}
+            </DialogTitle>
+            <DialogDescription className="text-primary-foreground/85 text-sm leading-relaxed">
+              {step === "atendente" && "Escolha o profissional que vai te atender."}
+              {step === "service" && "Selecione o serviço e a duração total do atendimento."}
+              {step === "date" && "Escolha o melhor dia na agenda."}
+              {step === "time" && "Horários em azul estão livres; em vermelho, já ocupados."}
+              {step === "confirm" && "Revise e confirme — o profissional receberá o pedido no Chamô."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 flex items-center gap-2">
+            <div className="flex-1 h-1.5 rounded-full bg-primary-foreground/25 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary-foreground transition-all duration-300"
+                style={{ width: `${(stepIndex / stepTotal) * 100}%` }}
+              />
+            </div>
+            <span className="text-xs font-bold tabular-nums shrink-0">
+              {stepIndex}/{stepTotal}
+            </span>
           </div>
-        )}
+        </div>
 
-        {!loading && step === "atendente" && atendentes.length > 0 && (
-          <div className="flex flex-col gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedAtendenteId(null);
-                setStep("service");
-              }}
-              className="flex items-center gap-3 w-full p-3 rounded-xl border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 text-left transition-colors"
-            >
-              {professionalAvatarUrl ? (
-                <img src={professionalAvatarUrl} alt="" className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                  <User className="w-6 h-6 text-primary" />
-                </div>
-              )}
-              <div>
-                <p className="font-medium text-foreground">Atendimento geral</p>
-                <p className="text-xs text-muted-foreground">Qualquer profissional disponível</p>
-              </div>
-            </button>
-            {atendentes.map((a) => (
+        <div className="px-4 sm:px-5 py-5 bg-background">
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-12 gap-3">
+              <Loader2 className="w-10 h-10 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Carregando opções…</p>
+            </div>
+          )}
+
+          {!loading && step === "atendente" && atendentes.length > 0 && (
+            <div className="flex flex-col gap-3">
               <button
-                key={a.id}
                 type="button"
                 onClick={() => {
-                  setSelectedAtendenteId(a.id);
+                  setSelectedAtendenteId(null);
                   setStep("service");
                 }}
-                className="flex items-center gap-3 w-full p-3 rounded-xl border bg-card hover:bg-accent/50 text-left transition-colors"
+                className="group flex items-center gap-4 w-full p-4 rounded-2xl border-2 border-primary/35 bg-gradient-to-br from-primary/8 to-amber-500/5 hover:border-primary/60 hover:shadow-md text-left transition-all"
               >
-                {a.photo_url ? (
-                  <img src={a.photo_url} alt="" className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
-                ) : (
-                  <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                    <User className="w-6 h-6 text-muted-foreground" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-foreground truncate">{a.name}</p>
-                  {a.description && <p className="text-xs text-muted-foreground line-clamp-2">{a.description}</p>}
+                <div className="relative shrink-0">
+                  {proAvatar ? (
+                    <img src={proAvatar} alt="" className="w-14 h-14 rounded-2xl object-cover ring-2 ring-primary/30 shadow-md" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-2xl bg-primary/20 flex items-center justify-center ring-2 ring-primary/25">
+                      <Building2 className="w-7 h-7 text-primary" />
+                    </div>
+                  )}
                 </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-foreground text-base">Atendimento geral</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">Primeiro horário disponível da equipe</p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
               </button>
-            ))}
-          </div>
-        )}
 
-        {!loading && step === "service" && (
-          <div className="flex flex-col gap-2 pt-2">
-            {atendentes.length > 0 && selectedAtendenteName && (
-              <p className="text-xs text-muted-foreground mb-1">Atendente: <strong>{selectedAtendenteName}</strong></p>
-            )}
-            <p className="text-xs text-muted-foreground">Selecione um ou mais serviços. A duração será a soma.</p>
-            {services.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Nenhum serviço disponível para esta escolha.</p>
-            ) : (
-              <>
-                {services.map((s) => {
-                  const isSelected = selectedServices.some((x) => x.id === s.id);
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        if (isSelected) setSelectedServices((prev) => prev.filter((x) => x.id !== s.id));
-                        else setSelectedServices((prev) => [...prev, s]);
-                      }}
-                      className={`flex justify-between items-center w-full p-3 rounded-xl border text-left transition-colors ${
-                        isSelected ? "border-primary bg-primary/10" : "bg-card hover:bg-accent/50"
-                      }`}
-                    >
-                      <span className="font-medium">{s.name}</span>
-                      <span className="text-xs text-muted-foreground">{s.duration_minutes} min</span>
-                    </button>
-                  );
-                })}
-                {selectedServices.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Total: {selectedServices.reduce((a, b) => a + b.duration_minutes, 0)} min
-                  </p>
-                )}
-                <Button
-                  size="sm"
-                  className="mt-2 rounded-xl"
-                  disabled={selectedServices.length === 0}
-                  onClick={() => setStep("date")}
-                >
-                  Próximo
-                </Button>
-              </>
-            )}
-            {atendentes.length > 0 && (
-              <Button variant="ghost" size="sm" className="mt-2 rounded-lg" onClick={() => { setSelectedServices([]); setSelectedDate(undefined); setSelectedSlot(null); setStep("atendente"); }}>
-                Trocar atendente
-              </Button>
-            )}
-          </div>
-        )}
-
-        {!loading && step === "date" && selectedServices.length > 0 && (
-          <div className="pt-2">
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={(d) => {
-                setSelectedDate(d);
-                if (d) setStep("time");
-              }}
-              disabled={isDateDisabled}
-              locale={ptBR}
-              fromDate={today}
-              toDate={addDays(today, 60)}
-            />
-            <div className="flex gap-2 mt-3">
-              <Button variant="outline" size="sm" onClick={() => setStep("service")}>
-                Voltar
-              </Button>
+              {atendentes.map((a) => {
+                const img = resolveUploadsUrl(a.photo_url);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedAtendenteId(a.id);
+                      setStep("service");
+                    }}
+                    className="group flex items-center gap-4 w-full p-4 rounded-2xl border border-border/80 bg-card hover:border-primary/40 hover:shadow-md text-left transition-all"
+                  >
+                    <div className="relative shrink-0">
+                      {img ? (
+                        <img src={img} alt="" className="w-14 h-14 rounded-2xl object-cover ring-2 ring-border shadow-sm" />
+                      ) : (
+                        <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center ring-2 ring-border/60">
+                          <User className="w-7 h-7 text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-foreground text-base truncate">{a.name}</p>
+                      {a.description ? (
+                        <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{a.description}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/80 mt-0.5">Toque para ver serviços e horários</p>
+                      )}
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+                  </button>
+                );
+              })}
             </div>
-          </div>
-        )}
+          )}
 
-        {!loading && step === "time" && selectedServices.length > 0 && selectedDate && (
-          <div className="pt-2">
-            <p className="text-sm text-muted-foreground mb-2">
-              {format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR })}
-            </p>
-            {loadingSlots ? (
-              <div className="flex justify-center py-6">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : (slots.length === 0 && occupiedSlots.length === 0) ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Nenhum horário neste dia.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {[...slots, ...occupiedSlots]
-                  .sort()
-                  .map((slot) => {
-                    const isOccupied = occupiedSlots.includes(slot);
-                    return (
-                      <Button
-                        key={slot}
-                        variant={isOccupied ? "outline" : selectedSlot === slot ? "default" : "outline"}
-                        size="sm"
-                        disabled={isOccupied}
-                        onClick={() => !isOccupied && setSelectedSlot(slot)}
-                        className={isOccupied ? "border-destructive/50 bg-destructive/10 text-destructive cursor-not-allowed" : ""}
-                      >
-                        {slot}
-                      </Button>
-                    );
-                  })}
-              </div>
-            )}
-            <div className="flex gap-2 mt-4">
-              <Button variant="outline" size="sm" onClick={() => setStep("date")}>
-                Voltar
-              </Button>
-              {selectedSlot && (
-                <Button size="sm" onClick={() => setStep("confirm")}>
-                  Próximo
+          {!loading && step === "service" && (
+            <div className="flex flex-col gap-3">
+              {atendentes.length > 0 && selectedAtendenteName && (
+                <div className="flex items-center gap-2 px-1">
+                  <User className="w-4 h-4 text-primary shrink-0" />
+                  <p className="text-sm text-muted-foreground">
+                    Atendente: <span className="font-semibold text-foreground">{selectedAtendenteName}</span>
+                  </p>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground px-1">Um ou mais serviços — a duração total define os horários oferecidos.</p>
+              {services.length === 0 ? (
+                <div className="rounded-2xl border border-dashed py-10 text-center text-sm text-muted-foreground">
+                  Nenhum serviço disponível para esta escolha.
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    {services.map((s) => {
+                      const isSelected = selectedServices.some((x) => x.id === s.id);
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) setSelectedServices((prev) => prev.filter((x) => x.id !== s.id));
+                            else setSelectedServices((prev) => [...prev, s]);
+                          }}
+                          className={cn(
+                            "flex justify-between items-center w-full p-4 rounded-2xl border-2 text-left transition-all",
+                            isSelected
+                              ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20"
+                              : "border-border/70 bg-card hover:border-primary/30 hover:bg-muted/40",
+                          )}
+                        >
+                          <span className="font-semibold text-foreground pr-2">{s.name}</span>
+                          <span
+                            className={cn(
+                              "text-xs font-bold px-2.5 py-1 rounded-lg shrink-0",
+                              isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {s.duration_minutes} min
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedServices.length > 0 && (
+                    <p className="text-sm font-medium text-foreground px-1">
+                      Duração total:{" "}
+                      <span className="text-primary">{selectedServices.reduce((a, b) => a + b.duration_minutes, 0)} min</span>
+                    </p>
+                  )}
+                  <Button
+                    size="lg"
+                    className="w-full rounded-2xl font-bold mt-2"
+                    disabled={selectedServices.length === 0}
+                    onClick={() => setStep("date")}
+                  >
+                    Continuar
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </>
+              )}
+              {atendentes.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-xl text-muted-foreground"
+                  onClick={() => {
+                    setSelectedServices([]);
+                    setSelectedDate(undefined);
+                    setSelectedSlot(null);
+                    setStep("atendente");
+                  }}
+                >
+                  Voltar à escolha do profissional
                 </Button>
               )}
             </div>
-          </div>
-        )}
+          )}
 
-        {!loading && step === "confirm" && selectedServices.length > 0 && selectedDate && selectedSlot && (
-          <div className="pt-2 space-y-3">
-            <div className="p-3 rounded-xl bg-muted/50 text-sm">
-              {selectedAtendenteName && <p><strong>Atendente:</strong> {selectedAtendenteName}</p>}
-              <p><strong>Serviço(s):</strong> {selectedServices.map((s) => s.name).join(" + ")}</p>
-              <p><strong>Duração total:</strong> {totalDurationMinutes} min</p>
-              <p><strong>Data:</strong> {format(selectedDate, "dd/MM/yyyy", { locale: ptBR })}</p>
-              <p><strong>Horário:</strong> {selectedSlot}</p>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setStep("time")}>
+          {!loading && step === "date" && selectedServices.length > 0 && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-border/80 bg-card p-3 shadow-sm">
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <CalendarDays className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-semibold text-foreground">Selecione a data</span>
+                </div>
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(d) => {
+                    setSelectedDate(d);
+                    if (d) setStep("time");
+                  }}
+                  disabled={isDateDisabled}
+                  locale={ptBR}
+                  fromDate={today}
+                  toDate={addDays(today, 60)}
+                  className="mx-auto"
+                />
+              </div>
+              <Button variant="outline" className="w-full rounded-2xl" onClick={() => setStep("service")}>
                 Voltar
               </Button>
-              <Button onClick={handleConfirmBooking} disabled={sending}>
-                {sending ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Enviando...</> : "Confirmar agendamento"}
-              </Button>
             </div>
-          </div>
-        )}
+          )}
+
+          {!loading && step === "time" && selectedServices.length > 0 && selectedDate && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-muted/50 border border-border/60 px-3 py-2.5">
+                <p className="text-sm font-semibold text-foreground capitalize">
+                  {format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR })}
+                </p>
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  Toque em um horário disponível
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-[11px] font-medium">
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-sky-500 text-white">
+                  <span className="w-2 h-2 rounded-full bg-white/90" />
+                  Disponível
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300 border border-red-200/80 dark:border-red-900">
+                  <Ban className="w-3 h-3" />
+                  Indisponível
+                </span>
+              </div>
+
+              {loadingSlots ? (
+                <div className="flex flex-col items-center py-10 gap-2">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  <p className="text-xs text-muted-foreground">Consultando agenda…</p>
+                </div>
+              ) : sortedTimeSlots.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">Nenhum horário neste dia.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {sortedTimeSlots.map((slot) => {
+                    const isOccupied = occupiedSlots.includes(slot);
+                    const isSelected = selectedSlot === slot && !isOccupied;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        disabled={isOccupied}
+                        onClick={() => !isOccupied && setSelectedSlot(slot)}
+                        className={cn(
+                          "min-w-[4.75rem] py-2.5 px-3 rounded-xl text-sm font-bold transition-all",
+                          isOccupied &&
+                            "bg-red-50 text-red-600 border-2 border-red-200 cursor-not-allowed opacity-95 dark:bg-red-950/35 dark:text-red-400 dark:border-red-900/60",
+                          !isOccupied &&
+                            !isSelected &&
+                            "bg-sky-500 text-white border-2 border-sky-600 hover:bg-sky-600 active:scale-[0.98] shadow-sm",
+                          !isOccupied &&
+                            isSelected &&
+                            "bg-sky-700 text-white border-2 border-sky-800 ring-2 ring-sky-300 ring-offset-2 ring-offset-background scale-[1.02]",
+                        )}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1 rounded-2xl" onClick={() => setStep("date")}>
+                  Voltar
+                </Button>
+                {selectedSlot && (
+                  <Button className="flex-1 rounded-2xl font-bold" onClick={() => setStep("confirm")}>
+                    Continuar
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!loading && step === "confirm" && selectedServices.length > 0 && selectedDate && selectedSlot && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border-l-4 border-l-primary border border-border/80 bg-gradient-to-br from-muted/40 to-background p-4 space-y-3 shadow-sm">
+                <div className="flex items-center gap-2 text-primary">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span className="font-bold text-foreground">Resumo do agendamento</span>
+                </div>
+                <ul className="text-sm space-y-2 text-foreground/90">
+                  {selectedAtendenteName && (
+                    <li>
+                      <span className="text-muted-foreground">Profissional:</span>{" "}
+                      <span className="font-semibold">{selectedAtendenteName}</span>
+                    </li>
+                  )}
+                  <li>
+                    <span className="text-muted-foreground">Serviço(s):</span>{" "}
+                    <span className="font-semibold">{selectedServices.map((s) => s.name).join(" + ")}</span>
+                  </li>
+                  <li>
+                    <span className="text-muted-foreground">Duração:</span>{" "}
+                    <span className="font-semibold">{totalDurationMinutes} min</span>
+                  </li>
+                  <li>
+                    <span className="text-muted-foreground">Data:</span>{" "}
+                    <span className="font-semibold">{format(selectedDate, "dd/MM/yyyy", { locale: ptBR })}</span>
+                  </li>
+                  <li>
+                    <span className="text-muted-foreground">Horário:</span>{" "}
+                    <span className="font-semibold text-primary">{selectedSlot}</span>
+                  </li>
+                </ul>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button variant="outline" className="rounded-2xl sm:flex-1" onClick={() => setStep("time")}>
+                  Ajustar horário
+                </Button>
+                <Button className="rounded-2xl font-bold sm:flex-1 h-12" onClick={handleConfirmBooking} disabled={sending}>
+                  {sending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" /> Enviando…
+                    </>
+                  ) : (
+                    "Confirmar agendamento"
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

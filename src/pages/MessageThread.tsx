@@ -33,6 +33,16 @@ interface OtherParty {
   avatar_url: string | null;
 }
 
+type ThreadLabelColor = "blue" | "green" | "orange" | "red";
+
+const threadLabelPillClass = (c: ThreadLabelColor) =>
+  ({
+    blue: "bg-blue-600 text-white",
+    green: "bg-emerald-600 text-white",
+    orange: "bg-orange-500 text-white",
+    red: "bg-red-600 text-white",
+  })[c];
+
 const getOptimizedAvatar = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
@@ -65,6 +75,7 @@ const MessageThread = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [otherParty, setOtherParty] = useState<OtherParty>({ name: "Chat", avatar_url: null });
+  const [threadLabel, setThreadLabel] = useState<{ color: ThreadLabelColor; text: string } | null>(null);
   const [isProfessional, setIsProfessional] = useState(false);
   const [proAvailabilityStatus, setProAvailabilityStatus] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -397,9 +408,29 @@ const MessageThread = () => {
           .from("agenda_appointments")
           .select("id, status, service_id, appointment_date, start_time, end_time, client_id, professional_id, atendente_id, agenda_services(name, duration_minutes)")
           .eq("chat_request_id", threadId).order("start_time", { ascending: true }).limit(1).maybeSingle();
+        const crsQuery = supabase
+          .from("chat_read_status" as any)
+          .select("label_color, label_text")
+          .eq("request_id", threadId)
+          .eq("user_id", user.id)
+          .maybeSingle();
 
-        const [proRes, reviewRes, appRes] = await Promise.all([proQuery, reviewCountQuery, appointmentQuery]);
+        const [proRes, reviewRes, appRes, crsRes] = await Promise.all([proQuery, reviewCountQuery, appointmentQuery, crsQuery]);
         const pro = proRes.data;
+        const allowedLabelColors = new Set(["blue", "green", "orange", "red"]);
+        const crsRow = crsRes.data as { label_color?: string | null; label_text?: string | null } | null;
+        if (
+          crsRow?.label_color &&
+          crsRow.label_text?.trim() &&
+          allowedLabelColors.has(crsRow.label_color)
+        ) {
+          setThreadLabel({
+            color: crsRow.label_color as ThreadLabelColor,
+            text: crsRow.label_text.trim().slice(0, 15),
+          });
+        } else {
+          setThreadLabel(null);
+        }
 
         if ((reviewRes as any).count > 0) setHasRated(true);
         setAppointment(appRes.data ? (appRes.data as any) : null);
@@ -487,6 +518,33 @@ const MessageThread = () => {
     subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [threadId]);
+
+  useEffect(() => {
+    if (!threadId || !userId) return;
+    const allowed = new Set(["blue", "green", "orange", "red"]);
+    const channel = supabase
+      .channel(`chat-read-label-${threadId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "chat_read_status", filter: `request_id=eq.${threadId}` },
+        (payload) => {
+          const row = payload.new as { user_id?: string; label_color?: string | null; label_text?: string | null };
+          if (row.user_id !== userId) return;
+          if (row.label_color && row.label_text?.trim() && allowed.has(row.label_color)) {
+            setThreadLabel({
+              color: row.label_color as ThreadLabelColor,
+              text: row.label_text.trim().slice(0, 15),
+            });
+          } else {
+            setThreadLabel(null);
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [threadId, userId]);
 
   useEffect(() => {
     if (!threadId || !appointment?.id) return;
@@ -1897,7 +1955,14 @@ const MessageThread = () => {
               {otherInitials}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
+                {threadLabel ? (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 max-w-[90px] truncate ${threadLabelPillClass(threadLabel.color)}`}>
+                    {threadLabel.text}
+                  </span>
+                ) : null}
+              </div>
               {!isProfessional && proAvailabilityStatus ? (
                 <p className={`text-[10px] font-medium ${
                   proAvailabilityStatus === "available" ? "text-green-500" :

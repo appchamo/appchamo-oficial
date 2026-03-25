@@ -163,19 +163,30 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-md rounded-2xl">
         <DialogHeader>
-          <DialogTitle className="font-bold">Chamar {professionalName}</DialogTitle>
-          <DialogDescription>
-            {step === "ask" ? "Deseja descrever o serviço?" : "Envie detalhes e fotos para o profissional."}
-          </DialogDescription>
+          {step === "ask" ? (
+            <>
+              <DialogTitle className="text-lg sm:text-xl font-bold text-foreground leading-snug pr-8">
+                Deseja descrever serviço?
+              </DialogTitle>
+              <DialogDescription className="text-sm font-medium text-foreground/70 pt-1">
+                Chamar {professionalName}
+              </DialogDescription>
+            </>
+          ) : (
+            <>
+              <DialogTitle className="font-bold">Detalhes do serviço</DialogTitle>
+              <DialogDescription>Envie detalhes e fotos para {professionalName}.</DialogDescription>
+            </>
+          )}
         </DialogHeader>
 
         {step === "ask" ? (
           <div className="flex flex-col gap-3 pt-2">
-            <button onClick={() => setStep("form")} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm">
-              Sim, quero descrever
+            <button type="button" onClick={() => setStep("form")} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm uppercase tracking-wide">
+              Descrever serviço
             </button>
-            <button onClick={() => submit(false)} disabled={sending} className="w-full py-3 rounded-xl border font-bold text-sm disabled:opacity-50">
-              {sending ? "Enviando..." : "Não, chamar agora"}
+            <button type="button" onClick={() => submit(false)} disabled={sending} className="w-full py-3 rounded-xl border-2 border-border bg-background font-bold text-sm uppercase tracking-wide disabled:opacity-50">
+              {sending ? "Enviando..." : "Chamar agora"}
             </button>
           </div>
         ) : (

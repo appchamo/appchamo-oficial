@@ -19,13 +19,8 @@ export default function ProtectedRoute({ children }: Props) {
   }
 
   if (!session) {
-    return (
-      <Navigate 
-        to="/login" 
-        replace 
-        state={{ from: location.pathname }} 
-      />
-    );
+    const from = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to="/login" replace state={{ from }} />;
   }
 
   return children;

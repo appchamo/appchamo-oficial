@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
+import { peekPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
 
 export default function PostLoginGate() {
   const navigate = useNavigate();
@@ -60,6 +61,12 @@ export default function PostLoginGate() {
             const userType = (data as any)?.user_type as string | undefined;
             if (userType) {
               setChecking(false);
+              const pending = peekPostAuthRedirect();
+              if (pending) {
+                clearPostAuthRedirect();
+                navigate(pending, { replace: true });
+                return;
+              }
               navigate(userType === "sponsor" ? "/sponsor/dashboard" : "/home", { replace: true });
               return;
             }
@@ -85,8 +92,14 @@ export default function PostLoginGate() {
       };
     }
 
-    // Perfil carregado → redireciona conforme tipo
+    // Perfil carregado → destino pendente (ex.: link da agenda) ou home
     setChecking(false);
+    const pending = peekPostAuthRedirect();
+    if (pending) {
+      clearPostAuthRedirect();
+      navigate(pending, { replace: true });
+      return;
+    }
     navigate(profile?.user_type === "sponsor" ? "/sponsor/dashboard" : "/home", { replace: true });
   }, [loading, session?.user, profile, navigate]);
 

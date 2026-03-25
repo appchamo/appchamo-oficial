@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
+import { consumePostAuthRedirect } from "@/lib/chamoAuthReturn";
+import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ticket, MailCheck, Mail, Home } from "lucide-react";
 import StepAccountType from "@/components/signup/StepAccountType";
@@ -353,16 +355,8 @@ const Signup = () => {
       
       if (!userId) { setLoading(false); return; }
 
-      // Garante JWT válido para a Edge Function (evita 401)
-      let token = session?.access_token ?? null;
-      if (!token) {
-        const { data: { session: fresh } } = await supabase.auth.getSession();
-        token = fresh?.access_token ?? null;
-      }
-      if (!token) {
-        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
-        token = refreshed?.access_token ?? null;
-      }
+      // JWT fresco: o token do contexto React pode estar expirado após várias etapas (401 intermitente).
+      const token = await getAccessTokenForEdgeFunctions();
       if (!token) {
         toast({
           title: "Sessão expirada",
@@ -394,7 +388,15 @@ const Signup = () => {
 
       if (fnError || result?.error) {
         console.error("Erro na função complete-signup:", fnError || result?.error);
-        toast({ title: "Erro ao completar cadastro.", variant: "destructive" });
+        const raw = (fnError as Error)?.message || String((result as { error?: string })?.error || "");
+        const isAuth =
+          /401|jwt|token|Unauthorized|sessão/i.test(raw) ||
+          String((result as { error?: string })?.error || "").toLowerCase().includes("token");
+        toast({
+          title: isAuth ? "Sessão expirada ou inválida" : "Erro ao completar cadastro.",
+          description: isAuth ? translateError(raw) : undefined,
+          variant: "destructive",
+        });
         setLoading(false);
         return;
       }
@@ -445,9 +447,9 @@ const Signup = () => {
   const handleCouponClose = async () => {
     setCouponPopup(false);
     if (createdUserId) {
-      // Atualiza perfil (user_type, etc.) antes de ir para a Home para já abrir como profissional/cliente
       await refreshProfile?.();
-      navigate("/home");
+      const back = consumePostAuthRedirect();
+      navigate(back || "/home");
     } else {
       setStep("awaiting-email");
     }

@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCpf, validateCpf } from "@/lib/formatters";
+import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
@@ -128,8 +129,8 @@ const BecomeProfessional = () => {
       professionalId = upsertedPro?.id ?? professionalId;
 
       if (professionalId && docFiles.length > 0) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("Sessão expirada. Faça login novamente.");
+        const accessToken = await getAccessTokenForEdgeFunctions();
+        if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
 
         for (const file of docFiles) {
           // Upload via Edge Function com service_role — garante que o arquivo vai ao storage
@@ -142,7 +143,7 @@ const BecomeProfessional = () => {
 
           const uploadRes = await fetch(uploadUrl, {
             method: "POST",
-            headers: { Authorization: `Bearer ${session.access_token}` },
+            headers: { Authorization: `Bearer ${accessToken}` },
             body: formData,
           });
 

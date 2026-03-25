@@ -3,7 +3,7 @@ import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Tick
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
-import { format } from "date-fns";
+import { format, isValid, parse } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,6 +15,10 @@ import { Capacitor } from "@capacitor/core";
 import { formatCep, formatCpf, validateCpf } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
 import { translateError } from "@/lib/errorMessages";
+import {
+  parseChatAppointmentRequestMessage,
+  parseLegacyAppointmentRequestMessage,
+} from "@/lib/chatAppointmentRequest";
 
 interface Message {
   id: string;
@@ -1670,6 +1674,40 @@ const MessageThread = () => {
               <p className="text-[10px] font-semibold text-primary mt-0.5">{product.price}</p>
             </div>
           </div>
+        </div>
+      );
+    }
+
+    const appointmentParsed =
+      parseChatAppointmentRequestMessage(msg.content) ??
+      parseLegacyAppointmentRequestMessage(msg.content);
+    if (appointmentParsed) {
+      let datePretty = appointmentParsed.dateLine;
+      const parsedDate = parse(appointmentParsed.dateLine, "dd/MM/yyyy", new Date());
+      if (isValid(parsedDate)) {
+        datePretty = format(parsedDate, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
+        datePretty = datePretty.charAt(0).toUpperCase() + datePretty.slice(1);
+      }
+      return (
+        <div
+          className={`space-y-2.5 min-w-[200px] max-w-[260px] text-left ${isMine ? "text-primary-foreground" : "text-foreground"}`}
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-wider opacity-80 flex items-center gap-1.5">
+            <Calendar className="w-3 h-3 shrink-0" />
+            Solicitação de agendamento
+          </p>
+          <p className={`text-[15px] font-bold leading-snug ${isMine ? "" : "text-foreground"}`}>
+            {appointmentParsed.service}
+          </p>
+          <div
+            className={`rounded-xl px-3 py-2.5 space-y-0.5 border ${
+              isMine ? "bg-background/20 border-primary-foreground/20" : "bg-muted/70 border-border"
+            }`}
+          >
+            <p className="text-xs font-medium leading-tight opacity-95">{datePretty}</p>
+            <p className={`text-sm font-semibold ${isMine ? "" : "text-foreground"}`}>às {appointmentParsed.time}</p>
+          </div>
+          <p className="text-[11px] opacity-75 leading-relaxed">Aguardando confirmação do profissional.</p>
         </div>
       );
     }

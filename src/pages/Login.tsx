@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth, OAUTH_FAILED_KEY } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
+import { resolveAuthReturnPath, setPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
@@ -81,6 +82,14 @@ const Login = () => {
     localStorage.removeItem("manual_login_intent");
     socialLoginInProgressRef.current = false;
   }, []);
+
+  // Mantém destino pós-login no storage (OAuth perde o state do React Router ao voltar na URL)
+  useEffect(() => {
+    const from = (location.state as { from?: string } | null)?.from;
+    if (from && from.startsWith("/") && !from.startsWith("//")) {
+      setPostAuthRedirect(from);
+    }
+  }, [location.state]);
 
   // Quando não há sessão, reseta a ref de redirect para que um novo login (ex.: OAuth) possa redirecionar
   useEffect(() => {
@@ -311,13 +320,6 @@ const Login = () => {
     return { profile: null, roles: [] };
   };
 
-  const getRedirectPath = (defaultPath: string): string => {
-    if (returnTo && typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//")) {
-      return returnTo;
-    }
-    return defaultPath;
-  };
-
   const proceedToRedirect = async (userId: string, emailFromAuth?: string) => {
     if (isRedirectingRef.current) return;
     isRedirectingRef.current = true; 
@@ -341,7 +343,8 @@ const Login = () => {
           .maybeSingle();
 
         if (!existingByEmail || !existingByEmail.user_type || existingByEmail.user_type === "pending_signup") {
-          // Não existe perfil com esse e-mail → fluxo de cadastro
+          const back = resolveAuthReturnPath(returnTo);
+          if (back) setPostAuthRedirect(back);
           localStorage.removeItem("signup_in_progress");
           localStorage.removeItem("manual_login_intent");
           navigate("/signup", { replace: true });
@@ -377,6 +380,8 @@ const Login = () => {
         profile.user_type === "pending_signup";
 
       if (isProfileIncomplete) {
+        const back = resolveAuthReturnPath(returnTo);
+        if (back) setPostAuthRedirect(back);
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
 
@@ -386,9 +391,15 @@ const Login = () => {
 
       localStorage.removeItem("signup_in_progress");
       localStorage.removeItem("manual_login_intent");
-      sessionStorage.setItem("chamo_oauth_just_landed", "1");
-      localStorage.setItem("chamo_oauth_just_landed", "1");
-      navigate(getRedirectPath("/post-login"), { replace: true });
+      const afterAuth = resolveAuthReturnPath(returnTo);
+      if (afterAuth) {
+        clearPostAuthRedirect();
+        navigate(afterAuth, { replace: true });
+      } else {
+        sessionStorage.setItem("chamo_oauth_just_landed", "1");
+        localStorage.setItem("chamo_oauth_just_landed", "1");
+        navigate("/post-login", { replace: true });
+      }
       
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);

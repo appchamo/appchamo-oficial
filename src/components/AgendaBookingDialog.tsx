@@ -14,6 +14,8 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, User } from "lucide-react";
 import { addDays, startOfToday, format, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { buildChatAppointmentRequestMessage } from "@/lib/chatAppointmentRequest";
+import { getCurrentPathForAuthReturn, setPostAuthRedirect } from "@/lib/chamoAuthReturn";
 
 type Step = "atendente" | "service" | "date" | "time" | "confirm";
 
@@ -57,6 +59,8 @@ interface AgendaBookingDialogProps {
   professionalUserId: string;
   /** Avatar do perfil do profissional (exibido em "Atendimento geral") */
   professionalAvatarUrl?: string | null;
+  /** Após login/cadastro, volta para este caminho (ex.: `/agendar/meu-slug`). Default: URL atual. */
+  loginRedirectPath?: string;
 }
 
 function timeToMinutes(t: string): number {
@@ -77,6 +81,7 @@ export default function AgendaBookingDialog({
   professionalName,
   professionalUserId,
   professionalAvatarUrl,
+  loginRedirectPath,
 }: AgendaBookingDialogProps) {
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>("atendente");
@@ -208,22 +213,19 @@ export default function AgendaBookingDialog({
         }
       }
 
-      let existingQ = supabase
-        .from("agenda_appointments")
-        .select("start_time, end_time")
-        .eq("professional_id", professionalId)
-        .eq("appointment_date", dateStr)
-        .in("status", ["pending", "confirmed", "done"]);
-      if (selectedAtendenteId === null) {
-        existingQ = existingQ.is("atendente_id", null);
-      } else {
-        existingQ = existingQ.eq("atendente_id", selectedAtendenteId);
+      const { data: rpcRows, error: rpcErr } = await supabase.rpc("public_agenda_existing_ranges", {
+        p_professional_id: professionalId,
+        p_date: dateStr,
+        p_atendente_id: selectedAtendenteId,
+      });
+      if (rpcErr) {
+        console.warn("[AgendaBookingDialog] public_agenda_existing_ranges:", rpcErr);
       }
-      const { data: existing } = await existingQ;
+      const existing = (rpcRows || []) as { start_time: string; end_time: string }[];
 
-      const existingRanges = (existing || []).map((r: { start_time: string; end_time: string }) => ({
-        start: timeToMinutes(r.start_time),
-        end: timeToMinutes(r.end_time?.slice(0, 5) || r.end_time),
+      const existingRanges = existing.map((r: { start_time: string; end_time: string }) => ({
+        start: timeToMinutes(String(r.start_time).slice(0, 5)),
+        end: timeToMinutes(String(r.end_time).slice(0, 5) || String(r.end_time)),
       }));
 
       const available: string[] = [];
@@ -248,7 +250,13 @@ export default function AgendaBookingDialog({
     if (selectedServices.length === 0 || !selectedDate || !selectedSlot) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      toast({ title: "Faça login para agendar", variant: "destructive" });
+      const ret = loginRedirectPath || getCurrentPathForAuthReturn();
+      setPostAuthRedirect(ret);
+      navigate("/login", { state: { from: ret } });
+      toast({
+        title: "Faça login para concluir",
+        description: "Entre ou cadastre-se — você volta para esta agenda.",
+      });
       return;
     }
 
@@ -299,7 +307,12 @@ export default function AgendaBookingDialog({
         });
       }
 
-      const msg = `Agendamento solicitado: **${servicesLabel}** em ${format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às ${selectedSlot}. Aguardando confirmação do profissional.`;
+      const dateDdMmYyyy = format(selectedDate, "dd/MM/yyyy", { locale: ptBR });
+      const msg = buildChatAppointmentRequestMessage({
+        servicesLabel,
+        dateDdMmYyyy,
+        slot: selectedSlot,
+      });
       await supabase.from("chat_messages").insert({
         request_id: requestId,
         sender_id: user.id,

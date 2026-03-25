@@ -48,6 +48,7 @@ const ProfessionalProfile = lazy(() => import("./pages/ProfessionalProfile"));
 const ProAgenda = lazy(() => import("./pages/ProAgenda"));
 const ProAgendaCalendar = lazy(() => import("./pages/ProAgendaCalendar"));
 const MeusAgendamentos = lazy(() => import("./pages/MeusAgendamentos"));
+const PublicAgenda = lazy(() => import("./pages/PublicAgenda"));
 const BecomeProfessional = lazy(() => import("./pages/BecomeProfessional"));
 const Support = lazy(() => import("./pages/Support"));
 const SupportThread = lazy(() => import("./pages/SupportThread"));
@@ -488,6 +489,7 @@ const AppContent = () => {
         <Route path="/meus-agendamentos" element={<ProtectedRoute><MeusAgendamentos /></ProtectedRoute>} />
         <Route path="/pro/:id" element={<ProfessionalProfile />} />
         <Route path="/professional/:id" element={<ProfessionalProfile />} />
+        <Route path="/agendar/:proKey" element={<PublicAgenda />} />
         <Route path="/support" element={<ProtectedRoute><Support /></ProtectedRoute>} />
         <Route path="/support/:ticketId" element={<ProtectedRoute><SupportThread /></ProtectedRoute>} />
         <Route path="/suporte-desk" element={<SupportDeskRoute><SupportDesk /></SupportDeskRoute>} />

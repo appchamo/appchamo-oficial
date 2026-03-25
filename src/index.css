@@ -100,6 +100,27 @@
     @apply border-border;
   }
 
+  /* Capacitor / iOS: sem menu de “Abrir link”, “Salvar imagem”, etc. no long-press */
+  html {
+    -webkit-touch-callout: none;
+  }
+
+  img,
+  picture img,
+  a[href],
+  [role="link"] {
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
   body {
     @apply text-foreground font-sans antialiased;
     font-family: 'Plus Jakarta Sans', system-ui, sans-serif;

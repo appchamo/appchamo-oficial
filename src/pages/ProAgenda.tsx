@@ -15,6 +15,9 @@ import {
   Save,
   User,
   Pencil,
+  Link2,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -43,6 +46,8 @@ export default function ProAgenda() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [professionalId, setProfessionalId] = useState<string | null>(null);
+  const [proSlug, setProSlug] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [agendaEnabled, setAgendaEnabled] = useState(false);
 
   const [atendentes, setAtendentes] = useState<Atendente[]>([]);
@@ -66,12 +71,17 @@ export default function ProAgenda() {
       return;
     }
     const loadProAndAtendentes = async () => {
-      const { data: pro } = await supabase.from("professionals").select("id, agenda_enabled").eq("user_id", user.id).maybeSingle();
+      const { data: pro } = await supabase
+        .from("professionals")
+        .select("id, agenda_enabled, slug")
+        .eq("user_id", user.id)
+        .maybeSingle();
       if (!pro) {
         setLoading(false);
         return;
       }
       setProfessionalId(pro.id);
+      setProSlug(((pro as { slug?: string | null }).slug || "").trim() || null);
       setAgendaEnabled(!!(pro as any).agenda_enabled);
       try {
         const { data: atList } = await supabase
@@ -348,9 +358,54 @@ export default function ProAgenda() {
     );
   }
 
+  const agendaPublicPath = proSlug || professionalId || "";
+  const agendaPublicUrl =
+    typeof window !== "undefined" && agendaPublicPath ? `${window.location.origin}/agendar/${agendaPublicPath}` : "";
+
+  const copyAgendaLink = async () => {
+    if (!agendaPublicUrl) return;
+    try {
+      await navigator.clipboard.writeText(agendaPublicUrl);
+      setLinkCopied(true);
+      toast({ title: "Link copiado!", description: "Cole na bio do Instagram ou envie para seus clientes." });
+      window.setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      toast({ title: "Não foi possível copiar", variant: "destructive" });
+    }
+  };
+
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-6">
+        {isBusiness && professionalId && (
+          <section className="mb-6 rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-background to-amber-500/[0.06] p-4 sm:p-5 shadow-card">
+            <p className="text-xs font-bold text-primary uppercase tracking-wider mb-1">Link público da agenda</p>
+            <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+              Qualquer pessoa com o link pode ver seus horários e agendar. Na hora de confirmar, o cliente entra no Chamô
+              (login ou cadastro) e volta para esta página.
+            </p>
+            <div className="flex items-center gap-2 rounded-xl border bg-background/90 px-3 py-2.5 mb-3">
+              <Link2 className="w-4 h-4 text-muted-foreground shrink-0" />
+              <p className="text-xs sm:text-sm font-mono truncate flex-1 text-foreground">{agendaPublicUrl || "…"}</p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="rounded-xl gap-2"
+              onClick={copyAgendaLink}
+              disabled={!agendaPublicUrl}
+            >
+              {linkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {linkCopied ? "Copiado!" : "Copiar link"}
+            </Button>
+            {!agendaEnabled && (
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-3 font-medium">
+                Ative a agenda abaixo para que o link permita agendamentos.
+              </p>
+            )}
+          </section>
+        )}
+
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
             <Calendar className="w-5 h-5 text-primary" />

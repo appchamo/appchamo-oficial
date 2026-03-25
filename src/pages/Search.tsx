@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation, normalizeStateToUF } from "@/lib/locationUtils";
 import { fetchCitiesByState } from "@/lib/brazilLocations";
 import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
+import { useRefreshAtKey } from "@/contexts/RefreshContext";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -229,6 +230,11 @@ const Search = () => {
     setPros(mappedPros);
     setLoading(false);
   };
+
+  useRefreshAtKey("/search", async () => {
+    await loadUserLocation();
+    await loadPros();
+  });
 
   // 🔥 OTIMIZAÇÃO: Inicia as duas buscas em paralelo (não espera uma acabar para começar a outra)
   useEffect(() => { 

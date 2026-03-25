@@ -7,12 +7,15 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom"; 
+import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import EdgeSwipeBack from "@/components/EdgeSwipeBack";
+import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
+import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
 import { Loader2 } from "lucide-react";
 import { syncAppIconBadge } from "@/lib/appBadge";
@@ -20,7 +23,6 @@ import { diagLog, diagEnabled } from "@/lib/diag";
 
 // Lazy pages – carregam sob demanda para navegação mais rápida
 const Index = lazy(() => import("./pages/Index"));
-const Home = lazy(() => import("./pages/Home"));
 const SponsorDashboard = lazy(() => import("./pages/SponsorDashboard"));
 const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
@@ -28,15 +30,12 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
 const PostLoginGate = lazy(() => import("./pages/PostLoginGate"));
 const HardReload = lazy(() => import("./pages/HardReload"));
-const Search = lazy(() => import("./pages/Search"));
 const Categories = lazy(() => import("./pages/Categories"));
 const CategoryDetail = lazy(() => import("./pages/CategoryDetail"));
-const Messages = lazy(() => import("./pages/Messages"));
 const MessageThread = lazy(() => import("./pages/MessageThread"));
-const Notifications = lazy(() => import("./pages/Notifications"));
 const Coupons = lazy(() => import("./pages/Coupons"));
-const Profile = lazy(() => import("./pages/Profile"));
 const Jobs = lazy(() => import("./pages/Jobs"));
+const RewardsProgram = lazy(() => import("./pages/RewardsProgram"));
 const JobDetail = lazy(() => import("./pages/JobDetail"));
 const MyJobPostings = lazy(() => import("./pages/MyJobPostings"));
 const MyCatalog = lazy(() => import("./pages/MyCatalog"));
@@ -130,16 +129,23 @@ const NotificationOpenHandler = () => {
 };
 
 const BackButtonHandler = () => {
-  const navigate = useNavigate();
+  const location = useLocation();
+  const pathRef = useRef(location.pathname);
+  pathRef.current = location.pathname;
+
   useEffect(() => {
-    const handlerPromise = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+    const handlerPromise = CapacitorApp.addListener("backButton", ({ canGoBack }) => {
+      if (pathRef.current === "/home") {
+        CapacitorApp.minimizeApp();
+        return;
+      }
       if (canGoBack) window.history.back();
       else CapacitorApp.minimizeApp();
     });
-    return () => { 
-      handlerPromise.then(h => h.remove()); 
+    return () => {
+      handlerPromise.then((h) => h.remove());
     };
-  }, [navigate]);
+  }, []);
   return null;
 };
 
@@ -435,6 +441,8 @@ const AppContent = () => {
     <>
       <OAuthCallbackRedirectGuard />
       <Suspense fallback={<PageFallback />}>
+        <MainTabPersistentLayers />
+        <RoutesOverlayShell>
         <Routes>
         <Route path="/" element={session ? <RedirectLoggedIn /> : <Index />} />
         <Route path="/login" element={<Login />} />
@@ -452,16 +460,17 @@ const AppContent = () => {
         <Route path="/signup-pro" element={<BecomeProfessional />} />
 
         {/* Rotas públicas (App Store: explorar sem login) */}
-        <Route path="/home" element={<Home />} />
-        <Route path="/search" element={<Search />} />
+        <Route path="/home" element={<TabRoutePlaceholder />} />
+        <Route path="/search" element={<TabRoutePlaceholder />} />
         <Route path="/categories" element={<Categories />} />
         <Route path="/category/:id" element={<CategoryDetail />} />
-        <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
+        <Route path="/messages" element={<TabRoutePlaceholder />} />
         <Route path="/messages/:threadId" element={<ProtectedRoute><MessageThread /></ProtectedRoute>} />
-        <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+        <Route path="/notifications" element={<TabRoutePlaceholder />} />
         <Route path="/coupons" element={<ProtectedRoute><Coupons /></ProtectedRoute>} />
-        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+        <Route path="/profile" element={<TabRoutePlaceholder />} />
         <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
+        <Route path="/rewards" element={<ProtectedRoute><RewardsProgram /></ProtectedRoute>} />
         <Route path="/jobs/:id" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
         <Route path="/jobs/:id/apply" element={<JobApply />} />
         <Route path="/my-jobs" element={<ProtectedRoute><MyJobPostings /></ProtectedRoute>} />
@@ -522,6 +531,7 @@ const AppContent = () => {
 
         <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
         </Routes>
+        </RoutesOverlayShell>
       </Suspense>
     </>
   );
@@ -545,6 +555,7 @@ const App = () => {
               <AndroidPushChannelInit />
               <RoutePrefetcher />
               <BackButtonHandler />
+              <EdgeSwipeBack />
               <ErrorBoundary>
                 <AppContent />
               </ErrorBoundary>

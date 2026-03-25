@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { FileText, ShieldCheck, Clock, Star, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -13,8 +13,10 @@ type Step = "intro" | "cpf" | "doc-notice" | "documents" | "profile";
 
 const BecomeProfessional = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, profile, refreshProfile } = useAuth();
   const [step, setStep] = useState<Step | null>(null);
+  const [referralCodeInput, setReferralCodeInput] = useState("");
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [cpfValue, setCpfValue] = useState("");
@@ -32,6 +34,11 @@ const BecomeProfessional = () => {
       setStep("intro");
     }
   }, [profile, navigate, step]);
+
+  useEffect(() => {
+    const r = searchParams.get("ref")?.trim() || searchParams.get("referral")?.trim();
+    if (r) setReferralCodeInput(r.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12));
+  }, [searchParams]);
 
   const handleCpfNext = async () => {
     const raw = cpfValue.replace(/\D/g, "");
@@ -194,6 +201,21 @@ const BecomeProfessional = () => {
 
       await refreshProfile();
 
+      const refTrim = referralCodeInput.trim();
+      if (refTrim.length >= 6) {
+        const { data: refData, error: refErr } = await supabase.rpc("apply_referral_code", { p_raw_code: refTrim });
+        if (refErr) {
+          console.warn("apply_referral_code:", refErr);
+        } else if (refData && typeof refData === "object" && "ok" in refData && (refData as { ok?: boolean }).ok === false) {
+          const err = (refData as { error?: string }).error;
+          if (err === "code_not_found") {
+            toast({ title: "Código de indicação não encontrado", description: "Confira o código com quem te convidou.", variant: "destructive" });
+          } else if (err === "self_referral") {
+            toast({ title: "Código inválido", description: "Você não pode usar o próprio código.", variant: "destructive" });
+          }
+        }
+      }
+
       toast({
         title: isEarlyAccess ? "Bem-vindo ao Chamô Business! 🎉" : "Solicitação enviada!",
         description: isEarlyAccess ? "Você ganhou acesso antecipado ao plano Business!" : "Seu perfil profissional está em análise.",
@@ -286,6 +308,22 @@ const BecomeProfessional = () => {
                       Durante a análise, você terá acesso ao plano <strong>Free</strong>. Os planos pagos (Pro, VIP, Business) são liberados após aprovação.
                     </p>
                   </div>
+                </div>
+
+                <div className="rounded-xl border border-dashed border-primary/25 bg-primary/5 p-3 space-y-2">
+                  <label className="text-xs font-semibold text-foreground">Código de indicação (opcional)</label>
+                  <input
+                    type="text"
+                    value={referralCodeInput}
+                    onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))}
+                    placeholder="Ex.: ABC12XY8"
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-mono tracking-wider outline-none focus:ring-2 focus:ring-primary/30"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Se alguém do Chamô te convidou, informe o código. Ao assinar um plano pago depois, essa pessoa pode receber comissão pelo programa Indique e ganhe.
+                  </p>
                 </div>
               </div>
 

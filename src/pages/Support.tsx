@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { useRefresh } from "@/contexts/RefreshContext";
+import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import { ArrowLeft, HelpCircle, Plus, RefreshCw } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import BottomNav from "@/components/BottomNav";
@@ -54,7 +54,7 @@ const Support = () => {
     loadTickets();
   }, [user, loadTickets]);
 
-  useRefresh(handleRefresh);
+  useRefreshAtKey("/support", handleRefresh);
 
   useEffect(() => {
     if (!user) return;

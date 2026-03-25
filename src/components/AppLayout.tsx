@@ -7,7 +7,7 @@ import { MenuProvider } from "@/contexts/MenuContext";
 import OnboardingTutorial from "./OnboardingTutorial";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import DiagPanel from "@/components/DiagPanel";
-import { MAIN_APP_TAB_PATHS, getMainAppTabSwipeIndex } from "@/lib/mainAppTabs";
+import { EDGE_SWIPE_BACK_ZONE_PX, MAIN_APP_TAB_PATHS, getMainAppTabSwipeIndex } from "@/lib/mainAppTabs";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -25,13 +25,19 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
   const navigate = useNavigate();
   const isHome = location.pathname === "/home";
   const isProProfile = /^\/pro\/[^/]+$/.test(location.pathname) || /^\/professional\/[^/]+$/.test(location.pathname);
-  const usePullToRefresh = isHome || isProProfile;
+  const isMainPullTab =
+    location.pathname === "/search" ||
+    location.pathname === "/messages" ||
+    location.pathname === "/notifications";
+  const usePullToRefresh = isHome || isProProfile || isMainPullTab;
 
   const swipeTouch = useRef<{ x: number; y: number; ignore: boolean } | null>(null);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
 
   const onTabSwipeTouchStart = useCallback((e: React.TouchEvent) => {
     const t = e.targetTouches[0];
     if (!t) return;
+    if (t.clientX <= EDGE_SWIPE_BACK_ZONE_PX) return;
     const target = e.target as HTMLElement | null;
     const ignore = !!(target && typeof target.closest === "function" && target.closest("[data-tab-swipe-ignore]"));
     swipeTouch.current = { x: t.clientX, y: t.clientY, ignore };
@@ -89,8 +95,9 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
 
   const mainContent = (
     <main
+      ref={mainScrollRef}
       key={location.pathname}
-      className={`flex-1 animate-in fade-in duration-300 touch-pan-y ${isHome ? "bg-secondary pt-2" : "pt-3"}`}
+      className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain animate-in fade-in duration-300 touch-pan-y ${isHome ? "bg-secondary pt-2" : "pt-3"}`}
       onTouchStart={onTabSwipeTouchStart}
       onTouchEnd={onTabSwipeTouchEnd}
     >
@@ -100,9 +107,13 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
 
   return (
     <MenuProvider>
-      <div className={`min-h-[100dvh] pb-20 flex flex-col ${isHome ? "bg-secondary" : "bg-background"}`}>
+      <div className={`flex min-h-0 flex-1 flex-col pb-20 ${isHome ? "bg-secondary" : "bg-background"}`}>
         {showHeader && <MemoizedHeader />}
-        {usePullToRefresh ? <PullToRefresh>{mainContent}</PullToRefresh> : mainContent}
+        {usePullToRefresh ? (
+          <PullToRefresh scrollContainerRef={mainScrollRef}>{mainContent}</PullToRefresh>
+        ) : (
+          mainContent
+        )}
         <MemoizedBottomNav />
         <OnboardingTutorial />
         <DiagPanel />

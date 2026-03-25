@@ -248,6 +248,30 @@ serve(async (req) => {
       return json({ error: "Erro ao ativar assinatura." }, 500);
     }
 
+    // Comissão Indique e ganhe (5%) — base no valor do plano/período cobrado
+    try {
+      const { data: planRow } = await supabase
+        .from("plans")
+        .select("price_monthly, price_semester, price_annual")
+        .eq("id", planId)
+        .maybeSingle();
+      const pm = Number((planRow as { price_monthly?: number })?.price_monthly ?? 0);
+      let charge = pm;
+      if (billingPeriod === "annual") {
+        const pa = Number((planRow as { price_annual?: number | null })?.price_annual ?? 0);
+        charge = pa > 0 ? pa : pm * 12;
+      } else if (billingPeriod === "semester") {
+        const ps = Number((planRow as { price_semester?: number | null })?.price_semester ?? 0);
+        charge = ps > 0 ? ps : pm * 6;
+      }
+      await supabase.rpc("grant_referral_commission_on_paid_subscription", {
+        p_subscriber_user_id: userId,
+        p_charge_amount_brl: charge,
+      });
+    } catch (refErr) {
+      console.error("validate_iap_subscription referral commission:", refErr);
+    }
+
     // Atualiza user_type de acordo com o plano
     const newUserType = planId === "business" ? "company" : "professional";
     await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);

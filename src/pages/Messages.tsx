@@ -8,6 +8,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -190,6 +191,8 @@ const Messages = () => {
     setThreads(finalThreads);
     if (!isBackgroundUpdate) setLoading(false);
   }, [page]);
+
+  useRefreshAtKey("/messages", () => load(false));
 
   // ─────────────────────────────────────────────────────────────────────
   // Atualização incremental de thread a partir de uma mensagem nova

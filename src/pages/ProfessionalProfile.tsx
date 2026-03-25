@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
-import { useRefresh } from "@/contexts/RefreshContext";
+import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import { ArrowLeft, BadgeCheck, Star, Clock, CalendarOff, FileQuestion, Circle, Pencil, Check, X, Calendar, Share2, Building2 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -167,7 +167,7 @@ const ProfessionalProfile = () => {
     setLoading(false);
   }, [id]);
 
-  useRefresh(loadProfile);
+  useRefreshAtKey(location.pathname, loadProfile);
 
   useEffect(() => {
     if (id) loadProfile();

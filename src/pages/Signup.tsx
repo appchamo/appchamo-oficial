@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
@@ -47,6 +47,9 @@ const fileToBase64 = (file: File): Promise<string> =>
 
 const Signup = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const signupReferralParam =
+    searchParams.get("ref")?.trim() || searchParams.get("referral")?.trim() || "";
   const { session, profile, loading: authLoading, refreshProfile } = useAuth();
   const [accountType, setAccountType] = useState<AccountType>("client");
   const [step, setStep] = useState<Step>("method-choice");
@@ -396,6 +399,21 @@ const Signup = () => {
         return;
       }
 
+      const refCode = accountType === "professional" ? basicData.referralCode?.trim() : "";
+      if (refCode && refCode.length >= 6) {
+        const { data: refData, error: refErr } = await supabase.rpc("apply_referral_code", { p_raw_code: refCode });
+        if (refErr) {
+          console.warn("apply_referral_code:", refErr);
+        } else if (refData && typeof refData === "object" && "ok" in refData && (refData as { ok?: boolean }).ok === false) {
+          const err = (refData as { error?: string }).error;
+          if (err === "code_not_found") {
+            toast({ title: "Código de indicação inválido", description: "Verifique com quem te indicou e tente de novo em Perfil → Suporte, se precisar.", variant: "destructive" });
+          } else if (err === "self_referral") {
+            toast({ title: "Código inválido", description: "Você não pode usar o próprio código.", variant: "destructive" });
+          }
+        }
+      }
+
       setLoading(false);
       localStorage.removeItem("signup_in_progress");
 
@@ -510,7 +528,16 @@ const Signup = () => {
       )}
 
       {!loading && step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
-      {!loading && step === "basic" && <StepBasicData accountType={accountType} onNext={handleBasicNext} onBack={() => setStep(createdUserId ? "method-choice" : "type")} initialData={basicData || undefined} />}
+      {!loading && step === "basic" && (
+        <StepBasicData
+          key={`basic-${accountType}-${createdUserId ?? "new"}`}
+          accountType={accountType}
+          onNext={handleBasicNext}
+          onBack={() => setStep(createdUserId ? "method-choice" : "type")}
+          initialData={basicData || undefined}
+          initialReferralCode={signupReferralParam || undefined}
+        />
+      )}
       {!loading && step === "document-notice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-8">
           <h1 className="text-2xl font-extrabold text-gradient mb-2">Chamô</h1>

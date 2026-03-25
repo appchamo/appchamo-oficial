@@ -31,6 +31,8 @@ export interface BasicData {
   addressCountry: string;
   /** Preenchido após validação do CPF/CNPJ no Asaas (cadastro profissional). */
   asaas_customer_id?: string;
+  /** Código Indique e ganhe (opcional). */
+  referralCode?: string;
 }
 
 interface Props {
@@ -38,6 +40,8 @@ interface Props {
   onNext: (data: BasicData) => void;
   onBack: () => void;
   initialData?: Partial<BasicData>; // ✅ ADICIONADO: Para receber dados do Google
+  /** Preenchido pela URL ?ref= ao cadastrar como profissional */
+  initialReferralCode?: string;
 }
 
 import { formatCpf, formatCnpj, formatPhone } from "@/lib/formatters";
@@ -57,13 +61,15 @@ const InputRow = ({ icon: Icon, label, children }: { icon: any; label: string; c
   </div>
 );
 
-const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
-  /** iOS WebView: evita travar junto com SIGNED_IN + primeiro paint pesado */
+const NATIVE_FORM_DEFER_MS = 200;
+
+const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferralCode }: Props) => {
+  /** iOS WebView: pequeno defer após SIGNED_IN para não competir com o primeiro paint (600ms deixava a tela “morta” por muito tempo). */
   const [nativeFormReady, setNativeFormReady] = useState(() => !Capacitor.isNativePlatform());
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     setNativeFormReady(false);
-    const t = window.setTimeout(() => setNativeFormReady(true), 600);
+    const t = window.setTimeout(() => setNativeFormReady(true), NATIVE_FORM_DEFER_MS);
     return () => clearTimeout(t);
   }, []);
   const [name, setName] = useState(initialData?.name || ""); // ✅ Preenche se vier do Google
@@ -87,11 +93,33 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
   const [gender, setGender] = useState<BasicData["gender"]>(initialData?.gender ?? "prefer_not_say");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  const [referralCode, setReferralCode] = useState(() => {
+    const fromProp = initialReferralCode?.trim();
+    if (fromProp) return fromProp.toUpperCase();
+    try {
+      const s = sessionStorage.getItem("chamo_signup_referral")?.trim();
+      return s ? s.toUpperCase() : "";
+    } catch {
+      return "";
+    }
+  });
   const [loadingCep, setLoadingCep] = useState(false);
   const [validating, setValidating] = useState(false);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
   const citySuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const v = initialReferralCode?.trim();
+    if (!v || accountType !== "professional") return;
+    const u = v.toUpperCase();
+    setReferralCode(u);
+    try {
+      sessionStorage.setItem("chamo_signup_referral", u);
+    } catch {
+      /* ignore */
+    }
+  }, [initialReferralCode, accountType]);
 
   // ✅ Identifica se é login social para esconder senhas
   const isSocialSignup = !!initialData?.email;
@@ -240,7 +268,16 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
       return;
     }
     
-    if (!addressCity || !addressState) { toast({ title: "Informe pelo menos sua cidade e estado." }); return; }
+    if (accountType === "professional") {
+      if (!addressCity?.trim() || !addressState?.trim()) {
+        toast({ title: "Informe cidade e estado (UF) do seu endereço." });
+        return;
+      }
+      if (!addressNumber?.trim()) {
+        toast({ title: "Informe o número do endereço." });
+        return;
+      }
+    }
     if (isUnderage(birthIso)) { toast({ title: "Você precisa ter 18 anos ou mais para se cadastrar.", variant: "destructive" }); return; }
     if (!termsAccepted) { toast({ title: "Aceite os termos de uso para continuar." }); return; }
     
@@ -253,47 +290,99 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
     const docClean = document.replace(/\D/g, "");
     if (accountType === "professional" && !docClean) { toast({ title: "CPF ou CNPJ é obrigatório para profissionais." }); return; }
 
-    // Validate uniqueness of CPF/CNPJ
+    const addressPayload =
+      accountType === "professional"
+        ? {
+            addressZip: addressZip.replace(/\D/g, ""),
+            addressStreet,
+            addressNumber,
+            addressComplement,
+            addressNeighborhood,
+            addressCity,
+            addressState,
+            addressCountry,
+          }
+        : {
+            addressZip: "",
+            addressStreet: "",
+            addressNumber: "",
+            addressComplement: "",
+            addressNeighborhood: "",
+            addressCity: "",
+            addressState: "",
+            addressCountry: "Brasil",
+          };
+
+    // Validate uniqueness of CPF/CNPJ (+ Asaas só para profissional)
     if (docClean) {
       setValidating(true);
-      const field = documentType === "cpf" ? "cpf" : "cnpj";
-      const { data: existing } = await supabase.from("profiles").select("id").eq(field, docClean).limit(1);
-      if (existing && existing.length > 0) {
-        setValidating(false);
-        toast({ title: `Este ${documentType.toUpperCase()} já está cadastrado.`, variant: "destructive" });
-        return;
-      }
+      try {
+        const field = documentType === "cpf" ? "cpf" : "cnpj";
+        const { data: existing } = await supabase.from("profiles").select("id").eq(field, docClean).limit(1);
+        if (existing && existing.length > 0) {
+          toast({ title: `Este ${documentType.toUpperCase()} já está cadastrado.`, variant: "destructive" });
+          return;
+        }
 
-      // Profissional: validar CPF/CNPJ + nome no Asaas (verifica se documento existe e confere com o nome)
-      if (accountType === "professional") {
-        const { data: validation } = await supabase.functions.invoke("validate-cpf-signup", {
-          body: { name: name.trim(), cpfCnpj: docClean },
-        });
-        setValidating(false);
-        if (validation?.valid !== true) {
-          toast({
-            title: validation?.message || "CPF/CNPJ inválido ou não confere com o nome.",
-            variant: "destructive",
+        if (accountType === "professional") {
+          const invokePromise = supabase.functions.invoke("validate-cpf-signup", {
+            body: { name: name.trim(), cpfCnpj: docClean },
+          });
+          const timeoutMs = 32000;
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("validate_timeout")), timeoutMs)
+          );
+          let validation: { valid?: boolean; message?: string; asaas_customer_id?: string } | null = null;
+          try {
+            const result = await Promise.race([invokePromise, timeoutPromise]);
+            if (result.error) {
+              toast({
+                title: "Não foi possível validar o documento",
+                description: "Verifique sua conexão e tente novamente.",
+                variant: "destructive",
+              });
+              return;
+            }
+            validation = result.data as typeof validation;
+          } catch (err: unknown) {
+            const isTimeout = err instanceof Error && err.message === "validate_timeout";
+            toast({
+              title: isTimeout ? "Tempo esgotado" : "Erro na validação",
+              description: isTimeout
+                ? "A validação do documento demorou demais. Tente de novo."
+                : "Não foi possível concluir a validação. Tente novamente.",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          if (validation?.valid !== true) {
+            toast({
+              title: validation?.message || "CPF/CNPJ inválido ou não confere com o nome.",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          onNext({
+            name,
+            displayName,
+            email,
+            phone: phone.replace(/\D/g, ""),
+            document: docClean,
+            documentType,
+            password,
+            birthDate: birthIso,
+            gender,
+            ...addressPayload,
+            asaas_customer_id: validation.asaas_customer_id,
+            referralCode: referralCode.trim() || undefined,
           });
           return;
         }
-        // Guardar asaas_customer_id para o complete-signup salvar no perfil e reutilizar em assinaturas
-        onNext({
-          name,
-          displayName,
-          email,
-          phone: phone.replace(/\D/g, ""),
-          document: docClean, documentType,
-          password, birthDate: birthIso, gender,
-          addressZip: addressZip.replace(/\D/g, ""),
-          addressStreet, addressNumber, addressComplement,
-          addressNeighborhood, addressCity, addressState,
-          addressCountry,
-          asaas_customer_id: validation.asaas_customer_id,
-        });
-        return;
+      } finally {
+        setValidating(false);
       }
-      setValidating(false);
     }
 
     onNext({
@@ -301,12 +390,13 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
       displayName,
       email,
       phone: phone.replace(/\D/g, ""),
-      document: docClean, documentType,
-      password, birthDate: birthIso, gender,
-      addressZip: addressZip.replace(/\D/g, ""),
-      addressStreet, addressNumber, addressComplement,
-      addressNeighborhood, addressCity, addressState,
-      addressCountry,
+      document: docClean,
+      documentType,
+      password,
+      birthDate: birthIso,
+      gender,
+      ...addressPayload,
+      referralCode: accountType === "professional" ? (referralCode.trim() || undefined) : undefined,
     });
   };
 
@@ -402,7 +492,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
       ? documentType === "cpf"
         ? "CPF *"
         : "CNPJ *"
-      : "CPF *"}
+      : "CPF (opcional)"}
   </label>
 
   {accountType === "professional" && (
@@ -474,69 +564,90 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData }: Props) => {
             </>
           )}
 
-          {/* Endereço: CEP (busca cidade/estado); número e rua o usuário preenche */}
-          <div className="border-t pt-3 mt-2">
-            <p className="text-xs font-semibold text-muted-foreground mb-2">Endereço *</p>
-            <InputRow icon={MapPin} label="CEP">
-              <input type="text" value={addressZip} onChange={(e) => handleCepChange(e.target.value)} placeholder="00000-000"
-                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
-              {loadingCep && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full flex-shrink-0" />}
-            </InputRow>
-            <div className="space-y-2 mt-2">
-              <div className="relative">
-                <label className="text-xs text-muted-foreground block mb-1">Cidade *</label>
-                <p className="text-[10px] text-muted-foreground mb-1">Preencha o estado (UF) antes para sugestões de cidade.</p>
-                <input value={addressCity} onChange={(e) => handleCityChange(e.target.value)} placeholder="Sua cidade"
-                  onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
-                  onFocus={() => citySuggestions.length > 0 && setShowCitySuggestions(true)}
-                  className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                {showCitySuggestions && (
-                  <div className="absolute z-50 top-full left-0 right-0 bg-card border rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
-                    {citySuggestions.map((city) => (
-                      <button key={city} type="button" onMouseDown={() => selectCity(city)}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors text-foreground">
-                        {city}
-                      </button>
-                    ))}
+          {/* Endereço: obrigatório só para profissional (Asaas / cadastro) */}
+          {accountType === "professional" && (
+            <div className="border-t pt-3 mt-2">
+              <p className="text-xs font-semibold text-muted-foreground mb-2">Endereço *</p>
+              <InputRow icon={MapPin} label="CEP">
+                <input type="text" value={addressZip} onChange={(e) => handleCepChange(e.target.value)} placeholder="00000-000"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+                {loadingCep && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full flex-shrink-0" />}
+              </InputRow>
+              <div className="space-y-2 mt-2">
+                <div className="relative">
+                  <label className="text-xs text-muted-foreground block mb-1">Cidade *</label>
+                  <p className="text-[10px] text-muted-foreground mb-1">Preencha o estado (UF) antes para sugestões de cidade.</p>
+                  <input value={addressCity} onChange={(e) => handleCityChange(e.target.value)} placeholder="Sua cidade"
+                    onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
+                    onFocus={() => citySuggestions.length > 0 && setShowCitySuggestions(true)}
+                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                  {showCitySuggestions && (
+                    <div className="absolute z-50 top-full left-0 right-0 bg-card border rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
+                      {citySuggestions.map((city) => (
+                        <button key={city} type="button" onMouseDown={() => selectCity(city)}
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors text-foreground">
+                          {city}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Rua</label>
+                  <input value={addressStreet} onChange={(e) => setAddressStreet(e.target.value)} placeholder="Sua rua"
+                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Bairro</label>
+                  <input value={addressNeighborhood} onChange={(e) => setAddressNeighborhood(e.target.value)} placeholder="Seu bairro"
+                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Número *</label>
+                    <input value={addressNumber} onChange={(e) => setAddressNumber(e.target.value)} placeholder="Ex: 123"
+                      className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
                   </div>
-                )}
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Rua</label>
-                <input value={addressStreet} onChange={(e) => setAddressStreet(e.target.value)} placeholder="Sua rua"
-                  className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Bairro</label>
-                <input value={addressNeighborhood} onChange={(e) => setAddressNeighborhood(e.target.value)} placeholder="Seu bairro"
-                  className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Número *</label>
-                  <input value={addressNumber} onChange={(e) => setAddressNumber(e.target.value)} placeholder="Ex: 123"
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Complemento</label>
+                    <input value={addressComplement} onChange={(e) => setAddressComplement(e.target.value)} placeholder="Opcional"
+                      className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Complemento</label>
-                  <input value={addressComplement} onChange={(e) => setAddressComplement(e.target.value)} placeholder="Opcional"
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Estado *</label>
-                  <input value={addressState} onChange={(e) => setAddressState(e.target.value)} placeholder="UF" maxLength={2}
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">País</label>
-                  <input value={addressCountry} onChange={(e) => setAddressCountry(e.target.value)} placeholder="Brasil"
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Estado *</label>
+                    <input value={addressState} onChange={(e) => setAddressState(e.target.value)} placeholder="UF" maxLength={2}
+                      className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">País</label>
+                    <input value={addressCountry} onChange={(e) => setAddressCountry(e.target.value)} placeholder="Brasil"
+                      className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {accountType === "professional" && (
+            <div className="border-t pt-3 mt-2">
+              <InputRow icon={UserCircle} label="Código de indicação (opcional)">
+                <input
+                  type="text"
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))}
+                  placeholder="Quem te indicou?"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground font-mono tracking-wide"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </InputRow>
+              <p className="text-[10px] text-muted-foreground mt-1.5 px-1">
+                Se alguém do Chamô te convidou, peça o código para vincular a indicação ao seu cadastro profissional.
+              </p>
+            </div>
+          )}
 
           {/* Termos: só avança depois de ler e aceitar nos modais */}
           <div className="border rounded-xl p-4 bg-muted/30 space-y-3">

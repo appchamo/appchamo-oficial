@@ -8,8 +8,8 @@ import HomeBanners from "@/components/HomeBanners";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { useRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useRefreshAtKey, useIsRefreshing } from "@/contexts/RefreshContext";
+import { Link } from "react-router-dom";
 import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight, Crown, Sparkles, Building2, Star } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -103,12 +103,10 @@ function HomeHeavyPlaceholder({ kind, title }: { kind: "sponsors" | "featured" |
 
 const Home = () => {
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
-  const location = useLocation();
   const { isFreePlan, callsRemaining, loading: subLoading, plan } = useSubscription();
   const isBusiness = plan?.id === "business";
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
   const isRefreshing = useIsRefreshing();
-  const navigate = useNavigate();
   // Fallback para user_metadata (ex.: OAuth) enquanto o perfil ainda não carregou
   const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
   const nameFromAuth = (user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined;
@@ -296,13 +294,8 @@ const Home = () => {
     fetchUpcomingAppointments();
   }, [fetchUpcomingAppointments]);
 
-  // Ao voltar para a Home (ex.: após cancelar um agendamento), revalida e mostra o alerta de novo se ainda houver agendamentos
-  useEffect(() => {
-    if (location.pathname !== "/home" || !user?.id) return;
-    fetchUpcomingAppointments().then((has) => {
-      if (has) setAppointmentBannerDismissed(false);
-    });
-  }, [location.pathname, user?.id, fetchUpcomingAppointments]);
+  // Voltar para a Home não refaz fetch aqui — só pull-to-refresh (useRefreshAtKey("/home")) ou montagem inicial.
+  // A Home fica montada em cache (HomePersistentLayer); pathname global muda mesmo com display:none.
 
   // ✅ 2. TRANSIÇÃO SUAVE: Espera o layout carregar para liberar a tela (com ou sem login)
   useEffect(() => {
@@ -367,7 +360,7 @@ const Home = () => {
     ]);
     await minDelay;
   };
-  useRefresh(onRefresh);
+  useRefreshAtKey("/home", onRefresh);
 
   const locationLabel = profile?.address_city && profile?.address_state
     ? `${profile.address_city}, ${profile.address_state}`
@@ -511,7 +504,7 @@ const Home = () => {
       {!contentReady ? (
         <HomeSkeleton />
       ) : (
-        <main
+        <div
           className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary animate-in fade-in duration-500 transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
@@ -706,7 +699,7 @@ const Home = () => {
               </Link>
             </div>
           </footer>
-        </main>
+        </div>
       )}
 
       {/* Modal de localização: CEP → busca automática cidade/estado */}

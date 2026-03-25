@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, ReactNode } from "react";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 import { Capacitor } from "@capacitor/core";
@@ -37,6 +37,8 @@ interface Profile {
   gender?: string | null;
   address_city?: string | null;
   address_state?: string | null;
+  /** Código único Indique e ganhe */
+  invite_code?: string | null;
 }
 
 type AppRole =
@@ -92,7 +94,7 @@ function normalizeOAuthCode(code: string | null): string | null {
 async function fetchProfile(userId: string) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_city, address_state")
+    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_city, address_state, invite_code")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -459,21 +461,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (!user) return;
     const p = await fetchProfile(user.id);
     if (p) {
       setProfile(p);
       localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
     }
-  };
+  }, [user]);
 
-  const refreshRoles = async () => {
+  const refreshRoles = useCallback(async () => {
     if (!user) return;
     const r = await fetchRoles(user.id);
     setRoles(r);
     localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
-  };
+  }, [user]);
 
   return (
     <AuthContext.Provider value={{ user, session, profile, roles, isAdmin, loading, signOut, refreshProfile, refreshRoles }}>

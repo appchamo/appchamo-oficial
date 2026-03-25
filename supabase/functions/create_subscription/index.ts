@@ -309,6 +309,18 @@ serve(async (req) => {
       });
     }
 
+    try {
+      const charge = Number(value);
+      if (Number.isFinite(charge) && charge > 0) {
+        await supabase.rpc("grant_referral_commission_on_paid_subscription", {
+          p_subscriber_user_id: userId,
+          p_charge_amount_brl: charge,
+        });
+      }
+    } catch (refErr) {
+      console.error("create_subscription referral commission:", refErr);
+    }
+
     return new Response(JSON.stringify(subscriptionData), {
       status: subscriptionResponse.status,
       headers: { "Access-Control-Allow-Origin": "*" },

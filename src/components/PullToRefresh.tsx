@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
-import { useTriggerRefresh } from "@/contexts/RefreshContext";
+import { Loader2 } from "lucide-react";
+import { useTriggerRefresh, useIsRefreshing } from "@/contexts/RefreshContext";
 
-const PULL_THRESHOLD = 72;
+const PULL_THRESHOLD = 88;
 const MAX_PULL = 140;
-const INDICATOR_SIZE = 44;
+/** Só bloqueia scroll nativo depois desse arraste (evita refresh acidental no iOS). */
+const PREVENT_DEFAULT_AFTER = 16;
 /** Distância que a tela fica puxada enquanto roda o refresh */
 const REFRESH_OFFSET = 56;
 
@@ -18,6 +19,7 @@ interface PullToRefreshProps {
 
 export default function PullToRefresh({ children, scrollContainerRef, scrollContainer }: PullToRefreshProps) {
   const triggerRefresh = useTriggerRefresh();
+  const isGlobalRefreshing = useIsRefreshing();
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [useTransition, setUseTransition] = useState(false);
@@ -48,13 +50,15 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
     const onTouchMove = (e: TouchEvent) => {
       if (refreshingRef.current) return;
       const scrollTop = getScrollTop();
-      if (scrollTop > 2) return;
+      if (scrollTop > 1) return;
       const currentY = e.touches[0].clientY;
       const diff = currentY - startY.current;
-      if (diff > 0) {
-        const distance = Math.min(diff * 0.5, MAX_PULL);
+      if (diff > 8) {
+        const distance = Math.min(diff * 0.45, MAX_PULL);
         setPullDistance(distance);
-        if (distance > 6) e.preventDefault();
+        if (distance > PREVENT_DEFAULT_AFTER && e.cancelable) e.preventDefault();
+      } else {
+        setPullDistance(0);
       }
     };
 
@@ -104,49 +108,45 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
   }, [getScrollTop, triggerRefresh, el]);
 
   const progress = Math.min(pullDistance / PULL_THRESHOLD, 1);
-  const rotation = progress * 360;
   const contentOffset = refreshing ? REFRESH_OFFSET : pullDistance;
   const showIndicator = contentOffset > 0;
-  const indicatorOpacity = showIndicator ? Math.min(1, progress * 2) : 0;
+  const indicatorOpacity = showIndicator ? Math.min(1, Math.max(0.35, progress * 1.4)) : 0;
+  /** Estilo Instagram: gira o tempo todo enquanto arrasta ou enquanto o refresh roda. */
+  const spinActive = pullDistance > 4 || refreshing || isGlobalRefreshing;
+  const safeTop = "var(--safe-top, env(safe-area-inset-top, 0px))";
 
   return (
-    <>
-      {/* Faixa fixa por cima de tudo – aparece ao puxar com fade-in */}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* Faixa fixa por cima de tudo – fundo igual ao tema (hsl), ícone laranja girando */}
       <div
-        className="fixed left-0 right-0 flex items-center justify-center z-[100] overflow-hidden"
+        className="fixed left-0 right-0 z-[100] flex flex-col items-center justify-center overflow-hidden bg-background"
         style={{
           top: 0,
-          height: contentOffset,
+          boxSizing: "border-box",
+          height: contentOffset > 0 ? `calc(${contentOffset}px + ${safeTop})` : 0,
+          paddingTop: contentOffset > 0 ? safeTop : 0,
           minHeight: 0,
-          background: "var(--background)",
-          transition: useTransition ? "height 0.25s ease-out" : "none",
+          backgroundColor: "hsl(var(--background))",
+          transition: useTransition ? "height 0.25s ease-out, padding-top 0.25s ease-out" : "none",
           pointerEvents: "none",
         }}
       >
         <div
-          className="flex items-center justify-center flex-shrink-0"
+          className="flex min-h-0 flex-1 w-full items-center justify-center"
           style={{
-            width: INDICATOR_SIZE,
-            height: INDICATOR_SIZE,
             opacity: indicatorOpacity,
-            transform: `translateY(${showIndicator ? 0 : -8}px)`,
-            transition: useTransition ? "opacity 0.2s ease-out, transform 0.2s ease-out" : "none",
+            transition: useTransition ? "opacity 0.2s ease-out" : "none",
           }}
         >
-          <div className="rounded-full bg-card border-2 border-border shadow-lg flex items-center justify-center w-full h-full">
-            {refreshing ? (
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-            ) : (
-              <RefreshCw
-                className="w-5 h-5 text-primary transition-transform duration-150"
-                style={{ transform: `rotate(${rotation}deg)` }}
-              />
-            )}
-          </div>
+          <Loader2
+            className={`h-7 w-7 shrink-0 text-primary ${spinActive ? "animate-spin" : ""}`}
+            style={{ animationDuration: spinActive ? "0.65s" : undefined }}
+          />
         </div>
       </div>
       {/* Conteúdo desce quando puxa */}
       <div
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
         style={{
           marginTop: contentOffset,
           transition: useTransition ? "margin-top 0.25s ease-out" : "none",
@@ -154,6 +154,6 @@ export default function PullToRefresh({ children, scrollContainerRef, scrollCont
       >
         {children}
       </div>
-    </>
+    </div>
   );
 }

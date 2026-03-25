@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { syncAppIconBadge } from "@/lib/appBadge";
+import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -107,6 +108,10 @@ const Notifications = () => {
       syncAppIconBadge(0);
     }
   }, [user]);
+
+  useRefreshAtKey("/notifications", async () => {
+    await fetchNotifications(0, false);
+  });
 
   useEffect(() => {
     fetchNotifications(0);

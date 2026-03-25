@@ -159,4 +159,21 @@
   body.qr-scanner-active #root > * {
     background: transparent !important;
   }
+
+  /* Durante o gesto voltar: mostra a aba anterior por baixo (estilo Instagram) */
+  [data-chamo-tab-persist].chamo-swipe-peek {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 8 !important;
+    pointer-events: none !important;
+    padding-top: var(--safe-top, env(safe-area-inset-top, 0px)) !important;
+    box-sizing: border-box !important;
+  }
+
+  [data-chamo-tab-persist].chamo-swipe-peek [data-chamo-bottom-nav] {
+    visibility: hidden !important;
+  }
 }

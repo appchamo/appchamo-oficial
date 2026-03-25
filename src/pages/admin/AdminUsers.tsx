@@ -29,6 +29,7 @@ interface Profile {
 
 const AdminUsers = () => {
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | "client" | "professional" | "company">("all");
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc">("date_desc");
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +50,13 @@ const AdminUsers = () => {
   useEffect(() => { fetchUsers(); }, []);
 
   const filtered = users
+    .filter((u) => {
+      const safeType = u.user_type === "enterprise" ? "company" : u.user_type;
+      if (typeFilter === "client" && safeType !== "client") return false;
+      if (typeFilter === "professional" && safeType !== "professional") return false;
+      if (typeFilter === "company" && safeType !== "company") return false;
+      return true;
+    })
     .filter((u) =>
       u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
       u.email?.toLowerCase().includes(search.toLowerCase())
@@ -204,6 +212,16 @@ const AdminUsers = () => {
             className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
           />
         </div>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
+          className="border rounded-xl px-3 py-2.5 text-sm bg-card outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer min-w-[10rem]"
+        >
+          <option value="all">Tipo: todos</option>
+          <option value="client">Tipo: cliente</option>
+          <option value="professional">Tipo: profissional</option>
+          <option value="company">Tipo: empresa</option>
+        </select>
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as typeof sortBy)}

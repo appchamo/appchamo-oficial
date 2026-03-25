@@ -38,6 +38,16 @@ interface Professional {
   city: string | null;
   state: string | null;
   subscription_status?: string;
+  /** Documento principal no cadastro (perfil): CPF ou CNPJ */
+  docKind: "cpf" | "cnpj" | "none";
+}
+
+function profileDocKind(cpf: string | null | undefined, cnpj: string | null | undefined): "cpf" | "cnpj" | "none" {
+  const cnpjDigits = String(cnpj || "").replace(/\D/g, "");
+  if (cnpjDigits.length >= 14) return "cnpj";
+  const cpfDigits = String(cpf || "").replace(/\D/g, "");
+  if (cpfDigits.length >= 11) return "cpf";
+  return "none";
 }
 
 interface Category {
@@ -127,6 +137,7 @@ const AdminPros = () => {
   const [bonusSaving, setBonusSaving] = useState(false);
 
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc" | "plan_asc" | "plan_desc">("date_desc");
+  const [docFilter, setDocFilter] = useState<"all" | "cpf" | "cnpj">("all");
 
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [reviewsPro, setReviewsPro] = useState<Professional | null>(null);
@@ -166,7 +177,7 @@ const AdminPros = () => {
     const proIds = professionals.map((p) => p.id);
 
     const [profilesRes, subsRes, callsRes] = await Promise.all([
-      supabase.from("profiles").select("user_id, full_name, email, address_city, address_state").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, full_name, email, address_city, address_state, cpf, cnpj").in("user_id", userIds),
       supabase.from("subscriptions").select("user_id, plan_id, status").in("user_id", userIds),
       supabase.from("service_requests").select("professional_id").in("professional_id", proIds),
     ]);
@@ -182,20 +193,23 @@ const AdminPros = () => {
     setPros(
       professionals.map((p) => {
         const subInfo = subsMap.get(p.user_id) || { plan_id: "free", status: null };
+        const prof = profileMap.get(p.user_id);
+        const docKind = profileDocKind(prof?.cpf, prof?.cnpj);
         return {
           ...p,
           bonus_calls: (p as any).bonus_calls || 0,
           availability_status: (p as any).availability_status || "available",
-          full_name: profileMap.get(p.user_id)?.full_name || "—",
-          email: profileMap.get(p.user_id)?.email || "—",
+          full_name: prof?.full_name || "—",
+          email: prof?.email || "—",
           category_name: (p.categories as any)?.name || "—",
           profession_name: (p.professions as any)?.name || "—",
           plan_id: subInfo.plan_id,
           subscription_status: subInfo.status,
           calls_used: callCountMap.get(p.id) || 0,
           max_calls: 3,
-          city: profileMap.get(p.user_id)?.address_city || null,
-          state: profileMap.get(p.user_id)?.address_state || null,
+          city: prof?.address_city || null,
+          state: prof?.address_state || null,
+          docKind,
         }
       })
     );
@@ -211,7 +225,11 @@ const AdminPros = () => {
       const q = search.toLowerCase();
       const matchesSearch = p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q);
       const matchesTab = tab === "all" || p.profile_status === tab;
-      return matchesSearch && matchesTab;
+      const matchesDoc =
+        docFilter === "all" ||
+        (docFilter === "cpf" && p.docKind === "cpf") ||
+        (docFilter === "cnpj" && p.docKind === "cnpj");
+      return matchesSearch && matchesTab && matchesDoc;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -686,6 +704,15 @@ const AdminPros = () => {
             placeholder="Buscar profissional..."
             className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
         </div>
+        <select
+          value={docFilter}
+          onChange={(e) => setDocFilter(e.target.value as typeof docFilter)}
+          className="border rounded-xl px-3 py-2.5 text-sm bg-card outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer min-w-[11rem]"
+        >
+          <option value="all">Doc: todos</option>
+          <option value="cpf">Doc: CPF (PF)</option>
+          <option value="cnpj">Doc: CNPJ (PJ)</option>
+        </select>
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as typeof sortBy)}

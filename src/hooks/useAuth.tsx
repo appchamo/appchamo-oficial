@@ -223,9 +223,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const safetyTimeout = setTimeout(() => setLoading(false), 10000);
 
+    const syncRealtimeJwt = (sess: Session | null) => {
+      try {
+        const token = sess?.access_token ?? null;
+        if (token) void supabase.realtime.setAuth(token);
+        else void supabase.realtime.setAuth(null);
+      } catch {
+        /* ignore */
+      }
+    };
+
     const loadInitialSession = async () => {
       try {
         const { data: { session: s } } = await supabase.auth.getSession();
+        syncRealtimeJwt(s ?? null);
         if (s) {
           loadUserData(s);
           return;
@@ -233,6 +244,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (Capacitor.isNativePlatform()) {
           await new Promise((r) => setTimeout(r, 300));
           const { data: { session: s2 } } = await supabase.auth.getSession();
+          syncRealtimeJwt(s2 ?? null);
           loadUserData(s2 ?? null);
         } else {
           loadUserData(null);
@@ -356,6 +368,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     run();
 
     const { data: { subscription: sub } } = supabase.auth.onAuthStateChange((event, sess) => {
+      syncRealtimeJwt(sess ?? null);
       try {
         console.log("🔐 Auth Event:", event);
         if (event === 'SIGNED_OUT') {

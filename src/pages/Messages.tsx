@@ -285,7 +285,7 @@ const Messages = () => {
   }, [load]);
 
   useEffect(() => {
-    load();
+    void load();
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleFullReload = () => {
@@ -293,24 +293,54 @@ const Messages = () => {
       debounceTimer = setTimeout(() => void load(true), 120);
     };
 
-    const channel = supabase
-      .channel("messages-list-realtime-v3", { config: { broadcast: { self: false } } })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, applyNewMessage)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_messages" }, scheduleFullReload)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_read_status" }, scheduleFullReload)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_read_status" }, scheduleFullReload)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "service_requests" }, scheduleFullReload)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests" }, scheduleFullReload)
-      .subscribe((status, err) => {
-        if (status === "SUBSCRIBED") return;
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.warn("[Messages] realtime:", status, err?.message ?? err);
-        }
-      });
+    let cancelled = false;
+    let chMsg: ReturnType<typeof supabase.channel> | null = null;
+    let chReq: ReturnType<typeof supabase.channel> | null = null;
+
+    void (async () => {
+      const { data: sess } = await supabase.auth.getSession();
+      if (cancelled) return;
+      const token = sess.session?.access_token;
+      if (token) await supabase.realtime.setAuth(token);
+      if (cancelled) return;
+
+      // Dois canais: menos bindings por join no hosted. Lista atualiza também via UPDATE service_requests (trigger na mensagem).
+      const a = supabase
+        .channel("messages-list-msg-v4", { config: { broadcast: { self: false } } })
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, applyNewMessage)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_messages" }, scheduleFullReload)
+        .subscribe((status, err) => {
+          if (status === "SUBSCRIBED") return;
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("[Messages] realtime (chat_messages):", status, err?.message ?? err);
+          }
+        });
+
+      const b = supabase
+        .channel("messages-list-req-v4", { config: { broadcast: { self: false } } })
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "service_requests" }, scheduleFullReload)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests" }, scheduleFullReload)
+        .subscribe((status, err) => {
+          if (status === "SUBSCRIBED") return;
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("[Messages] realtime (service_requests):", status, err?.message ?? err);
+          }
+        });
+
+      if (cancelled) {
+        supabase.removeChannel(a);
+        supabase.removeChannel(b);
+        return;
+      }
+      chMsg = a;
+      chReq = b;
+    })();
 
     return () => {
+      cancelled = true;
       if (debounceTimer) clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
+      if (chMsg) supabase.removeChannel(chMsg);
+      if (chReq) supabase.removeChannel(chReq);
     };
   }, [load, applyNewMessage]);
 

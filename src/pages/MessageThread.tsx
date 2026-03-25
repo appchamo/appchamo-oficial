@@ -480,44 +480,93 @@ const MessageThread = () => {
   }, [threadId, load]);
 
   useEffect(() => {
-    if (!threadId) return;
-    const channel = supabase
-      .channel(`chat-${threadId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
-        (payload) => {
-          setMessages((prev) => {
-            const incoming = payload.new as Message;
-            // Já existe pelo id real → ignora
-            if (prev.some(m => m.id === incoming.id)) return prev;
-            // Substitui possível mensagem otimista (temp-*) do mesmo remetente com mesmo conteúdo
-            const tempIdx = prev.findIndex(
-              m => m.id.startsWith("temp-") && m.sender_id === incoming.sender_id && m.content === incoming.content
-            );
-            if (tempIdx !== -1) {
-              const next = [...prev];
-              next[tempIdx] = incoming;
-              return next;
-            }
-            return [...prev, incoming];
-          });
-        })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [threadId]);
+    // Só entra no Realtime com JWT + userId: senão o Postgres Changes (RLS) não entrega linhas.
+    if (!threadId || !userId) return;
+    let cancelled = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    void (async () => {
+      const { data: sessData } = await supabase.auth.getSession();
+      const token = sessData.session?.access_token;
+      if (token) await supabase.realtime.setAuth(token);
+      if (cancelled) return;
+
+      const ch = supabase
+        .channel(`chat-${threadId}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `request_id=eq.${threadId}` },
+          (payload) => {
+            setMessages((prev) => {
+              const incoming = payload.new as Message;
+              if (prev.some(m => m.id === incoming.id)) return prev;
+              const tempIdx = prev.findIndex(
+                m => m.id.startsWith("temp-") && m.sender_id === incoming.sender_id && m.content === incoming.content
+              );
+              if (tempIdx !== -1) {
+                const next = [...prev];
+                next[tempIdx] = incoming;
+                return next;
+              }
+              return [...prev, incoming];
+            });
+          })
+        .subscribe((status, err) => {
+          if (status === "SUBSCRIBED") return;
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("[MessageThread] realtime chat_messages:", status, err?.message ?? err);
+          }
+        });
+
+      if (cancelled) {
+        supabase.removeChannel(ch);
+        return;
+      }
+      channel = ch;
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [threadId, userId]);
 
   useEffect(() => {
-    if (!threadId) return;
-    const channel = supabase.
-    channel(`req-status-${threadId}`).
-    on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests", filter: `id=eq.${threadId}` },
-    (payload) => {
-      const updated = payload.new as any;
-      setRequestStatus(updated.status);
-      if (updated.protocol) setRequestProtocol(updated.protocol);
-    }).
-    subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [threadId]);
+    if (!threadId || !userId) return;
+    let cancelled = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    void (async () => {
+      const { data: sessData } = await supabase.auth.getSession();
+      const token = sessData.session?.access_token;
+      if (token) await supabase.realtime.setAuth(token);
+      if (cancelled) return;
+
+      const ch = supabase
+        .channel(`req-status-${threadId}`)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "service_requests", filter: `id=eq.${threadId}` },
+          (payload) => {
+            const updated = payload.new as any;
+            setRequestStatus(updated.status);
+            if (updated.protocol) setRequestProtocol(updated.protocol);
+          })
+        .subscribe((status, err) => {
+          if (status === "SUBSCRIBED") return;
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("[MessageThread] realtime service_requests:", status, err?.message ?? err);
+          }
+        });
+
+      if (cancelled) {
+        supabase.removeChannel(ch);
+        return;
+      }
+      channel = ch;
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [threadId, userId]);
 
   useEffect(() => {
     if (!threadId || !userId) return;

@@ -23,24 +23,12 @@ export type SealDefinitionRow = {
   is_active: boolean;
 };
 
-const KIND_LABEL: Record<string, string> = {
-  calls: "Chamadas (min_calls no JSON)",
-  rating_streak: "Sequência de avaliação (streak_days, etc.)",
-  response_streak: "Tempo de resposta (streak_days, max_avg_response_seconds)",
-  revenue_lifetime: "Receita total (min_revenue_brl)",
-  chamo_master: "Chamô (min_monthly_brl + todos os outros selos ativos)",
-};
-
-function requirementHint(kind: string): string {
-  return KIND_LABEL[kind] || kind;
-}
-
 export function AdminProsSealsPanel() {
   const [rows, setRows] = useState<SealDefinitionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [evaluating, setEvaluating] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, Partial<SealDefinitionRow> & { configText?: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, Partial<SealDefinitionRow>>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,7 +42,7 @@ export function AdminProsSealsPanel() {
     } else {
       const list = (data || []) as SealDefinitionRow[];
       setRows(list);
-      const d: Record<string, Partial<SealDefinitionRow> & { configText?: string }> = {};
+      const d: Record<string, Partial<SealDefinitionRow>> = {};
       for (const r of list) {
         d[r.id] = {
           title: r.title,
@@ -62,7 +50,6 @@ export function AdminProsSealsPanel() {
           icon_variant: r.icon_variant,
           sort_order: r.sort_order,
           is_active: r.is_active,
-          configText: JSON.stringify(r.config ?? {}, null, 2),
         };
       }
       setDrafts(d);
@@ -81,13 +68,7 @@ export function AdminProsSealsPanel() {
   const saveRow = async (row: SealDefinitionRow) => {
     const d = drafts[row.id];
     if (!d) return;
-    let configObj: Record<string, unknown>;
-    try {
-      configObj = JSON.parse(d.configText || "{}") as Record<string, unknown>;
-    } catch {
-      toast({ title: "JSON inválido", description: "Corrija o campo de requisitos (JSON).", variant: "destructive" });
-      return;
-    }
+    const latest = rows.find((r) => r.id === row.id) ?? row;
     setSavingId(row.id);
     const { error } = await supabase
       .from("professional_seal_definitions" as any)
@@ -97,7 +78,7 @@ export function AdminProsSealsPanel() {
         icon_variant: d.icon_variant ?? row.icon_variant,
         sort_order: Number(d.sort_order ?? row.sort_order),
         is_active: d.is_active ?? row.is_active,
-        config: configObj,
+        config: latest.config,
         updated_at: new Date().toISOString(),
       })
       .eq("id", row.id);
@@ -147,8 +128,8 @@ export function AdminProsSealsPanel() {
         <div>
           <p className="font-semibold text-foreground">Configuração dos selos</p>
           <p className="text-sm text-muted-foreground mt-1">
-            Título, texto de requisitos e JSON de parâmetros (limiares). O motor diário também roda via cron; use o botão para
-            forçar agora.
+            Título, texto de requisitos e aparência. Os limiares numéricos (chamadas, valores, dias) ficam no banco de dados —
+            avise o time de desenvolvimento se precisar alterá-los.
           </p>
         </div>
         <Button type="button" variant="default" disabled={evaluating} onClick={runEvaluate} className="shrink-0 gap-2">
@@ -237,16 +218,6 @@ export function AdminProsSealsPanel() {
                   <Label htmlFor={`active-${row.id}`} className="text-sm font-normal cursor-pointer">
                     Selo ativo (participa da avaliação)
                   </Label>
-                </div>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label className="text-xs">Parâmetros (JSON)</Label>
-                  <p className="text-[11px] text-muted-foreground mb-1">{requirementHint(row.requirement_kind)}</p>
-                  <Textarea
-                    value={d.configText ?? "{}"}
-                    onChange={(e) => updateDraft(row.id, { configText: e.target.value })}
-                    rows={5}
-                    className="font-mono text-xs"
-                  />
                 </div>
               </div>
 

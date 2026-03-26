@@ -1,7 +1,8 @@
 import AdminLayout from "@/components/AdminLayout";
 import { AdminProsSealsPanel } from "@/pages/admin/AdminProsSealsPanel";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall } from "lucide-react";
-import { useState, useEffect } from "react";
+import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2 } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
@@ -11,6 +12,8 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 interface Professional {
   id: string;
@@ -131,11 +134,18 @@ const AdminPros = () => {
   const [rejectSubReason, setRejectSubReason] = useState("");
 
   const [bonusOpen, setBonusOpen] = useState(false);
+  const [bonusMainTab, setBonusMainTab] = useState<"chamadas" | "selos">("chamadas");
   const [bonusTarget, setBonusTarget] = useState<"individual" | "category">("individual");
   const [bonusProId, setBonusProId] = useState<string>("");
   const [bonusCategoryId, setBonusCategoryId] = useState<string>("");
   const [bonusAmount, setBonusAmount] = useState("10");
   const [bonusSaving, setBonusSaving] = useState(false);
+  const [bonusSealQuery, setBonusSealQuery] = useState("");
+  const [bonusSealProId, setBonusSealProId] = useState<string>("");
+  const [bonusSealDefs, setBonusSealDefs] = useState<{ id: string; title: string; icon_variant: string; sort_order: number }[]>([]);
+  const [bonusSealAwarded, setBonusSealAwarded] = useState<Set<string>>(new Set());
+  const [bonusSealLoading, setBonusSealLoading] = useState(false);
+  const [bonusSealToggling, setBonusSealToggling] = useState<string | null>(null);
 
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc" | "plan_asc" | "plan_desc">("date_desc");
   const [docFilter, setDocFilter] = useState<"all" | "cpf" | "cnpj">("all");
@@ -502,10 +512,90 @@ const AdminPros = () => {
     fetchPros();
   };
 
+  const bonusSealProsFiltered = useMemo(() => {
+    const q = bonusSealQuery.trim().toLowerCase();
+    const approved = pros.filter((p) => p.profile_status === "approved");
+    if (q.length === 0) return approved.slice(0, 18);
+    return approved
+      .filter((p) => p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+      .slice(0, 40);
+  }, [pros, bonusSealQuery]);
+
+  useEffect(() => {
+    if (!bonusOpen || bonusMainTab !== "selos") return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("professional_seal_definitions" as any)
+        .select("id, title, icon_variant, sort_order")
+        .order("sort_order", { ascending: true });
+      if (!cancelled) setBonusSealDefs((data || []) as { id: string; title: string; icon_variant: string; sort_order: number }[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bonusOpen, bonusMainTab]);
+
+  useEffect(() => {
+    if (!bonusOpen || bonusMainTab !== "selos" || !bonusSealProId) {
+      if (bonusOpen && bonusMainTab === "selos" && !bonusSealProId) setBonusSealAwarded(new Set());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setBonusSealLoading(true);
+      const { data } = await supabase
+        .from("professional_seals_awarded" as any)
+        .select("seal_id")
+        .eq("professional_id", bonusSealProId);
+      if (!cancelled) {
+        setBonusSealAwarded(new Set((data || []).map((a: { seal_id: string }) => a.seal_id)));
+        setBonusSealLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bonusOpen, bonusMainTab, bonusSealProId]);
+
   const logAction = async (action: string, target_type: string, target_id: string, details?: any) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
       await supabase.from("admin_logs").insert({ admin_user_id: session.user.id, action, target_type, target_id, details: details || null });
+    }
+  };
+
+  const handleBonusSealToggle = async (sealId: string, currentlyAwarded: boolean) => {
+    if (!bonusSealProId) return;
+    setBonusSealToggling(sealId);
+    try {
+      if (currentlyAwarded) {
+        const { error } = await supabase
+          .from("professional_seals_awarded" as any)
+          .delete()
+          .eq("professional_id", bonusSealProId)
+          .eq("seal_id", sealId);
+        if (error) throw error;
+        await logAction("seal_revoke", "professional", bonusSealProId, { seal_id: sealId });
+        toast({ title: "Selo desativado para este profissional" });
+      } else {
+        const { error } = await supabase.from("professional_seals_awarded" as any).insert({
+          professional_id: bonusSealProId,
+          seal_id: sealId,
+        });
+        if (error) throw error;
+        await logAction("seal_grant", "professional", bonusSealProId, { seal_id: sealId });
+        toast({ title: "Selo ativado para este profissional" });
+      }
+      const { data } = await supabase
+        .from("professional_seals_awarded" as any)
+        .select("seal_id")
+        .eq("professional_id", bonusSealProId);
+      setBonusSealAwarded(new Set((data || []).map((a: { seal_id: string }) => a.seal_id)));
+    } catch (e: unknown) {
+      toast({ title: "Erro ao atualizar selo", description: translateError(e), variant: "destructive" });
+    } finally {
+      setBonusSealToggling(null);
     }
   };
 
@@ -678,7 +768,14 @@ const AdminPros = () => {
                             <><Eye className="w-3.5 h-3.5 mr-2" /> Tornar visível</> :
                             <><EyeOff className="w-3.5 h-3.5 mr-2" /> Ocultar</>}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setBonusProId(pro.id); setBonusTarget("individual"); setBonusOpen(true); }}>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setBonusMainTab("chamadas");
+                            setBonusTarget("individual");
+                            setBonusProId(pro.id);
+                            setBonusOpen(true);
+                          }}
+                        >
                           <Gift className="w-3.5 h-3.5 mr-2" /> Dar chamadas bônus
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -727,9 +824,15 @@ const AdminPros = () => {
           <option value="plan_asc">Plano ↑ (Grátis → Business)</option>
           <option value="plan_desc">Plano ↓ (Business → Grátis)</option>
         </select>
-        <button onClick={() => { setBonusTarget("category"); setBonusOpen(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors whitespace-nowrap">
-          <Gift className="w-4 h-4" /> Bonificar por categoria
+        <button
+          onClick={() => {
+            setBonusMainTab("chamadas");
+            setBonusTarget("category");
+            setBonusOpen(true);
+          }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
+        >
+          <Gift className="w-4 h-4" /> Bonificar
         </button>
       </div>
       )}
@@ -970,57 +1073,204 @@ const AdminPros = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={bonusOpen} onOpenChange={setBonusOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Gift className="w-5 h-5 text-primary" /> Bonificar chamadas</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <button onClick={() => setBonusTarget("individual")}
-                className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${bonusTarget === "individual" ? "bg-primary text-primary-foreground" : "border hover:bg-muted"}`}>
-                Individual
-              </button>
-              <button onClick={() => setBonusTarget("category")}
-                className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${bonusTarget === "category" ? "bg-primary text-primary-foreground" : "border hover:bg-muted"}`}>
-                Por categoria
-              </button>
-            </div>
+      <Dialog
+        open={bonusOpen}
+        onOpenChange={(open) => {
+          setBonusOpen(open);
+          if (!open) {
+            setBonusMainTab("chamadas");
+            setBonusSealQuery("");
+            setBonusSealProId("");
+            setBonusSealDefs([]);
+            setBonusSealAwarded(new Set());
+            setBonusSealLoading(false);
+            setBonusSealToggling(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Gift className="w-5 h-5 text-primary" /> Bonificar
+            </DialogTitle>
+          </DialogHeader>
+          <Tabs value={bonusMainTab} onValueChange={(v) => setBonusMainTab(v as "chamadas" | "selos")} className="w-full">
+            <TabsList className="grid w-full grid-cols-2 h-auto p-1">
+              <TabsTrigger value="chamadas" className="text-xs font-semibold tracking-wide">
+                CHAMADAS
+              </TabsTrigger>
+              <TabsTrigger value="selos" className="text-xs font-semibold tracking-wide">
+                SELOS
+              </TabsTrigger>
+            </TabsList>
 
-            {bonusTarget === "individual" ? (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Profissional</label>
-                <select value={bonusProId} onChange={e => setBonusProId(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-                  <option value="">Selecione...</option>
-                  {pros.filter(p => p.profile_status === "approved").map(p => (
-                    <option key={p.id} value={p.id}>{p.full_name} ({p.calls_used} chamadas, +{p.bonus_calls} bônus)</option>
-                  ))}
-                </select>
+            <TabsContent value="chamadas" className="mt-4 space-y-4">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBonusTarget("individual")}
+                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                    bonusTarget === "individual" ? "bg-primary text-primary-foreground" : "border hover:bg-muted"
+                  }`}
+                >
+                  Individual
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBonusTarget("category")}
+                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                    bonusTarget === "category" ? "bg-primary text-primary-foreground" : "border hover:bg-muted"
+                  }`}
+                >
+                  Por categoria
+                </button>
               </div>
-            ) : (
+
+              {bonusTarget === "individual" ? (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Profissional</label>
+                  <select
+                    value={bonusProId}
+                    onChange={(e) => setBonusProId(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">Selecione...</option>
+                    {pros
+                      .filter((p) => p.profile_status === "approved")
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.full_name} ({p.calls_used} chamadas, +{p.bonus_calls} bônus)
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Categoria</label>
+                  <select
+                    value={bonusCategoryId}
+                    onChange={(e) => setBonusCategoryId(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">Selecione...</option>
+                    {categories.map((c) => {
+                      const count = pros.filter((p) => p.category_id === c.id && p.profile_status === "approved").length;
+                      return (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({count} profissionais)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Categoria</label>
-                <select value={bonusCategoryId} onChange={e => setBonusCategoryId(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30">
-                  <option value="">Selecione...</option>
-                  {categories.map(c => {
-                    const count = pros.filter(p => p.category_id === c.id && p.profile_status === "approved").length;
-                    return <option key={c.id} value={c.id}>{c.name} ({count} profissionais)</option>;
-                  })}
-                </select>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Quantidade de chamadas</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={bonusAmount}
+                  onChange={(e) => setBonusAmount(e.target.value)}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                />
               </div>
-            )}
 
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Quantidade de chamadas</label>
-              <input type="number" min="1" value={bonusAmount} onChange={e => setBonusAmount(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-            </div>
+              <button
+                type="button"
+                onClick={handleBonusCalls}
+                disabled={bonusSaving}
+                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {bonusSaving ? "Aplicando..." : "Conceder chamadas bônus"}
+              </button>
+            </TabsContent>
 
-            <button onClick={handleBonusCalls} disabled={bonusSaving}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {bonusSaving ? "Aplicando..." : "Conceder chamadas bônus"}
-            </button>
-          </div>
+            <TabsContent value="selos" className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Buscar profissional (nome ou e-mail)</label>
+                <Input
+                  value={bonusSealQuery}
+                  onChange={(e) => setBonusSealQuery(e.target.value)}
+                  placeholder="Digite para filtrar..."
+                  className="rounded-xl"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {bonusSealQuery.trim().length === 0
+                    ? "Mostrando alguns aprovados — digite para refinar."
+                    : `${bonusSealProsFiltered.length} resultado(s).`}
+                </p>
+              </div>
+              <div className="border rounded-xl max-h-40 overflow-y-auto divide-y">
+                {bonusSealProsFiltered.length === 0 ? (
+                  <p className="p-3 text-sm text-muted-foreground text-center">Nenhum profissional encontrado.</p>
+                ) : (
+                  bonusSealProsFiltered.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setBonusSealProId(p.id)}
+                      className={`w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-muted/80 ${
+                        bonusSealProId === p.id ? "bg-primary/10 ring-inset ring-1 ring-primary/30" : ""
+                      }`}
+                    >
+                      <span className="font-medium text-foreground block truncate">{p.full_name}</span>
+                      <span className="text-xs text-muted-foreground truncate block">{p.email}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              {bonusSealProId && (
+                <div className="space-y-3 pt-1 border-t">
+                  <p className="text-xs text-muted-foreground">
+                    Selos de{" "}
+                    <strong className="text-foreground">
+                      {pros.find((x) => x.id === bonusSealProId)?.full_name ?? "—"}
+                    </strong>
+                  </p>
+                  {bonusSealLoading ? (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="w-7 h-7 animate-spin text-primary" />
+                    </div>
+                  ) : (
+                    <ul className="space-y-2 max-h-[min(50vh,22rem)] overflow-y-auto pr-1">
+                      {bonusSealDefs.map((s) => {
+                        const on = bonusSealAwarded.has(s.id);
+                        return (
+                          <li
+                            key={s.id}
+                            className="flex items-center gap-3 rounded-lg border bg-card px-2 py-2"
+                          >
+                            <ProfessionalSealIcon variant={s.icon_variant} size={40} earned={on} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">{s.title}</p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={on ? "secondary" : "default"}
+                              className="shrink-0"
+                              disabled={bonusSealToggling === s.id}
+                              onClick={() => handleBonusSealToggle(s.id, on)}
+                            >
+                              {bonusSealToggling === s.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : on ? (
+                                "Desativar"
+                              ) : (
+                                "Ativar"
+                              )}
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 

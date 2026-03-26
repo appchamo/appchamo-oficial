@@ -1,5 +1,6 @@
 import AppLayout from "@/components/AppLayout";
-import { Bell, ChevronDown, Loader2, XCircle, Home, UserCheck, Ticket, CalendarCheck, MessageSquare, Wallet, X } from "lucide-react";
+import { Bell, ChevronDown, Loader2, XCircle, Home, UserCheck, Ticket, CalendarCheck, MessageSquare, Wallet, X, Trophy } from "lucide-react";
+import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,6 +18,23 @@ interface Notification {
   read: boolean;
   link: string | null;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+type SealNotifMeta = {
+  seal_title?: string;
+  icon_variant?: string;
+  seal_id?: string;
+};
+
+function parseSealMeta(n: Notification): SealNotifMeta | null {
+  if (n.type !== "seal_award" || !n.metadata || typeof n.metadata !== "object") return null;
+  const m = n.metadata as Record<string, unknown>;
+  return {
+    seal_title: typeof m.seal_title === "string" ? m.seal_title : undefined,
+    icon_variant: typeof m.icon_variant === "string" ? m.icon_variant : "seal_default",
+    seal_id: typeof m.seal_id === "string" ? m.seal_id : undefined,
+  };
 }
 
 const PAGE_SIZE = 7;
@@ -42,6 +60,7 @@ const resolveDestination = (n: Notification): string => {
   const t = n.title.toLowerCase();
   if (n.type === "coupon" || t.includes("cupom")) return "/coupons";
   if (n.type === "appointment" || t.includes("agendamento")) return n.link || "/meus-agendamentos";
+  if (n.type === "seal_award") return "/pro";
   return n.link || "/home";
 };
 
@@ -66,6 +85,7 @@ const Notifications = () => {
   const [page, setPage] = useState(0);
   const [rejectionNotif, setRejectionNotif] = useState<Notification | null>(null);
   const [expandedNotif, setExpandedNotif] = useState<Notification | null>(null);
+  const [sealCelebrateNotif, setSealCelebrateNotif] = useState<Notification | null>(null);
 
   const fetchNotifications = useCallback(async (pageIndex = 0, append = false) => {
     if (!user) return;
@@ -76,7 +96,7 @@ const Notifications = () => {
 
     const { data } = await supabase
       .from("notifications")
-      .select("*")
+      .select("id, title, message, type, read, link, created_at, metadata")
       .eq("user_id", user.id)
       .neq("type", "chat")
       .order("created_at", { ascending: false })
@@ -135,6 +155,10 @@ const Notifications = () => {
   const handleClick = (n: Notification) => {
     if (n.type === "rejection") {
       setRejectionNotif(n);
+      return;
+    }
+    if (n.type === "seal_award") {
+      setSealCelebrateNotif(n);
       return;
     }
     const action = resolveAction(n);
@@ -197,6 +221,50 @@ const Notifications = () => {
               </button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: conquista de selo */}
+      <Dialog open={!!sealCelebrateNotif} onOpenChange={(o) => !o && setSealCelebrateNotif(null)}>
+        <DialogContent className="max-w-sm border-2 border-amber-400/35 bg-gradient-to-b from-amber-50/95 via-background to-violet-50/25 dark:from-amber-950/40 dark:via-background dark:to-violet-950/20 shadow-2xl overflow-hidden">
+          {sealCelebrateNotif && (() => {
+            const meta = parseSealMeta(sealCelebrateNotif);
+            const variant = meta?.icon_variant || "seal_default";
+            return (
+              <div className="flex flex-col items-center text-center gap-3 py-1">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                  <Trophy className="w-4 h-4" />
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em]">Conquista no Chamô</p>
+                </div>
+                <div className="relative py-2">
+                  <div className="absolute inset-0 blur-2xl bg-amber-400/25 rounded-full scale-150 pointer-events-none" aria-hidden />
+                  <ProfessionalSealIcon variant={variant} size={108} earned className="relative z-[1]" />
+                </div>
+                <h2 className="text-lg font-extrabold text-foreground leading-tight px-1">
+                  {sealCelebrateNotif.title}
+                </h2>
+                {sanitizeMessage(sealCelebrateNotif.message) && (
+                  <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line px-1">
+                    {sanitizeMessage(sealCelebrateNotif.message)}
+                  </p>
+                )}
+                <div className="flex flex-col gap-2 w-full pt-2">
+                  <Button
+                    className="w-full font-semibold shadow-lg shadow-amber-500/20"
+                    onClick={() => {
+                      setSealCelebrateNotif(null);
+                      navigate("/pro");
+                    }}
+                  >
+                    Ver meus selos
+                  </Button>
+                  <Button variant="outline" className="w-full" onClick={() => setSealCelebrateNotif(null)}>
+                    Fechar
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -272,6 +340,32 @@ const Notifications = () => {
                 }
                 return null;
               };
+
+              if (n.type === "seal_award") {
+                const meta = parseSealMeta(n);
+                const variant = meta?.icon_variant || "seal_default";
+                return (
+                  <button
+                    key={n.id}
+                    onClick={() => handleClick(n)}
+                    className={`w-full text-left p-4 rounded-xl border-2 border-amber-400/40 transition-all bg-gradient-to-br from-amber-50/90 via-orange-50/40 to-violet-50/30 dark:from-amber-950/35 dark:via-orange-950/20 dark:to-violet-950/25 shadow-md hover:shadow-lg hover:border-amber-500/50 active:scale-[0.99]`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="shrink-0 drop-shadow-md">
+                        <ProfessionalSealIcon variant={variant} size={58} earned />
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <p className={`text-sm ${n.read ? "text-foreground" : "font-extrabold text-foreground"}`}>{n.title}</p>
+                        {message && <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-snug">{message}</p>}
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <Trophy className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                        <span className="text-[10px] text-muted-foreground">{timeAgo(n.created_at)}</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              }
 
               return (
                 <button

@@ -1,4 +1,5 @@
 import { Star, BadgeCheck, MapPin } from "lucide-react";
+import { FeaturedSealStack, sortPublicSealsForDisplay } from "@/components/seals/FeaturedSealStack";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -53,6 +54,8 @@ interface Pro {
   longitude: number | null;
   distance_km: number | null;
   created_at: string | null;
+  /** Selos públicos (ordenados: destaque primeiro) */
+  seals?: { icon_variant: string }[];
 }
 
 interface FeaturedProfessionalsProps {
@@ -300,7 +303,42 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         return tA - tB;
       });
 
-      const top10 = withLocation.slice(0, 10).map(({ _city, _state, ...p }) => p);
+      const top10Raw = withLocation.slice(0, 10);
+      const proIds = top10Raw.map((p) => p.id);
+      const sealsByPro = new Map<string, { icon_variant: string }[]>();
+
+      if (proIds.length > 0) {
+        try {
+          const { data: sealData } = await supabase.rpc("public_professional_seals" as any, { p_ids: proIds });
+          type SealRow = {
+            professional_id: string;
+            icon_variant: string;
+            sort_order: number;
+            is_special: boolean;
+          };
+          const rows = (sealData || []) as SealRow[];
+          const grouped = new Map<string, SealRow[]>();
+          for (const r of rows) {
+            const list = grouped.get(r.professional_id) || [];
+            list.push(r);
+            grouped.set(r.professional_id, list);
+          }
+          grouped.forEach((list, pid) => {
+            const sorted = sortPublicSealsForDisplay(list);
+            sealsByPro.set(
+              pid,
+              sorted.map((s) => ({ icon_variant: s.icon_variant }))
+            );
+          });
+        } catch (sealErr) {
+          diagLog("warn", "featured", "public_professional_seals failed", { e: String(sealErr) });
+        }
+      }
+
+      const top10 = top10Raw.map(({ _city, _state, ...p }) => ({
+        ...p,
+        seals: sealsByPro.get(p.id) ?? [],
+      }));
 
       diagLog("info", "featured", "pros computed", { total: finalPros.length, shown: top10.length });
       if (loadGenRef.current !== gen) return;
@@ -356,9 +394,13 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   useEffect(() => {
     const channel = supabase
       .channel("featured-pro-updates")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "professionals" }, () => { loadPros(); })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "professionals" }, () => {
+        loadPros();
+      })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [loadPros]);
 
   const scrollToPage = useCallback((pageIndex: number) => {
@@ -478,6 +520,12 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
           <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
         </div>
+
+        {pro.seals && pro.seals.length > 0 && (
+          <div className="flex justify-end w-full pt-0.5">
+            <FeaturedSealStack seals={pro.seals} />
+          </div>
+        )}
 
         {distanceText && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">

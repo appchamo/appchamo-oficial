@@ -17,6 +17,7 @@ import {
   Building2,
   Loader2,
   Timer,
+  Award,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -25,6 +26,8 @@ import { toast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ProductCatalog from "@/components/ProductCatalog";
 import ProfessionalServices from "@/components/ProfessionalServices";
+import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
+import { sortPublicSealsForDisplay } from "@/components/seals/FeaturedSealStack";
 import ServiceRequestDialog from "@/components/ServiceRequestDialog";
 import AgendaBookingDialog from "@/components/AgendaBookingDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -99,6 +102,7 @@ const ProfessionalProfile = () => {
   const [savingCategoryProfession, setSavingCategoryProfession] = useState(false);
   const [planId, setPlanId] = useState<string | null>(null);
   const [reviewsVisible, setReviewsVisible] = useState(5);
+  const [publicSeals, setPublicSeals] = useState<{ seal_id: string; title: string; icon_variant: string }[]>([]);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -192,7 +196,24 @@ const ProfessionalProfile = () => {
             client_name: nameMap.get(r.client_id)?.name || "Cliente",
             client_avatar: nameMap.get(r.client_id)?.avatar || null,
           })));
+        } else {
+          setReviews([]);
         }
+
+        const { data: sealRows } = await supabase.rpc("public_professional_seals" as any, {
+          p_ids: [data.id],
+        });
+        type PubSeal = { seal_id?: string; title: string; icon_variant: string; sort_order: number; is_special: boolean };
+        const sortedSeals = sortPublicSealsForDisplay((sealRows || []) as PubSeal[]);
+        setPublicSeals(
+          sortedSeals.map((s, i) => ({
+            seal_id: s.seal_id ?? `seal-${i}-${s.title}`,
+            title: s.title,
+            icon_variant: s.icon_variant,
+          }))
+        );
+      } else {
+        setPublicSeals([]);
       }
     setLoading(false);
   }, [id]);
@@ -636,6 +657,29 @@ const ProfessionalProfile = () => {
             )}
           </div>
         </div>
+
+        {publicSeals.length > 0 && (
+          <div className="bg-gradient-to-b from-amber-50/90 to-card dark:from-amber-950/25 dark:to-card border border-amber-200/60 dark:border-amber-800/40 rounded-2xl p-4 shadow-card mb-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Award className="w-5 h-5 text-amber-600 shrink-0" />
+              <h2 className="text-sm font-bold text-foreground">Selos no Chamô</h2>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              Reconhecimentos oficiais conquistados na plataforma — visíveis para clientes.
+            </p>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+              {publicSeals.map((s) => (
+                <div
+                  key={s.seal_id}
+                  className="flex flex-col items-center text-center gap-1.5 rounded-xl bg-card/90 border border-border/60 p-2 shadow-sm"
+                >
+                  <ProfessionalSealIcon variant={s.icon_variant} size={44} earned />
+                  <span className="text-[10px] font-semibold text-foreground leading-tight line-clamp-2">{s.title}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Lightbox da foto do perfil */}
         {avatarLightbox && avatarUrl && (

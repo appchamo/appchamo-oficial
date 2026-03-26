@@ -21,6 +21,9 @@ export type SealDefinitionRow = {
   is_special: boolean;
   sort_order: number;
   is_active: boolean;
+  award_notification_title?: string | null;
+  award_notification_message?: string | null;
+  push_image_url?: string | null;
 };
 
 export function AdminProsSealsPanel() {
@@ -34,7 +37,9 @@ export function AdminProsSealsPanel() {
     setLoading(true);
     const { data, error } = await supabase
       .from("professional_seal_definitions" as any)
-      .select("id, slug, title, description, icon_variant, requirement_kind, config, is_special, sort_order, is_active")
+      .select(
+        "id, slug, title, description, icon_variant, requirement_kind, config, is_special, sort_order, is_active, award_notification_title, award_notification_message, push_image_url"
+      )
       .order("sort_order", { ascending: true });
     if (error) {
       toast({ title: "Erro ao carregar selos", description: translateError(error), variant: "destructive" });
@@ -50,6 +55,9 @@ export function AdminProsSealsPanel() {
           icon_variant: r.icon_variant,
           sort_order: r.sort_order,
           is_active: r.is_active,
+          award_notification_title: r.award_notification_title ?? "",
+          award_notification_message: r.award_notification_message ?? "",
+          push_image_url: r.push_image_url ?? "",
         };
       }
       setDrafts(d);
@@ -79,6 +87,9 @@ export function AdminProsSealsPanel() {
         sort_order: Number(d.sort_order ?? row.sort_order),
         is_active: d.is_active ?? row.is_active,
         config: latest.config,
+        award_notification_title: (d.award_notification_title ?? "").trim() || null,
+        award_notification_message: (d.award_notification_message ?? "").trim() || null,
+        push_image_url: (d.push_image_url ?? "").trim() || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", row.id);
@@ -218,6 +229,41 @@ export function AdminProsSealsPanel() {
                   <Label htmlFor={`active-${row.id}`} className="text-sm font-normal cursor-pointer">
                     Selo ativo (participa da avaliação)
                   </Label>
+                </div>
+
+                <div className="sm:col-span-2 rounded-lg border bg-muted/20 p-3 space-y-3">
+                  <p className="text-xs font-semibold text-foreground">Notificação e push ao conquistar</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Título e texto únicos por selo. URL da imagem deve ser HTTPS pública (PNG/JPG) para aparecer no push FCM.
+                  </p>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Título da notificação</Label>
+                    <Input
+                      value={d.award_notification_title ?? row.award_notification_title ?? ""}
+                      onChange={(e) => updateDraft(row.id, { award_notification_title: e.target.value })}
+                      placeholder="Ex.: Parabéns! Novo selo no Chamô"
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Mensagem</Label>
+                    <Textarea
+                      value={d.award_notification_message ?? row.award_notification_message ?? ""}
+                      onChange={(e) => updateDraft(row.id, { award_notification_message: e.target.value })}
+                      placeholder="Frase de celebração específica deste selo…"
+                      rows={2}
+                      className="text-sm resize-y min-h-[52px]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">URL da imagem (push)</Label>
+                    <Input
+                      value={d.push_image_url ?? row.push_image_url ?? ""}
+                      onChange={(e) => updateDraft(row.id, { push_image_url: e.target.value })}
+                      placeholder="https://… ou /seals/push/seal_vip.png (PUBLIC_APP_URL na edge)"
+                      className="h-9 font-mono text-xs"
+                    />
+                  </div>
                 </div>
               </div>
 

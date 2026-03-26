@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 92 104" width="512" height="579">
+  <defs>
+    <linearGradient id="ch1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f472b6"/><stop offset="35%" stop-color="#fbbf24"/><stop offset="70%" stop-color="#22d3ee"/><stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="ch2" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#fffbeb"/><stop offset="50%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <polygon points="46,2 88,26 88,62 46,86 4,62 4,26" fill="none" stroke="#fbbf24" stroke-width="1.5" opacity="0.9"/>
+  <polygon points="46,8 82,29 82,59 46,80 10,59 10,29" fill="url(#ch1)" stroke="#831843" stroke-width="1.2"/>
+  <polygon points="46,22 68,35 68,53 46,66 24,53 24,35" fill="url(#ch2)" stroke="#78350f" stroke-width="0.9"/>
+  <path d="M46 28 Q52 38 46 48 Q40 38 46 28 M46 36 Q50 42 46 48 Q42 42 46 36" fill="#fef08a" stroke="#ea580c" stroke-width="0.5"/>
+  <circle cx="32" cy="44" r="3" fill="#38bdf8"/>
+  <circle cx="60" cy="44" r="3" fill="#f472b6"/>
+  <path d="M38 76 L46 68 L54 76 L50 88 L42 88 Z" fill="#7c3aed" stroke="#c4b5fd" stroke-width="0.6"/>
+</svg>

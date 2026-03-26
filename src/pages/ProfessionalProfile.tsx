@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import {
   ArrowLeft,
+  ChevronRight,
   BadgeCheck,
   Star,
   Clock,
@@ -103,6 +104,7 @@ const ProfessionalProfile = () => {
   const [planId, setPlanId] = useState<string | null>(null);
   const [reviewsVisible, setReviewsVisible] = useState(5);
   const [publicSeals, setPublicSeals] = useState<{ seal_id: string; title: string; icon_variant: string }[]>([]);
+  const [sealsModalOpen, setSealsModalOpen] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -659,26 +661,56 @@ const ProfessionalProfile = () => {
         </div>
 
         {publicSeals.length > 0 && (
-          <div className="bg-gradient-to-b from-amber-50/90 to-card dark:from-amber-950/25 dark:to-card border border-amber-200/60 dark:border-amber-800/40 rounded-2xl p-4 shadow-card mb-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Award className="w-5 h-5 text-amber-600 shrink-0" />
-              <h2 className="text-sm font-bold text-foreground">Selos no Chamô</h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-3">
-              Reconhecimentos oficiais conquistados na plataforma — visíveis para clientes.
-            </p>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-              {publicSeals.map((s) => (
-                <div
-                  key={s.seal_id}
-                  className="flex flex-col items-center text-center gap-1.5 rounded-xl bg-card/90 border border-border/60 p-2 shadow-sm"
-                >
-                  <ProfessionalSealIcon variant={s.icon_variant} size={44} earned />
-                  <span className="text-[10px] font-semibold text-foreground leading-tight line-clamp-2">{s.title}</span>
+          <>
+            <button
+              type="button"
+              onClick={() => setSealsModalOpen(true)}
+              className="w-full flex items-center gap-2.5 rounded-xl border border-amber-200/50 dark:border-amber-800/40 bg-gradient-to-r from-amber-50/50 to-card dark:from-amber-950/20 px-3 py-2 mb-4 text-left hover:from-amber-50/80 dark:hover:from-amber-950/30 transition-colors active:scale-[0.99]"
+            >
+              <Award className="w-4 h-4 text-amber-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-foreground leading-tight">Selos no Chamô</p>
+                <p className="text-[10px] text-muted-foreground">Toque para ver todos ({publicSeals.length})</p>
+              </div>
+              <div className="flex items-center shrink-0">
+                {publicSeals.slice(0, 3).map((s, i) => (
+                  <div
+                    key={s.seal_id}
+                    className="relative"
+                    style={{ marginLeft: i === 0 ? 0 : -10, zIndex: 3 - i }}
+                  >
+                    <ProfessionalSealIcon variant={s.icon_variant} size={32} earned />
+                  </div>
+                ))}
+                {publicSeals.length > 3 && (
+                  <span className="ml-1.5 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold px-1.5 py-0.5 min-w-[1.25rem] text-center shadow-sm">
+                    +{publicSeals.length - 3}
+                  </span>
+                )}
+              </div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            </button>
+
+            <Dialog open={sealsModalOpen} onOpenChange={setSealsModalOpen}>
+              <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Selos no Chamô</DialogTitle>
+                  <DialogDescription>Reconhecimentos oficiais conquistados na plataforma.</DialogDescription>
+                </DialogHeader>
+                <div className="grid grid-cols-3 gap-2.5 py-2">
+                  {publicSeals.map((s) => (
+                    <div
+                      key={s.seal_id}
+                      className="flex flex-col items-center text-center gap-1 rounded-lg border bg-muted/30 p-2"
+                    >
+                      <ProfessionalSealIcon variant={s.icon_variant} size={40} earned />
+                      <span className="text-[9px] font-semibold text-foreground leading-tight line-clamp-2">{s.title}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
+              </DialogContent>
+            </Dialog>
+          </>
         )}
 
         {/* Lightbox da foto do perfil */}

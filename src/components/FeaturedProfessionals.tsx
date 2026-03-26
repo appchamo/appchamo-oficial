@@ -481,11 +481,11 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       <Link
         key={pro.id}
         to={`/professional/${pro.id}`}
-        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-2.5 flex-1 min-w-0 basis-0 overflow-hidden active:scale-[0.97] transition-transform"
+        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-2.5 flex-1 min-w-0 basis-0 overflow-visible active:scale-[0.97] transition-transform"
       >
-        {/* Avatar com badge verificado sobreposto */}
+        {/* Avatar: verificado no canto superior direito; selos compactos sobrepostos embaixo à direita */}
         <div className="relative self-start mb-0.5">
-          <div className="w-16 h-16 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden">
+          <div className="w-16 h-16 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
             {avatarSrc ? (
               <img
                 src={avatarSrc}
@@ -499,8 +499,13 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
             )}
           </div>
           {pro.verified && (
-            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-white">
+            <div className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-card shadow-sm">
               <BadgeCheck className="w-3 h-3 text-white" />
+            </div>
+          )}
+          {pro.seals && pro.seals.length > 0 && (
+            <div className="absolute -right-1 -bottom-1 z-[5] flex items-end justify-end w-[4.5rem] h-[2.5rem] pointer-events-none">
+              <FeaturedSealStack seals={pro.seals} placement="avatar" />
             </div>
           )}
         </div>
@@ -520,12 +525,6 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
           <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
         </div>
-
-        {pro.seals && pro.seals.length > 0 && (
-          <div className="flex justify-end w-full pt-0.5">
-            <FeaturedSealStack seals={pro.seals} />
-          </div>
-        )}
 
         {distanceText && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">

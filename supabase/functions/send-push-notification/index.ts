@@ -2,6 +2,23 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { SignJWT, importPKCS8 } from 'npm:jose@5.2.0'
 
+/** FCM precisa de URL HTTPS absoluta; caminhos /... vêm do DB e usam PUBLIC_APP_URL (origem do site com os PNG em public/seals/push). */
+function resolveNotificationImageUrl(raw: string | null | undefined): string | null {
+  if (raw == null || typeof raw !== "string") return null
+  const t = raw.trim()
+  if (!t) return null
+  if (t.startsWith("https://") || t.startsWith("http://")) return t
+  if (t.startsWith("/")) {
+    const base = (Deno.env.get("PUBLIC_APP_URL") ?? Deno.env.get("APP_PUBLIC_URL") ?? "").replace(/\/$/, "")
+    if (!base) {
+      console.warn("⚠️ push_image_url é caminho relativo mas PUBLIC_APP_URL não está definido; imagem do push omitida.")
+      return null
+    }
+    return `${base}${t}`
+  }
+  return null
+}
+
 /** Obtém access_token do Google OAuth2 com conta de serviço (compatível com Deno, sem google-auth-library). */
 async function getGoogleAccessToken(clientEmail: string, privateKeyPem: string): Promise<string> {
   const pem = privateKeyPem.replace(/\\n/g, '\n')
@@ -102,7 +119,17 @@ serve(async (req) => {
     const fcmUrl = `https://fcm.googleapis.com/v1/projects/${firebaseConfig.project_id}/messages:send`
     const title = record.title || "Chamô 🚀"
     const body = record.message || "Você tem uma nova atualização."
-    const imageUrl: string | null = record.image_url || null
+    let imageUrl: string | null = resolveNotificationImageUrl(record.image_url)
+    if (!imageUrl && record.type === "seal_award" && record.metadata) {
+      try {
+        const m = typeof record.metadata === "string" ? JSON.parse(record.metadata) : record.metadata
+        if (m && typeof m.push_image_url === "string") {
+          imageUrl = resolveNotificationImageUrl(m.push_image_url)
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     const dataPayload: Record<string, string> = {
       notification_id: String(record.id || ""),
       type: String(record.type || "general"),

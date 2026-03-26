@@ -883,7 +883,7 @@ const Home = () => {
               <Ticket className="w-8 h-8 text-primary" />
             </div>
             <p className="text-sm text-foreground font-medium">
-              Você ganhou <strong className="text-primary">1 cupom</strong> para o sorteio!
+              Você ganhou <strong className="text-primary">1 cupom</strong> para o sorteio mensal!
             </p>
           </div>
           <button

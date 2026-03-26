@@ -10,6 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { subscribeThreadActivity } from "@/lib/threadActivityChannels";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -56,10 +57,18 @@ const sortThreadsByPinAndTime = (list: Thread[]) => {
 
 const labelColorPillClass = (c: ThreadLabelColor) =>
   ({
-    blue: "bg-blue-600 text-white",
-    green: "bg-emerald-600 text-white",
-    orange: "bg-orange-500 text-white",
-    red: "bg-red-600 text-white",
+    blue: "border border-blue-500/70 text-blue-700 dark:text-blue-300 bg-blue-500/10",
+    green: "border border-emerald-500/70 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10",
+    orange: "border border-orange-500/70 text-orange-800 dark:text-orange-300 bg-orange-500/10",
+    red: "border border-red-500/70 text-red-700 dark:text-red-300 bg-red-500/10",
+  })[c];
+
+const labelColorSwatchClass = (c: ThreadLabelColor) =>
+  ({
+    blue: "border-2 border-blue-500/50 bg-blue-500/10 text-blue-800 dark:text-blue-200 hover:bg-blue-500/20",
+    green: "border-2 border-emerald-500/50 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/20",
+    orange: "border-2 border-orange-500/50 bg-orange-500/10 text-orange-900 dark:text-orange-200 hover:bg-orange-500/20",
+    red: "border-2 border-red-500/50 bg-red-500/10 text-red-800 dark:text-red-200 hover:bg-red-500/20",
   })[c];
 
 // Cache em memória — lista aparece instantaneamente ao voltar para a tela
@@ -102,9 +111,12 @@ const Messages = () => {
     text: string;
   } | null>(null);
   const userIdRef = useRef<string | null>(null);
+  /** Sincronizado com a sessão — evita efeito de “digitando” antes do userIdRef estar definido. */
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const longPressTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const skipNextNavRef = useRef(false);
+  const [peerActivityByThread, setPeerActivityByThread] = useState<Record<string, "typing" | "recording">>({});
   const navigate = useNavigate();
 
   const load = useCallback(async (isBackgroundUpdate = false, opts?: { widenFetch?: boolean }) => {
@@ -112,8 +124,14 @@ const Messages = () => {
 
     const { data: { session } } = await supabase.auth.getSession();
     const user = session?.user;
-    if (!user) { if (!isBackgroundUpdate) setLoading(false); return; }
+    if (!user) {
+      userIdRef.current = null;
+      setCurrentUserId(null);
+      if (!isBackgroundUpdate) setLoading(false);
+      return;
+    }
     userIdRef.current = user.id;
+    setCurrentUserId(user.id);
 
     const PAGE_SIZE = 7;
     const baseLimit = (page + 1) * PAGE_SIZE;
@@ -344,6 +362,78 @@ const Messages = () => {
     };
   }, [load, applyNewMessage]);
 
+  useEffect(() => {
+    const uid = currentUserId;
+    if (!uid) return;
+
+    const isC = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
+    const tGeral = sortThreadsByPinAndTime(threads.filter((t) => !isC(t)));
+    const tCan = sortThreadsByPinAndTime(threads.filter(isC));
+    const active = tGeral.filter((t) => !t.is_archived);
+    const arch = tGeral.filter((t) => t.is_archived);
+    const base = chatTab === "cancelados" ? tCan : showArchived ? arch : active;
+    const norm = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const cur = !searchChat.trim()
+      ? base
+      : base.filter((t) => {
+          const q = norm(searchChat);
+          return norm(t.otherName).includes(q) || norm(t.protocol || "").includes(q);
+        });
+    const canShow = !searchChat.trim()
+      ? tCan
+      : tCan.filter((t) => {
+          const q = norm(searchChat);
+          return norm(t.otherName).includes(q) || norm(t.protocol || "").includes(q);
+        });
+    const arr = chatTab === "geral" ? cur : canShow;
+    const ids = [...new Set(arr.slice(0, 45).map((t) => t.id))];
+
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const unsubs: (() => void)[] = [];
+
+    for (const id of ids) {
+      const unsub = subscribeThreadActivity(id, (payload) => {
+        const from = payload?.fromUserId;
+        const kind = payload?.kind;
+        if (!from || from === uid) return;
+        if (kind === "idle") {
+          const te = timers.get(id);
+          if (te) clearTimeout(te);
+          timers.delete(id);
+          setPeerActivityByThread((p) => {
+            const n = { ...p };
+            delete n[id];
+            return n;
+          });
+          return;
+        }
+        if (kind === "typing" || kind === "recording") {
+          setPeerActivityByThread((p) => ({ ...p, [id]: kind }));
+          const old = timers.get(id);
+          if (old) clearTimeout(old);
+          timers.set(
+            id,
+            setTimeout(() => {
+              setPeerActivityByThread((p) => {
+                const n = { ...p };
+                delete n[id];
+                return n;
+              });
+              timers.delete(id);
+            }, 4500),
+          );
+        }
+      });
+      unsubs.push(unsub);
+    }
+
+    return () => {
+      unsubs.forEach((u) => u());
+      timers.forEach((t) => clearTimeout(t));
+      setPeerActivityByThread({});
+    };
+  }, [currentUserId, threads, chatTab, showArchived, searchChat]);
+
   const handleArchive = async (chatId: string, current: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("chat_read_status" as any).update({ is_archived: !current }).eq("user_id", user?.id).eq("request_id", chatId);
@@ -455,10 +545,22 @@ const Messages = () => {
       return sorted;
     });
     setThreadMenuThread(null);
-    await supabase.from("chat_read_status" as any).upsert(
+    const { error } = await supabase.from("chat_read_status" as any).upsert(
       { request_id: t.id, user_id: user.id, last_read_at: new Date().toISOString(), is_pinned: nextPinned },
       { onConflict: "request_id,user_id" },
     );
+    if (error) {
+      const msg = error.message || "";
+      const isSchema = msg.includes("is_pinned") || msg.includes("schema cache");
+      toast({
+        title: "Não foi possível fixar",
+        description: isSchema
+          ? "O Supabase ainda não tem a coluna is_pinned em chat_read_status. Aplique a migração 20260328210000_chat_pin_label.sql (Dashboard → SQL ou supabase db push) e aguarde alguns segundos."
+          : msg || "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+      void load(true);
+    }
   };
 
   const handleSaveThreadLabel = async () => {
@@ -575,6 +677,7 @@ const Messages = () => {
   const renderLastMessage = (msg: string | null) => {
     if (!msg) return <span className="text-muted-foreground/70">Nova conversa</span>;
     if (msg.startsWith("[AUDIO:")) return <span className="flex items-center gap-1 text-muted-foreground"><Mic className="w-3 h-3" /> Áudio</span>;
+    if (msg === "📷 Foto" || msg.startsWith("📷 ")) return <span className="flex items-center gap-1 text-muted-foreground">📷 Foto</span>;
     if (msg.includes("[PRODUCT:")) return <span className="flex items-center gap-1 text-emerald-600 font-medium"><Package className="w-3 h-3" /> Produto</span>;
     return <span className="truncate">{msg}</span>;
   };
@@ -635,9 +738,10 @@ const Messages = () => {
     const hasUnread = t.unreadCount > 0 || t.manual_unread;
     const isChatFinished = t.status === "completed" || t.status === "closed" || t.status === "cancelled" || t.status === "rejected";
     const isSelected = selectedCanceladosIds.has(t.id);
+    const peerAct = peerActivityByThread[t.id];
 
     return (
-      <div className={`flex items-center gap-3 px-4 py-3 border-b border-border/50 last:border-b-0 active:bg-muted/60 transition-colors select-none ${hasUnread ? "bg-primary/[0.04]" : ""}`}>
+      <div className={`flex items-center gap-3 px-4 py-3 border-b border-border/60 active:bg-muted/50 transition-colors select-none ${hasUnread ? "bg-primary/[0.04]" : ""}`}>
         {isCancelled && canceladosSelectMode && (
           <button type="button" onClick={() => toggleCanceladoSelection(t.id)} className="flex-shrink-0">
             {isSelected ? <CheckSquare className="w-5 h-5 text-primary" /> : <Square className="w-5 h-5 text-muted-foreground" />}
@@ -680,11 +784,12 @@ const Messages = () => {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 mb-0.5 min-w-0">
               <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                {t.is_pinned ? <Pin className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden /> : null}
                 <p className={`text-[15px] truncate ${hasUnread ? "font-bold text-foreground" : "font-medium text-foreground"}`}>
                   {t.otherName}
                 </p>
                 {t.label_text && t.label_color ? (
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 max-w-[100px] truncate ${labelColorPillClass(t.label_color)}`}>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 max-w-[100px] truncate ${labelColorPillClass(t.label_color)}`}>
                     {t.label_text}
                   </span>
                 ) : null}
@@ -697,7 +802,11 @@ const Messages = () => {
               <div className={`text-[13px] truncate flex items-center gap-1 flex-1 min-w-0 ${hasUnread ? "text-foreground/80" : "text-muted-foreground"}`}>
                 {isCancelled
                   ? <span>{t.status === "rejected" ? "Recusado" : "Cancelado"}</span>
-                  : renderLastMessage(t.lastMessage)}
+                  : peerAct === "typing"
+                    ? <span className="text-primary italic font-medium">digitando…</span>
+                    : peerAct === "recording"
+                      ? <span className="text-amber-600 dark:text-amber-400 font-medium inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />gravando áudio…</span>
+                      : renderLastMessage(t.lastMessage)}
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 {hasUnread && (
@@ -719,21 +828,21 @@ const Messages = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52 rounded-xl shadow-lg">
-              <DropdownMenuItem onClick={() => handleMarkRead(t.id)} className="gap-2 cursor-pointer py-2.5">
+              <DropdownMenuItem onSelect={() => handleMarkRead(t.id)} className="gap-2 cursor-pointer py-2.5">
                 <Eye className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm">Marcar como lida</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleMarkUnread(t.id)} className="gap-2 cursor-pointer py-2.5">
+              <DropdownMenuItem onSelect={() => handleMarkUnread(t.id)} className="gap-2 cursor-pointer py-2.5">
                 <EyeOff className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm">Marcar como não lida</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => void handleTogglePin(t, !t.is_pinned)} className="gap-2 cursor-pointer py-2.5">
+              <DropdownMenuItem onSelect={() => void handleTogglePin(t, !t.is_pinned)} className="gap-2 cursor-pointer py-2.5">
                 <Pin className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm">{t.is_pinned ? "Desfixar" : "Fixar no topo"}</span>
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() =>
+                onSelect={() =>
                   setLabelModal({
                     thread: t,
                     step: "colors",
@@ -747,7 +856,7 @@ const Messages = () => {
                 <span className="text-sm">Rótulo</span>
               </DropdownMenuItem>
               {isChatFinished && (
-                <DropdownMenuItem onClick={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2.5">
+                <DropdownMenuItem onSelect={() => handleArchive(t.id, t.is_archived)} className="gap-2 cursor-pointer py-2.5">
                   <Archive className="w-4 h-4 text-muted-foreground" />
                   <span className="text-sm">{t.is_archived ? "Desarquivar" : "Arquivar"}</span>
                 </DropdownMenuItem>
@@ -755,14 +864,14 @@ const Messages = () => {
               {showArchived && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setDeletingChatId(t.id)} className="gap-2 cursor-pointer py-2.5 text-destructive focus:text-destructive focus:bg-destructive/10">
+                  <DropdownMenuItem onSelect={() => setDeletingChatId(t.id)} className="gap-2 cursor-pointer py-2.5 text-destructive focus:text-destructive focus:bg-destructive/10">
                     <Trash2 className="w-4 h-4" />
                     <span className="text-sm">Excluir conversa</span>
                   </DropdownMenuItem>
                 </>
               )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setReportingChatId(t.id)} className="gap-2 cursor-pointer py-2.5 text-amber-600 focus:text-amber-600 focus:bg-amber-50">
+              <DropdownMenuItem onSelect={() => setReportingChatId(t.id)} className="gap-2 cursor-pointer py-2.5 text-amber-600 focus:text-amber-600 focus:bg-amber-50">
                 <AlertTriangle className="w-4 h-4" />
                 <span className="text-sm">Denunciar</span>
               </DropdownMenuItem>
@@ -851,7 +960,7 @@ const Messages = () => {
             {!showArchived && hasSupportMessages && (
               <Link
                 to="/support"
-                className={`flex items-center gap-3 px-4 py-3 border-b border-border/50 active:bg-muted/60 transition-colors ${supportUnread > 0 ? "bg-amber-500/[0.05]" : ""}`}
+                className={`flex items-center gap-3 px-4 py-3 border-b border-border/60 active:bg-muted/60 transition-colors ${supportUnread > 0 ? "bg-amber-500/[0.05]" : ""}`}
               >
                 <div className="w-[52px] h-[52px] rounded-full bg-amber-500/15 flex items-center justify-center flex-shrink-0">
                   <MessageSquare className="w-6 h-6 text-amber-600" />
@@ -1038,12 +1147,12 @@ const Messages = () => {
                   <DialogTitle>Cor do rótulo</DialogTitle>
                   <DialogDescription>Escolha uma cor para o rótulo desta conversa.</DialogDescription>
                 </DialogHeader>
-                <div className="grid grid-cols-2 gap-2 py-2">
+                <div className="grid grid-cols-2 gap-3 py-2">
                   {(["blue", "green", "orange", "red"] as const).map((c) => (
                     <button
                       key={c}
                       type="button"
-                      className={`rounded-xl py-3 text-sm font-bold text-white shadow-sm active:scale-[0.98] transition-transform ${labelColorPillClass(c)}`}
+                      className={`rounded-2xl py-4 text-sm font-bold shadow-sm active:scale-[0.98] transition-all ${labelColorSwatchClass(c)}`}
                       onClick={() => setLabelModal((m) => (m ? { ...m, step: "text", color: c } : null))}
                     >
                       {c === "blue" ? "Azul" : c === "green" ? "Verde" : c === "orange" ? "Laranja" : "Vermelho"}

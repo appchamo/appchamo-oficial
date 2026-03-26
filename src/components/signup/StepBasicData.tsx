@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from "react";
 import { Mail, Lock, User, Phone, FileText, MapPin, Calendar, ScrollText, CheckCircle2, UserCircle } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { toast } from "@/hooks/use-toast";
@@ -39,6 +39,8 @@ interface Props {
   accountType: AccountType;
   onNext: (data: BasicData) => void;
   onBack: () => void;
+  /** Sai do cadastro e vai ao login (rodapé dentro do fluxo, evita sobrepor o formulário). */
+  onExitToLogin: () => void | Promise<void>;
   initialData?: Partial<BasicData>; // ✅ ADICIONADO: Para receber dados do Google
   /** Preenchido pela URL ?ref= ao cadastrar como profissional */
   initialReferralCode?: string;
@@ -46,6 +48,7 @@ interface Props {
 
 import { formatCpf, formatCnpj, formatPhone } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
+import { cn } from "@/lib/utils";
 
 const TermsDialogFromAdmin = lazy(() =>
   import("./SignupTermsModals").then((m) => ({ default: m.TermsDialogFromAdmin }))
@@ -63,7 +66,7 @@ const InputRow = ({ icon: Icon, label, children }: { icon: any; label: string; c
 
 const NATIVE_FORM_DEFER_MS = 200;
 
-const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferralCode }: Props) => {
+const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, initialData, initialReferralCode }: Props) => {
   /** iOS WebView: pequeno defer após SIGNED_IN para não competir com o primeiro paint (600ms deixava a tela “morta” por muito tempo). */
   const [nativeFormReady, setNativeFormReady] = useState(() => !Capacitor.isNativePlatform());
   useEffect(() => {
@@ -105,13 +108,18 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
   });
   const [loadingCep, setLoadingCep] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [referralValidating, setReferralValidating] = useState(false);
+  const [referralValidated, setReferralValidated] = useState(false);
+  const [referralValidatedCode, setReferralValidatedCode] = useState("");
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
   const citySuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addressStateRef = useRef(addressState);
+  addressStateRef.current = addressState;
 
   useEffect(() => {
     const v = initialReferralCode?.trim();
-    if (!v || accountType !== "professional") return;
+    if (!v) return;
     const u = v.toUpperCase();
     setReferralCode(u);
     try {
@@ -119,7 +127,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
     } catch {
       /* ignore */
     }
-  }, [initialReferralCode, accountType]);
+  }, [initialReferralCode]);
 
   // ✅ Identifica se é login social para esconder senhas
   const isSocialSignup = !!initialData?.email;
@@ -221,8 +229,53 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
     setAddressCity(val);
     if (citySuggestTimer.current) clearTimeout(citySuggestTimer.current);
     citySuggestTimer.current = setTimeout(() => {
-      fetchCitySuggestions(val, addressState);
+      fetchCitySuggestions(val, addressStateRef.current);
     }, 350);
+  };
+
+  const handleReferralCodeChange = (val: string) => {
+    const u = val.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+    setReferralCode(u);
+    if (u !== referralValidatedCode) {
+      setReferralValidated(false);
+      setReferralValidatedCode("");
+    }
+  };
+
+  const handleApplyReferralCode = async () => {
+    const raw = referralCode.trim();
+    if (raw.length < 6) {
+      toast({ title: "Código incompleto", description: "Digite o código de convite (mínimo 6 caracteres).", variant: "destructive" });
+      return;
+    }
+    setReferralValidating(true);
+    try {
+      const { data, error } = await supabase.rpc("validate_invite_code", { p_raw_code: raw });
+      if (error) {
+        toast({ title: "Não foi possível validar", description: error.message, variant: "destructive" });
+        setReferralValidated(false);
+        setReferralValidatedCode("");
+        return;
+      }
+      const r = data as { ok?: boolean; error?: string } | null;
+      if (!r?.ok) {
+        if (r?.error === "self_referral") {
+          toast({ title: "Código inválido", description: "Você não pode usar o próprio código.", variant: "destructive" });
+        } else if (r?.error === "invalid_format") {
+          toast({ title: "Código inválido", description: "Verifique o código e tente de novo.", variant: "destructive" });
+        } else {
+          toast({ title: "Código não encontrado", description: "Confira com quem te convidou.", variant: "destructive" });
+        }
+        setReferralValidated(false);
+        setReferralValidatedCode("");
+        return;
+      }
+      setReferralValidated(true);
+      setReferralValidatedCode(raw);
+      toast({ title: "Código aplicado!", description: "Você ganhará os cupons ao concluir o cadastro." });
+    } finally {
+      setReferralValidating(false);
+    }
   };
 
   const selectCity = (city: string) => {
@@ -244,6 +297,14 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(initialData.birthDate.trim());
     if (m) setBirthDateBr(`${m[3]}/${m[2]}/${m[1]}`);
   }, [initialData?.birthDate]);
+
+  const underageHint = useMemo(() => {
+    const iso = brBirthToIso(birthDateBr) || "";
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso) || !isUnderage(iso)) return null;
+    return (
+      <p className="text-xs text-destructive font-medium px-1">Você precisa ter 18 anos ou mais para se cadastrar.</p>
+    );
+  }, [birthDateBr]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -396,14 +457,14 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
       birthDate: birthIso,
       gender,
       ...addressPayload,
-      referralCode: accountType === "professional" ? (referralCode.trim() || undefined) : undefined,
+      referralCode: referralCode.trim() || undefined,
     });
   };
 
 
   if (!nativeFormReady) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-8">
+      <div className="min-h-[50vh] bg-background flex flex-col items-center justify-center px-4 py-8">
         <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
         <p className="text-sm text-muted-foreground mb-4 text-center">Preparando formulário…</p>
         <div className="w-9 h-9 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -412,7 +473,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
+    <div className="min-h-full w-full bg-background flex flex-col items-center justify-start px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
       <div className="w-full max-w-sm">
         <div className="text-center mb-4">
           <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
@@ -462,12 +523,7 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
               className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
             />
           </InputRow>
-          {(() => {
-            const iso = brBirthToIso(birthDateBr) || "";
-            return iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && isUnderage(iso) ? (
-              <p className="text-xs text-destructive font-medium px-1">Você precisa ter 18 anos ou mais para se cadastrar.</p>
-            ) : null;
-          })()}
+          {underageHint}
 
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Sexo</label>
@@ -630,24 +686,43 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
             </div>
           )}
 
-          {accountType === "professional" && (
-            <div className="border-t pt-3 mt-2">
-              <InputRow icon={UserCircle} label="Código de indicação (opcional)">
+          <div className="border-t pt-3 mt-2 space-y-2">
+            <label className="text-xs font-medium text-muted-foreground block">Código de convite (opcional)</label>
+            <div className="flex items-stretch gap-2">
+              <div className="flex flex-1 min-w-0 items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+                <UserCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                 <input
                   type="text"
                   value={referralCode}
-                  onChange={(e) => setReferralCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))}
-                  placeholder="Quem te indicou?"
-                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground font-mono tracking-wide"
+                  onChange={(e) => handleReferralCodeChange(e.target.value)}
+                  placeholder="Código de quem te indicou"
+                  className="flex-1 min-w-0 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground font-mono tracking-wide"
                   autoComplete="off"
                   spellCheck={false}
                 />
-              </InputRow>
-              <p className="text-[10px] text-muted-foreground mt-1.5 px-1">
-                Se alguém do Chamô te convidou, peça o código para vincular a indicação ao seu cadastro profissional.
-              </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleApplyReferralCode()}
+                disabled={referralValidating || referralCode.trim().length < 6}
+                className={cn(
+                  "shrink-0 self-stretch px-3 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 min-w-[5.5rem]",
+                  referralValidated && referralCode.trim() === referralValidatedCode
+                    ? "bg-emerald-600 text-white"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90",
+                )}
+              >
+                {referralValidating
+                  ? "…"
+                  : referralValidated && referralCode.trim() === referralValidatedCode
+                    ? "APLICADO"
+                    : "APLICAR"}
+              </button>
             </div>
-          )}
+            <p className="text-[10px] text-muted-foreground leading-relaxed px-0.5">
+              Se alguém do Chamô te convidou, digite o código e aplique para ganhar 2 cupons especiais para participar do nosso sorteio mensal.
+            </p>
+          </div>
 
           {/* Termos: só avança depois de ler e aceitar nos modais */}
           <div className="border rounded-xl p-4 bg-muted/30 space-y-3">
@@ -682,6 +757,17 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
             {validating ? "Validando..." : "Próximo →"}
           </button>
         </form>
+
+        <p className="text-center text-xs text-muted-foreground mt-6 pb-2">
+          Já tem uma conta?{" "}
+          <button
+            type="button"
+            onClick={() => void onExitToLogin()}
+            className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer p-0"
+          >
+            Entrar
+          </button>
+        </p>
       </div>
 
       {termsOpen && (
@@ -707,4 +793,5 @@ const StepBasicData = ({ accountType, onNext, onBack, initialData, initialReferr
   );
 };
 
+const StepBasicData = memo(StepBasicDataComponent);
 export default StepBasicData;

@@ -1,4 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
+import { AdminProsSealsPanel } from "@/pages/admin/AdminProsSealsPanel";
 import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -224,7 +225,7 @@ const AdminPros = () => {
     .filter((p) => {
       const q = search.toLowerCase();
       const matchesSearch = p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q);
-      const matchesTab = tab === "all" || p.profile_status === tab;
+      const matchesTab = tab === "all" || (tab !== "seals" && p.profile_status === tab);
       const matchesDoc =
         docFilter === "all" ||
         (docFilter === "cpf" && p.docKind === "cpf") ||
@@ -697,6 +698,7 @@ const AdminPros = () => {
 
   return (
     <AdminLayout title="Profissionais">
+      {tab !== "seals" && (
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
         <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
           <Search className="w-4 h-4 text-muted-foreground" />
@@ -730,6 +732,7 @@ const AdminPros = () => {
           <Gift className="w-4 h-4" /> Bonificar por categoria
         </button>
       </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
@@ -745,9 +748,17 @@ const AdminPros = () => {
             <TabsTrigger value="approved" className="shrink-0">Aprovados</TabsTrigger>
             <TabsTrigger value="rejected" className="shrink-0">Reprovados</TabsTrigger>
             <TabsTrigger value="all" className="shrink-0">Todos</TabsTrigger>
+            <TabsTrigger value="seals" className="shrink-0 font-semibold tracking-wide text-xs">
+              SELOS
+            </TabsTrigger>
           </TabsList>
-          <TabsContent value={tab}>
-            <ProTable items={filtered} />
+          {(["pending", "approved", "rejected", "all"] as const).map((t) => (
+            <TabsContent key={t} value={t} className="mt-0">
+              <ProTable items={filtered} />
+            </TabsContent>
+          ))}
+          <TabsContent value="seals" className="mt-0">
+            <AdminProsSealsPanel />
           </TabsContent>
         </Tabs>
       )}

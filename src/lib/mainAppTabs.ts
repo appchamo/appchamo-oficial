@@ -18,6 +18,31 @@ export function isMainAppTabPath(pathname: string): boolean {
   return MAIN_APP_TAB_PATHS.includes(pathname as MainAppTabPath);
 }
 
+/**
+ * Telas que precisam rolar como página inteira (body-style) dentro do shell.
+ * Sem isso, `RoutesOverlayShell` usa overflow-hidden e o formulário de cadastro/login fica “travado” no app nativo.
+ */
+const FULL_PAGE_SCROLL_EXACT = new Set([
+  "/",
+  "/signup",
+  "/complete-signup",
+  "/login",
+  "/reset-password",
+  "/oauth-callback",
+  "/post-login",
+  "/hard-reload",
+  "/terms-of-use",
+  "/privacy",
+  "/exclusao-de-conta",
+  "/admin/login",
+  "/signup-pro",
+]);
+
+export function isFullPageScrollRoute(pathname: string): boolean {
+  if (FULL_PAGE_SCROLL_EXACT.has(pathname)) return true;
+  return false;
+}
+
 /** Rotas “empilhadas” por cima das abas (perfil público, categorias, chat…). */
 export function isOverlayStackRoute(pathname: string): boolean {
   return !isMainAppTabPath(pathname);

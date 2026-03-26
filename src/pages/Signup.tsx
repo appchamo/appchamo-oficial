@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -36,6 +36,39 @@ const friendlyError = (msg: string, status?: number) => {
   return "Erro ao criar conta. Tente novamente.";
 };
 
+/** Retorno de apply_referral_code: bônus do indicado só quando o backend concedeu cupons. */
+function parseReferralInviteeRewards(refData: unknown): { extraRaffle: boolean; signupDiscount: boolean } {
+  if (!refData || typeof refData !== "object") return { extraRaffle: false, signupDiscount: false };
+  const r = refData as Record<string, unknown>;
+  if (r.ok !== true) return { extraRaffle: false, signupDiscount: false };
+  if (r.skipped === "already_applied") return { extraRaffle: false, signupDiscount: false };
+  if (typeof r.error === "string" && r.error.length > 0) return { extraRaffle: false, signupDiscount: false };
+  return {
+    extraRaffle: r.invitee_extra_raffle === true,
+    signupDiscount: r.invitee_signup_discount === true,
+  };
+}
+
+function signupRewardSummary(extraRaffle: boolean, signupDiscount: boolean): string {
+  if (extraRaffle && signupDiscount) {
+    return "Você ganhou 2 cupons para o sorteio mensal (1 pelo cadastro + 1 pelo código de convite) e 1 cupom de desconto pelo código. Confira em Meus cupons!";
+  }
+  if (extraRaffle) {
+    return "Você ganhou 2 cupons para o sorteio mensal: 1 pelo cadastro e +1 pelo código de convite. Confira em Meus cupons!";
+  }
+  return "Você ganhou 1 cupom para o sorteio mensal do Chamô. Confira em Meus cupons!";
+}
+
+function signupRewardSummaryEmail(extraRaffle: boolean, signupDiscount: boolean): string {
+  if (extraRaffle && signupDiscount) {
+    return "Você ganhou 2 cupons para o sorteio mensal (1 pelo cadastro + 1 pelo código) e 1 cupom de desconto pelo código de convite.";
+  }
+  if (extraRaffle) {
+    return "Você ganhou 2 cupons para o sorteio mensal: 1 pelo cadastro + 1 pelo código de convite.";
+  }
+  return "Você ganhou 1 cupom para o sorteio mensal do Chamô.";
+}
+
 const fileToBase64 = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -59,6 +92,9 @@ const Signup = () => {
   const [docFiles, setDocFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [couponPopup, setCouponPopup] = useState(false);
+  /** Cupom extra de sorteio por ter usado código de convite válido no cadastro (se ativo no admin). */
+  const [referralExtraRaffle, setReferralExtraRaffle] = useState(false);
+  const [referralSignupDiscount, setReferralSignupDiscount] = useState(false);
   const [showVerifyEmailModal, setShowVerifyEmailModal] = useState(false);
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
@@ -276,33 +312,41 @@ const Signup = () => {
     setStep("basic");
   };
 
-  const handleBasicNext = async (data: BasicData) => {
-    setLoading(true);
-    try {
-      if (data.email && !createdUserId) {
-        const { data: emailExists } = await supabase.rpc('check_email_exists', { 
-          user_email: data.email 
-        });
-
-        if (emailExists) {
-          toast({ 
-            title: "E-mail já cadastrado", 
-            description: "Por favor, entre com sua conta.", 
-            variant: "destructive"
+  const handleBasicNext = useCallback(
+    async (data: BasicData) => {
+      setLoading(true);
+      try {
+        if (data.email && !createdUserId) {
+          const { data: emailExists } = await supabase.rpc("check_email_exists", {
+            user_email: data.email,
           });
-          await forceExitToLogin();
-          return;
+
+          if (emailExists) {
+            toast({
+              title: "E-mail já cadastrado",
+              description: "Por favor, entre com sua conta.",
+              variant: "destructive",
+            });
+            await forceExitToLogin();
+            return;
+          }
         }
+        setBasicData(data);
+        if (accountType === "professional") setStep("document-notice");
+        else setStep("profile");
+      } catch {
+        toast({ title: "Erro de verificação", variant: "destructive" });
+      } finally {
+        setLoading(false);
       }
-      setBasicData(data);
-      if (accountType === "professional") setStep("document-notice");
-      else setStep("profile");
-    } catch (error) {
-      toast({ title: "Erro de verificação", variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [accountType, createdUserId],
+  );
+
+  /** Sempre volta para Cliente / Profissional (não para Google/Apple/e-mail após OAuth). */
+  const handleBasicBack = useCallback(() => {
+    setStep("type");
+  }, []);
 
   const handleDocumentsNext = (files: File[]) => {
     setDocFiles(files);
@@ -401,21 +445,28 @@ const Signup = () => {
         return;
       }
 
-      const refCode = accountType === "professional" ? basicData.referralCode?.trim() : "";
-      if (refCode && refCode.length >= 6) {
+      const refCode = basicData.referralCode?.trim() ?? "";
+      let extraRaffle = false;
+      let signupDisc = false;
+      if (refCode.length >= 6) {
         const { data: refData, error: refErr } = await supabase.rpc("apply_referral_code", { p_raw_code: refCode });
         if (refErr) {
           console.warn("apply_referral_code:", refErr);
         } else if (refData && typeof refData === "object" && "ok" in refData && (refData as { ok?: boolean }).ok === false) {
           const err = (refData as { error?: string }).error;
           if (err === "code_not_found") {
-            toast({ title: "Código de indicação inválido", description: "Verifique com quem te indicou e tente de novo em Perfil → Suporte, se precisar.", variant: "destructive" });
+            toast({ title: "Código de convite inválido", description: "Verifique com quem te indicou e tente de novo em Perfil → Suporte, se precisar.", variant: "destructive" });
           } else if (err === "self_referral") {
             toast({ title: "Código inválido", description: "Você não pode usar o próprio código.", variant: "destructive" });
           }
+        } else {
+          const rw = parseReferralInviteeRewards(refData);
+          extraRaffle = rw.extraRaffle;
+          signupDisc = rw.signupDiscount;
         }
       }
-
+      setReferralExtraRaffle(extraRaffle);
+      setReferralSignupDiscount(signupDisc);
       setLoading(false);
       localStorage.removeItem("signup_in_progress");
 
@@ -535,7 +586,8 @@ const Signup = () => {
           key={`basic-${accountType}-${createdUserId ?? "new"}`}
           accountType={accountType}
           onNext={handleBasicNext}
-          onBack={() => setStep(createdUserId ? "method-choice" : "type")}
+          onBack={handleBasicBack}
+          onExitToLogin={forceExitToLogin}
           initialData={basicData || undefined}
           initialReferralCode={signupReferralParam || undefined}
         />
@@ -549,6 +601,16 @@ const Signup = () => {
             onContinue={() => setStep("documents")}
             onBack={() => setStep("basic")}
           />
+          <p className="text-center text-xs text-muted-foreground mt-8 max-w-sm pb-4">
+            Já tem uma conta?{" "}
+            <button
+              type="button"
+              onClick={() => void forceExitToLogin()}
+              className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer"
+            >
+              Entrar
+            </button>
+          </p>
         </div>
       )}
       {!loading && step === "documents" && (
@@ -556,19 +618,16 @@ const Signup = () => {
           documentType={basicData?.documentType || "cpf"}
           onNext={handleDocumentsNext}
           onBack={() => setStep(accountType === "professional" ? "document-notice" : "basic")}
+          onExitToLogin={forceExitToLogin}
         />
       )}
-      {!loading && step === "profile" && <StepProfile accountType={accountType} onNext={handleProfileNext} onBack={() => setStep(accountType === "professional" ? "documents" : "basic")} />}
-      {(!loading && step !== "method-choice" && step !== "awaiting-email") && (
-        <p className="text-center text-xs text-muted-foreground mt-8">
-          Já tem uma conta?{" "}
-          <button 
-            onClick={forceExitToLogin} 
-            className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer"
-          >
-            Entrar
-          </button>
-        </p>
+      {!loading && step === "profile" && (
+        <StepProfile
+          accountType={accountType}
+          onNext={handleProfileNext}
+          onBack={() => setStep(accountType === "professional" ? "documents" : "basic")}
+          onExitToLogin={forceExitToLogin}
+        />
       )}
 
       <Dialog open={showVerifyEmailModal} onOpenChange={(open) => !open && setShowVerifyEmailModal(false)}>
@@ -583,9 +642,7 @@ const Signup = () => {
             <p className="text-sm font-medium text-foreground">
               Verifique seu e-mail e faça login para ativar sua conta.
             </p>
-            <p className="text-xs text-muted-foreground">
-              Você também ganhou 1 cupom para o sorteio mensal do Chamô.
-            </p>
+            <p className="text-xs text-muted-foreground">{signupRewardSummaryEmail(referralExtraRaffle, referralSignupDiscount)}</p>
           </div>
           <button
             onClick={forceExitToLogin}
@@ -601,9 +658,7 @@ const Signup = () => {
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />
-            <p className="text-sm font-medium text-foreground">
-              Você ganhou 1 cupom para o sorteio mensal do Chamô, confira!
-            </p>
+            <p className="text-sm font-medium text-foreground">{signupRewardSummary(referralExtraRaffle, referralSignupDiscount)}</p>
           </div>
           <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors">
             Entendi!

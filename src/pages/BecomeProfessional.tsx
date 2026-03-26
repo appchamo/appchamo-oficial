@@ -210,7 +210,7 @@ const BecomeProfessional = () => {
         } else if (refData && typeof refData === "object" && "ok" in refData && (refData as { ok?: boolean }).ok === false) {
           const err = (refData as { error?: string }).error;
           if (err === "code_not_found") {
-            toast({ title: "Código de indicação não encontrado", description: "Confira o código com quem te convidou.", variant: "destructive" });
+            toast({ title: "Código de convite não encontrado", description: "Confira o código com quem te convidou.", variant: "destructive" });
           } else if (err === "self_referral") {
             toast({ title: "Código inválido", description: "Você não pode usar o próprio código.", variant: "destructive" });
           }
@@ -312,7 +312,7 @@ const BecomeProfessional = () => {
                 </div>
 
                 <div className="rounded-xl border border-dashed border-primary/25 bg-primary/5 p-3 space-y-2">
-                  <label className="text-xs font-semibold text-foreground">Código de indicação (opcional)</label>
+                  <label className="text-xs font-semibold text-foreground">Código de convite (opcional)</label>
                   <input
                     type="text"
                     value={referralCodeInput}
@@ -323,7 +323,7 @@ const BecomeProfessional = () => {
                     spellCheck={false}
                   />
                   <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    Se alguém do Chamô te convidou, informe o código. Ao assinar um plano pago depois, essa pessoa pode receber comissão pelo programa Indique e ganhe.
+                    Se alguém do Chamô te convidou, informe o código. Ao concluir com um código válido, você e quem indicou ganham cupons pelo Indique e ganhe (sorteio e, para quem indicou, desconto quando houver lote na plataforma). Se depois você assinar um plano pago, quem indicou pode receber também a comissão de 5% na primeira cobrança (uma vez).
                   </p>
                 </div>
               </div>

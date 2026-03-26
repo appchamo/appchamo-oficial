@@ -13,9 +13,11 @@ interface Props {
   documentType: "cpf" | "cnpj";
   onNext: (files: File[]) => void;
   onBack: () => void;
+  /** Rodapé “Já tem conta?” — opcional (ex.: fluxo tornar-se profissional). */
+  onExitToLogin?: () => void | Promise<void>;
 }
 
-const StepDocuments = ({ documentType, onNext, onBack }: Props) => {
+const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) => {
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [currentSlot, setCurrentSlot] = useState("");
@@ -133,12 +135,14 @@ const StepDocuments = ({ documentType, onNext, onBack }: Props) => {
 
             <div className="flex gap-2 pt-1">
               <button
+                type="button"
                 onClick={onBack}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors"
               >
                 Voltar
               </button>
               <button
+                type="button"
                 onClick={handleNext}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors"
               >
@@ -146,6 +150,19 @@ const StepDocuments = ({ documentType, onNext, onBack }: Props) => {
               </button>
             </div>
           </div>
+
+          {onExitToLogin && (
+            <p className="text-center text-xs text-muted-foreground mt-6 pb-4">
+              Já tem uma conta?{" "}
+              <button
+                type="button"
+                onClick={() => void onExitToLogin()}
+                className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer p-0"
+              >
+                Entrar
+              </button>
+            </p>
+          )}
         </div>
       </div>
 

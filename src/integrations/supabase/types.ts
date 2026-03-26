@@ -151,6 +151,106 @@ export type Database = {
           },
         ]
       }
+      chat_message_reactions: {
+        Row: {
+          id: string
+          message_id: string
+          user_id: string
+          reaction: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          message_id: string
+          user_id: string
+          reaction: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          message_id?: string
+          user_id?: string
+          reaction?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_message_reactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_thread_activity: {
+        Row: {
+          request_id: string
+          user_id: string
+          kind: string
+          updated_at: string
+        }
+        Insert: {
+          request_id: string
+          user_id: string
+          kind: string
+          updated_at?: string
+        }
+        Update: {
+          request_id?: string
+          user_id?: string
+          kind?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_thread_activity_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "service_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_media_attachments: {
+        Row: {
+          id: string
+          message_id: string
+          request_id: string
+          object_path: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          message_id: string
+          request_id: string
+          object_path: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          message_id?: string
+          request_id?: string
+          object_path?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_media_attachments_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "chat_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_media_attachments_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "service_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chat_read_status: {
         Row: {
           id: string
@@ -966,6 +1066,7 @@ export type Database = {
       service_requests: {
         Row: {
           accepted_at: string | null
+          chat_media_delete_after: string | null
           client_id: string
           created_at: string
           description: string | null
@@ -977,6 +1078,7 @@ export type Database = {
         }
         Insert: {
           accepted_at?: string | null
+          chat_media_delete_after?: string | null
           client_id: string
           created_at?: string
           description?: string | null
@@ -988,6 +1090,7 @@ export type Database = {
         }
         Update: {
           accepted_at?: string | null
+          chat_media_delete_after?: string | null
           client_id?: string
           created_at?: string
           description?: string | null

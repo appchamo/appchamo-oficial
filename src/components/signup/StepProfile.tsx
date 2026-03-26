@@ -17,6 +17,7 @@ interface Props {
   accountType: "client" | "professional";
   onNext: (data: StepProfileData) => void;
   onBack: () => void;
+  onExitToLogin?: () => void | Promise<void>;
 }
 
 interface Category {
@@ -30,7 +31,7 @@ interface Profession {
   category_id: string;
 }
 
-const StepProfile = ({ accountType, onNext, onBack }: Props) => {
+const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
   const [professions, setProfessions] = useState<Profession[]>([]);
@@ -196,6 +197,19 @@ const StepProfile = ({ accountType, onNext, onBack }: Props) => {
             </button>
           </div>
         </div>
+
+        {onExitToLogin && (
+          <p className="text-center text-xs text-muted-foreground mt-6 pb-4">
+            Já tem uma conta?{" "}
+            <button
+              type="button"
+              onClick={() => void onExitToLogin()}
+              className="text-primary font-bold hover:underline bg-transparent border-none cursor-pointer p-0"
+            >
+              Entrar
+            </button>
+          </p>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
@@ -19,6 +19,24 @@ import {
   parseChatAppointmentRequestMessage,
   parseLegacyAppointmentRequestMessage,
 } from "@/lib/chatAppointmentRequest";
+import { subscribeThreadActivity, sendThreadActivity, type ThreadActivityKind } from "@/lib/threadActivityChannels";
+import { compressImageForChat } from "@/lib/compressChatImage";
+
+type ReactionAgg = { likes: number; dislikes: number; mine: "like" | "dislike" | null };
+
+function aggregateReactions(
+  rows: { message_id: string; user_id: string; reaction: string }[],
+  myId: string,
+): Record<string, ReactionAgg> {
+  const map: Record<string, ReactionAgg> = {};
+  for (const r of rows) {
+    if (!map[r.message_id]) map[r.message_id] = { likes: 0, dislikes: 0, mine: null };
+    if (r.reaction === "like") map[r.message_id].likes++;
+    else if (r.reaction === "dislike") map[r.message_id].dislikes++;
+    if (r.user_id === myId) map[r.message_id].mine = r.reaction as "like" | "dislike";
+  }
+  return map;
+}
 
 interface Message {
   id: string;
@@ -37,10 +55,10 @@ type ThreadLabelColor = "blue" | "green" | "orange" | "red";
 
 const threadLabelPillClass = (c: ThreadLabelColor) =>
   ({
-    blue: "bg-blue-600 text-white",
-    green: "bg-emerald-600 text-white",
-    orange: "bg-orange-500 text-white",
-    red: "bg-red-600 text-white",
+    blue: "border border-blue-500/70 text-blue-700 dark:text-blue-300 bg-blue-500/10",
+    green: "border border-emerald-500/70 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10",
+    orange: "border border-orange-500/70 text-orange-800 dark:text-orange-300 bg-orange-500/10",
+    red: "border border-red-500/70 text-red-700 dark:text-red-300 bg-red-500/10",
   })[c];
 
 const getOptimizedAvatar = (url: string | null | undefined) => {
@@ -54,10 +72,49 @@ const getOptimizedAvatar = (url: string | null | undefined) => {
 const getOptimizedChatImage = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
-    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=600&quality=75";
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=720&quality=78";
   }
   return url;
 };
+
+/** Visualização em tela cheia no app (transformação Supabase mais larga). */
+const getChatImageLightboxSrc = (url: string | null | undefined) => {
+  if (!url) return undefined;
+  if (url.includes("supabase.co/storage/v1/object/public/")) {
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=1600&quality=86";
+  }
+  return url;
+};
+
+/** Galeria do chat: só formatos de imagem estáticos (sem vídeo, PDF, etc.). */
+const CHAT_GALLERY_ACCEPT =
+  "image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif";
+
+const ALLOWED_CHAT_IMAGE_MIME = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+]);
+
+function isChatGalleryImageFile(f: File): boolean {
+  const t = (f.type || "").toLowerCase().trim();
+  if (t.startsWith("video/")) return false;
+  if (t === "application/pdf" || t.includes("pdf")) return false;
+  if (ALLOWED_CHAT_IMAGE_MIME.has(t)) return true;
+  if (t === "" || t === "application/octet-stream") {
+    return /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(f.name);
+  }
+  return false;
+}
+
+function isUserCancelledPick(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /cancel|cancell?ed|dismiss|denied|user\s*cancel|no\s*image\s*picked/i.test(msg);
+}
 
 const MessageThread = () => {
   const { threadId } = useParams();
@@ -67,18 +124,29 @@ const MessageThread = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isFetchingMessages, setIsFetchingMessages] = useState(true); // NOVO: Controle visual de carregamento
   
-  // 🛡️ TRAVA ANTI-LOOP MESTRA: Impede que o load rode centenas de vezes
-  const isInitialLoadDone = useRef(false);
-  const isCurrentlyLoading = useRef(false);
+  /** Incrementa ao mudar threadId — ignora respostas antigas de `load` se o usuário trocar de conversa rápido. */
+  const loadGenerationRef = useRef(0);
 
   const [text, setText] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [otherParty, setOtherParty] = useState<OtherParty>({ name: "Chat", avatar_url: null });
   const [threadLabel, setThreadLabel] = useState<{ color: ThreadLabelColor; text: string } | null>(null);
+  const [peerActivity, setPeerActivity] = useState<"typing" | "recording" | null>(null);
+  const [reactionByMessage, setReactionByMessage] = useState<Record<string, ReactionAgg>>({});
+  const reactionByMessageRef = useRef(reactionByMessage);
+  reactionByMessageRef.current = reactionByMessage;
+  const [reactionPickerMsg, setReactionPickerMsg] = useState<Message | null>(null);
+  const peerActivityClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingIdleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const msgLongPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isProfessional, setIsProfessional] = useState(false);
   const [proAvailabilityStatus, setProAvailabilityStatus] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** Área rolável das mensagens — scroll explícito após layout (evita ficar no topo após o skeleton). */
+  const messagesScrollRef = useRef<HTMLElement | null>(null);
+  /** true = abrir conversa / trocar thread: scroll instantâneo ao fim; depois mensagens novas usam smooth. */
+  const isFirstScrollRef = useRef(true);
 
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
   const [proSlug, setProSlug] = useState<string | null>(null); // guarda o ID do profissional para navegação
@@ -169,6 +237,21 @@ const MessageThread = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [uploadingChatImages, setUploadingChatImages] = useState(false);
+  const [chatImagePreviewUrl, setChatImagePreviewUrl] = useState<string | null>(null);
+  /** Lightbox: zoom (pinch / Ctrl+scroll) + arrastar quando ampliado */
+  const [lightboxScale, setLightboxScale] = useState(1);
+  const [lightboxPan, setLightboxPan] = useState({ x: 0, y: 0 });
+  const lightboxPinchRef = useRef<{ initialDist: number; initialScale: number } | null>(null);
+  const lightboxDragTouchRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const lightboxSkipPanAfterPinchRef = useRef(false);
+  const lightboxWasPinchingRef = useRef(false);
+  const lightboxPanRef = useRef({ x: 0, y: 0 });
+  const lightboxScaleRef = useRef(1);
+  const lightboxWrapRef = useRef<HTMLDivElement | null>(null);
+  const lightboxImgRef = useRef<HTMLImageElement | null>(null);
+  const chatGalleryInputRef = useRef<HTMLInputElement>(null);
+  const chatCameraInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -183,6 +266,7 @@ const MessageThread = () => {
 
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
+  const canSendChatMedia = requestStatus === "accepted" && !isChatFinished;
   const hasPaymentConfirmed = messages.some(m => m.content && m.content.includes("PAGAMENTO CONFIRMADO"));
 
   // Detecta se profissional não respondeu o cliente há mais de 4h
@@ -375,14 +459,14 @@ const MessageThread = () => {
     }
   }, [threadId]);
 
-  const load = useCallback(async () => {
-    if (!threadId || isCurrentlyLoading.current) return;
-    isCurrentlyLoading.current = true;
+  const load = useCallback(async (expectedGen: number) => {
+    if (!threadId) return;
     setIsFetchingMessages(true);
 
     try {
       // getSession() usa cache local — sem chamada de rede
       const { data: { session } } = await supabase.auth.getSession();
+      if (expectedGen !== loadGenerationRef.current) return;
       const user = session?.user;
       if (user) setUserId(user.id);
 
@@ -392,8 +476,22 @@ const MessageThread = () => {
         supabase.from("chat_messages").select("*").eq("request_id", threadId).order("created_at"),
       ]);
 
-      setMessages((msgs as Message[]) || []);
+      if (expectedGen !== loadGenerationRef.current) return;
+      const msgList = (msgs as Message[]) || [];
+      setMessages(msgList);
 
+      const realIds = msgList.map((m) => m.id).filter((id) => !id.startsWith("temp-"));
+      if (realIds.length > 0 && user?.id) {
+        const { data: rxRows } = await supabase
+          .from("chat_message_reactions" as any)
+          .select("message_id, user_id, reaction")
+          .in("message_id", realIds);
+        setReactionByMessage(aggregateReactions((rxRows || []) as { message_id: string; user_id: string; reaction: string }[], user.id));
+      } else {
+        setReactionByMessage({});
+      }
+
+      if (expectedGen !== loadGenerationRef.current) return;
       if (req && user) {
         setRequestStatus(req.status);
         setRequestProtocol((req as any).protocol || null);
@@ -466,18 +564,57 @@ const MessageThread = () => {
     } catch (err) {
       console.error("Erro ao carregar chat:", err);
     } finally {
-      setIsFetchingMessages(false);
-      isInitialLoadDone.current = true;
-      setTimeout(() => { isCurrentlyLoading.current = false; }, 1000);
+      if (expectedGen === loadGenerationRef.current) {
+        setIsFetchingMessages(false);
+      }
     }
   }, [threadId]);
 
-  // CHAMA O LOAD APENAS SE AINDA NÃO FOI FEITO
   useEffect(() => {
-    if (threadId && !isInitialLoadDone.current) {
-      load();
-    }
+    if (!threadId) return;
+    loadGenerationRef.current += 1;
+    const gen = loadGenerationRef.current;
+    isFirstScrollRef.current = true;
+    setMessages([]);
+    setReactionByMessage({});
+    void load(gen);
   }, [threadId, load]);
+
+  useEffect(() => {
+    if (!threadId || !userId) return;
+    const onPayload = (payload: { fromUserId?: string; kind?: ThreadActivityKind }) => {
+      const from = payload?.fromUserId;
+      const kind = payload?.kind;
+      if (!from || from === userId) return;
+      if (kind === "idle") {
+        if (peerActivityClearRef.current) clearTimeout(peerActivityClearRef.current);
+        setPeerActivity(null);
+        return;
+      }
+      if (kind === "typing" || kind === "recording") {
+        setPeerActivity(kind);
+        if (peerActivityClearRef.current) clearTimeout(peerActivityClearRef.current);
+        peerActivityClearRef.current = setTimeout(() => {
+          setPeerActivity(null);
+          peerActivityClearRef.current = null;
+        }, 4000);
+      }
+    };
+    return subscribeThreadActivity(threadId, onPayload);
+  }, [threadId, userId]);
+
+  useEffect(() => {
+    if (!threadId || !userId) return;
+    if (isRecording) sendThreadActivity(threadId, userId, "recording");
+    else sendThreadActivity(threadId, userId, "idle");
+  }, [isRecording, threadId, userId]);
+
+  useEffect(() => {
+    return () => {
+      if (typingIdleRef.current) clearTimeout(typingIdleRef.current);
+      if (peerActivityClearRef.current) clearTimeout(peerActivityClearRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     // Só entra no Realtime com JWT + userId: senão o Postgres Changes (RLS) não entrega linhas.
@@ -677,22 +814,30 @@ const MessageThread = () => {
     }
   }, [location.state, location.pathname, navigate]);
 
-  // Controla se é o primeiro render (scroll instantâneo) ou mensagem nova (smooth)
-  const isFirstScrollRef = useRef(true);
-
   useEffect(() => {
-    if (messages.length === 0) return;
-    const behavior = isFirstScrollRef.current ? "instant" : "smooth";
-    isFirstScrollRef.current = false;
-    bottomRef.current?.scrollIntoView({ behavior: behavior as ScrollBehavior });
+    if (isFetchingMessages) return;
+    const hasMsgs = messages.length > 0;
+    const behavior: ScrollBehavior = isFirstScrollRef.current ? "instant" : "smooth";
+    if (hasMsgs) isFirstScrollRef.current = false;
 
-    if (threadId && userId) {
-      supabase.from("chat_read_status" as any).upsert(
-        { request_id: threadId, user_id: userId, last_read_at: new Date().toISOString() },
-        { onConflict: "request_id,user_id" }
-      ).then();
-    }
-  }, [messages, threadId, userId]);
+    const run = () => {
+      const el = messagesScrollRef.current;
+      if (el && hasMsgs) {
+        el.scrollTo({ top: el.scrollHeight, behavior });
+      } else if (hasMsgs) {
+        bottomRef.current?.scrollIntoView({ behavior });
+      }
+      if (threadId && userId && hasMsgs) {
+        supabase.from("chat_read_status" as any).upsert(
+          { request_id: threadId, user_id: userId, last_read_at: new Date().toISOString() },
+          { onConflict: "request_id,user_id" },
+        ).then();
+      }
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run);
+    });
+  }, [messages, isFetchingMessages, threadId, userId]);
 
   const handleSend = async () => {
     const content = text.trim();
@@ -731,7 +876,376 @@ const MessageThread = () => {
       sendMessagePushNotification(recipientUserId, content);
     }
     setSending(false);
+    if (threadId && userId) {
+      if (typingIdleRef.current) clearTimeout(typingIdleRef.current);
+      sendThreadActivity(threadId, userId, "idle");
+    }
   };
+
+  const sendChatImages = useCallback(
+    async (blobs: Blob[]) => {
+      if (!threadId || !userId || blobs.length === 0) return;
+      const slice = blobs.slice(0, 4);
+      setUploadingChatImages(true);
+      try {
+        const compressed: Blob[] = [];
+        for (const b of slice) {
+          try {
+            compressed.push(await compressImageForChat(b));
+          } catch {
+            toast({ title: "Uma das imagens não pôde ser processada", variant: "destructive" });
+          }
+        }
+        if (compressed.length === 0) return;
+
+        const publicUrls: string[] = [];
+        const objectPaths: string[] = [];
+        const base = Date.now();
+        for (let i = 0; i < compressed.length; i++) {
+          const blob = compressed[i];
+          const mime = blob.type.startsWith("image/") ? blob.type : "image/webp";
+          const ext = mime.includes("jpeg") || mime === "image/jpg" ? "jpg" : "webp";
+          const path = `${threadId}/${userId}/${base}-${i}.${ext}`;
+          const { error: upErr } = await supabase.storage.from("chat-media").upload(path, blob, {
+            contentType: mime,
+            upsert: false,
+          });
+          if (upErr) {
+            toast({ title: "Erro ao enviar foto", description: upErr.message, variant: "destructive" });
+            return;
+          }
+          const { data: urlData } = supabase.storage.from("chat-media").getPublicUrl(path);
+          publicUrls.push(urlData.publicUrl);
+          objectPaths.push(path);
+        }
+
+        const { data: inserted, error: insErr } = await supabase
+          .from("chat_messages")
+          .insert({
+            request_id: threadId,
+            sender_id: userId,
+            content: "📷 Foto",
+            image_urls: publicUrls,
+          })
+          .select()
+          .maybeSingle();
+
+        if (insErr || !inserted) {
+          toast({ title: "Erro ao registrar mensagem", variant: "destructive" });
+          return;
+        }
+
+        const msgId = inserted.id;
+        const attRows = objectPaths.map((object_path) => ({
+          message_id: msgId,
+          request_id: threadId,
+          object_path,
+        }));
+        const { error: attErr } = await supabase.from("chat_media_attachments").insert(attRows);
+        if (attErr) console.warn("[chat] chat_media_attachments:", attErr);
+
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msgId)) return prev;
+          return [...prev, inserted as Message];
+        });
+        sendMessagePushNotification(recipientUserId, "📷 Foto");
+        toast({ title: compressed.length > 1 ? "Fotos enviadas" : "Foto enviada" });
+      } finally {
+        setUploadingChatImages(false);
+      }
+    },
+    [threadId, userId, recipientUserId],
+  );
+
+  const onChatGalleryChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      e.target.value = "";
+      if (!files?.length) return;
+      const list = Array.from(files).filter(isChatGalleryImageFile).slice(0, 4);
+      if (!list.length) {
+        toast({
+          title: "Só é possível enviar imagens (JPG, PNG, WebP, HEIC ou GIF)",
+          variant: "destructive",
+        });
+        return;
+      }
+      void sendChatImages(list);
+    },
+    [sendChatImages],
+  );
+
+  const onChatCameraChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0];
+      e.target.value = "";
+      if (!f || !isChatGalleryImageFile(f)) return;
+      void sendChatImages([f]);
+    },
+    [sendChatImages],
+  );
+
+  const openChatCamera = useCallback(async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { Camera: CapCamera, CameraResultType, CameraSource } = await import("@capacitor/camera");
+        await CapCamera.requestPermissions({ permissions: ["camera"] }).catch(() => {});
+        const photo = await CapCamera.getPhoto({
+          quality: 88,
+          allowEditing: false,
+          resultType: CameraResultType.Uri,
+          source: CameraSource.Camera,
+        });
+        const webPath = photo.webPath;
+        if (!webPath) return;
+        const res = await fetch(webPath);
+        const blob = await res.blob();
+        await sendChatImages([blob]);
+      } catch (err) {
+        if (isUserCancelledPick(err)) return;
+        console.error(err);
+        toast({ title: "Não foi possível usar a câmera", variant: "destructive" });
+      }
+    } else {
+      chatCameraInputRef.current?.click();
+    }
+  }, [sendChatImages]);
+
+  /** Nativo: só fototeca (sem menu Fototeca/Câmera/Arquivos do `<input type="file">`). Web: input oculto. */
+  const openChatPhotoLibrary = useCallback(async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { Camera: CapCamera } = await import("@capacitor/camera");
+        await CapCamera.requestPermissions({ permissions: ["photos"] }).catch(() => {});
+        const { photos } = await CapCamera.pickImages({ limit: 4, quality: 88 });
+        if (!photos?.length) return;
+        const blobs: Blob[] = [];
+        for (const p of photos) {
+          const res = await fetch(p.webPath);
+          blobs.push(await res.blob());
+        }
+        await sendChatImages(blobs);
+      } catch (err) {
+        if (isUserCancelledPick(err)) return;
+        console.error(err);
+        toast({ title: "Não foi possível abrir a galeria", variant: "destructive" });
+      }
+    } else {
+      chatGalleryInputRef.current?.click();
+    }
+  }, [sendChatImages]);
+
+  const LIGHTBOX_MIN_SCALE = 1;
+  const LIGHTBOX_MAX_SCALE = 4;
+
+  useEffect(() => {
+    lightboxPanRef.current = lightboxPan;
+  }, [lightboxPan]);
+
+  useEffect(() => {
+    lightboxScaleRef.current = lightboxScale;
+  }, [lightboxScale]);
+
+  const clampLightboxPan = useCallback((x: number, y: number, scale: number) => {
+    const wrap = lightboxWrapRef.current;
+    const img = lightboxImgRef.current;
+    if (!wrap || !img || scale <= 1.02) return { x: 0, y: 0 };
+    const cw = wrap.clientWidth;
+    const ch = wrap.clientHeight;
+    const iw = img.offsetWidth * scale;
+    const ih = img.offsetHeight * scale;
+    const maxX = Math.max(0, (iw - cw) / 2 + 24);
+    const maxY = Math.max(0, (ih - ch) / 2 + 24);
+    return {
+      x: Math.min(maxX, Math.max(-maxX, x)),
+      y: Math.min(maxY, Math.max(-maxY, y)),
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chatImagePreviewUrl) {
+      setLightboxScale(1);
+      setLightboxPan({ x: 0, y: 0 });
+      lightboxPinchRef.current = null;
+      lightboxDragTouchRef.current = null;
+      lightboxSkipPanAfterPinchRef.current = false;
+      lightboxWasPinchingRef.current = false;
+    }
+  }, [chatImagePreviewUrl]);
+
+  useEffect(() => {
+    if (lightboxScale <= 1.02) setLightboxPan({ x: 0, y: 0 });
+  }, [lightboxScale]);
+
+  useEffect(() => {
+    if (!chatImagePreviewUrl) return;
+    const el = lightboxWrapRef.current;
+    if (!el) return;
+    const blockScroll = (ev: TouchEvent) => {
+      if (ev.touches.length > 1) ev.preventDefault();
+      if (ev.touches.length === 1 && lightboxScaleRef.current > 1.02) ev.preventDefault();
+    };
+    el.addEventListener("touchmove", blockScroll, { passive: false });
+    return () => el.removeEventListener("touchmove", blockScroll);
+  }, [chatImagePreviewUrl]);
+
+  const onLightboxTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      lightboxWasPinchingRef.current = true;
+      lightboxDragTouchRef.current = null;
+      const a = e.touches[0];
+      const b = e.touches[1];
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      lightboxPinchRef.current = {
+        initialDist: Math.max(dist, 1),
+        initialScale: lightboxScaleRef.current,
+      };
+      return;
+    }
+    if (e.touches.length === 1) {
+      if (lightboxSkipPanAfterPinchRef.current) {
+        lightboxSkipPanAfterPinchRef.current = false;
+        return;
+      }
+      if (lightboxScaleRef.current > 1.02) {
+        const t = e.touches[0];
+        const p = lightboxPanRef.current;
+        lightboxDragTouchRef.current = { sx: t.clientX, sy: t.clientY, ox: p.x, oy: p.y };
+      }
+    }
+  }, []);
+
+  const onLightboxTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 2 && lightboxPinchRef.current) {
+        e.preventDefault();
+        const a = e.touches[0];
+        const b = e.touches[1];
+        const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        const { initialDist, initialScale } = lightboxPinchRef.current;
+        const s = Math.min(
+          LIGHTBOX_MAX_SCALE,
+          Math.max(LIGHTBOX_MIN_SCALE, initialScale * (dist / initialDist)),
+        );
+        setLightboxScale(s);
+        return;
+      }
+      if (e.touches.length === 1 && lightboxDragTouchRef.current && lightboxScaleRef.current > 1.02) {
+        e.preventDefault();
+        const t = e.touches[0];
+        const d = lightboxDragTouchRef.current;
+        setLightboxPan(
+          clampLightboxPan(
+            d.ox + (t.clientX - d.sx),
+            d.oy + (t.clientY - d.sy),
+            lightboxScaleRef.current,
+          ),
+        );
+      }
+    },
+    [clampLightboxPan],
+  );
+
+  const onLightboxTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (lightboxWasPinchingRef.current && e.touches.length === 1) {
+      lightboxSkipPanAfterPinchRef.current = true;
+    }
+    if (e.touches.length < 2) lightboxPinchRef.current = null;
+    if (e.touches.length === 0) {
+      lightboxWasPinchingRef.current = false;
+      lightboxDragTouchRef.current = null;
+      setLightboxPan((p) => clampLightboxPan(p.x, p.y, lightboxScaleRef.current));
+    }
+  }, [clampLightboxPan]);
+
+  const onLightboxMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0 || lightboxScaleRef.current <= 1.02) return;
+      e.preventDefault();
+      const ox = lightboxPanRef.current.x;
+      const oy = lightboxPanRef.current.y;
+      const sx = e.clientX;
+      const sy = e.clientY;
+      const onMove = (ev: MouseEvent) => {
+        setLightboxPan(
+          clampLightboxPan(ox + ev.clientX - sx, oy + ev.clientY - sy, lightboxScaleRef.current),
+        );
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setLightboxPan((p) => clampLightboxPan(p.x, p.y, lightboxScaleRef.current));
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [clampLightboxPan],
+  );
+
+  const onLightboxWheel = useCallback((e: React.WheelEvent) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const step = e.deltaY > 0 ? -0.12 : 0.12;
+    setLightboxScale((prev) => {
+      const next = Math.min(LIGHTBOX_MAX_SCALE, Math.max(LIGHTBOX_MIN_SCALE, prev + step));
+      queueMicrotask(() => {
+        setLightboxPan((p) => clampLightboxPan(p.x, p.y, next));
+      });
+      return next;
+    });
+  }, [clampLightboxPan]);
+
+  const notifyTyping = useCallback(() => {
+    if (!threadId || !userId) return;
+    sendThreadActivity(threadId, userId, "typing");
+    if (typingIdleRef.current) clearTimeout(typingIdleRef.current);
+    typingIdleRef.current = setTimeout(() => {
+      sendThreadActivity(threadId, userId, "idle");
+      typingIdleRef.current = null;
+    }, 3000);
+  }, [threadId, userId]);
+
+  const submitMessageReaction = useCallback(
+    async (msg: Message, reaction: "like" | "dislike") => {
+      if (!userId || msg.id.startsWith("temp-")) return;
+      const p = reactionByMessageRef.current[msg.id] ?? { likes: 0, dislikes: 0, mine: null };
+
+      if (p.mine === reaction) {
+        const { error } = await supabase
+          .from("chat_message_reactions" as any)
+          .delete()
+          .eq("message_id", msg.id)
+          .eq("user_id", userId);
+        if (error) {
+          toast({ title: "Não foi possível atualizar a reação", variant: "destructive" });
+          return;
+        }
+        const next: ReactionAgg = { ...p };
+        if (reaction === "like") next.likes = Math.max(0, next.likes - 1);
+        else next.dislikes = Math.max(0, next.dislikes - 1);
+        next.mine = null;
+        setReactionByMessage((cur) => ({ ...cur, [msg.id]: next }));
+      } else {
+        const { error } = await supabase.from("chat_message_reactions" as any).upsert(
+          { message_id: msg.id, user_id: userId, reaction },
+          { onConflict: "message_id,user_id" },
+        );
+        if (error) {
+          toast({ title: "Não foi possível reagir", description: error.message, variant: "destructive" });
+          return;
+        }
+        const next: ReactionAgg = { ...p };
+        if (p.mine === "like") next.likes = Math.max(0, next.likes - 1);
+        if (p.mine === "dislike") next.dislikes = Math.max(0, next.dislikes - 1);
+        if (reaction === "like") next.likes += 1;
+        else next.dislikes += 1;
+        next.mine = reaction;
+        setReactionByMessage((cur) => ({ ...cur, [msg.id]: next }));
+      }
+      setReactionPickerMsg(null);
+    },
+    [userId],
+  );
 
   const startRecording = async () => {
     try {
@@ -1772,7 +2286,13 @@ const MessageThread = () => {
           <div className="bg-background rounded-xl overflow-hidden border border-border">
             {product.image ? (
                // ✨ OTIMIZAÇÃO: Usa imagem otimizada para o produto também, mas permite ver em tamanho real
-               <img src={getOptimizedChatImage(product.image)} alt={product.name} loading="lazy" className="w-full h-24 object-cover cursor-pointer" onClick={() => window.open(product.image, '_blank')} />
+               <img
+                  src={getOptimizedChatImage(product.image)}
+                  alt={product.name}
+                  loading="lazy"
+                  className="w-full h-24 object-cover cursor-pointer"
+                  onClick={() => setChatImagePreviewUrl(product.image)}
+                />
             ) : (
                <div className="w-full h-24 bg-muted flex items-center justify-center"><Package className="w-6 h-6 text-muted-foreground/50" /></div>
             )}
@@ -1914,15 +2434,22 @@ const MessageThread = () => {
     }
 
     if (msg.image_urls && msg.image_urls.length > 0) {
+      const hideCaption = msg.content === "📷 Foto";
       return (
         <div className="space-y-2">
-          <div className={`grid ${msg.image_urls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-1.5`}>
+          <div className={`grid ${msg.image_urls.length > 1 ? "grid-cols-2" : "grid-cols-1"} gap-1.5 max-w-[min(280px,85vw)]`}>
             {msg.image_urls.map((url, j) => (
-              // ✨ OTIMIZAÇÃO: Carrega imagem leve para economizar 90% de rede, mas abre full HD ao clicar
-              <img key={j} src={getOptimizedChatImage(url)} alt="Mídia do chat" loading="lazy" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
+              <img
+                key={j}
+                src={getOptimizedChatImage(url)}
+                alt="Foto no chat"
+                loading="lazy"
+                className="w-full aspect-square rounded-lg object-cover cursor-pointer border border-black/5"
+                onClick={() => setChatImagePreviewUrl(url)}
+              />
             ))}
           </div>
-          {msg.content && <p className="text-sm">{msg.content}</p>}
+          {msg.content && !hideCaption && <p className="text-sm">{msg.content}</p>}
         </div>
       );
     }
@@ -1941,7 +2468,14 @@ const MessageThread = () => {
                 <div key={i} className="flex flex-wrap gap-1.5">
                   {imgMatch.map((url, j) =>
                   // ✨ OTIMIZAÇÃO: Mesma mágica aplicada nas imagens por Regex
-                  <img key={j} src={getOptimizedChatImage(url)} alt="Foto do serviço" loading="lazy" className="w-24 h-24 rounded-lg object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
+                  <img
+                    key={j}
+                    src={getOptimizedChatImage(url)}
+                    alt="Foto do serviço"
+                    loading="lazy"
+                    className="w-24 h-24 rounded-lg object-cover cursor-pointer"
+                    onClick={() => setChatImagePreviewUrl(url)}
+                  />
                   )}
                 </div>);
 
@@ -2007,7 +2541,7 @@ const MessageThread = () => {
               <div className="flex items-center gap-1.5 min-w-0">
                 <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
                 {threadLabel ? (
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 max-w-[90px] truncate ${threadLabelPillClass(threadLabel.color)}`}>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 max-w-[100px] truncate ${threadLabelPillClass(threadLabel.color)}`}>
                     {threadLabel.text}
                   </span>
                 ) : null}
@@ -2023,6 +2557,15 @@ const MessageThread = () => {
                    proAvailabilityStatus === "quotes_only" ? "● Somente orçamentos" :
                    proAvailabilityStatus === "busy" ? "● Agenda fechada" :
                    "● Indisponível"}
+                </p>
+              ) : null}
+              {peerActivity === "typing" ? (
+                <p className="text-[10px] text-muted-foreground italic">digitando…</p>
+              ) : null}
+              {peerActivity === "recording" ? (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                  gravando áudio…
                 </p>
               ) : null}
             </div>
@@ -2120,7 +2663,10 @@ const MessageThread = () => {
         )}
       </header>
 
-      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2">
+      <main
+        ref={messagesScrollRef}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2 bg-muted/20"
+      >
         {/* Banner de aviso: profissional sem resposta há +2h (antes das 4h) */}
         {(() => {
           if (isProfessional || isChatFinished || !userId || canCloseByDelay) return null;
@@ -2311,6 +2857,7 @@ const MessageThread = () => {
                 </div>);
             }
 
+            const rx = reactionByMessage[msg.id];
             return (
               <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"} gap-2`}>
                 {!isMine && (
@@ -2338,15 +2885,55 @@ const MessageThread = () => {
                     </div>
                   </div>
                 )}
-                <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
-                isMine ?
-                "bg-primary text-primary-foreground rounded-br-md" :
-                "bg-card border rounded-bl-md text-foreground"}`
-                }>
+                <div
+                  className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm select-none ${
+                    isMine
+                      ? "bg-primary text-primary-foreground rounded-br-md shadow-sm"
+                      : "bg-muted/60 border border-border/60 rounded-bl-md text-foreground shadow-sm"
+                  }`}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (!msg.id.startsWith("temp-")) setReactionPickerMsg(msg);
+                  }}
+                  onTouchStart={() => {
+                    if (msg.id.startsWith("temp-")) return;
+                    if (msgLongPressRef.current) clearTimeout(msgLongPressRef.current);
+                    msgLongPressRef.current = window.setTimeout(() => {
+                      setReactionPickerMsg(msg);
+                      msgLongPressRef.current = null;
+                    }, 520);
+                  }}
+                  onTouchEnd={() => {
+                    if (msgLongPressRef.current) {
+                      clearTimeout(msgLongPressRef.current);
+                      msgLongPressRef.current = null;
+                    }
+                  }}
+                  onTouchMove={() => {
+                    if (msgLongPressRef.current) {
+                      clearTimeout(msgLongPressRef.current);
+                      msgLongPressRef.current = null;
+                    }
+                  }}
+                >
                   {rendered}
                   <p className={`text-[10px] mt-1 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                     {new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                   </p>
+                  {rx && (rx.likes > 0 || rx.dislikes > 0) ? (
+                    <div className={`flex items-center gap-2 mt-1.5 flex-wrap ${isMine ? "text-primary-foreground/90" : "text-foreground/80"}`}>
+                      {rx.likes > 0 ? (
+                        <span className="text-[11px] font-medium inline-flex items-center gap-0.5 bg-background/25 rounded-full px-1.5 py-0.5">
+                          <ThumbsUp className="w-3 h-3" /> {rx.likes}
+                        </span>
+                      ) : null}
+                      {rx.dislikes > 0 ? (
+                        <span className="text-[11px] font-medium inline-flex items-center gap-0.5 bg-background/25 rounded-full px-1.5 py-0.5">
+                          <ThumbsDown className="w-3 h-3" /> {rx.dislikes}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>);
 
@@ -2371,6 +2958,26 @@ const MessageThread = () => {
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 16px) + 12px)" }}
       >
           <div className="flex items-center gap-2 max-w-screen-lg mx-auto">
+            {canSendChatMedia && !isRecording && !uploadingAudio && !Capacitor.isNativePlatform() ? (
+              <>
+                <input
+                  ref={chatGalleryInputRef}
+                  type="file"
+                  accept={CHAT_GALLERY_ACCEPT}
+                  multiple
+                  className="hidden"
+                  onChange={onChatGalleryChange}
+                />
+                <input
+                  ref={chatCameraInputRef}
+                  type="file"
+                  accept={CHAT_GALLERY_ACCEPT}
+                  capture="environment"
+                  className="hidden"
+                  onChange={onChatCameraChange}
+                />
+              </>
+            ) : null}
             {isRecording ?
           <>
                 <button onClick={cancelRecording}
@@ -2401,10 +3008,41 @@ const MessageThread = () => {
                 <span className="text-sm text-muted-foreground">Enviando áudio...</span>
               </div> :
 
+          uploadingChatImages ?
+          <div className="flex-1 flex items-center justify-center gap-2 py-2.5">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-sm text-muted-foreground">Enviando foto...</span>
+              </div> :
+
           <>
+                {canSendChatMedia ? (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Enviar imagens da galeria"
+                      disabled={uploadingChatImages || sending}
+                      onClick={() => void openChatPhotoLibrary()}
+                      className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-muted-foreground hover:bg-muted/80 transition-colors disabled:opacity-50 flex-shrink-0"
+                    >
+                      <ImageIcon className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Tirar foto"
+                      disabled={uploadingChatImages || sending}
+                      onClick={() => void openChatCamera()}
+                      className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-muted-foreground hover:bg-muted/80 transition-colors disabled:opacity-50 flex-shrink-0"
+                    >
+                      <Camera className="w-5 h-5" />
+                    </button>
+                  </>
+                ) : null}
                 <textarea
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                notifyTyping();
+              }}
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
                 if (e.shiftKey) return; // Shift+Enter = nova linha
@@ -2432,6 +3070,93 @@ const MessageThread = () => {
           </div>
         </div>
       }
+
+      <Dialog open={reactionPickerMsg !== null} onOpenChange={(open) => !open && setReactionPickerMsg(null)}>
+        <DialogContent className="sm:max-w-[min(calc(100vw-2rem),22rem)]">
+          <DialogHeader>
+            <DialogTitle>Reagir</DialogTitle>
+            <DialogDescription>Escolha 👍 ou 👎. Abra de novo o menu e escolha a mesma opção para remover a sua reação.</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center gap-5 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="h-16 w-16 rounded-2xl border-2 border-emerald-500/40 hover:bg-emerald-500/10 p-0"
+              onClick={() => reactionPickerMsg && void submitMessageReaction(reactionPickerMsg, "like")}
+            >
+              <ThumbsUp className="w-8 h-8 text-emerald-600" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="h-16 w-16 rounded-2xl border-2 border-red-500/40 hover:bg-red-500/10 p-0"
+              onClick={() => reactionPickerMsg && void submitMessageReaction(reactionPickerMsg, "dislike")}
+            >
+              <ThumbsDown className="w-8 h-8 text-red-600" />
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={chatImagePreviewUrl !== null} onOpenChange={(open) => !open && setChatImagePreviewUrl(null)}>
+        <DialogContent
+          className="max-w-[100vw] w-full h-[100dvh] max-h-[100dvh] sm:max-w-[100vw] translate-x-[-50%] translate-y-[-50%] p-0 border-0 bg-black/[0.96] shadow-none rounded-none gap-0 overflow-hidden [&>button.absolute]:hidden"
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Foto</DialogTitle>
+          </DialogHeader>
+          <div
+            ref={lightboxWrapRef}
+            className="relative flex h-full w-full touch-none items-center justify-center overflow-hidden p-4 pt-16 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+            onTouchStart={onLightboxTouchStart}
+            onTouchMove={onLightboxTouchMove}
+            onTouchEnd={onLightboxTouchEnd}
+            onTouchCancel={onLightboxTouchEnd}
+            onWheel={onLightboxWheel}
+          >
+            <button
+              type="button"
+              aria-label="Fechar"
+              onClick={() => setChatImagePreviewUrl(null)}
+              className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-neutral-900 shadow-[0_4px_20px_rgba(0,0,0,0.45)] ring-2 ring-white/90 hover:bg-neutral-100 active:scale-95"
+            >
+              <X className="h-7 w-7" strokeWidth={2.75} />
+            </button>
+            {chatImagePreviewUrl ? (
+              <div
+                className={`flex max-h-full max-w-full items-center justify-center ${lightboxScale > 1.02 ? "cursor-grab active:cursor-grabbing" : ""}`}
+                style={{
+                  transform: `translate(${lightboxPan.x}px, ${lightboxPan.y}px)`,
+                  willChange: "transform",
+                }}
+                onMouseDown={onLightboxMouseDown}
+              >
+                <img
+                  ref={lightboxImgRef}
+                  src={getChatImageLightboxSrc(chatImagePreviewUrl)}
+                  alt=""
+                  className="max-h-[min(85dvh,calc(100dvh-5rem))] max-w-full w-auto object-contain select-none will-change-transform"
+                  style={{
+                    transform: `scale(${lightboxScale})`,
+                    transformOrigin: "center center",
+                  }}
+                  loading="eager"
+                  decoding="async"
+                  draggable={false}
+                  onLoad={() => {
+                    setLightboxPan((p) =>
+                      clampLightboxPan(p.x, p.y, lightboxScaleRef.current),
+                    );
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <BottomNav />
 
       <Dialog open={billingOpen} onOpenChange={(open) => {

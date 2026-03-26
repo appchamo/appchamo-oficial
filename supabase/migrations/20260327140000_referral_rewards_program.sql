@@ -76,10 +76,12 @@ CREATE INDEX IF NOT EXISTS idx_referral_attributions_referrer ON public.referral
 
 ALTER TABLE public.referral_attributions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "referral_attr_invitee_read" ON public.referral_attributions;
 CREATE POLICY "referral_attr_invitee_read"
   ON public.referral_attributions FOR SELECT TO authenticated
   USING (invitee_user_id = auth.uid());
 
+DROP POLICY IF EXISTS "referral_attr_referrer_read" ON public.referral_attributions;
 CREATE POLICY "referral_attr_referrer_read"
   ON public.referral_attributions FOR SELECT TO authenticated
   USING (referrer_user_id = auth.uid());
@@ -100,10 +102,12 @@ CREATE INDEX IF NOT EXISTS idx_referral_commission_referrer ON public.referral_c
 
 ALTER TABLE public.referral_commission_events ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "referral_comm_invitee_read" ON public.referral_commission_events;
 CREATE POLICY "referral_comm_invitee_read"
   ON public.referral_commission_events FOR SELECT TO authenticated
   USING (invitee_user_id = auth.uid());
 
+DROP POLICY IF EXISTS "referral_comm_referrer_read" ON public.referral_commission_events;
 CREATE POLICY "referral_comm_referrer_read"
   ON public.referral_commission_events FOR SELECT TO authenticated
   USING (referrer_user_id = auth.uid());

@@ -12,10 +12,14 @@ export function buildSignupInviteUrl(inviteCode: string): string {
 }
 
 export function buildInviteShareMessage(inviteCode: string): string {
-  const link = buildSignupProInviteUrl(inviteCode);
+  const code = inviteCode.trim().toUpperCase();
+  const linkPro = buildSignupProInviteUrl(inviteCode);
+  const linkCliente = buildSignupInviteUrl(inviteCode);
   return (
-    `Oi! Vim te convidar para o Chamô — o ecossistema que conecta profissionais e clientes no Triângulo Mineiro e região. ` +
-    `Cadastre-se como profissional e faça parte:\n\n${link}\n\n` +
-    `Se pedir código de indicação, use: ${inviteCode.trim().toUpperCase()}`
+    `Oi! Te convido pro Chamô — conecta profissionais e clientes na região.\n\n` +
+    `Profissional: ${linkPro}\n` +
+    `Cliente: ${linkCliente}\n\n` +
+    `Código de convite (se pedir no cadastro): ${code}\n` +
+    `Quem se cadastra com o código ganha benefícios na hora. Quem compartilha ganha 1 cupom extra de sorteio e 1 cupom de desconto para usar no app quando alguém conclui o cadastro com o código.`
   );
 }

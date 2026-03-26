@@ -1,5 +1,6 @@
 import AppLayout from "@/components/AppLayout";
-import { Eye, Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText, Image, Wallet } from "lucide-react";
+import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
+import { Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText, Image, Wallet } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -11,6 +12,9 @@ const ProfessionalDashboard = () => {
   const { plan } = useSubscription();
   const [requestCount, setRequestCount] = useState(0);
   const [proId, setProId] = useState<string | null>(null);
+  const [sealRows, setSealRows] = useState<
+    { id: string; title: string; description: string; icon_variant: string; is_special: boolean; awarded: boolean }[]
+  >([]);
 
   useEffect(() => {
     if (!user) return;
@@ -27,6 +31,23 @@ const ProfessionalDashboard = () => {
           .select("*", { count: "exact", head: true })
           .eq("professional_id", pro.id);
         setRequestCount(count || 0);
+
+        const [{ data: defs }, { data: awarded }] = await Promise.all([
+          supabase
+            .from("professional_seal_definitions" as never)
+            .select("id, title, description, icon_variant, is_special, sort_order")
+            .eq("is_active", true)
+            .order("sort_order", { ascending: true }),
+          supabase.from("professional_seals_awarded" as never).select("seal_id").eq("professional_id", pro.id),
+        ]);
+        const earned = new Set((awarded as { seal_id: string }[] | null)?.map((a) => a.seal_id) ?? []);
+        const list = (defs as { id: string; title: string; description: string; icon_variant: string; is_special: boolean }[] | null) ?? [];
+        setSealRows(
+          list.map((d) => ({
+            ...d,
+            awarded: earned.has(d.id),
+          }))
+        );
       }
     };
     load();
@@ -63,6 +84,37 @@ const ProfessionalDashboard = () => {
             </div>
           ))}
         </div>
+
+        {proId && sealRows.length > 0 && (
+          <section className="mb-6">
+            <h2 className="font-semibold text-foreground mb-2">Meus selos</h2>
+            <p className="text-xs text-muted-foreground mb-3">
+              Conquistas da plataforma. Os selos são atualizados automaticamente conforme seus resultados.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {sealRows.map((s) => (
+                <div
+                  key={s.id}
+                  className={`rounded-xl border bg-card p-3 flex flex-col items-center text-center gap-2 ${
+                    s.is_special && s.awarded
+                      ? "border-amber-400/50 shadow-[0_0_16px_rgba(251,191,36,0.15)]"
+                      : s.awarded
+                        ? "border-primary/20"
+                        : "opacity-80"
+                  }`}
+                >
+                  <ProfessionalSealIcon variant={s.icon_variant} size={48} earned={s.awarded} />
+                  <p className="text-xs font-semibold text-foreground leading-tight">{s.title}</p>
+                  <p className="text-[10px] text-muted-foreground leading-snug line-clamp-3">{s.description}</p>
+                  {!s.awarded && (
+                    <span className="text-[10px] font-medium text-muted-foreground">Em progresso</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <h2 className="font-semibold text-foreground mb-3">Ações rápidas</h2>
         <div className="flex flex-col gap-2">
           {actions.map((action) => (

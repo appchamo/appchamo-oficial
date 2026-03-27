@@ -17,17 +17,14 @@ export function getPublicAppBaseUrl(): string {
 
 /**
  * Origem HTTPS onde estão as rotas `/api/*-og` (Vercel).
- * Em builds na Vercel, usa automaticamente `VERCEL_URL` (HTTPS válido) quando `app.chamo.com` estiver com SSL inválido.
+ * Usa o mesmo domínio canónico do app (`VITE_PUBLIC_APP_URL` / origem no browser), para links de partilha
+ * ficarem curtos (ex.: appchamo.com). Só force outra base com `VITE_SHARE_OG_BASE_URL` (ex.: SSL fraco no custom).
  */
 export function getOgShareBaseUrl(): string {
   const raw = (import.meta.env.VITE_SHARE_OG_BASE_URL as string | undefined)?.trim();
   if (raw) {
     const u = raw.replace(/\/$/, "");
     if (u.startsWith("https://") || u.startsWith("http://")) return u;
-  }
-  const vercel = (import.meta.env.VITE_VERCEL_DEPLOYMENT_URL as string | undefined)?.trim();
-  if (vercel && (vercel.startsWith("https://") || vercel.startsWith("http://"))) {
-    return vercel.replace(/\/$/, "");
   }
   return getPublicAppBaseUrl();
 }
@@ -42,8 +39,8 @@ export function getPublicProfessionalProfileUrl(proKey: string): string {
 /**
  * URL para partilhar o perfil em redes (WhatsApp, etc.) com Open Graph (`/api/professional-og`).
  *
- * Build: `VITE_SHARE_OG_BASE_URL` (HTTPS estável, ex. *.vercel.app) se o domínio público tiver SSL fraco.
- * Vercel (Production): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, opcional `OG_SHARE_BASE_URL` = mesma base do link de partilha.
+ * Opcional: `VITE_SHARE_OG_BASE_URL` se precisares de outra origem para `/api/*-og` (SSL no custom).
+ * Na Vercel: `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` para o HTML/ imagem OG dinâmicos (senão cai no selo genérico).
  */
 export function getProfessionalProfileShareUrl(proKey: string): string {
   const key = (proKey || "").trim();

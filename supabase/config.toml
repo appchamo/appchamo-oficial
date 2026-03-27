@@ -468,3 +468,9 @@ entrypoint = "./functions/sync_platform_fee_invoice_pdf/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/process_transfer/index.ts"
+
+# Pré-visualização Open Graph (WhatsApp); crawlers não enviam JWT — usa apikey na query
+[functions.professional-og]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/professional-og/index.ts"

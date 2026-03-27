@@ -1,8 +1,16 @@
 /**
- * Open Graph para partilha de perfil profissional (pré-visualização no WhatsApp).
- * Requer: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY no Vercel.
+ * Open Graph para partilha de perfil (WhatsApp / crawlers).
+ * Chamada pública: `?key=` slug ou UUID + `apikey=` publishable (query).
+ * Usa SUPABASE_SERVICE_ROLE_KEY injetado no deploy.
  */
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Max-Age": "86400",
+};
 
 function escAttr(s: string) {
   return s
@@ -18,33 +26,33 @@ function escText(s: string) {
 
 function absoluteAvatarUrl(
   avatarUrl: string | null | undefined,
-  supabaseBase: string,
+  supabaseUrl: string,
   publicApp: string,
 ): string {
   const u = (avatarUrl || "").trim();
   if (!u) return `${publicApp}/seals/push/seal_chamo.png`;
   if (u.startsWith("http")) return u;
-  const base = supabaseBase.replace(/\/$/, "");
+  const base = supabaseUrl.replace(/\/$/, "");
   return `${base}/storage/v1/object/public/uploads/${u}`;
 }
 
-export const config = { runtime: "edge" };
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+  if (req.method !== "GET") {
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  }
 
-export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const key = url.searchParams.get("key")?.trim() || "";
   if (!key || key.length > 200) {
-    return new Response("Not found", { status: 404 });
+    return new Response("Not found", { status: 404, headers: corsHeaders });
   }
 
-  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const isUuid = uuidRe.test(key);
-
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const publicApp =
-    (process.env.VITE_PUBLIC_APP_URL || process.env.PUBLIC_APP_URL || "https://app.chamo.com").replace(/\/$/, "");
-
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const publicApp = (Deno.env.get("PUBLIC_APP_URL") ?? "https://app.chamo.com").replace(/\/$/, "");
   const fallbackRedirect = `${publicApp}/professional/${encodeURIComponent(key)}`;
 
   if (!supabaseUrl || !serviceKey) {
@@ -54,20 +62,24 @@ export default async function handler(req: Request): Promise<Response> {
 <meta property="og:site_name" content="Chamô" />
 <meta http-equiv="refresh" content="0;url=${escAttr(fallbackRedirect)}" />
 </head><body><p><a href="${escAttr(fallbackRedirect)}">Abrir no Chamô</a></p></body></html>`;
-    return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    return new Response(html, {
+      headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" },
+    });
   }
+
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const isUuid = uuidRe.test(key);
 
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  const proQuery = supabase
+  const { data: pro, error: proErr } = await supabase
     .from("professionals")
     .select("id, user_id, slug, profession_id, category_id")
     .eq(isUuid ? "id" : "slug", key)
     .maybeSingle();
 
-  const { data: pro, error: proErr } = await proQuery;
   if (proErr || !pro) {
-    return new Response("Not found", { status: 404 });
+    return new Response("Not found", { status: 404, headers: corsHeaders });
   }
 
   const proRow = pro as {
@@ -147,8 +159,9 @@ export default async function handler(req: Request): Promise<Response> {
 
   return new Response(html, {
     headers: {
+      ...corsHeaders,
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
     },
   });
-}
+});

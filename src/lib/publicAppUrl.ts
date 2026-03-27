@@ -24,12 +24,18 @@ export function getPublicProfessionalProfileUrl(proKey: string): string {
 
 /**
  * URL para partilhar o perfil em redes (WhatsApp, etc.) com pré-visualização rica (Open Graph).
- * Depende da função `api/professional-og` no Vercel + SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+ * Preferimos a Edge Function no Supabase (HTTPS estável); fallback para `api/professional-og` no Vercel.
  */
 export function getProfessionalProfileShareUrl(proKey: string): string {
   const key = (proKey || "").trim();
   if (!key) return "";
-  return `${getPublicAppBaseUrl()}/api/professional-og?key=${encodeURIComponent(key)}`;
+  const enc = encodeURIComponent(key);
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, "");
+  const pub = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim();
+  if (supabaseUrl && pub) {
+    return `${supabaseUrl}/functions/v1/professional-og?key=${enc}&apikey=${encodeURIComponent(pub)}`;
+  }
+  return `${getPublicAppBaseUrl()}/api/professional-og?key=${enc}`;
 }
 
 /**

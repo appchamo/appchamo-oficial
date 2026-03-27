@@ -427,6 +427,7 @@ const ProfessionalProfile = () => {
   /** Link com meta tags para WhatsApp / Instagram (pré-visualização). */
   const profileShareLink = profilePathKey ? getProfessionalProfileShareUrl(profilePathKey) : null;
   const profileLinkDisplay = profileLink ? profileLink.replace(/^https?:\/\//, "") : null;
+  const profileShareDisplay = profileShareLink ? profileShareLink.replace(/^https?:\/\//, "") : null;
 
   // Compartilhar / copiar usam URL OG para pré-visualização rica nas redes
   const handleShareLink = async () => {
@@ -459,6 +460,16 @@ const ProfessionalProfile = () => {
       toast({ title: "Link copiado!", description: "Pronto para colar no WhatsApp com pré-visualização." });
     } catch {
       toast({ title: "Seu link:", description: profileShareLink });
+    }
+  };
+
+  const handleCopyPublicLink = async () => {
+    if (!profileLink) return;
+    try {
+      await navigator.clipboard.writeText(profileLink);
+      toast({ title: "Link do perfil copiado!", description: "Abre a página pública direto no navegador." });
+    } catch {
+      toast({ title: "Link do perfil:", description: profileLink });
     }
   };
 
@@ -747,19 +758,34 @@ const ProfessionalProfile = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                {profileLink && profileLinkDisplay && (
+                {profileShareLink && profileShareDisplay && (
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Seu link público</label>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                      Link para WhatsApp / Instagram (pré-visualização)
+                    </label>
                     <p className="text-[10px] text-muted-foreground mb-1.5 leading-snug">
-                      O botão Compartilhar / Copiar usa um link otimizado para pré-visualização rica no WhatsApp (foto e título).
+                      O app usa este link ao compartilhar — o WhatsApp lê foto e título a partir dele. Para testar: Depurador da Meta com a URL{" "}
+                      <span className="font-mono">…/api/professional-og?key=…</span> (não use só <span className="font-mono">professional-og-image</span>).
                     </p>
-                    <div className="flex items-center gap-2 bg-muted/80 border border-border/60 rounded-xl px-3 py-2.5">
-                      <span className="text-xs text-foreground flex-1 truncate font-mono">{profileLinkDisplay}</span>
+                    <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-3 py-2.5">
+                      <span className="text-xs text-foreground flex-1 truncate font-mono">{profileShareDisplay}</span>
                       <button type="button" onClick={handleCopyLink} className="text-xs text-primary font-bold hover:underline shrink-0">
                         Copiar
                       </button>
                       <button type="button" onClick={handleShareLink} className="text-muted-foreground hover:text-primary shrink-0 p-1" title="Compartilhar">
                         <Share2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {profileLink && profileLinkDisplay && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Link direto do perfil</label>
+                    <p className="text-[10px] text-muted-foreground mb-1.5 leading-snug">Para abrir no navegador ou colar em bio (sem cartão de prévia nas redes).</p>
+                    <div className="flex items-center gap-2 bg-muted/80 border border-border/60 rounded-xl px-3 py-2.5">
+                      <span className="text-xs text-foreground flex-1 truncate font-mono">{profileLinkDisplay}</span>
+                      <button type="button" onClick={handleCopyPublicLink} className="text-xs text-primary font-bold hover:underline shrink-0">
+                        Copiar
                       </button>
                     </div>
                   </div>

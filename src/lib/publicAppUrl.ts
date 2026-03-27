@@ -40,8 +40,10 @@ export function getPublicProfessionalProfileUrl(proKey: string): string {
 }
 
 /**
- * URL para partilhar o perfil em redes (WhatsApp, etc.) com Open Graph.
- * Deve apontar para `api/professional-og` no Vercel — Edge Functions do Supabase reescrevem `text/html` para `text/plain` e quebram pré-visualização.
+ * URL para partilhar o perfil em redes (WhatsApp, etc.) com Open Graph (`/api/professional-og`).
+ *
+ * Build: `VITE_SHARE_OG_BASE_URL` (HTTPS estável, ex. *.vercel.app) se o domínio público tiver SSL fraco.
+ * Vercel (Production): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, opcional `OG_SHARE_BASE_URL` = mesma base do link de partilha.
  */
 export function getProfessionalProfileShareUrl(proKey: string): string {
   const key = (proKey || "").trim();

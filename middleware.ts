@@ -4,8 +4,9 @@ import { next, rewrite } from "@vercel/edge";
  * WhatsApp / Meta pedem `/professional/:key` mas o SPA só devolve `index.html` sem OG.
  * Para crawlers, reescrevemos para `/api/professional-og` (HTML com meta + redirect humano).
  */
+/** Inclui `meta-externalagent` — é o que o Depurador de compartilhamento da Meta usa (não só facebookexternalhit). */
 const OG_CRAWLER_UA =
-  /facebookexternalhit|Facebot|WhatsApp|Instagram|LinkedInBot|Slackbot|Twitterbot|SkypeUriPreview|TelegramBot|Discordbot|Bytespider|Pinterest|vkShare|redditbot|Applebot/i;
+  /facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Instagram|LinkedInBot|Slackbot|Twitterbot|SkypeUriPreview|TelegramBot|Discordbot|Bytespider|Pinterest|vkShare|redditbot|Applebot/i;
 
 export const config = {
   matcher: ["/professional/:path+"],

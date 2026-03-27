@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
 import { resolveOgApiOrigin } from "../api-utils/resolveOgApiOrigin";
 import { sealImageUrlForMeta } from "../api-utils/resolveSealAssetOrigin";
+import { brandIconLinkTags } from "../api-utils/brandIconLinkTags";
 
 function escAttr(s: string) {
   return s
@@ -42,11 +43,12 @@ export default async function handler(req: Request): Promise<Response> {
     const seal = escAttr(sealImageUrlForMeta(req));
     const desc = escAttr("Ver perfil no Chamô — serviços verificados e chat direto.");
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
+${brandIconLinkTags(publicApp, escAttr)}
 <meta property="og:title" content="${t}" />
 <meta property="og:description" content="${desc}" />
 <meta property="og:image" content="${seal}" />
 <meta property="og:site_name" content="Chamô" />
-<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:card" content="summary" />
 <meta name="twitter:image" content="${seal}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(fallbackRedirect)}" />
 </head><body><p><a href="${escAttr(fallbackRedirect)}">Abrir no Chamô</a></p></body></html>`;
@@ -122,15 +124,17 @@ export default async function handler(req: Request): Promise<Response> {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+${brandIconLinkTags(publicApp, escAttr)}
 <title>${escText(title)}</title>
 <meta property="og:type" content="profile" />
 <meta property="og:title" content="${escAttr(title)}" />
 <meta property="og:description" content="${escAttr(description)}" />
 <meta property="og:image" content="${escAttr(ogImage)}" />
 <meta property="og:image:secure_url" content="${escAttr(ogImage)}" />
+<meta property="og:image:alt" content="${escAttr(displayName)}" />
 <meta property="og:url" content="${escAttr(canonical)}" />
 <meta property="og:site_name" content="Chamô" />
-<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="${escAttr(title)}" />
 <meta name="twitter:description" content="${escAttr(description)}" />
 <meta name="twitter:image" content="${escAttr(ogImage)}" />

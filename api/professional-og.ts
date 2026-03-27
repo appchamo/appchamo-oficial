@@ -3,6 +3,7 @@
  * Requer: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY no Vercel.
  */
 import { createClient } from "@supabase/supabase-js";
+import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
 
 function escAttr(s: string) {
   return s
@@ -42,8 +43,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const publicApp =
-    (process.env.VITE_PUBLIC_APP_URL || process.env.PUBLIC_APP_URL || "https://app.chamo.com").replace(/\/$/, "");
+  const publicApp = resolveOgPublicAppOrigin(req);
 
   const fallbackRedirect = `${publicApp}/professional/${encodeURIComponent(key)}`;
 

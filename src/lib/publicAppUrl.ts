@@ -16,14 +16,18 @@ export function getPublicAppBaseUrl(): string {
 }
 
 /**
- * Origem HTTPS onde as rotas `/api/*-og` estão hospedadas (Vercel).
- * Use quando `VITE_PUBLIC_APP_URL` (ex.: app.chamo.com) tiver SSL inválido mas existir um deploy Vercel com HTTPS válido.
+ * Origem HTTPS onde estão as rotas `/api/*-og` (Vercel).
+ * Em builds na Vercel, usa automaticamente `VERCEL_URL` (HTTPS válido) quando `app.chamo.com` estiver com SSL inválido.
  */
 export function getOgShareBaseUrl(): string {
   const raw = (import.meta.env.VITE_SHARE_OG_BASE_URL as string | undefined)?.trim();
   if (raw) {
     const u = raw.replace(/\/$/, "");
     if (u.startsWith("https://") || u.startsWith("http://")) return u;
+  }
+  const vercel = (import.meta.env.VITE_VERCEL_DEPLOYMENT_URL as string | undefined)?.trim();
+  if (vercel && (vercel.startsWith("https://") || vercel.startsWith("http://"))) {
+    return vercel.replace(/\/$/, "");
   }
   return getPublicAppBaseUrl();
 }

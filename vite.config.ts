@@ -4,7 +4,14 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 
 export default defineConfig(({ mode }) => {
+  const vercelHost = (process.env.VERCEL_URL || "").trim().replace(/\/$/, "");
+  const vercelDeploymentUrl =
+    vercelHost && !vercelHost.includes("localhost") ? `https://${vercelHost}` : "";
+
   return {
+    define: {
+      "import.meta.env.VITE_VERCEL_DEPLOYMENT_URL": JSON.stringify(vercelDeploymentUrl),
+    },
     server: {
       host: "::",
       port: 8080,

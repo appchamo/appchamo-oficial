@@ -149,6 +149,10 @@ function uint8ToBase64(buf: Uint8Array): string {
   return btoa(bin);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function fetchPdfBase64(url: string, apiKey: string): Promise<string | null> {
   try {
     let res = await fetch(url, { headers: { access_token: apiKey } });
@@ -159,6 +163,56 @@ async function fetchPdfBase64(url: string, apiKey: string): Promise<string | nul
   } catch {
     return null;
   }
+}
+
+/** O link do PDF no Asaas pode responder 404 nos primeiros segundos após o pdfUrl aparecer na API. */
+async function fetchPdfBase64WithRetry(
+  url: string,
+  apiKey: string,
+  maxAttempts = 8,
+  delayMs = 2500,
+): Promise<string | null> {
+  for (let a = 0; a < maxAttempts; a++) {
+    const b64 = await fetchPdfBase64(url, apiKey);
+    if (b64) return b64;
+    if (a < maxAttempts - 1) await sleep(delayMs);
+  }
+  return null;
+}
+
+type AsaasInvoiceSnapshot = {
+  pdfUrl: string | null;
+  xmlUrl: string | null;
+  nfNumber: string | null;
+  invStatus: string;
+};
+
+/** Aguarda o Asaas expor pdfUrl (prefeitura / NFS-e costuma atrasar mais que o status AUTHORIZED). */
+async function pollAsaasInvoiceUntilPdf(
+  apiKey: string,
+  invoiceId: string,
+  maxAttempts: number,
+  delayMs: number,
+): Promise<AsaasInvoiceSnapshot> {
+  let pdfUrl: string | null = null;
+  let xmlUrl: string | null = null;
+  let nfNumber: string | null = null;
+  let invStatus = "AUTHORIZED";
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const inv = await asaasReq(apiKey, `/invoices/${invoiceId}`, "GET");
+    invStatus = inv.status || invStatus;
+    if (inv.pdfUrl) pdfUrl = inv.pdfUrl;
+    if (inv.xmlUrl) xmlUrl = inv.xmlUrl;
+    if (inv.number || inv.rpsNumber) nfNumber = inv.number || inv.rpsNumber || nfNumber;
+    if (inv.status === "ERROR") {
+      throw new Error(inv.statusDescription || "Erro na emissão da NFS-e no Asaas");
+    }
+    if (pdfUrl) break;
+    if (i < maxAttempts - 1) await sleep(delayMs);
+  }
+
+  return { pdfUrl, xmlUrl, nfNumber, invStatus };
 }
 
 /** SMTP: SMTP_HOST, SMTP_USER (ou SMTP_USERNAME), SMTP_PASSWORD (ou SMTP_PASS), SMTP_FROM.
@@ -213,6 +267,10 @@ async function sendSmtpInvoiceEmail(opts: {
   let html = opts.html;
   if (!opts.pdfBase64 && opts.pdfUrlFallback) {
     html += `<p style="margin-top:16px;font-size:14px;"><a href="${opts.pdfUrlFallback}" style="color:#ea580c;font-weight:600;">Baixar PDF da nota fiscal</a></p>`;
+  } else if (!opts.pdfBase64 && !opts.pdfUrlFallback) {
+    html += `<p style="margin-top:16px;font-size:14px;line-height:1.55;color:#666;font-family:system-ui,-apple-system,sans-serif;">
+      O PDF pode levar alguns minutos para ficar disponível. Você pode baixá-lo em <strong>Carteira</strong> no app Chamô quando aparecer lá.
+    </p>`;
   }
 
   const attachments = opts.pdfBase64
@@ -398,24 +456,12 @@ serve(async (req) => {
 
     await asaasReq(ASAAS_API_KEY, `/invoices/${invoiceId}/authorize`, "POST", {});
 
-    let pdfUrl: string | null = null;
-    let xmlUrl: string | null = null;
-    let nfNumber: string | null = null;
-    let invStatus = "AUTHORIZED";
-
-    for (let i = 0; i < 24; i++) {
-      const inv = await asaasReq(ASAAS_API_KEY, `/invoices/${invoiceId}`, "GET");
-      invStatus = inv.status || invStatus;
-      pdfUrl = inv.pdfUrl || pdfUrl;
-      xmlUrl = inv.xmlUrl || xmlUrl;
-      nfNumber = inv.number || inv.rpsNumber || nfNumber;
-      if (inv.status === "ERROR") {
-        throw new Error(inv.statusDescription || "Erro na emissão da NFS-e no Asaas");
-      }
-      if (pdfUrl && (inv.status === "AUTHORIZED" || inv.status === "SYNCHRONIZED")) break;
-      if (pdfUrl && i >= 8) break;
-      await new Promise((r) => setTimeout(r, 1500));
-    }
+    // ~60s: muitas prefeituras só geram o PDF depois do status AUTHORIZED
+    const pre = await pollAsaasInvoiceUntilPdf(ASAAS_API_KEY, invoiceId, 30, 2000);
+    let pdfUrl = pre.pdfUrl;
+    let xmlUrl = pre.xmlUrl;
+    let nfNumber = pre.nfNumber;
+    let invStatus = pre.invStatus;
 
     const { data: inserted, error: insErr } = await supabase
       .from("platform_fee_invoices")
@@ -458,10 +504,28 @@ serve(async (req) => {
       console.error("DB insert invoice items:", itemErr);
     }
 
+    // Mais ~40s após gravar: pdfUrl às vezes só surge depois (evita NF no app sem PDF e e-mail sem anexo)
+    if (!pdfUrl) {
+      const post = await pollAsaasInvoiceUntilPdf(ASAAS_API_KEY, invoiceId, 20, 2000);
+      if (post.pdfUrl) pdfUrl = post.pdfUrl;
+      if (post.xmlUrl) xmlUrl = post.xmlUrl;
+      if (post.nfNumber) nfNumber = post.nfNumber;
+      invStatus = post.invStatus;
+      await supabase
+        .from("platform_fee_invoices")
+        .update({
+          pdf_url: pdfUrl,
+          xml_url: xmlUrl,
+          nf_number: nfNumber,
+          status: invStatus === "AUTHORIZED" ? "authorized" : String(invStatus).toLowerCase(),
+        })
+        .eq("id", invoiceRowId);
+    }
+
     const toEmail = (fiscal.fiscal_email || "").trim();
     let emailSent = false;
     if (toEmail) {
-      const pdfB64 = pdfUrl ? await fetchPdfBase64(pdfUrl, ASAAS_API_KEY) : null;
+      const pdfB64 = pdfUrl ? await fetchPdfBase64WithRetry(pdfUrl, ASAAS_API_KEY, 8, 2500) : null;
       emailSent = await sendSmtpInvoiceEmail({
         to: toEmail,
         subject: "Chamô — sua nota fiscal de comissão da plataforma",

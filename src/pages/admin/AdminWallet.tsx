@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Timer, X, FileText, Download } from "lucide-react";
+import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Timer, X, FileText, Download, RefreshCw } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -33,7 +33,7 @@ interface WalletTx {
   available_at: string | null;
   asaas_transfer_id: string | null;
   /** Preenchido quando já existe NFS-e de comissão vinculada a esta transação */
-  platform_fee_nf?: { pdf_url: string | null; nf_number: string | null };
+  platform_fee_nf?: { pdf_url: string | null; nf_number: string | null; invoice_id: string };
 }
 
 const fmt = (v: number) =>
@@ -246,6 +246,7 @@ const AdminWallet = () => {
   const [nfAfterTransfer, setNfAfterTransfer] = useState<NfAfterTransferPayload | null>(null);
   const [emittingNf, setEmittingNf] = useState(false);
   const [emittingNfTxId, setEmittingNfTxId] = useState<string | null>(null);
+  const [syncingPdfTxId, setSyncingPdfTxId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -260,7 +261,7 @@ const AdminWallet = () => {
     if (!proIds.length) { setEntries([]); setLoading(false); return; }
 
     const allTxIds = (data || []).map(t => t.id);
-    const nfByTxId: Record<string, { pdf_url: string | null; nf_number: string | null }> = {};
+    const nfByTxId: Record<string, { pdf_url: string | null; nf_number: string | null; invoice_id: string }> = {};
     if (allTxIds.length > 0) {
       const { data: nfiRows } = await supabase
         .from("platform_fee_invoice_items")
@@ -279,7 +280,12 @@ const AdminWallet = () => {
       }
       (nfiRows || []).forEach((row: { wallet_transaction_id: string; invoice_id: string }) => {
         const inv = invById[row.invoice_id];
-        if (inv) nfByTxId[row.wallet_transaction_id] = inv;
+        if (inv) {
+          nfByTxId[row.wallet_transaction_id] = {
+            ...inv,
+            invoice_id: row.invoice_id,
+          };
+        }
       });
     }
 
@@ -421,6 +427,36 @@ const AdminWallet = () => {
       toast({ title: "Erro ao emitir NF", description: err.message, variant: "destructive" });
     } finally {
       setEmittingNfTxId(null);
+    }
+  };
+
+  const syncFeeInvoicePdf = async (tx: WalletTx) => {
+    const invId = tx.platform_fee_nf?.invoice_id;
+    if (!invId) return;
+    setSyncingPdfTxId(tx.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync_platform_fee_invoice_pdf", {
+        body: { platform_fee_invoice_id: invId },
+      });
+      if (error) throw new Error(error.message || "Erro ao sincronizar PDF");
+      if (data?.success === true) {
+        toast({ title: "PDF atualizado", description: "Você já pode baixar a nota fiscal." });
+        await load();
+        return;
+      }
+      if (data?.success === false) {
+        toast({
+          title: "PDF ainda indisponível",
+          description: data.error || "O Asaas ainda não gerou o arquivo. Tente de novo em alguns minutos.",
+        });
+        return;
+      }
+      if (data?.error) throw new Error(data.error);
+      throw new Error("Resposta inesperada ao sincronizar PDF");
+    } catch (err: any) {
+      toast({ title: "Erro ao buscar PDF", description: err.message, variant: "destructive" });
+    } finally {
+      setSyncingPdfTxId(null);
     }
   };
 
@@ -652,9 +688,24 @@ const AdminWallet = () => {
                                         Baixar NF
                                       </button>
                                     ) : (
-                                      <span className="text-xs text-muted-foreground">
-                                        NF emitida{tx.platform_fee_nf.nf_number ? ` · nº ${tx.platform_fee_nf.nf_number}` : ""} — PDF ainda indisponível
-                                      </span>
+                                      <div className="flex flex-wrap items-center justify-end gap-2">
+                                        <span className="text-xs text-muted-foreground">
+                                          NF emitida{tx.platform_fee_nf.nf_number ? ` · nº ${tx.platform_fee_nf.nf_number}` : ""} — PDF ainda indisponível
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => syncFeeInvoicePdf(tx)}
+                                          disabled={syncingPdfTxId === tx.id || !!emittingNf}
+                                          className="inline-flex items-center gap-1.5 text-xs font-medium border border-border bg-background hover:bg-muted px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+                                        >
+                                          {syncingPdfTxId === tx.id ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          ) : (
+                                            <RefreshCw className="w-3.5 h-3.5" />
+                                          )}
+                                          Buscar PDF
+                                        </button>
+                                      </div>
                                     )
                                   ) : (
                                     <button

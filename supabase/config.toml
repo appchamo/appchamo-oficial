@@ -457,6 +457,12 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/emit_transfer_fee_invoice/index.ts"
 
+# Admin: atualiza pdf_url / nf_number a partir do Asaas (notas emitidas antes do PDF existir)
+[functions.sync_platform_fee_invoice_pdf]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/sync_platform_fee_invoice_pdf/index.ts"
+
 # Admin: repasse PIX — gateway pode retornar 401 Invalid JWT com ES256; a função valida com getUser() + e-mail admin
 [functions.process_transfer]
 enabled = true

@@ -5,6 +5,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
 import { resolveStorageImageForOg } from "../api-utils/resolveStorageImageForOg";
+import { sealImageUrlForMeta } from "../api-utils/resolveSealAssetOrigin";
 
 function escAttr(s: string) {
   return s
@@ -34,7 +35,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (!supabaseUrl || !serviceKey) {
     const title = escAttr("Comunidade Chamô");
-    const seal = escAttr(`${publicApp}/seals/push/seal_chamo.png`);
+    const seal = escAttr(sealImageUrlForMeta(req));
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="Publicação na Comunidade Chamô" />
@@ -71,7 +72,7 @@ export default async function handler(req: Request): Promise<Response> {
     .slice(0, 220);
   const description = bodySnippet.length > 0 ? bodySnippet : "Publicação na Comunidade Chamô";
   const title = `${authorName} no Chamô`;
-  const sealUrl = `${publicApp}/seals/push/seal_chamo.png`;
+  const sealUrl = sealImageUrlForMeta(req);
   const ogImage = await resolveStorageImageForOg(supabase, post.image_url, supabaseUrl, sealUrl);
 
   const canonical = `${publicApp}/p/comunidade/${postId}`;

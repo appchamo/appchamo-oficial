@@ -4,6 +4,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
+import { sealImageUrlForMeta } from "../api-utils/resolveSealAssetOrigin";
 
 function escAttr(s: string) {
   return s
@@ -37,7 +38,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (!supabaseUrl || !serviceKey) {
     const t = escAttr("Profissional no Chamô");
-    const seal = escAttr(`${publicApp}/seals/push/seal_chamo.png`);
+    const seal = escAttr(sealImageUrlForMeta(req));
     const desc = escAttr("Ver perfil no Chamô — serviços verificados e chat direto.");
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
 <meta property="og:title" content="${t}" />

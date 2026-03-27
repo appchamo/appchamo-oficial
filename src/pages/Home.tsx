@@ -387,6 +387,14 @@ const Home = () => {
     return () => clearTimeout(failsafe);
   }, []);
 
+  // Assim que o perfil bate com a sessão (pós-troca Google ↔ Apple), liberta sponsors/featured/categorias.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    if (user?.id && profile?.user_id === user.id) {
+      setHeavySectionsReady(true);
+    }
+  }, [user?.id, profile?.user_id]);
+
   // ✅ Pós-OAuth: no web remonta seções; no nativo NÃO dar contentSeed cedo (disparava 3× montagem + trava).
   useEffect(() => {
     const t = setTimeout(() => {

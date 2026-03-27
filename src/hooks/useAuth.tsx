@@ -131,7 +131,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [roles]);
 
   const loadUserData = (sess: Session | null) => {
-    if (isSignOutInProgress) return;
+    // Durante signOut ficamos ~1s com isSignOutInProgress; se o utilizador entrar com outro OAuth
+    // nesse intervalo, SIGNED_IN deve aplicar — senão a Home fica sem perfil/dados (skeleton eterno).
+    if (isSignOutInProgress && !sess?.user) return;
+    if (sess?.user) setIsSignOutInProgress(false);
 
     setSession(sess);
     setUser(sess?.user ?? null);
@@ -372,6 +375,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         console.log("🔐 Auth Event:", event);
         if (event === 'SIGNED_OUT') {
+          lastProcessedCode = null;
+          isExchangingOAuth = false;
           setUser(null);
           setSession(null);
           setProfile(null);
@@ -380,9 +385,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem("chamo_cached_roles");
           try {
             sessionStorage.removeItem("chamo_featured_reload_after_oauth");
+            sessionStorage.removeItem("chamo_oauth_just_landed");
+            sessionStorage.removeItem("chamo_hang_reload_grace_until");
           } catch (_) {}
           setLoading(false);
         } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && sess?.user) {
+            setIsSignOutInProgress(false);
+          }
           // Refresh de token não deve refazer fetch do perfil: em rede lenta o timeout apagava profile/cache e “quebrava” a Home.
           if (event === "TOKEN_REFRESHED") {
             if (sess) {
@@ -506,7 +516,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         `sb-${import.meta.env.VITE_SUPABASE_URL?.split("//")[1]?.split(".")[0]}-auth-token`,
       ];
       authKeys.forEach((k) => localStorage.removeItem(k));
+      try {
+        sessionStorage.removeItem("chamo_featured_reload_after_oauth");
+        sessionStorage.removeItem("chamo_oauth_just_landed");
+        sessionStorage.removeItem("chamo_hang_reload_grace_until");
+      } catch (_) {}
       await supabase.auth.signOut();
+      await hardClearNativeAuthSession();
       setUser(null);
       setSession(null);
       setProfile(null);

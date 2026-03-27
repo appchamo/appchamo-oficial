@@ -61,45 +61,80 @@ async function asaasReq(apiKey: string, path: string, method: string, body?: unk
   return data;
 }
 
-async function findOrCreateAsaasCustomer(
-  apiKey: string,
-  fiscal: {
-    fiscal_name: string;
-    fiscal_email: string;
-    fiscal_document: string;
-    fiscal_address_street: string;
-    fiscal_address_number: string;
-    fiscal_address_complement: string | null;
-    fiscal_address_neighborhood: string;
-    fiscal_address_city: string;
-    fiscal_address_state: string;
-    fiscal_address_zip: string;
-  },
-) {
-  const clean = (fiscal.fiscal_document || "").replace(/\D/g, "");
-  if (clean.length !== 11 && clean.length !== 14) {
-    throw new Error("CPF/CNPJ fiscal inválido para emissão no Asaas");
+type FiscalRow = {
+  fiscal_name: string;
+  fiscal_email: string;
+  fiscal_document: string;
+  fiscal_address_street: string;
+  fiscal_address_number: string;
+  fiscal_address_complement: string | null;
+  fiscal_address_neighborhood: string;
+  fiscal_address_city: string;
+  fiscal_address_state: string;
+  fiscal_address_zip: string;
+};
+
+/** Exigências do Asaas para cliente tomador em NFS-e (evita erro genérico na API). */
+function buildAsaasCustomerPayload(fiscal: FiscalRow): { payload: Record<string, unknown>; cpfCnpj: string } {
+  const cpfCnpj = (fiscal.fiscal_document || "").replace(/\D/g, "");
+  if (cpfCnpj.length !== 11 && cpfCnpj.length !== 14) {
+    throw new Error("CPF/CNPJ fiscal inválido para emissão no Asaas.");
   }
 
-  const search = await asaasReq(apiKey, `/customers?cpfCnpj=${clean}`, "GET");
-  const existing = search.data?.[0];
-  if (existing?.id) return existing.id as string;
+  const email = (fiscal.fiscal_email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    throw new Error(
+      "E-mail fiscal inválido ou incompleto. O profissional deve corrigir em Financeiro → Cadastro fiscal.",
+    );
+  }
 
-  const zip = (fiscal.fiscal_address_zip || "").replace(/\D/g, "").slice(0, 8);
+  const street = (fiscal.fiscal_address_street || "").trim();
+  if (street.length < 2) {
+    throw new Error(
+      "Endereço fiscal incompleto: informe o logradouro (rua/avenida). Necessário para NFS-e no Asaas.",
+    );
+  }
+
+  const city = (fiscal.fiscal_address_city || "").trim();
+  if (city.length < 2) {
+    throw new Error("Cidade fiscal incompleta. Peça para preencher em Cadastro fiscal.");
+  }
+
+  const state = (fiscal.fiscal_address_state || "").trim().toUpperCase().slice(0, 2);
+  if (!/^[A-Z]{2}$/.test(state)) {
+    throw new Error("UF fiscal inválida: use a sigla com 2 letras (ex.: SP, RJ).");
+  }
+
+  const postalCode = (fiscal.fiscal_address_zip || "").replace(/\D/g, "").slice(0, 8);
+  if (postalCode.length !== 8) {
+    throw new Error("CEP fiscal inválido: o Asaas exige 8 dígitos (somente números).");
+  }
 
   const payload: Record<string, unknown> = {
     name: (fiscal.fiscal_name || "").trim() || "Profissional Chamô",
-    email: (fiscal.fiscal_email || "").trim(),
-    cpfCnpj: clean,
-    address: (fiscal.fiscal_address_street || "").trim(),
+    email,
+    cpfCnpj,
+    address: street,
     addressNumber: (fiscal.fiscal_address_number || "").trim() || "S/N",
     complement: (fiscal.fiscal_address_complement || "").trim() || undefined,
     province: (fiscal.fiscal_address_neighborhood || "").trim() || "Centro",
-    postalCode: zip || undefined,
-    city: (fiscal.fiscal_address_city || "").trim() || undefined,
-    state: (fiscal.fiscal_address_state || "").trim().slice(0, 2) || undefined,
+    postalCode,
+    city,
+    state,
   };
 
+  return { payload, cpfCnpj };
+}
+
+/** Cria ou atualiza o cliente no Asaas — clientes antigos sem endereço falhavam na NFS-e se não dessem PUT. */
+async function syncAsaasCustomerForInvoice(apiKey: string, fiscal: FiscalRow): Promise<string> {
+  const { payload, cpfCnpj } = buildAsaasCustomerPayload(fiscal);
+  const search = await asaasReq(apiKey, `/customers?cpfCnpj=${cpfCnpj}`, "GET");
+  const existing = search.data?.[0];
+  if (existing?.id) {
+    await asaasReq(apiKey, `/customers/${existing.id}`, "PUT", payload);
+    return existing.id as string;
+  }
   const created = await asaasReq(apiKey, "/customers", "POST", payload);
   return created.id as string;
 }
@@ -320,16 +355,25 @@ serve(async (req) => {
       .eq("professional_id", professional_id)
       .maybeSingle();
 
-    if (fiscalErr || !fiscal?.fiscal_email || !fiscal?.fiscal_document) {
+    if (fiscalErr || !fiscal?.fiscal_document) {
       return new Response(
         JSON.stringify({
-          error: "Cadastro fiscal incompleto (e-mail e CPF/CNPJ da NF são obrigatórios).",
+          error: "Cadastro fiscal não encontrado ou sem CPF/CNPJ. O profissional deve completar Financeiro → Cadastro fiscal.",
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    const customerId = await findOrCreateAsaasCustomer(ASAAS_API_KEY, fiscal as any);
+    let customerId: string;
+    try {
+      customerId = await syncAsaasCustomerForInvoice(ASAAS_API_KEY, fiscal as FiscalRow);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     const serviceDescription =

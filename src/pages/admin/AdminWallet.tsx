@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Timer, X, FileText } from "lucide-react";
+import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Timer, X, FileText, Download } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -32,6 +32,8 @@ interface WalletTx {
   transferred_at: string | null;
   available_at: string | null;
   asaas_transfer_id: string | null;
+  /** Preenchido quando já existe NFS-e de comissão vinculada a esta transação */
+  platform_fee_nf?: { pdf_url: string | null; nf_number: string | null };
 }
 
 const fmt = (v: number) =>
@@ -243,6 +245,7 @@ const AdminWallet = () => {
   const [modalEntry, setModalEntry] = useState<WalletEntry | null>(null);
   const [nfAfterTransfer, setNfAfterTransfer] = useState<NfAfterTransferPayload | null>(null);
   const [emittingNf, setEmittingNf] = useState(false);
+  const [emittingNfTxId, setEmittingNfTxId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -255,6 +258,30 @@ const AdminWallet = () => {
 
     const proIds = [...new Set((data || []).map(t => t.professional_id))];
     if (!proIds.length) { setEntries([]); setLoading(false); return; }
+
+    const allTxIds = (data || []).map(t => t.id);
+    const nfByTxId: Record<string, { pdf_url: string | null; nf_number: string | null }> = {};
+    if (allTxIds.length > 0) {
+      const { data: nfiRows } = await supabase
+        .from("platform_fee_invoice_items")
+        .select("wallet_transaction_id, invoice_id")
+        .in("wallet_transaction_id", allTxIds);
+      const invoiceIds = [...new Set((nfiRows || []).map((r: { invoice_id: string }) => r.invoice_id))];
+      const invById: Record<string, { pdf_url: string | null; nf_number: string | null }> = {};
+      if (invoiceIds.length > 0) {
+        const { data: invs } = await supabase
+          .from("platform_fee_invoices")
+          .select("id, pdf_url, nf_number")
+          .in("id", invoiceIds);
+        (invs || []).forEach((i: { id: string; pdf_url: string | null; nf_number: string | null }) => {
+          invById[i.id] = { pdf_url: i.pdf_url, nf_number: i.nf_number };
+        });
+      }
+      (nfiRows || []).forEach((row: { wallet_transaction_id: string; invoice_id: string }) => {
+        const inv = invById[row.invoice_id];
+        if (inv) nfByTxId[row.wallet_transaction_id] = inv;
+      });
+    }
 
     const { data: pros } = await supabase.from("professionals").select("id, user_id").in("id", proIds);
     const userIds = (pros || []).map(p => p.user_id).filter(Boolean);
@@ -292,6 +319,7 @@ const AdminWallet = () => {
           transactions: [],
         };
       }
+      const nf = nfByTxId[tx.id];
       map[pid].transactions.push({
         id: tx.id,
         amount: Number(tx.amount),
@@ -307,6 +335,7 @@ const AdminWallet = () => {
         transferred_at: tx.transferred_at,
         available_at: tx.available_at,
         asaas_transfer_id: tx.asaas_transfer_id,
+        ...(nf ? { platform_fee_nf: nf } : {}),
       });
       if (tx.status === "pending") {
         map[pid].pending_amount += Number(tx.amount);
@@ -352,31 +381,46 @@ const AdminWallet = () => {
     }
   };
 
+  const invokeEmitFeeInvoice = async (professional_id: string, wallet_transaction_ids: string[]) => {
+    const { data, error } = await supabase.functions.invoke("emit_transfer_fee_invoice", {
+      body: { professional_id, wallet_transaction_ids },
+    });
+    if (error) throw new Error(error.message || "Erro ao emitir NF");
+    if (data?.error) throw new Error(data.error);
+    const emailHint = data.email_sent
+      ? "E-mail enviado ao prestador."
+      : "Configure SMTP (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM) na função para enviar o PDF por e-mail.";
+    toast({
+      title: "Nota fiscal emitida",
+      description: `${emailHint} Valor: ${fmt(data.value)}.`,
+    });
+    return data;
+  };
+
   const emitFeeInvoice = async () => {
     if (!nfAfterTransfer || nfAfterTransfer.platform_fee <= 0) return;
     setEmittingNf(true);
     try {
-      const { data, error } = await supabase.functions.invoke("emit_transfer_fee_invoice", {
-        body: {
-          professional_id: nfAfterTransfer.professional_id,
-          wallet_transaction_ids: nfAfterTransfer.wallet_transaction_ids,
-        },
-      });
-      if (error) throw new Error(error.message || "Erro ao emitir NF");
-      if (data?.error) throw new Error(data.error);
-      const emailHint = data.email_sent
-        ? "E-mail enviado ao prestador."
-        : "Configure SMTP (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM) na função para enviar o PDF por e-mail.";
-      toast({
-        title: "Nota fiscal emitida",
-        description: `${emailHint} Valor: ${fmt(data.value)}.`,
-      });
+      await invokeEmitFeeInvoice(nfAfterTransfer.professional_id, nfAfterTransfer.wallet_transaction_ids);
       setNfAfterTransfer(null);
       load();
     } catch (err: any) {
       toast({ title: "Erro ao emitir NF", description: err.message, variant: "destructive" });
     } finally {
       setEmittingNf(false);
+    }
+  };
+
+  const emitFeeInvoiceForSingleTx = async (entry: WalletEntry, tx: WalletTx) => {
+    if (tx.platform_fee_amount <= 0 || tx.platform_fee_nf) return;
+    setEmittingNfTxId(tx.id);
+    try {
+      await invokeEmitFeeInvoice(entry.professional_id, [tx.id]);
+      await load();
+    } catch (err: any) {
+      toast({ title: "Erro ao emitir NF", description: err.message, variant: "destructive" });
+    } finally {
+      setEmittingNfTxId(null);
     }
   };
 
@@ -593,6 +637,41 @@ const AdminWallet = () => {
                               )}
                               {tx.asaas_transfer_id && (
                                 <p className="text-xs text-muted-foreground">ID Asaas: {tx.asaas_transfer_id}</p>
+                              )}
+
+                              {tab === "transferred" && tx.status === "transferred" && tx.platform_fee_amount > 0 && (
+                                <div className="flex flex-wrap items-center justify-end gap-2 pt-1 border-t border-dashed">
+                                  {tx.platform_fee_nf ? (
+                                    tx.platform_fee_nf.pdf_url ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => window.open(tx.platform_fee_nf!.pdf_url!, "_blank", "noopener,noreferrer")}
+                                        className="inline-flex items-center gap-1.5 text-xs font-medium text-primary border border-primary/40 bg-primary/5 hover:bg-primary/10 px-2.5 py-1.5 rounded-lg transition-colors"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        Baixar NF
+                                      </button>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">
+                                        NF emitida{tx.platform_fee_nf.nf_number ? ` · nº ${tx.platform_fee_nf.nf_number}` : ""} — PDF ainda indisponível
+                                      </span>
+                                    )
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => emitFeeInvoiceForSingleTx(entry, tx)}
+                                      disabled={emittingNfTxId === tx.id || !!emittingNf}
+                                      className="inline-flex items-center gap-1.5 text-xs font-medium bg-primary text-white px-2.5 py-1.5 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                                    >
+                                      {emittingNfTxId === tx.id ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <FileText className="w-3.5 h-3.5" />
+                                      )}
+                                      Emitir NF
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </div>
                           );

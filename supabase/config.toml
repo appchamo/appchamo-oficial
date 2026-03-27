@@ -456,3 +456,9 @@ entrypoint = "./functions/asaas_webhook/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/emit_transfer_fee_invoice/index.ts"
+
+# Admin: repasse PIX — gateway pode retornar 401 Invalid JWT com ES256; a função valida com getUser() + e-mail admin
+[functions.process_transfer]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/process_transfer/index.ts"

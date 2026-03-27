@@ -1,12 +1,43 @@
 /**
- * Proxy da foto de perfil para og:image (WhatsApp / Facebook).
- * Mesma origem que a página OG, URL curta; evita signed URLs enormes e falhas do crawler em storage direto.
+ * Devolve os bytes da foto de perfil para og:image (WhatsApp / Facebook).
+ * Usa download direto no Storage (service role) — sem signed URL + fetch.
+ * Em falta: devolve o selo com 200 (redirect quebra alguns crawlers).
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
 import { extractUploadsObjectPath } from "../api-utils/extractUploadsObjectPath";
 
 export const config = { runtime: "edge" };
+
+function mimeFromPath(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "application/octet-stream";
+}
+
+async function sealBytesResponse(publicApp: string): Promise<Response> {
+  const sealUrl = `${publicApp}/seals/push/seal_chamo.png`;
+  try {
+    const r = await fetch(sealUrl, { redirect: "follow" });
+    if (!r.ok) {
+      return new Response("Not found", { status: 404 });
+    }
+    const buf = await r.arrayBuffer();
+    const ct = r.headers.get("content-type") || "image/png";
+    return new Response(buf, {
+      status: 200,
+      headers: {
+        "Content-Type": ct,
+        "Cache-Control": "public, max-age=300, s-maxage=300",
+      },
+    });
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+}
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "GET") {
@@ -22,12 +53,9 @@ export default async function handler(req: Request): Promise<Response> {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const publicApp = resolveOgPublicAppOrigin(req);
-  const sealUrl = `${publicApp}/seals/push/seal_chamo.png`;
-
-  const redirectSeal = () => Response.redirect(sealUrl, 302);
 
   if (!supabaseUrl || !serviceKey) {
-    return redirectSeal();
+    return sealBytesResponse(publicApp);
   }
 
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -42,7 +70,7 @@ export default async function handler(req: Request): Promise<Response> {
     .maybeSingle();
 
   if (proErr || !pro) {
-    return redirectSeal();
+    return sealBytesResponse(publicApp);
   }
 
   const proRow = pro as { user_id: string };
@@ -56,48 +84,59 @@ export default async function handler(req: Request): Promise<Response> {
   const raw = (avatarRef || "").trim();
 
   if (!raw) {
-    return redirectSeal();
+    return sealBytesResponse(publicApp);
   }
 
-  let fetchUrl: string | null = null;
   const objectPath = extractUploadsObjectPath(raw);
 
   if (objectPath) {
-    const { data, error } = await supabase.storage.from("uploads").createSignedUrl(objectPath, 3600);
-    if (!error && data?.signedUrl) fetchUrl = data.signedUrl;
-  } else if (/^https?:\/\//i.test(raw)) {
-    fetchUrl = raw;
-  }
-
-  if (!fetchUrl) {
-    return redirectSeal();
-  }
-
-  try {
-    const imgRes = await fetch(fetchUrl, {
-      headers: { Accept: "image/*,*/*;q=0.8" },
-      redirect: "follow",
-    });
-    if (!imgRes.ok) {
-      return redirectSeal();
+    const { data: blob, error: dlErr } = await supabase.storage.from("uploads").download(objectPath);
+    if (dlErr || !blob) {
+      return sealBytesResponse(publicApp);
     }
-    const ct = imgRes.headers.get("content-type") || "application/octet-stream";
+    const buf = await blob.arrayBuffer();
+    const ct =
+      blob.type && blob.type !== "application/octet-stream" ? blob.type : mimeFromPath(objectPath);
     if (!ct.startsWith("image/")) {
-      return redirectSeal();
+      return sealBytesResponse(publicApp);
     }
-    const len = imgRes.headers.get("content-length");
-    if (len && Number(len) > 2_500_000) {
-      return redirectSeal();
-    }
-
-    return new Response(imgRes.body, {
+    return new Response(buf, {
       status: 200,
       headers: {
         "Content-Type": ct,
-        "Cache-Control": "public, max-age=3600, s-maxage=3600",
+        "Cache-Control": "public, max-age=86400, s-maxage=86400",
       },
     });
-  } catch {
-    return redirectSeal();
   }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const imgRes = await fetch(raw, {
+        headers: { Accept: "image/*,*/*;q=0.8" },
+        redirect: "follow",
+      });
+      if (!imgRes.ok) {
+        return sealBytesResponse(publicApp);
+      }
+      const ct = imgRes.headers.get("content-type") || "application/octet-stream";
+      if (!ct.startsWith("image/")) {
+        return sealBytesResponse(publicApp);
+      }
+      const buf = await imgRes.arrayBuffer();
+      if (buf.byteLength > 2_500_000) {
+        return sealBytesResponse(publicApp);
+      }
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          "Content-Type": ct,
+          "Cache-Control": "public, max-age=86400, s-maxage=86400",
+        },
+      });
+    } catch {
+      return sealBytesResponse(publicApp);
+    }
+  }
+
+  return sealBytesResponse(publicApp);
 }

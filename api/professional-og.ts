@@ -4,7 +4,6 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
-import { resolveStorageImageForOg } from "../api-utils/resolveStorageImageForOg";
 
 function escAttr(s: string) {
   return s
@@ -109,8 +108,8 @@ export default async function handler(req: Request): Promise<Response> {
   const title = `${displayName} - ${rolePart} - Perfil Oficial | Chamô`;
   const description = `Contrate ${displayName} no Chamô — serviços verificados e chat direto.`;
 
-  const sealUrl = `${publicApp}/seals/push/seal_chamo.png`;
-  const avatar = await resolveStorageImageForOg(supabase, profRow?.avatar_url, supabaseUrl, sealUrl);
+  /** Mesma origem que a página OG — o crawler do WhatsApp acede aqui e nós servimos bytes (evita WebP/signed URL direto no meta). */
+  const ogImage = `${publicApp}/api/professional-og-image?key=${encodeURIComponent(key)}`;
 
   const canonicalKey = (proRow.slug || proRow.id).trim();
   const canonical = `${publicApp}/professional/${encodeURIComponent(canonicalKey)}`;
@@ -124,13 +123,13 @@ export default async function handler(req: Request): Promise<Response> {
 <meta property="og:type" content="profile" />
 <meta property="og:title" content="${escAttr(title)}" />
 <meta property="og:description" content="${escAttr(description)}" />
-<meta property="og:image" content="${escAttr(avatar)}" />
+<meta property="og:image" content="${escAttr(ogImage)}" />
 <meta property="og:url" content="${escAttr(canonical)}" />
 <meta property="og:site_name" content="Chamô" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${escAttr(title)}" />
 <meta name="twitter:description" content="${escAttr(description)}" />
-<meta name="twitter:image" content="${escAttr(avatar)}" />
+<meta name="twitter:image" content="${escAttr(ogImage)}" />
 <link rel="canonical" href="${escAttr(canonical)}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(canonical)}" />
 <script>location.replace(${JSON.stringify(canonical)});</script>

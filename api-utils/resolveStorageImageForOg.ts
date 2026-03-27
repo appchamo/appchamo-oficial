@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { extractUploadsObjectPath } from "./extractUploadsObjectPath";
 
 /**
  * Imagem pública para og:image / crawlers (WhatsApp, Facebook).
@@ -20,25 +21,16 @@ export async function resolveStorageImageForOg(
     host = "";
   }
 
-  let objectPath: string | null = null;
-  if (!/^https?:\/\//i.test(raw)) {
-    objectPath = raw.replace(/^\/+/, "");
-  } else if (host && raw.includes(host)) {
-    const m = raw.match(/\/object\/(?:public|sign)\/uploads\/([^?]+)/);
-    if (m) {
-      try {
-        objectPath = decodeURIComponent(m[1]);
-      } catch {
-        objectPath = m[1];
-      }
-    }
-  } else {
+  const objectPath = extractUploadsObjectPath(raw);
+  if (objectPath) {
+    const { data, error } = await supabase.storage.from("uploads").createSignedUrl(objectPath, 2592000);
+    if (!error && data?.signedUrl) return data.signedUrl;
+    return fallbackHttpsUrl;
+  }
+
+  if (/^https?:\/\//i.test(raw) && (!host || !raw.includes(host))) {
     return raw;
   }
 
-  if (!objectPath) return fallbackHttpsUrl;
-
-  const { data, error } = await supabase.storage.from("uploads").createSignedUrl(objectPath, 2592000);
-  if (error || !data?.signedUrl) return fallbackHttpsUrl;
-  return data.signedUrl;
+  return fallbackHttpsUrl;
 }

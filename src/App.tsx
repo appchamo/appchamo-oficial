@@ -49,6 +49,7 @@ const ProfessionalFinancial = lazy(() => import("./pages/ProfessionalFinancial")
 const ProfessionalProfile = lazy(() => import("./pages/ProfessionalProfile"));
 const ProAgenda = lazy(() => import("./pages/ProAgenda"));
 const ProAgendaCalendar = lazy(() => import("./pages/ProAgendaCalendar"));
+const Community = lazy(() => import("./pages/Community"));
 const MeusAgendamentos = lazy(() => import("./pages/MeusAgendamentos"));
 const PublicAgenda = lazy(() => import("./pages/PublicAgenda"));
 const BecomeProfessional = lazy(() => import("./pages/BecomeProfessional"));
@@ -498,6 +499,7 @@ const AppContent = () => {
         <Route path="/pro/carteira" element={<ProtectedRoute><ProWallet /></ProtectedRoute>} />
         <Route path="/pro/agenda" element={<ProtectedRoute><ProAgenda /></ProtectedRoute>} />
         <Route path="/pro/agenda/calendario" element={<ProtectedRoute><ProAgendaCalendar /></ProtectedRoute>} />
+        <Route path="/pro/comunidade" element={<ProtectedRoute><Community /></ProtectedRoute>} />
         <Route path="/meus-agendamentos" element={<ProtectedRoute><MeusAgendamentos /></ProtectedRoute>} />
         <Route path="/pro/:id" element={<ProfessionalProfile />} />
         <Route path="/professional/:id" element={<ProfessionalProfile />} />

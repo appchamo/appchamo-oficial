@@ -1,4 +1,4 @@
-import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, Wallet, ScrollText, Calendar, CalendarCheck, ShieldCheck, Image, Gift } from "lucide-react";
+import { X, Home, Search, Grid3X3, FileText, MessageSquare, Ticket, User, Briefcase, LogOut, Crown, ShoppingBag, UserPlus, HelpCircle, Wallet, ScrollText, Calendar, CalendarCheck, ShieldCheck, Image, Gift, UsersRound } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -33,6 +33,7 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
         ...(profile?.user_type === "professional" || profile?.user_type === "company"
           ? [
               { icon: Wallet, label: "Carteira", path: "/pro/financeiro" },
+              { icon: UsersRound, label: "Comunidade", path: "/pro/comunidade" },
               ...(profile?.user_type === "company"
                 ? [
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },

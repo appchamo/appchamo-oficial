@@ -45,8 +45,10 @@ function defaultTaxes(): Record<string, unknown> {
     pisCofinsRetentionType: Deno.env.get("ASAAS_NF_PIS_COFINS_RETENTION") ?? "NOT_WITHHELD",
     pisCofinsTaxStatus: Deno.env.get("ASAAS_NF_PIS_COFINS_TAX_STATUS") ?? "STANDARD_TAXABLE_OPERATION",
   };
-  // Algumas prefeituras (ex.: validação de CNAE na NF) usam o código de classificação tributária — 7 dígitos, só números
-  const tccRaw = Deno.env.get("ASAAS_NF_TAX_CLASSIFICATION_CODE")?.trim() ?? "";
+  // Patrocínio-MG e outras: CNAE na NF via taxes.taxClassificationCode (7 dígitos, só números).
+  // Use ASAAS_NF_CNAE ou ASAAS_NF_TAX_CLASSIFICATION_CODE (mesmo valor; ex.: 7311400).
+  const tccRaw =
+    (Deno.env.get("ASAAS_NF_TAX_CLASSIFICATION_CODE") ?? Deno.env.get("ASAAS_NF_CNAE") ?? "").trim();
   const tcc = tccRaw.replace(/\D/g, "");
   if (tcc.length === 7) {
     taxes.taxClassificationCode = tcc;

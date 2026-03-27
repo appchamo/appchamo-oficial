@@ -64,7 +64,7 @@ const threadLabelPillClass = (c: ThreadLabelColor) =>
 const getOptimizedAvatar = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
-    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=96&height=96&resize=cover&quality=70";
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=96&height=96&resize=cover&quality=62";
   }
   return url;
 };
@@ -72,7 +72,7 @@ const getOptimizedAvatar = (url: string | null | undefined) => {
 const getOptimizedChatImage = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
-    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=720&quality=78";
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=640&quality=72";
   }
   return url;
 };
@@ -81,7 +81,7 @@ const getOptimizedChatImage = (url: string | null | undefined) => {
 const getChatImageLightboxSrc = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
-    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=1600&quality=86";
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=1400&quality=78";
   }
   return url;
 };
@@ -1018,7 +1018,7 @@ const MessageThread = () => {
         const { Camera: CapCamera, CameraResultType, CameraSource } = await import("@capacitor/camera");
         await CapCamera.requestPermissions({ permissions: ["camera"] }).catch(() => {});
         const photo = await CapCamera.getPhoto({
-          quality: 88,
+          quality: 78,
           allowEditing: false,
           resultType: CameraResultType.Uri,
           source: CameraSource.Camera,
@@ -1044,7 +1044,7 @@ const MessageThread = () => {
       try {
         const { Camera: CapCamera } = await import("@capacitor/camera");
         await CapCamera.requestPermissions({ permissions: ["photos"] }).catch(() => {});
-        const { photos } = await CapCamera.pickImages({ limit: 4, quality: 88 });
+        const { photos } = await CapCamera.pickImages({ limit: 4, quality: 78 });
         if (!photos?.length) return;
         const blobs: Blob[] = [];
         for (const p of photos) {

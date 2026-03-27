@@ -1,14 +1,14 @@
 /**
  * Redimensiona e comprime imagem para o chat (WebP com fallback JPEG).
- * Limite ~1280px no maior lado, peso típico bem abaixo de 500 KB em fotos comuns.
+ * Limite ~1024px no maior lado, WebP mais compacto para economizar banda e storage.
  */
 export async function compressImageForChat(
   input: Blob | File,
   options?: { maxEdge?: number; webpQuality?: number; jpegQuality?: number },
 ): Promise<Blob> {
-  const maxEdge = options?.maxEdge ?? 1280;
-  const webpQ = options?.webpQuality ?? 0.78;
-  const jpegQ = options?.jpegQuality ?? 0.82;
+  const maxEdge = options?.maxEdge ?? 1024;
+  const webpQ = options?.webpQuality ?? 0.72;
+  const jpegQ = options?.jpegQuality ?? 0.78;
 
   const bitmap = await createImageBitmap(input).catch(() => null);
   if (!bitmap) throw new Error("Não foi possível ler a imagem.");

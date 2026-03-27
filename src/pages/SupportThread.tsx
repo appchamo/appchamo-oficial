@@ -234,7 +234,7 @@ const SupportThread = () => {
               const canvas = document.createElement("canvas");
               let width = img.width;
               let height = img.height;
-              const MAX_WIDTH = 1200;
+              const MAX_WIDTH = 880;
               if (width > MAX_WIDTH) {
                 height *= MAX_WIDTH / width;
                 width = MAX_WIDTH;
@@ -248,7 +248,7 @@ const SupportThread = () => {
                   const compressed = new File([blob], originalFile.name.replace(/\.[^/.]+$/, ".webp"), { type: "image/webp" });
                   resolve(compressed);
                 }
-              }, "image/webp", 0.7);
+              }, "image/webp", 0.62);
             };
           };
         });

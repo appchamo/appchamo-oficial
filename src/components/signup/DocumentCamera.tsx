@@ -74,7 +74,7 @@ const DocumentCamera = ({ label, onCapture, onClose }: DocumentCameraProps) => {
         onCapture(file, preview);
       },
       "image/jpeg",
-      0.88
+      0.82
     );
   }, [ready, stopCamera, onCapture]);
 

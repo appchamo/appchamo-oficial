@@ -10,7 +10,7 @@ import SponsorStoryViewer, { SponsorStory } from "@/components/SponsorStoryViewe
 type UpgradeStep = "package" | "method" | "pix_form" | "pix_qr" | "card_form" | "success";
 
 /** Comprime imagem client-side para WebP leve mantendo boa qualidade visual */
-async function compressStoryImage(file: File, maxDim = 720, quality = 0.70): Promise<File> {
+async function compressStoryImage(file: File, maxDim = 600, quality = 0.62): Promise<File> {
   return new Promise((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(file);

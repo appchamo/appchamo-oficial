@@ -82,7 +82,7 @@ const getOptimizedAvatar = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
     return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") +
-      "?width=96&height=96&resize=cover&quality=70";
+      "?width=96&height=96&resize=cover&quality=62";
   }
   return url;
 };

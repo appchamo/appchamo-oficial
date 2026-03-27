@@ -547,8 +547,8 @@ const ProfessionalProfile = () => {
                   bucketPath="professionals"
                   currentImage={pro.cover_image_url || undefined}
                   label="Alterar capa"
-                  maxSize={1200}
-                  quality={0.8}
+                  maxSize={900}
+                  quality={0.68}
                 />
               </div>
             )}
@@ -591,7 +591,7 @@ const ProfessionalProfile = () => {
                 </button>
                 {isOwner && (
                   <div className="absolute -bottom-1 -right-1">
-                    <ImageCropUpload onUpload={handlePhotoUpload} aspect={1} shape="round" bucketPath="professionals" currentImage={avatarUrl} label="" />
+                    <ImageCropUpload onUpload={handlePhotoUpload} aspect={1} shape="round" bucketPath="professionals" currentImage={avatarUrl} label="" maxSize={336} quality={0.7} />
                   </div>
                 )}
               </div>

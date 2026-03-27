@@ -54,7 +54,7 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
               const canvas = document.createElement("canvas");
               let width = img.width;
               let height = img.height;
-              const MAX_WIDTH = 1200;
+              const MAX_WIDTH = 880;
               if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
               canvas.width = width; canvas.height = height;
               const ctx = canvas.getContext("2d");
@@ -64,7 +64,7 @@ const ServiceRequestDialog = ({ open, onOpenChange, professionalId, professional
                   const newFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".webp"), { type: "image/webp" });
                   resolve({ file: newFile, preview: URL.createObjectURL(newFile) });
                 }
-              }, "image/webp", 0.7);
+              }, "image/webp", 0.62);
             };
           };
         });

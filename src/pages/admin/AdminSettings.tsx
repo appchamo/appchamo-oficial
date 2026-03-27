@@ -121,12 +121,12 @@ const AdminSettings = () => {
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Imagem principal (Landing)</label>
             <ImageCropUpload aspect={16 / 9} shape="rect" bucketPath="branding" currentImage={settings.hero_image_url || null}
-              onUpload={(url) => set("hero_image_url", url)} label="Enviar imagem" />
+              onUpload={(url) => set("hero_image_url", url)} label="Enviar imagem" maxSize={1000} quality={0.64} />
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Imagem de fundo do Login</label>
             <ImageCropUpload aspect={9 / 16} shape="rect" bucketPath="branding" currentImage={settings.login_bg_url || null}
-              onUpload={(url) => set("login_bg_url", url)} label="Enviar imagem de fundo" />
+              onUpload={(url) => set("login_bg_url", url)} label="Enviar imagem de fundo" maxSize={1000} quality={0.64} />
             {settings.login_bg_url && (
               <button type="button" onClick={() => set("login_bg_url", "")}
                 className="mt-2 text-xs text-destructive hover:underline">
@@ -150,7 +150,7 @@ const AdminSettings = () => {
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Logo da tela de carregamento</label>
             <ImageCropUpload aspect={1} shape="rect" bucketPath="branding" currentImage={settings.splash_logo_url || null}
-              onUpload={(url) => set("splash_logo_url", url)} label="Enviar logo" />
+              onUpload={(url) => set("splash_logo_url", url)} label="Enviar logo" maxSize={400} quality={0.7} />
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cor de fundo da tela de carregamento</label>

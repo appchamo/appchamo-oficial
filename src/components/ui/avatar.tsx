@@ -12,7 +12,7 @@ const getOptimizedUrl = (url: string | undefined) => {
   if (url.includes("supabase.co/storage/v1/object/public/")) {
     // Adiciona parâmetros de largura, altura e qualidade (70% é o ideal para mobile)
     const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}width=150&height=150&quality=70&resize=cover`;
+    return `${url}${separator}width=150&height=150&quality=62&resize=cover`;
   }
   return url;
 };

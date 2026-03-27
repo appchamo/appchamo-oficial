@@ -148,8 +148,8 @@ const ProfessionalServices = ({ professionalId, isOwner }: ProfessionalServicesP
               bucketPath="services"
               currentImage={form.image_url || undefined}
               label="Foto do serviço"
-              maxSize={600}
-              quality={0.75}
+              maxSize={480}
+              quality={0.66}
             />
             <input
               value={form.title}

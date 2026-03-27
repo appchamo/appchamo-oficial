@@ -23,7 +23,7 @@ const getOptimizedAvatar = (url: string | null | undefined) => {
   if (!url) return undefined;
   if (url.includes("supabase.co/storage/v1/object/public/")) {
     const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}width=200&height=200&quality=75&resize=cover`;
+    return `${url}${separator}width=200&height=200&quality=65&resize=cover`;
   }
   return url;
 };
@@ -357,8 +357,8 @@ const Profile = () => {
                     bucketPath="professionals"
                     currentImage={proData.cover_image_url || undefined}
                     label="Alterar capa"
-                    maxSize={1200}
-                    quality={0.8}
+                    maxSize={900}
+                    quality={0.68}
                   />
                 </div>
               )}
@@ -380,7 +380,7 @@ const Profile = () => {
               )}
               {editing && (
                 <div className="absolute -bottom-1 -right-1">
-                  <ImageCropUpload onUpload={handleAvatarUpload} aspect={1} shape="round" bucketPath="avatars" currentImage={profile.avatar_url} label="" maxSize={400} quality={0.82} />
+                  <ImageCropUpload onUpload={handleAvatarUpload} aspect={1} shape="round" bucketPath="avatars" currentImage={profile.avatar_url} label="" maxSize={336} quality={0.7} />
                 </div>
               )}
             </div>

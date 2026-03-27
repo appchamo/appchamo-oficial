@@ -382,7 +382,7 @@ const AdminSponsors = () => {
             {/* Logo */}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Logo</label>
-              <ImageCropUpload aspect={1} shape="round" bucketPath="sponsors" currentImage={form.logo_url || null} onUpload={(url) => f("logo_url", url)} label="Upload logo" />
+              <ImageCropUpload aspect={1} shape="round" bucketPath="sponsors" currentImage={form.logo_url || null} onUpload={(url) => f("logo_url", url)} label="Upload logo" maxSize={256} quality={0.68} />
             </div>
 
             <div>

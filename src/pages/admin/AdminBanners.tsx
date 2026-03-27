@@ -268,6 +268,8 @@ const AdminBanners = () => {
                   shape="rect"
                   bucketPath="branding"
                   label="Upload Desktop (1080x460)"
+                  maxSize={960}
+                  quality={0.64}
                 />
               )}
             </div>
@@ -294,6 +296,8 @@ const AdminBanners = () => {
                   shape="rect"
                   bucketPath="branding"
                   label="Upload Mobile (1080x360)"
+                  maxSize={960}
+                  quality={0.64}
                 />
               )}
             </div>

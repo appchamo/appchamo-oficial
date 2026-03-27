@@ -704,6 +704,8 @@ export default function ProAgenda() {
                     currentImage={editAtendentePhotoUrl}
                     label=""
                     onUpload={(url) => setEditAtendentePhotoUrl(url)}
+                    maxSize={320}
+                    quality={0.68}
                   />
                 </div>
               </div>

@@ -255,8 +255,8 @@ const ProductCatalog = ({ professionalId, isOwner }: ProductCatalogProps) => {
               bucketPath="catalog"
               currentImage={form.image_url || undefined}
               label="Foto do produto"
-              maxSize={600}
-              quality={0.75}
+              maxSize={480}
+              quality={0.66}
             />
           </div>
           <input

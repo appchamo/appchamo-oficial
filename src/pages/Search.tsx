@@ -1,12 +1,14 @@
 import AppLayout from "@/components/AppLayout";
 import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, ChevronDown } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useCallback, useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation, normalizeStateToUF } from "@/lib/locationUtils";
 import { fetchCitiesByState } from "@/lib/brazilLocations";
 import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
+import { useProProfileImpression } from "@/hooks/useProProfileImpression";
+import { incrementProfessionalAnalytics, searchQueryMatchesDisplayName } from "@/lib/proAnalytics";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -25,6 +27,7 @@ import { Switch } from "@/components/ui/switch";
 
 interface Pro {
   id: string;
+  user_id: string;
   rating: number;
   total_services: number;
   verified: boolean;
@@ -37,9 +40,43 @@ interface Pro {
   user_type: string;
   city: string | null;
   state: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  distance?: number;
+}
+
+function SearchProCard({ pro }: { pro: Pro }) {
+  const impressionRef = useProProfileImpression(pro.user_id);
+  return (
+    <div ref={impressionRef} className="min-w-0">
+      <Link
+        to={`/professional/${pro.id}`}
+        className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group w-full"
+      >
+        <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
+          {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" alt="" /> : pro.full_name[0]}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 text-foreground">
+            <p className="font-bold text-sm truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
+            {pro.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
+          </div>
+          <p className="text-xs text-muted-foreground truncate font-medium">
+            {pro.category_name} · {pro.profession_name}
+          </p>
+          <div className="flex items-center justify-between mt-1">
+            <div className="flex items-center gap-1">
+              <Star className="w-3.5 h-3.5 fill-primary text-primary" />
+              <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
+            </div>
+            {(pro.city || pro.state) && (
+              <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-0.5 max-w-[48%] truncate justify-end">
+                <MapPin className="w-3 h-3 shrink-0 text-primary" />
+                <span className="truncate">{[pro.city, pro.state].filter(Boolean).join(", ")}</span>
+              </p>
+            )}
+          </div>
+        </div>
+      </Link>
+    </div>
+  );
 }
 
 interface Category {
@@ -74,8 +111,6 @@ const Search = () => {
   const [userCity, setUserCity] = useState<string | null>(null);
   const [userState, setUserState] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
-
-  const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
 
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterProfession, setFilterProfession] = useState<string>("");
@@ -134,28 +169,18 @@ const Search = () => {
 
   const loadUserLocation = async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      setUserCoords({ lat: -18.9431, lng: -46.9922 });
-      return;
-    }
-    
-    const { data } = await supabase.from("profiles").select("address_city, address_state, latitude, longitude").eq("user_id", user.id).single();
-    
+    if (!user) return;
+
+    const { data } = await supabase.from("profiles").select("address_city, address_state").eq("user_id", user.id).single();
+
     if (data?.address_state) {
       setUserState(data.address_state);
-      setFilterState((prev) => prev || data.address_state); 
+      setFilterState((prev) => prev || data.address_state);
     }
 
     if (data?.address_city) {
       setUserCity(data.address_city);
-      setFilterCity((prev) => prev || data.address_city); 
-    }
-    
-    if (data?.latitude && data?.longitude) {
-      setUserCoords({ lat: data.latitude, lng: data.longitude });
-    } else {
-      setUserCoords({ lat: -18.9431, lng: -46.9922 });
+      setFilterCity((prev) => prev || data.address_city);
     }
   };
 
@@ -199,7 +224,7 @@ const Search = () => {
         .from("profiles_public" as any)
         .select("user_id, full_name, avatar_url")
         .in("user_id", userIds),
-      supabase.from("profiles").select("user_id, address_city, address_state, latitude, longitude").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
     ]);
 
     const profileMap = new Map(((profilesRes.data || []) as any[]).map((p) => [p.user_id, p]));
@@ -210,6 +235,7 @@ const Search = () => {
 
       return {
         id: p.id,
+        user_id: p.user_id,
         rating: p.rating,
         total_services: p.total_services,
         verified: p.verified,
@@ -222,8 +248,6 @@ const Search = () => {
         user_type: "professional",
         city: loc?.address_city || null,
         state: loc?.address_state || null,
-        latitude: loc?.latitude || null,
-        longitude: loc?.longitude || null,
       };
     });
 
@@ -242,26 +266,8 @@ const Search = () => {
     loadPros(); 
   }, []); // <--- Array vazio faz rodar só uma vez e instantaneamente!
 
-  // 🔥 OTIMIZAÇÃO: Calcula distância no front-end em milissegundos sem precisar recarregar o banco
   const filteredAndSorted = useMemo(() => {
-    // 1. Calcula distâncias (se tiver a localização do usuário)
-    const prosWithDistance = pros.map(p => {
-      let distance = undefined;
-      if (userCoords && p.latitude && p.longitude) {
-        const R = 6371; 
-        const dLat = (p.latitude - userCoords.lat) * Math.PI / 180;
-        const dLon = (p.longitude - userCoords.lng) * Math.PI / 180;
-        const a = 
-          Math.sin(dLat/2) * Math.sin(dLat/2) +
-          Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(p.latitude * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        distance = R * c;
-      }
-      return { ...p, distance };
-    });
-
-    // 2. Aplica os filtros (busca com sinônimos: eletricista, aula de ingles → escola de idiomas, etc.)
-    let result = prosWithDistance.filter((p) => {
+    let result = pros.filter((p) => {
       const q = norm(search.trim());
       if (q) {
         const target = norm(`${p.full_name} ${p.category_name} ${p.profession_name} ${p.city || ""} ${p.state || ""}`);
@@ -292,7 +298,6 @@ const Search = () => {
       return true;
     });
 
-    // 3. Ordena: 1) significado mais buscado, 2) verificados, 3) rating, 4) distância (se tiver coords)
     const q = search.trim();
     result.sort((a, b) => {
       const aPrimary = isPrimaryMatch(q, a.category_name, a.profession_name);
@@ -300,12 +305,11 @@ const Search = () => {
       if (aPrimary !== bPrimary) return aPrimary ? -1 : 1;
       if (a.verified !== b.verified) return a.verified ? -1 : 1;
       if (b.rating !== a.rating) return b.rating - a.rating;
-      if (userCoords && a.distance !== undefined && b.distance !== undefined) return (a.distance || 999) - (b.distance || 999);
       return 0;
     });
 
     return result;
-  }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, userCoords]);
+  }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified]);
 
   // Reset paginação quando filtros ou busca mudam
   useEffect(() => {
@@ -314,6 +318,31 @@ const Search = () => {
 
   const prosToShow = filteredAndSorted.slice(0, visibleCount);
   const hasMore = visibleCount < filteredAndSorted.length;
+
+  const lastFiredNameQueryRef = useRef<string>("");
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const raw = search.trim();
+      const qn = raw
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!qn) {
+        lastFiredNameQueryRef.current = "";
+        return;
+      }
+      if (qn === lastFiredNameQueryRef.current) return;
+      lastFiredNameQueryRef.current = qn;
+      for (const p of filteredAndSorted) {
+        if (searchQueryMatchesDisplayName(raw, p.full_name)) {
+          incrementProfessionalAnalytics(p.user_id, "name_search");
+        }
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [search, filteredAndSorted]);
 
   const stateLabel = filterState ? statesList.find((s) => s.sigla === filterState)?.nome + " (" + filterState + ")" : "Selecione o Estado";
 
@@ -474,29 +503,7 @@ const Search = () => {
           <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {prosToShow.map((pro) => (
-              <Link key={pro.id} to={`/professional/${pro.id}`} className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group">
-                <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
-                  {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" /> : pro.full_name[0]}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1 text-foreground">
-                    <p className="font-bold text-sm truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
-                    {pro.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate font-medium">{pro.category_name} · {pro.profession_name}</p>
-                  <div className="flex items-center justify-between mt-1">
-                    <div className="flex items-center gap-1">
-                      <Star className="w-3.5 h-3.5 fill-primary text-primary" />
-                      <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
-                    </div>
-                    {userCoords && pro.distance !== undefined && (
-                      <p className="text-[10px] text-primary font-bold bg-primary/5 px-2 py-0.5 rounded-full">
-                        {pro.distance < 1 ? 'Menos de 1km' : `${Math.round(pro.distance)} km`}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </Link>
+              <SearchProCard key={pro.id} pro={pro} />
             ))}
           </div>
           {hasMore && (

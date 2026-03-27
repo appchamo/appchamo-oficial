@@ -40,6 +40,8 @@ const FULL_PAGE_SCROLL_EXACT = new Set([
 
 export function isFullPageScrollRoute(pathname: string): boolean {
   if (FULL_PAGE_SCROLL_EXACT.has(pathname)) return true;
+  if (pathname.startsWith("/profile/settings")) return true;
+  if (pathname === "/profile/relatorios") return true;
   return false;
 }
 

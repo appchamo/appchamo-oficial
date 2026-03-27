@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Info, Timer, X } from "lucide-react";
+import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Timer, X, FileText } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -168,6 +168,71 @@ const TransferTimingModal = ({
   );
 };
 
+type NfAfterTransferPayload = {
+  professional_id: string;
+  wallet_transaction_ids: string[];
+  platform_fee: number;
+  professional_name: string;
+};
+
+const NfAfterTransferModal = ({
+  data,
+  onClose,
+  onEmit,
+  emitting,
+}: {
+  data: NfAfterTransferPayload;
+  onClose: () => void;
+  onEmit: () => void;
+  emitting: boolean;
+}) => (
+  <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-bold">Repasse concluído</h3>
+        <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Repasse para <strong className="text-foreground">{data.professional_name}</strong> foi enviado com sucesso.
+      </p>
+      {data.platform_fee > 0 ? (
+        <>
+          <div className="rounded-xl border bg-muted/30 p-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Comissão da plataforma (NF)</p>
+            <p className="text-2xl font-bold text-foreground">{fmt(data.platform_fee)}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Emita a NFS-e para o prestador referente a esta taxa. O PDF será enviado ao e-mail fiscal cadastrado (se o envio estiver configurado).
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onEmit}
+            disabled={emitting}
+            className="w-full flex items-center justify-center gap-2 bg-primary text-white rounded-xl py-3 text-sm font-semibold disabled:opacity-50 hover:bg-primary/90"
+          >
+            {emitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            Emitir nota fiscal
+          </button>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground rounded-xl border border-border p-3">
+          Neste lote não há valor de comissão da plataforma para emitir nota fiscal.
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={emitting}
+        className="w-full border rounded-xl py-2.5 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
+      >
+        {data.platform_fee > 0 ? "Depois" : "Fechar"}
+      </button>
+    </div>
+  </div>
+);
+
 const AdminWallet = () => {
   const [entries, setEntries] = useState<WalletEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,6 +241,8 @@ const AdminWallet = () => {
   const [transferring, setTransferring] = useState<string | null>(null);
   const [tab, setTab] = useState<"pending" | "transferred">("pending");
   const [modalEntry, setModalEntry] = useState<WalletEntry | null>(null);
+  const [nfAfterTransfer, setNfAfterTransfer] = useState<NfAfterTransferPayload | null>(null);
+  const [emittingNf, setEmittingNf] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -256,10 +323,14 @@ const AdminWallet = () => {
   useEffect(() => { load(); }, []);
 
   const doTransfer = async (entry: WalletEntry) => {
+    const pendingIds = entry.transactions.filter(t => t.status === "pending").map(t => t.id);
+    const platformFeeForNf = entry.transactions
+      .filter(t => pendingIds.includes(t.id))
+      .reduce((s, t) => s + Number(t.platform_fee_amount || 0), 0);
+
     setTransferring(entry.professional_id);
     setModalEntry(null);
     try {
-      const pendingIds = entry.transactions.filter(t => t.status === "pending").map(t => t.id);
       const { data, error } = await supabase.functions.invoke("process_transfer", {
         body: { professional_id: entry.professional_id, wallet_transaction_ids: pendingIds },
       });
@@ -267,11 +338,43 @@ const AdminWallet = () => {
       if (data?.error) throw new Error(data.error);
       const desc = `Bruto: ${fmt(data.gross_amount)} | Comissão: ${fmt(data.platform_fee)}${data.anticipation_fee > 0 ? ` | Antecipação: ${fmt(data.anticipation_fee)}` : ""}`;
       toast({ title: `✅ Repasse de ${fmt(data.amount)} realizado!`, description: desc });
+      setNfAfterTransfer({
+        professional_id: entry.professional_id,
+        wallet_transaction_ids: pendingIds,
+        platform_fee: platformFeeForNf,
+        professional_name: entry.professional_name,
+      });
       load();
     } catch (err: any) {
       toast({ title: "Erro ao repassar", description: err.message, variant: "destructive" });
     } finally {
       setTransferring(null);
+    }
+  };
+
+  const emitFeeInvoice = async () => {
+    if (!nfAfterTransfer || nfAfterTransfer.platform_fee <= 0) return;
+    setEmittingNf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("emit_transfer_fee_invoice", {
+        body: {
+          professional_id: nfAfterTransfer.professional_id,
+          wallet_transaction_ids: nfAfterTransfer.wallet_transaction_ids,
+        },
+      });
+      if (error) throw new Error(error.message || "Erro ao emitir NF");
+      if (data?.error) throw new Error(data.error);
+      const emailHint = data.email_sent ? "E-mail enviado ao prestador." : "Configure RESEND_API_KEY para enviar o PDF por e-mail automaticamente.";
+      toast({
+        title: "Nota fiscal emitida",
+        description: `${emailHint} Valor: ${fmt(data.value)}.`,
+      });
+      setNfAfterTransfer(null);
+      load();
+    } catch (err: any) {
+      toast({ title: "Erro ao emitir NF", description: err.message, variant: "destructive" });
+    } finally {
+      setEmittingNf(false);
     }
   };
 
@@ -302,6 +405,14 @@ const AdminWallet = () => {
           onConfirm={() => doTransfer(modalEntry)}
           onCancel={() => setModalEntry(null)}
           transferring={transferring === modalEntry.professional_id}
+        />
+      )}
+      {nfAfterTransfer && (
+        <NfAfterTransferModal
+          data={nfAfterTransfer}
+          onClose={() => setNfAfterTransfer(null)}
+          onEmit={emitFeeInvoice}
+          emitting={emittingNf}
         />
       )}
 

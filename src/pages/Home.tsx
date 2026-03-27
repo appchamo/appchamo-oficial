@@ -23,6 +23,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
 import { fetchViaCep } from "@/lib/viacep";
+import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { diagLog } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
@@ -431,7 +432,9 @@ const Home = () => {
         const t = setTimeout(() => setLocationOpen(true), 600);
         return () => clearTimeout(t);
       }
-    } catch (_) {}
+    } catch {
+      void 0;
+    }
   }, [user?.id, profile?.address_city, profile?.address_state]);
 
   const handleOpenLocation = () => {
@@ -475,11 +478,24 @@ const Home = () => {
     if (!user?.id) return;
     setLocationSaving(true);
     const cepClean = locationCep.replace(/\D/g, "");
-    const payload = {
+    const payload: Record<string, string | number | null> = {
       address_zip: cepClean.length === 8 ? cepClean : null,
       address_city: city || null,
       address_state: state || null,
     };
+    try {
+      const geo = await forwardGeocodeBrazil({
+        cep: cepClean.length === 8 ? cepClean : null,
+        city,
+        state,
+      });
+      if (geo) {
+        payload.latitude = geo.lat;
+        payload.longitude = geo.lng;
+      }
+    } catch {
+      void 0;
+    }
     const { error } = await supabase.from("profiles").update(payload).eq("user_id", user.id);
     setLocationSaving(false);
     if (error) {

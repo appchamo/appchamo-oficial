@@ -9,10 +9,12 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Wallet, ChevronRight, ChevronLeft, MapPin,
-  CalendarCheck, Clock, User,
+  CalendarCheck, Clock, User, Target,
 } from "lucide-react";
 import { format, isToday, isTomorrow, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
+import { parseSealIconVariant } from "@/lib/sealIconVariant";
 
 /* ── tipos ──────────────────────────────────────────────── */
 interface NextAppointment {
@@ -26,7 +28,7 @@ interface NextAppointment {
 }
 
 interface Props {
-  profile: any;
+  profile: { avatar_url?: string | null } | null | undefined;
   userName: string;
   welcomeWord: string;
   locationLabel: string;
@@ -64,6 +66,12 @@ export default function HomeProCarousel({
   const [next, setNext] = useState<NextAppointment | null>(null);
   const [totalToday, setTotalToday] = useState(0);
   const [agendaLoaded, setAgendaLoaded] = useState(false);
+  const [nextMission, setNextMission] = useState<{
+    title: string;
+    icon_variant: string;
+    progress: number;
+    allDone: boolean;
+  } | null>(null);
 
   /* swipe tracking */
   const touchStartX = useRef(0);
@@ -90,15 +98,29 @@ export default function HomeProCarousel({
 
     if (!rows || rows.length === 0) { setAgendaLoaded(true); return; }
 
-    const clientIds = [...new Set(rows.map((r: any) => r.client_id).filter(Boolean))];
+    type AgendaRow = {
+      id: string;
+      appointment_date: string;
+      start_time: string | null;
+      end_time: string | null;
+      status: string;
+      client_id: string | null;
+      agenda_services: { name: string | null } | null;
+    };
+    const agendaRows = rows as AgendaRow[];
+
+    const clientIds = [...new Set(agendaRows.map((r) => r.client_id).filter(Boolean))] as string[];
     let clientMap: Record<string, string> = {};
     if (clientIds.length > 0) {
       const { data: profiles } = await supabase
         .from("profiles").select("user_id, full_name").in("user_id", clientIds);
-      clientMap = Object.fromEntries((profiles || []).map((p: any) => [p.user_id, p.full_name || "Cliente"]));
+      type ProfileRow = { user_id: string; full_name: string | null };
+      clientMap = Object.fromEntries(
+        ((profiles || []) as ProfileRow[]).map((p) => [p.user_id, p.full_name || "Cliente"]),
+      );
     }
 
-    const mapped: NextAppointment[] = rows.map((r: any) => ({
+    const mapped: NextAppointment[] = agendaRows.map((r) => ({
       id: r.id,
       appointment_date: r.appointment_date,
       start_time: r.start_time?.slice(0, 5) || "",
@@ -117,6 +139,45 @@ export default function HomeProCarousel({
   }, [professionalId]);
 
   useEffect(() => { loadAgenda(); }, [loadAgenda]);
+
+  useEffect(() => {
+    if (!professionalId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("get_my_seal_missions");
+      if (cancelled || error) {
+        if (error) console.warn("get_my_seal_missions:", error.message);
+        if (!cancelled) setNextMission(null);
+        return;
+      }
+      const rows = (data || []) as {
+        title: string;
+        icon_variant: string;
+        awarded: boolean;
+        progress_ratio: number;
+      }[];
+      const pending = rows.filter((r) => !r.awarded);
+      if (pending.length === 0) {
+        setNextMission({
+          title: "Todas as missões concluídas!",
+          icon_variant: "seal_chamo",
+          progress: 1,
+          allDone: true,
+        });
+        return;
+      }
+      const next = pending[0];
+      setNextMission({
+        title: next.title,
+        icon_variant: next.icon_variant || "seal_default",
+        progress: Math.min(1, Math.max(0, Number(next.progress_ratio) || 0)),
+        allDone: false,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [professionalId]);
 
   /* volta para slide 0 se a agenda desaparecer */
   const hasAgenda = agendaLoaded && next !== null;
@@ -170,32 +231,68 @@ export default function HomeProCarousel({
             className="p-5 cursor-pointer active:opacity-90"
             onClick={() => navigate("/pro/financeiro")}
           >
-            {/* avatar + saudação */}
-            <div className="flex items-center gap-3 mb-4">
-              {profile?.avatar_url ? (
-                <img
-                  src={profile.avatar_url}
-                  alt={userName}
-                  className="w-12 h-12 rounded-full object-cover border-2 border-white/40 shrink-0"
-                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center shrink-0">
-                  <span className="text-white font-bold text-xl">{userName.charAt(0).toUpperCase()}</span>
+            {/* avatar + saudação + prévia da próxima missão */}
+            <div className={`flex items-start gap-2 mb-4 ${hasAgenda ? "pr-10" : ""}`}>
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt={userName}
+                    className="w-12 h-12 rounded-full object-cover border-2 border-white/40 shrink-0"
+                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center shrink-0">
+                    <span className="text-white font-bold text-xl">{userName.charAt(0).toUpperCase()}</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-white/75 text-xs leading-none mb-0.5">{welcomeWord} de volta,</p>
+                  <p className="text-white font-bold text-lg leading-tight truncate">{userName} 👋</p>
+                  <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); onLocationClick(); }}
+                    className="flex items-center gap-1 text-white/60 text-[10px] mt-1 hover:text-white/90 transition-colors"
+                  >
+                    <MapPin className="w-2.5 h-2.5" />
+                    <span className="truncate max-w-[140px] sm:max-w-[160px]">{locationLabel}</span>
+                  </button>
                 </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-white/75 text-xs leading-none mb-0.5">{welcomeWord} de volta,</p>
-                <p className="text-white font-bold text-lg leading-tight truncate">{userName} 👋</p>
+              </div>
+              {nextMission && (
                 <button
                   type="button"
-                  onClick={e => { e.stopPropagation(); onLocationClick(); }}
-                  className="flex items-center gap-1 text-white/60 text-[10px] mt-1 hover:text-white/90 transition-colors"
+                  onClick={e => {
+                    e.stopPropagation();
+                    navigate("/rewards?tab=missions");
+                  }}
+                  className="shrink-0 w-[118px] sm:w-[128px] rounded-xl bg-white/15 backdrop-blur-sm px-2.5 py-2 text-left border border-white/25 shadow-sm active:scale-[0.98] transition-transform"
                 >
-                  <MapPin className="w-2.5 h-2.5" />
-                  <span className="truncate max-w-[160px]">{locationLabel}</span>
+                  <div className="flex items-center gap-0.5 text-white/85 mb-1">
+                    <Target className="w-2.5 h-2.5 shrink-0" />
+                    <span className="text-[8px] font-bold uppercase tracking-wide leading-none">
+                      {nextMission.allDone ? "Programa" : "Próxima missão"}
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-1.5 mb-1.5">
+                    <ProfessionalSealIcon
+                      variant={parseSealIconVariant(nextMission.icon_variant)}
+                      size={26}
+                      earned={nextMission.allDone}
+                      className="shrink-0 scale-90 origin-top-left"
+                    />
+                    <span className="text-[10px] font-semibold text-white leading-tight line-clamp-2 min-w-0 pt-0.5">
+                      {nextMission.title}
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-black/25 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-white/95 transition-all duration-500"
+                      style={{ width: `${Math.round(nextMission.progress * 100)}%` }}
+                    />
+                  </div>
                 </button>
-              </div>
+              )}
             </div>
 
             {/* saldo */}

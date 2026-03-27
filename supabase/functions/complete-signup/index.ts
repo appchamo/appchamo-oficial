@@ -100,6 +100,18 @@ Deno.serve(async (req) => {
 
     if (profileData?.avatarUrl) profileUpdates.avatar_url = profileData.avatarUrl;
 
+    const lat = basicData.latitude;
+    const lng = basicData.longitude;
+    if (
+      typeof lat === "number" &&
+      typeof lng === "number" &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng)
+    ) {
+      profileUpdates.latitude = lat;
+      profileUpdates.longitude = lng;
+    }
+
     // 🔥 UPSERT (resolve conflito com o Trigger SQL que criamos antes)
     const { error: profileError } = await supabase
       .from("profiles")

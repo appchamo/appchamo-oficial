@@ -1,7 +1,6 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Crown, Pencil, Star, Circle, Save, Trash2, Lock, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2 } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2 } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
-import { PasswordInput } from "@/components/ui/password-input";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -41,11 +40,6 @@ const Profile = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState("");
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [savingPassword, setSavingPassword] = useState(false);
   const [proData, setProData] = useState<{ id: string; slug: string | null; cover_image_url: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
@@ -520,8 +514,11 @@ const Profile = () => {
           {[
             ...((profile.user_type === "professional" || profile.user_type === "company") ? [{ icon: Briefcase, label: "Painel Profissional", path: "/pro" }] : []),
             { icon: CalendarCheck, label: "Meus agendamentos", path: "/meus-agendamentos" },
-            ...((profile.user_type === "professional" || profile.user_type === "company") ? [{ icon: Crown, label: "Planos e Assinatura", path: "/subscriptions" }] : []),
+            ...((profile.user_type === "professional" || profile.user_type === "company")
+              ? [{ icon: BarChart2, label: "Relatórios", path: "/profile/relatorios" } as const]
+              : []),
             { icon: Ticket, label: "Meus Cupons", path: "/coupons" },
+            { icon: Settings, label: "Configurações", path: "/profile/settings" },
           ].map((item) => (
             <Link key={item.label} to={item.path} className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 transition-all">
               <item.icon className="w-5 h-5 text-primary" />
@@ -540,11 +537,6 @@ const Profile = () => {
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </Link>
 
-          <button onClick={() => setPasswordOpen(true)} className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 transition-all w-full text-left">
-            <Lock className="w-5 h-5 text-primary" />
-            <span className="flex-1 text-sm font-medium text-foreground">Alterar senha</span>
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          </button>
           <button onClick={handleLogout} className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-destructive/30 transition-all mt-2 w-full text-left">
             <LogOut className="w-5 h-5 text-destructive" />
             <span className="flex-1 text-sm font-medium text-destructive">Sair da conta</span>
@@ -571,35 +563,6 @@ const Profile = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Change Password Dialog */}
-        <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Alterar senha</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <PasswordInput label="Senha atual" value={currentPassword} onChange={setCurrentPassword} placeholder="••••••••" autoComplete="current-password" />
-              <PasswordInput label="Nova senha" value={newPassword} onChange={setNewPassword} placeholder="••••••••" autoComplete="new-password" />
-              <PasswordInput label="Confirmar nova senha" value={confirmPassword} onChange={setConfirmPassword} placeholder="••••••••" autoComplete="new-password" />
-              <button onClick={async () => {
-                if (!currentPassword) { toast({ title: "Digite sua senha atual.", variant: "destructive" }); return; }
-                if (newPassword.length < 6) { toast({ title: "A senha deve ter pelo menos 6 caracteres.", variant: "destructive" }); return; }
-                if (newPassword !== confirmPassword) { toast({ title: "As senhas não conferem.", variant: "destructive" }); return; }
-                setSavingPassword(true);
-                // Verify current password by re-signing in
-                const { error: signInError } = await supabase.auth.signInWithPassword({ email: profile.email, password: currentPassword });
-                if (signInError) { toast({ title: "Senha atual incorreta.", variant: "destructive" }); setSavingPassword(false); return; }
-                const { error } = await supabase.auth.updateUser({ password: newPassword });
-                if (error) { toast({ title: "Erro ao alterar senha", description: error.message, variant: "destructive" }); }
-                else { toast({ title: "Senha alterada com sucesso!" }); setPasswordOpen(false); setNewPassword(""); setConfirmPassword(""); setCurrentPassword(""); }
-                setSavingPassword(false);
-              }} disabled={savingPassword || newPassword.length < 6 || !currentPassword}
-                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-                {savingPassword ? "Salvando..." : "Salvar nova senha"}
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </main>
     </AppLayout>
   );

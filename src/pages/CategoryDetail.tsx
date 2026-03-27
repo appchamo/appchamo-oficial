@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { sameCityState } from "@/lib/locationUtils";
+import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 
 interface Profession {
   id: string;
@@ -14,6 +15,7 @@ interface Profession {
 
 interface Pro {
   id: string;
+  user_id: string;
   rating: number;
   total_services: number;
   verified: boolean;
@@ -22,6 +24,39 @@ interface Pro {
   user_type: string;
   city: string | null;
   state: string | null;
+}
+
+function CategoryProRow({ pro }: { pro: Pro }) {
+  const impressionRef = useProProfileImpression(pro.user_id);
+  const initials = pro.full_name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
+  return (
+    <div ref={impressionRef}>
+      <Link
+        to={`/professional/${pro.id}`}
+        className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 hover:shadow-card transition-all w-full"
+      >
+        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
+          {pro.avatar_url ? <img src={pro.avatar_url} alt={pro.full_name} className="w-full h-full object-cover" /> : initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1">
+            <p className="font-semibold text-sm text-foreground">{pro.full_name}</p>
+            {pro.verified && <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />}
+          </div>
+          {(pro.city || pro.state) && (
+            <p className="text-[11px] text-muted-foreground flex items-center gap-0.5 mt-0.5">
+              <MapPin className="w-3 h-3" /> {[pro.city, pro.state].filter(Boolean).join(", ")}
+            </p>
+          )}
+          <div className="flex items-center gap-2 mt-0.5">
+            <Star className="w-3.5 h-3.5 fill-primary text-primary" />
+            <span className="text-xs font-medium">{Number(pro.rating).toFixed(1)}</span>
+            <span className="text-xs text-muted-foreground">· {pro.total_services} serviços</span>
+          </div>
+        </div>
+      </Link>
+    </div>
+  );
 }
 
 const CategoryDetail = () => {
@@ -135,6 +170,7 @@ const CategoryDetail = () => {
     const locationMap = new Map((locationsRes.data || []).map(p => [p.user_id, p]));
     const list = data.map(p => ({
       id: p.id,
+      user_id: p.user_id,
       rating: p.rating,
       total_services: p.total_services,
       verified: p.verified,
@@ -206,33 +242,9 @@ const CategoryDetail = () => {
           <div className="text-center py-12 text-muted-foreground text-sm">Nenhum profissional encontrado</div>
         ) : (
           <div className="flex flex-col gap-3">
-            {pros.map((pro) => {
-              const initials = pro.full_name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
-              return (
-                <Link key={pro.id} to={`/professional/${pro.id}`}
-                  className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 hover:shadow-card transition-all">
-                  <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
-                    {pro.avatar_url ? <img src={pro.avatar_url} alt={pro.full_name} className="w-full h-full object-cover" /> : initials}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1">
-                      <p className="font-semibold text-sm text-foreground">{pro.full_name}</p>
-                      {pro.verified && <BadgeCheck className="w-4 h-4 text-primary flex-shrink-0" />}
-                    </div>
-                    {(pro.city || pro.state) && (
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-0.5 mt-0.5">
-                        <MapPin className="w-3 h-3" /> {[pro.city, pro.state].filter(Boolean).join(", ")}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <Star className="w-3.5 h-3.5 fill-primary text-primary" />
-                      <span className="text-xs font-medium">{Number(pro.rating).toFixed(1)}</span>
-                      <span className="text-xs text-muted-foreground">· {pro.total_services} serviços</span>
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
+            {pros.map((pro) => (
+              <CategoryProRow key={pro.id} pro={pro} />
+            ))}
           </div>
         )}
       </main>

@@ -19,6 +19,7 @@ import {
   Loader2,
   Timer,
   Award,
+  MapPin,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -36,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
+import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
 
 interface ProData {
   id: string;
@@ -62,6 +64,8 @@ interface ProData {
   avg_response_seconds?: number | null;
   avg_response_sample_count?: number;
   avg_response_computed_at?: string | null;
+  address_city?: string | null;
+  address_state?: string | null;
 }
 
 interface Review {
@@ -138,6 +142,12 @@ const ProfessionalProfile = () => {
           if (publicProfile) profileData = publicProfile;
         }
 
+        const { data: proLocation } = await supabase
+          .from("profiles")
+          .select("address_city, address_state")
+          .eq("user_id", data.user_id)
+          .maybeSingle();
+
         setPro({
           ...data,
           full_name: profileData?.full_name || "Profissional",
@@ -154,6 +164,8 @@ const ProfessionalProfile = () => {
           avg_response_seconds: (data as any).avg_response_seconds ?? null,
           avg_response_sample_count: Number((data as any).avg_response_sample_count) || 0,
           avg_response_computed_at: (data as any).avg_response_computed_at ?? null,
+          address_city: proLocation?.address_city ?? null,
+          address_state: proLocation?.address_state ?? null,
         });
         
         const { data: { user } } = await supabase.auth.getUser();
@@ -239,6 +251,11 @@ const ProfessionalProfile = () => {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [pro?.id]);
+
+  useEffect(() => {
+    if (!pro || isOwner) return;
+    incrementProfessionalAnalytics(pro.user_id, "profile_click");
+  }, [pro?.user_id, isOwner]);
 
   const handlePhotoUpload = async (url: string) => {
     if (!pro) return;
@@ -336,6 +353,7 @@ const ProfessionalProfile = () => {
   };
 
   const handleCall = async () => {
+    if (pro) incrementProfessionalAnalytics(pro.user_id, "call_click");
     if (authLoading) {
       toast({ title: "Aguarde", description: "Carregando seus dados…" });
       return;
@@ -379,6 +397,10 @@ const ProfessionalProfile = () => {
   const avatarUrl = pro.avatar_url;
   const initials = name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
   const currentAvailability = availabilityOptions.find(o => o.value === pro.availability_status) || availabilityOptions[0];
+  const locationLine =
+    pro.address_city || pro.address_state
+      ? [pro.address_city, pro.address_state].filter(Boolean).join(", ")
+      : null;
 
   return (
     <AppLayout>
@@ -511,6 +533,13 @@ const ProfessionalProfile = () => {
               </p>
             )}
 
+            {locationLine ? (
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground mb-2">
+                <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>{locationLine}</span>
+              </div>
+            ) : null}
+
             {/* Badges — TODOS na mesma linha */}
             <div className="flex flex-wrap items-center gap-2 mb-2">
               {pro.verified && (
@@ -628,19 +657,6 @@ const ProfessionalProfile = () => {
             {/* Botões de ação (visitante) */}
             {!isOwner && pro.availability_status !== "unavailable" && (
               <div className="mt-5 rounded-2xl border border-border/70 bg-gradient-to-b from-muted/30 to-background p-4 space-y-3 shadow-sm">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground text-center">
-                  Próximo passo
-                </p>
-                {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
-                  <button
-                    type="button"
-                    onClick={() => setAgendaDialogOpen(true)}
-                    className="w-full min-h-[48px] py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
-                  >
-                    <Calendar className="w-5 h-5 shrink-0" />
-                    Agendar serviço
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={handleCall}
@@ -648,6 +664,17 @@ const ProfessionalProfile = () => {
                 >
                   CHAMAR
                 </button>
+                {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setAgendaDialogOpen(true)}
+                    className="w-full min-h-[48px] py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border-primary/50 text-primary hover:bg-primary/5 active:scale-[0.98]"
+                  >
+                    <Calendar className="w-5 h-5 shrink-0" />
+                    Agendar serviço
+                  </Button>
+                )}
               </div>
             )}
             {!isOwner && pro.availability_status === "unavailable" && (

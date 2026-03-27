@@ -22,6 +22,8 @@ type Props = {
   size?: number;
   earned?: boolean;
   className?: string;
+  /** Sem brilho/sombra extra (ex.: cards compactos na Home). */
+  flat?: boolean;
 };
 
 /** Estrela serrilhada + fitas — mesma família visual; cores e detalhe central mudam por tier. */
@@ -274,68 +276,22 @@ function SealStarSvg({ uid, size, earned }: { uid: string; size: number; earned:
   );
 }
 
-/** Selo Chamô — formato exclusivo: hex duplo, chama e gemas. */
-function SealChamoSvg({ uid, size, earned }: { uid: string; size: number; earned: boolean }) {
-  const w = Math.round(size * 1.15);
-  const h = Math.round(size * 1.28);
-  const o = earned ? 1 : 0.38;
+/** Selo Chamô — ícone oficial do app (mesmo asset do splash / loja). */
+function SealChamoAppIcon({ size, earned, flat }: { size: number; earned: boolean; flat?: boolean }) {
+  const dim = Math.round(size * 1.08);
   return (
-    <svg width={w} height={h} viewBox="0 0 92 104" className="block" aria-hidden>
-      <defs>
-        <linearGradient id={`${uid}-ch1`} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#f472b6" />
-          <stop offset="35%" stopColor="#fbbf24" />
-          <stop offset="70%" stopColor="#22d3ee" />
-          <stop offset="100%" stopColor="#a78bfa" />
-        </linearGradient>
-        <linearGradient id={`${uid}-ch2`} x1="50%" y1="0%" x2="50%" y2="100%">
-          <stop offset="0%" stopColor="#fffbeb" />
-          <stop offset="50%" stopColor="#f59e0b" />
-          <stop offset="100%" stopColor="#b45309" />
-        </linearGradient>
-        <filter id={`${uid}-glow`} x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="2.2" result="b" />
-          <feMerge>
-            <feMergeNode in="b" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-      {earned && (
-        <polygon
-          points="46,2 88,26 88,62 46,86 4,62 4,26"
-          fill="none"
-          stroke="#fbbf24"
-          strokeWidth="1.5"
-          opacity="0.85"
-          filter={`url(#${uid}-glow)`}
-        />
+    <img
+      src="/icon-512.png"
+      alt=""
+      width={dim}
+      height={dim}
+      className={cn(
+        "block rounded-2xl object-cover shadow-sm",
+        !earned && "opacity-[0.42] grayscale-[0.35]",
+        earned && !flat && "shadow-md ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
       )}
-      <polygon
-        points="46,8 82,29 82,59 46,80 10,59 10,29"
-        fill={`url(#${uid}-ch1)`}
-        stroke="#831843"
-        strokeWidth="1.2"
-        opacity={o}
-      />
-      <polygon
-        points="46,22 68,35 68,53 46,66 24,53 24,35"
-        fill={`url(#${uid}-ch2)`}
-        stroke="#78350f"
-        strokeWidth="0.9"
-        opacity={o}
-      />
-      <path
-        d="M46 28 Q52 38 46 48 Q40 38 46 28 M46 36 Q50 42 46 48 Q42 42 46 36"
-        fill="#fef08a"
-        stroke="#ea580c"
-        strokeWidth="0.5"
-        opacity={o}
-      />
-      <circle cx="32" cy="44" r="3" fill="#38bdf8" opacity={o} />
-      <circle cx="60" cy="44" r="3" fill="#f472b6" opacity={o} />
-      <path d="M38 76 L46 68 L54 76 L50 88 L42 88 Z" fill="#7c3aed" stroke="#c4b5fd" strokeWidth="0.6" opacity={o} />
-    </svg>
+      draggable={false}
+    />
   );
 }
 
@@ -345,9 +301,15 @@ function SealFallback({ uid, size, earned }: { uid: string; size: number; earned
 
 /**
  * Selos com silhuetas bem distintas; os quatro primeiros (chamadas) compartilham a medalha serrilhada com paletas diferentes.
- * Chamô usa hexágono, gradiente multicolor e contorno luminoso.
+ * Selo Chamô usa o ícone do app.
  */
-export function ProfessionalSealIcon({ variant, size = 52, earned = true, className }: Props) {
+export function ProfessionalSealIcon({
+  variant,
+  size = 52,
+  earned = true,
+  className,
+  flat = false,
+}: Props) {
   const rid = useId().replace(/:/g, "");
   const isChamo = variant === "seal_chamo";
 
@@ -370,7 +332,7 @@ export function ProfessionalSealIcon({ variant, size = 52, earned = true, classN
       case "seal_lobo":
         return <SealLoboSvg size={size} earned={earned} />;
       case "seal_chamo":
-        return <SealChamoSvg uid={rid} size={size} earned={earned} />;
+        return <SealChamoAppIcon size={size} earned={earned} flat={flat} />;
       case "seal_star":
         return <SealStarSvg uid={rid} size={size} earned={earned} />;
       default:
@@ -382,8 +344,7 @@ export function ProfessionalSealIcon({ variant, size = 52, earned = true, classN
     <div
       className={cn(
         "relative inline-flex shrink-0 items-center justify-center select-none",
-        !earned && "grayscale-[0.2]",
-        isChamo && earned && "drop-shadow-[0_0_18px_rgba(244,114,182,0.45)] scale-[1.08]",
+        !earned && !isChamo && "grayscale-[0.2]",
         className
       )}
       aria-hidden

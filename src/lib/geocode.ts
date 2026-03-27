@@ -12,6 +12,7 @@ export interface ReverseGeocodeResult {
 }
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
+const NOMINATIM_SEARCH = "https://nominatim.openstreetmap.org/search";
 const USER_AGENT = "ChamoApp/1.0 (contato@appchamo.com)";
 const BIGDATACLOUD_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client";
 
@@ -83,5 +84,78 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
     return await reverseGeocodeNominatim(lat, lng);
   } catch {
     return await reverseGeocodeBigDataCloud(lat, lng);
+  }
+}
+
+export type ForwardGeocodeBrazilInput = {
+  cep?: string | null;
+  city: string;
+  state: string;
+  street?: string | null;
+  neighborhood?: string | null;
+};
+
+/**
+ * CEP/endereço (Brasil) → coordenadas aproximadas (Nominatim).
+ * Usado ao salvar perfil após ViaCEP para distância na busca e no perfil.
+ */
+export async function forwardGeocodeBrazil(parts: ForwardGeocodeBrazilInput): Promise<{ lat: number; lng: number } | null> {
+  const city = (parts.city || "").trim();
+  const state = (parts.state || "").trim().toUpperCase();
+  if (!city || state.length !== 2) return null;
+  const cepDigits = (parts.cep || "").replace(/\D/g, "");
+  const street = (parts.street || "").trim();
+  const neighborhood = (parts.neighborhood || "").trim();
+
+  const headers = { Accept: "application/json", "User-Agent": USER_AGENT } as const;
+
+  const parseFirst = (raw: unknown): { lat: number; lng: number } | null => {
+    const arr = raw as { lat?: string; lon?: string }[] | null;
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    const lat = parseFloat(String(arr[0].lat));
+    const lng = parseFloat(String(arr[0].lon));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  };
+
+  try {
+    const structured = new URLSearchParams({
+      format: "json",
+      limit: "1",
+      country: "Brasil",
+      city,
+      state,
+    });
+    if (cepDigits.length === 8) structured.set("postalcode", cepDigits);
+    const streetLine = [street, neighborhood].filter(Boolean).join(", ");
+    if (streetLine) structured.set("street", streetLine);
+
+    const res1 = await fetch(`${NOMINATIM_SEARCH}?${structured}`, { headers });
+    if (res1.ok) {
+      const parsed = parseFirst(await res1.json());
+      if (parsed) return parsed;
+    }
+  } catch {
+    /* tenta busca livre */
+  }
+
+  try {
+    const chunks = [street, neighborhood, city, state];
+    if (cepDigits.length === 8) {
+      chunks.push(cepDigits.replace(/^(\d{5})(\d{3})$/, "$1-$2"));
+    }
+    chunks.push("Brasil");
+    const q = chunks.filter(Boolean).join(", ");
+    const params = new URLSearchParams({
+      q,
+      format: "json",
+      limit: "1",
+      countrycodes: "br",
+    });
+    const res2 = await fetch(`${NOMINATIM_SEARCH}?${params}`, { headers });
+    if (!res2.ok) return null;
+    return parseFirst(await res2.json());
+  } catch {
+    return null;
   }
 }

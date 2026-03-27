@@ -1,8 +1,8 @@
 import AppLayout from "@/components/AppLayout";
-import { DollarSign, TrendingUp, Calendar, Landmark, FileText, AlertTriangle, Save, Loader2, Info, Wallet, Clock, CheckCircle2 } from "lucide-react";
+import { DollarSign, TrendingUp, Calendar, Landmark, FileText, AlertTriangle, Save, Loader2, Info, Wallet, Clock, CheckCircle2, Download } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import React, { useEffect, useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -695,6 +695,17 @@ interface WalletTxItem {
   created_at: string; transferred_at: string | null;
   available_at: string | null; payment_method: string | null; anticipation_enabled: boolean;
 }
+
+interface FeeInvoiceRow {
+  id: string;
+  created_at: string;
+  invoice_value: number;
+  pdf_url: string | null;
+  nf_number: string | null;
+  status: string;
+  email_sent_at: string | null;
+}
+
 const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 const timeUntilAvailable = (available_at: string | null): string | null => {
@@ -730,22 +741,26 @@ const calcAvailableAt = (
 };
 
 const WalletTab = ({ proId }: { proId: string }) => {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [txs, setTxs] = useState<WalletTxItem[]>([]);
+  const [feeInvoices, setFeeInvoices] = useState<FeeInvoiceRow[]>([]);
   const [pixKey, setPixKey] = useState<string | null>(null);
   const [pixKeyType, setPixKeyType] = useState<string | null>(null);
   const [walletTab, setWalletTab] = useState<"pending" | "transferred">("pending");
   const [periodSettings, setPeriodSettings] = useState<Record<string, number>>({});
 
   const loadWallet = async () => {
-    const [{ data: fiscal }, { data: walletData }, { data: settingsData }] = await Promise.all([
+    const [{ data: fiscal }, { data: walletData }, { data: settingsData }, { data: invData }] = await Promise.all([
       supabase.from("professional_fiscal_data").select("pix_key, pix_key_type").eq("professional_id", proId).maybeSingle(),
       supabase.from("wallet_transactions")
         .select("id, amount, description, status, created_at, transferred_at, available_at, payment_method, anticipation_enabled")
         .eq("professional_id", proId).order("created_at", { ascending: false }),
       supabase.from("platform_settings").select("key, value")
         .in("key", ["transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days"]),
+      supabase.from("platform_fee_invoices")
+        .select("id, created_at, invoice_value, pdf_url, nf_number, status, email_sent_at")
+        .eq("professional_id", proId)
+        .order("created_at", { ascending: false }),
     ]);
     setPixKey(fiscal?.pix_key || null);
     setPixKeyType(fiscal?.pix_key_type || null);
@@ -759,6 +774,7 @@ const WalletTab = ({ proId }: { proId: string }) => {
       payment_method: (t as any).payment_method || null,
       anticipation_enabled: (t as any).anticipation_enabled || false,
     })));
+    setFeeInvoices((invData as FeeInvoiceRow[]) || []);
     setLoading(false);
   };
 
@@ -767,6 +783,7 @@ const WalletTab = ({ proId }: { proId: string }) => {
   useEffect(() => {
     const ch = supabase.channel(`wallet_pro_${proId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "wallet_transactions", filter: `professional_id=eq.${proId}` }, loadWallet)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "platform_fee_invoices", filter: `professional_id=eq.${proId}` }, loadWallet)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [proId]);
@@ -870,6 +887,48 @@ const WalletTab = ({ proId }: { proId: string }) => {
           ))}
         </div>
       )}
+
+      <div className="rounded-xl border bg-card p-4 mt-6">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-2">
+          <FileText className="w-4 h-4 text-primary" />
+          Notas fiscais (comissão Chamô)
+        </h3>
+        <p className="text-[11px] text-muted-foreground mb-3">
+          NFS-e referente à taxa de intermediação da plataforma sobre seus repasses. O mesmo PDF pode ser enviado ao seu e-mail fiscal.
+        </p>
+        {feeInvoices.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Nenhuma nota emitida ainda.</p>
+        ) : (
+          <div className="space-y-2">
+            {feeInvoices.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between gap-3 border rounded-xl px-3 py-2.5 bg-background/80">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground truncate">
+                    {inv.nf_number ? `NF ${inv.nf_number}` : "Nota fiscal"} · {fmtBRL(Number(inv.invoice_value))}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {new Date(inv.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+                    {inv.email_sent_at ? " · Enviada por e-mail" : ""}
+                  </p>
+                </div>
+                {inv.pdf_url ? (
+                  <a
+                    href={inv.pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    PDF
+                  </a>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground shrink-0">PDF em breve</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -1,11 +1,14 @@
 import { Star, BadgeCheck, MapPin } from "lucide-react";
-import { FeaturedSealStack, sortPublicSealsForDisplay } from "@/components/seals/FeaturedSealStack";
+import { sortPublicSealsForDisplay } from "@/components/seals/FeaturedSealStack";
+import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { sameCityState } from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
+import { useProProfileImpression } from "@/hooks/useProProfileImpression";
+import { cn } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
@@ -30,17 +33,6 @@ function setCachedLocation(city: string | null, state: string | null) {
   } catch { /* ignore */ }
 }
 
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 interface Pro {
   id: string;
   rating: number;
@@ -50,9 +42,8 @@ interface Pro {
   profession_name: string;
   full_name: string;
   avatar_url: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  distance_km: number | null;
+  address_city: string | null;
+  address_state: string | null;
   created_at: string | null;
   /** Selos públicos (ordenados: destaque primeiro) */
   seals?: { icon_variant: string }[];
@@ -68,13 +59,131 @@ const getAvatarUrl = (avatarUrl?: string | null) => {
   return `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${avatarUrl}`;
 };
 
+/**
+ * Melhor selo na frente; 2º e 3º atrás, lado a lado, ~50% sobrepostos entre si.
+ * Selos além do 3º viram +N ao lado.
+ */
+function FeaturedSealStrip({ seals }: { seals: { icon_variant: string }[] }) {
+  const best = seals[0];
+  if (!best) return null;
+  const backA = seals[1];
+  const backB = seals[2];
+  const extra = Math.max(0, seals.length - 3);
+  return (
+    <div
+      className="flex items-center justify-end gap-2 min-w-0 flex-1 pl-3"
+      aria-hidden
+    >
+      <div className="relative h-11 w-[3.25rem] sm:w-[3.5rem] shrink-0">
+        {(backA || backB) && (
+          <div className="absolute right-[1.65rem] top-1/2 z-0 flex flex-row items-center -translate-y-1/2">
+            {backA && (
+              <div className="relative shrink-0 opacity-90">
+                <ProfessionalSealIcon variant={backA.icon_variant} size={18} earned flat />
+              </div>
+            )}
+            {backB && (
+              <div className={cn("relative shrink-0 opacity-90", backA && "-ml-[9px]")}>
+                <ProfessionalSealIcon variant={backB.icon_variant} size={18} earned flat />
+              </div>
+            )}
+          </div>
+        )}
+        <div className="absolute right-0 top-1/2 z-[2] -translate-y-1/2">
+          <ProfessionalSealIcon variant={best.icon_variant} size={28} earned flat />
+        </div>
+      </div>
+      {extra > 0 && (
+        <span className="shrink-0 text-[11px] font-bold tabular-nums tracking-tight text-muted-foreground">
+          +{extra}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function FeaturedProCard({ pro }: { pro: Pro }) {
+  const impressionRef = useProProfileImpression(pro.user_id);
+  const initials = pro.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+  const avatarSrc = getAvatarUrl(pro.avatar_url);
+  const cityLine =
+    pro.address_city || pro.address_state
+      ? [pro.address_city, pro.address_state].filter(Boolean).join(", ")
+      : null;
+  return (
+    <div ref={impressionRef} className="flex-1 min-w-0 basis-0 min-h-0 flex">
+      <Link
+        to={`/professional/${pro.id}`}
+        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-2.5 flex-1 min-w-0 overflow-hidden active:scale-[0.97] transition-transform"
+      >
+        {/* Foto + selos ao lado (melhor selo maior); texto abaixo da foto */}
+        <div className="flex gap-4 items-start w-full min-w-0">
+          <div className="relative shrink-0 self-start">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
+              {avatarSrc ? (
+                <img
+                  src={avatarSrc}
+                  alt={pro.full_name}
+                  className="w-full h-full object-cover rounded-full"
+                  loading="lazy"
+                  decoding="async"
+                />
+              ) : (
+                initials
+              )}
+            </div>
+            {pro.verified && (
+              <div className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-card shadow-sm">
+                <BadgeCheck className="w-3 h-3 text-white" />
+              </div>
+            )}
+          </div>
+          {pro.seals && pro.seals.length > 0 ? (
+            <FeaturedSealStrip seals={pro.seals} />
+          ) : (
+            <div className="flex-1 min-w-0" />
+          )}
+        </div>
+
+        <div className="min-w-0 -mt-0.5">
+          <p className="font-bold text-foreground text-sm truncate leading-tight">{pro.full_name}</p>
+          <p className="text-sm font-semibold text-primary truncate mt-0.5">{pro.profession_name}</p>
+          {pro.verified && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 mt-0.5">
+              <BadgeCheck className="w-3 h-3 shrink-0" /> Verificado
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1">
+          <Star className="w-3.5 h-3.5 fill-primary text-primary flex-shrink-0" />
+          <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
+          <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
+        </div>
+
+        {cityLine && (
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <MapPin className="w-3 h-3 text-primary flex-shrink-0" />
+            <span className="truncate">{cityLine}</span>
+          </div>
+        )}
+
+        <div className="mt-auto pt-1">
+          <div className="w-full text-center text-sm font-semibold py-2.5 rounded-lg bg-primary text-white">
+            Contratar
+          </div>
+        </div>
+      </Link>
+    </div>
+  );
+}
+
 const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
   const [prosLoaded, setProsLoaded] = useState(false);
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   // Init from localStorage immediately — avoids waiting for DB before first render
   const cachedLoc = useMemo(() => getCachedLocation(), []);
@@ -93,7 +202,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     if (!user) return;
     const { data } = await supabase
       .from("profiles")
-      .select("latitude, longitude, address_city, address_state")
+      .select("address_city, address_state")
       .eq("user_id", user.id)
       .single();
     if (!data) return;
@@ -102,14 +211,6 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     setCachedLocation(city, state);
     setUserCity(city);
     setUserState(state);
-    if (data.latitude != null && data.longitude != null) {
-      setUserCoords({ lat: data.latitude, lng: data.longitude });
-    } else if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => {}
-      );
-    }
   }, []);
 
   const loadPros = useCallback(async () => {
@@ -254,7 +355,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         const pair = await Promise.race([
           Promise.all([
             supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
-            supabase.from("profiles").select("user_id, latitude, longitude, address_city, address_state").in("user_id", userIds),
+            supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
           ]),
           new Promise<never>((_, rej) => setTimeout(() => rej(new Error("featured_secondary_timeout")), 8_000)),
         ]);
@@ -271,7 +372,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         ((profilesRes.data || []) as { user_id: string; full_name: string; avatar_url: string | null }[]).map((p) => [p.user_id, p])
       );
       const locationMap = new Map(
-        ((locationsRes.data || []) as { user_id: string; latitude: number | null; longitude: number | null; address_city: string | null; address_state: string | null }[]).map((p) => [p.user_id, p])
+        ((locationsRes.data || []) as { user_id: string; address_city: string | null; address_state: string | null }[]).map((p) => [p.user_id, p])
       );
 
       const withLocation = finalPros.map((p) => {
@@ -285,12 +386,9 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
           full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
           avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
-          latitude: loc?.latitude ?? null,
-          longitude: loc?.longitude ?? null,
-          distance_km: null as number | null,
+          address_city: loc?.address_city ?? null,
+          address_state: loc?.address_state ?? null,
           created_at: (p as any).created_at as string | null,
-          _city: loc?.address_city ?? null,
-          _state: loc?.address_state ?? null,
         };
       });
 
@@ -335,7 +433,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         }
       }
 
-      const top10 = top10Raw.map(({ _city, _state, ...p }) => ({
+      const top10 = top10Raw.map((p) => ({
         ...p,
         seals: sealsByPro.get(p.id) ?? [],
       }));
@@ -358,23 +456,12 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     }
   }, [userCity, userState]);
 
-  const professionalsWithDistance = useMemo(() => {
-    if (!userCoords) return professionals;
-    return professionals.map((p) => ({
-      ...p,
-      distance_km:
-        p.latitude != null && p.longitude != null
-          ? haversineKm(userCoords.lat, userCoords.lng, p.latitude, p.longitude)
-          : null,
-    }));
-  }, [professionals, userCoords]);
-
   const pages = useMemo(() => {
     const p: Pro[][] = [];
-    for (let i = 0; i < professionalsWithDistance.length; i += ITEMS_PER_PAGE)
-      p.push(professionalsWithDistance.slice(i, i + ITEMS_PER_PAGE));
+    for (let i = 0; i < professionals.length; i += ITEMS_PER_PAGE)
+      p.push(professionals.slice(i, i + ITEMS_PER_PAGE));
     return p;
-  }, [professionalsWithDistance]);
+  }, [professionals]);
 
   const displayPages = useMemo(() => {
     if (pages.length <= 1) return pages;
@@ -468,79 +555,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       </section>
     );
   }
-  if (professionalsWithDistance.length === 0) return null;
-
-  const renderCard = (pro: Pro) => {
-    const initials = pro.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-    const avatarSrc = getAvatarUrl(pro.avatar_url);
-    const distanceText =
-      pro.distance_km != null
-        ? pro.distance_km < 1 ? "Menos de 1 km" : `${Math.round(pro.distance_km)} km de você`
-        : null;
-    return (
-      <Link
-        key={pro.id}
-        to={`/professional/${pro.id}`}
-        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-2.5 flex-1 min-w-0 basis-0 overflow-visible active:scale-[0.97] transition-transform"
-      >
-        {/* Avatar: verificado no canto superior direito; selos compactos sobrepostos embaixo à direita */}
-        <div className="relative self-start mb-0.5">
-          <div className="w-16 h-16 rounded-full bg-muted flex-shrink-0 flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
-            {avatarSrc ? (
-              <img
-                src={avatarSrc}
-                alt={pro.full_name}
-                className="w-full h-full object-cover rounded-full"
-                loading="lazy"
-                decoding="async"
-              />
-            ) : (
-              initials
-            )}
-          </div>
-          {pro.verified && (
-            <div className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-card shadow-sm">
-              <BadgeCheck className="w-3 h-3 text-white" />
-            </div>
-          )}
-          {pro.seals && pro.seals.length > 0 && (
-            <div className="absolute -right-1 -bottom-1 z-[5] flex items-end justify-end w-[4.5rem] h-[2.5rem] pointer-events-none">
-              <FeaturedSealStack seals={pro.seals} placement="avatar" />
-            </div>
-          )}
-        </div>
-
-        <div className="min-w-0">
-          <p className="font-bold text-foreground text-sm truncate leading-tight">{pro.full_name}</p>
-          <p className="text-sm font-semibold text-primary truncate mt-0.5">{pro.profession_name}</p>
-          {pro.verified && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 mt-0.5">
-              <BadgeCheck className="w-3 h-3" /> Verificado
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1">
-          <Star className="w-3.5 h-3.5 fill-primary text-primary flex-shrink-0" />
-          <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
-          <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
-        </div>
-
-        {distanceText && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="w-3 h-3 text-primary flex-shrink-0" />
-            <span className="truncate">{distanceText}</span>
-          </div>
-        )}
-
-        <div className="mt-auto pt-1">
-          <div className="w-full text-center text-sm font-semibold py-2.5 rounded-lg bg-primary text-white">
-            Contratar
-          </div>
-        </div>
-      </Link>
-    );
-  };
+  if (professionals.length === 0) return null;
 
   return (
     <section className="w-full min-w-0">
@@ -565,7 +580,9 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
             className="flex gap-3 flex-[0_0_100%] min-w-0 shrink-0 snap-start px-2 box-border"
             style={{ scrollSnapStop: "always" }}
           >
-            {pagePros.map((pro) => renderCard(pro))}
+            {pagePros.map((pro) => (
+              <FeaturedProCard key={pro.id} pro={pro} />
+            ))}
           </div>
         ))}
       </div>

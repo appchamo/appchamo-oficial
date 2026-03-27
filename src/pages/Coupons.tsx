@@ -20,11 +20,17 @@ const Coupons = () => {
 
   useEffect(() => {
     const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase.from("coupons").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
-      setCoupons((data as Coupon[]) || []);
-      setLoading(false);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setCoupons([]);
+          return;
+        }
+        const { data } = await supabase.from("coupons").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+        setCoupons((data as Coupon[]) || []);
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, []);

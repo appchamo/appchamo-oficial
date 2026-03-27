@@ -705,6 +705,44 @@ export type Database = {
           },
         ]
       }
+      professional_analytics_counters: {
+        Row: {
+          appointment_bookings: number
+          call_clicks: number
+          name_searches: number
+          profile_clicks: number
+          profile_views: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          appointment_bookings?: number
+          call_clicks?: number
+          name_searches?: number
+          profile_clicks?: number
+          profile_views?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          appointment_bookings?: number
+          call_clicks?: number
+          name_searches?: number
+          profile_clicks?: number
+          profile_views?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "professional_analytics_counters_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       professional_fiscal_data: {
         Row: {
           anticipation_enabled: boolean
@@ -1601,6 +1639,21 @@ export type Database = {
       }
     }
     Functions: {
+      get_my_seal_missions: {
+        Args: never
+        Returns: {
+          seal_id: string
+          slug: string
+          title: string
+          description: string
+          icon_variant: string
+          sort_order: number
+          is_special: boolean
+          awarded: boolean
+          progress_ratio: number
+          detail_label: string
+        }[]
+      }
       get_transaction_summary: {
         Args: never
         Returns: {
@@ -1615,6 +1668,14 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      get_my_professional_analytics: {
+        Args: never
+        Returns: Json
+      }
+      increment_professional_analytics: {
+        Args: { p_event: string; p_target_user_id: string }
+        Returns: undefined
       }
       increment_sponsor_clicks: {
         Args: { _sponsor_id: string }

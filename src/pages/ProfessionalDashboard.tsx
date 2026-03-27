@@ -42,12 +42,16 @@ const ProfessionalDashboard = () => {
         ]);
         const earned = new Set((awarded as { seal_id: string }[] | null)?.map((a) => a.seal_id) ?? []);
         const list = (defs as { id: string; title: string; description: string; icon_variant: string; is_special: boolean }[] | null) ?? [];
-        setSealRows(
-          list.map((d) => ({
-            ...d,
-            awarded: earned.has(d.id),
-          }))
-        );
+        const mapped = list.map((d) => ({
+          ...d,
+          awarded: earned.has(d.id),
+        }));
+        mapped.sort((a, b) => {
+          const ac = a.icon_variant === "seal_chamo" ? 1 : 0;
+          const bc = b.icon_variant === "seal_chamo" ? 1 : 0;
+          return ac - bc;
+        });
+        setSealRows(mapped);
       }
     };
     load();

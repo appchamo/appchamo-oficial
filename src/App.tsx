@@ -69,6 +69,10 @@ const QrAuthWeb = lazy(() => import("./pages/QrAuthWeb"));
 const QrScannerApp = lazy(() => import("./pages/QrScannerApp"));
 const JobApply = lazy(() => import("./pages/JobApply"));
 const BusinessCheckout = lazy(() => import("./pages/BusinessCheckout"));
+const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
+const ProfileSettingsPassword = lazy(() => import("./pages/ProfileSettingsPassword"));
+const ProfileSettingsAddress = lazy(() => import("./pages/ProfileSettingsAddress"));
+const ProfessionalReports = lazy(() => import("./pages/ProfessionalReports"));
 
 const AdminLogin = lazy(() => import("./pages/admin/AdminLogin"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -509,6 +513,10 @@ const AppContent = () => {
         <Route path="/how-to-hire" element={<ProtectedRoute><HowToHire /></ProtectedRoute>} />
         <Route path="/how-to-pay" element={<ProtectedRoute><HowToPay /></ProtectedRoute>} />
         <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
+        <Route path="/profile/settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+        <Route path="/profile/settings/senha" element={<ProtectedRoute><ProfileSettingsPassword /></ProtectedRoute>} />
+        <Route path="/profile/settings/endereco" element={<ProtectedRoute><ProfileSettingsAddress /></ProtectedRoute>} />
+        <Route path="/profile/relatorios" element={<ProtectedRoute><ProfessionalReports /></ProtectedRoute>} />
         <Route path="/checkout/business" element={<BusinessCheckout />} />
 
         {/* QR Login */}

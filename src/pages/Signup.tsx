@@ -6,6 +6,7 @@ import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { consumePostAuthRedirect } from "@/lib/chamoAuthReturn";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
+import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ticket, MailCheck, Mail, Home } from "lucide-react";
 import StepAccountType from "@/components/signup/StepAccountType";
@@ -420,10 +421,29 @@ const Signup = () => {
         }))
       );
 
+      const basicPayload: Record<string, unknown> = { ...basicData };
+      if (accountType === "professional" && basicData.addressCity?.trim() && basicData.addressState?.trim()) {
+        try {
+          const geo = await forwardGeocodeBrazil({
+            cep: basicData.addressZip,
+            city: basicData.addressCity,
+            state: basicData.addressState,
+            street: basicData.addressStreet,
+            neighborhood: basicData.addressNeighborhood,
+          });
+          if (geo) {
+            basicPayload.latitude = geo.lat;
+            basicPayload.longitude = geo.lng;
+          }
+        } catch {
+          void 0;
+        }
+      }
+
       const { data: result, error: fnError } = await supabase.functions.invoke(
         "complete-signup",
         {
-          body: { userId, accountType, profileData: pData, basicData, docFiles: docFilesPayload, planId },
+          body: { userId, accountType, profileData: pData, basicData: basicPayload, docFiles: docFilesPayload, planId },
           headers: {
             Authorization: `Bearer ${token}`,
           },

@@ -2,12 +2,56 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ChevronRight } from "lucide-react";
+import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 
 interface QuickPro {
   id: string;
+  user_id: string;
   full_name: string;
   profession_name: string;
   avatar_url: string | null;
+}
+
+function QuickProRow({ pro, isLast }: { pro: QuickPro; isLast: boolean }) {
+  const impressionRef = useProProfileImpression(pro.user_id);
+  const initials = pro.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+  const avatarUrl = pro.avatar_url?.startsWith("http")
+    ? pro.avatar_url
+    : pro.avatar_url
+      ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${pro.avatar_url}`
+      : null;
+
+  return (
+    <div ref={impressionRef}>
+      <Link
+        to={`/professional/${pro.id}`}
+        className={`flex items-center gap-3 px-4 py-3 active:bg-muted/50 transition-colors w-full ${
+          !isLast ? "border-b border-border/60" : ""
+        }`}
+      >
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary overflow-hidden shrink-0">
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={pro.full_name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            initials
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground truncate">{pro.full_name}</p>
+          <p className="text-xs font-medium text-primary truncate">{pro.profession_name}</p>
+        </div>
+        <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+      </Link>
+    </div>
+  );
 }
 
 const LOCATION_CACHE_KEY = "chamo_user_location_v1";
@@ -91,6 +135,7 @@ const QuickProfessionalsList = () => {
       }
       const list: QuickPro[] = finalData.slice(0, 5).map((p: any) => ({
         id: p.id,
+        user_id: p.user_id,
         full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
         profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
         avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
@@ -114,43 +159,9 @@ const QuickProfessionalsList = () => {
       </div>
 
       <div className="bg-card border rounded-2xl overflow-hidden shadow-sm">
-        {pros.map((pro, i) => {
-          const initials = pro.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-          const avatarUrl = pro.avatar_url?.startsWith("http")
-            ? pro.avatar_url
-            : pro.avatar_url
-            ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${pro.avatar_url}`
-            : null;
-
-          return (
-            <Link
-              key={pro.id}
-              to={`/professional/${pro.id}`}
-              className={`flex items-center gap-3 px-4 py-3 active:bg-muted/50 transition-colors ${
-                i < pros.length - 1 ? "border-b border-border/60" : ""
-              }`}
-            >
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary overflow-hidden shrink-0">
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt={pro.full_name}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                ) : (
-                  initials
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground truncate">{pro.full_name}</p>
-                <p className="text-xs font-medium text-primary truncate">{pro.profession_name}</p>
-              </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            </Link>
-          );
-        })}
+        {pros.map((pro, i) => (
+          <QuickProRow key={pro.id} pro={pro} isLast={i === pros.length - 1} />
+        ))}
       </div>
     </section>
   );

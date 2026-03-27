@@ -294,10 +294,12 @@ const Header = () => {
                 type="button"
                 onClick={handleVipOrPlanosClick}
                 aria-label="Ver planos e assinatura VIP"
-                className="flex items-center gap-1.5 min-h-[44px] min-w-[44px] px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.98] transition-colors shadow-sm touch-manipulation"
+                className="flex items-center gap-1 max-w-[7.5rem] sm:max-w-[9rem] px-2 py-1.5 rounded-xl border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 active:scale-95 transition-all touch-manipulation"
               >
-                <Crown className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold">{showPlanBadge ? planName : "Planos"}</span>
+                <Crown className="w-3 h-3 flex-shrink-0 text-primary" />
+                <span className="text-[11px] font-bold leading-none truncate">
+                  {showPlanBadge ? planName : "Planos"}
+                </span>
               </button>
             )}
 

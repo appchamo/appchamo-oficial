@@ -27,6 +27,7 @@ import { ptBR } from "date-fns/locale";
 import { buildChatAppointmentRequestMessage } from "@/lib/chatAppointmentRequest";
 import { getCurrentPathForAuthReturn, setPostAuthRedirect } from "@/lib/chamoAuthReturn";
 import { cn } from "@/lib/utils";
+import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
 
 type Step = "atendente" | "service" | "date" | "time" | "confirm";
 
@@ -368,6 +369,7 @@ export default function AgendaBookingDialog({
         image_url: clientPub?.avatar_url ?? null,
       } as any);
 
+      incrementProfessionalAnalytics(professionalUserId, "appointment_booking");
       onOpenChange(false);
       toast({ title: "Agendamento enviado! Aguarde a confirmação." });
       navigate(`/messages/${requestId}`);

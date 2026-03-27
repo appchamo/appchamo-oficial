@@ -450,3 +450,9 @@ entrypoint = "./functions/create_payment/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/asaas_webhook/index.ts"
+
+# Admin: emissão NFS-e comissão pós-repasse (JWT validado na função + is_admin)
+[functions.emit_transfer_fee_invoice]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/emit_transfer_fee_invoice/index.ts"

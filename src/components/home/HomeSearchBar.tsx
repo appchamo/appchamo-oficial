@@ -55,8 +55,8 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
   const [showResults, setShowResults] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  const placeholder = section?.title || "Buscar profissional ou serviço...";
-  const hint = section?.subtitle || "Ex: eletricista, encanador, escola de idiomas...";
+  const placeholder = "O que você procura hoje?";
+  const hint = section?.subtitle?.trim() || "Eletricista, beleza, aulas, reparos…";
 
   useEffect(() => {
     const load = async () => {
@@ -153,14 +153,16 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
 
   return (
     <div ref={searchRef} className="relative">
-      <div className="flex items-center gap-3 border-2 border-primary/20 rounded-2xl px-4 py-3.5 bg-card hover:border-primary/40 transition-all shadow-sm">
-        <div
-          onClick={handleSearchSubmit}
-          className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center cursor-pointer hover:bg-primary/20 transition-colors"
-        >
-          <Search className="w-5 h-5 text-primary" />
-        </div>
-        <div className="flex-1">
+      <div className="rounded-2xl border-2 border-primary/25 bg-card shadow-md transition-all hover:border-primary/40 focus-within:border-primary/55 focus-within:shadow-lg focus-within:ring-4 focus-within:ring-primary/15">
+        <div className="flex items-center gap-0.5 pl-2 pr-2 py-3 sm:py-3.5">
+          <button
+            type="button"
+            aria-label="Ir para busca"
+            onClick={handleSearchSubmit}
+            className="shrink-0 p-2.5 rounded-xl bg-primary/12 text-primary hover:bg-primary/18 active:scale-95 transition-colors"
+          >
+            <Search className="w-5 h-5" strokeWidth={2.5} />
+          </button>
           <input
             type="text"
             value={searchQuery}
@@ -171,16 +173,24 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
             onFocus={() => searchQuery.trim() && setShowResults(true)}
             onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()}
             placeholder={placeholder}
-            className="w-full bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+            className="flex-1 min-w-0 bg-transparent text-[15px] sm:text-base leading-tight outline-none text-foreground placeholder:text-muted-foreground placeholder:font-normal"
           />
-          <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>
+          {searchQuery ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                setShowResults(false);
+              }}
+              className="shrink-0 p-2 rounded-full hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Limpar busca"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          ) : null}
         </div>
-        {searchQuery && (
-          <button onClick={() => { setSearchQuery(""); setShowResults(false); }} className="p-1">
-            <X className="w-4 h-4 text-muted-foreground" />
-          </button>
-        )}
       </div>
+      <p className="text-xs text-muted-foreground mt-2 px-1 leading-snug">{hint}</p>
 
       {showResults && searchQuery.trim() && (
         <div className="absolute left-0 right-0 top-full mt-1 bg-card border-2 border-primary/20 rounded-2xl shadow-lg z-30 max-h-80 overflow-y-auto">

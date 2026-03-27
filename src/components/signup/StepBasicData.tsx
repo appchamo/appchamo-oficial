@@ -341,7 +341,19 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
     }
     if (isUnderage(birthIso)) { toast({ title: "Você precisa ter 18 anos ou mais para se cadastrar.", variant: "destructive" }); return; }
     if (!termsAccepted) { toast({ title: "Aceite os termos de uso para continuar." }); return; }
-    
+
+    const refTrim = referralCode.trim();
+    if (refTrim.length >= 6 && !referralValidated) {
+      toast({
+        title: "Valide o código de convite",
+        description: 'Toque em "Aplicar código" para confirmar ou limpe o campo.',
+        variant: "destructive",
+      });
+      return;
+    }
+    const referralToSubmit =
+      refTrim.length >= 6 && referralValidated && refTrim === referralValidatedCode ? refTrim : undefined;
+
     // ✅ Validação de senha condicional
     if (!isSocialSignup) {
       if (password.length < 6) { toast({ title: "A senha deve ter pelo menos 6 caracteres." }); return; }
@@ -437,7 +449,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             gender,
             ...addressPayload,
             asaas_customer_id: validation.asaas_customer_id,
-            referralCode: referralCode.trim() || undefined,
+            referralCode: referralToSubmit,
           });
           return;
         }
@@ -457,7 +469,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       birthDate: birthIso,
       gender,
       ...addressPayload,
-      referralCode: referralCode.trim() || undefined,
+      referralCode: referralToSubmit,
     });
   };
 

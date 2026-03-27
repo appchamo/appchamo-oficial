@@ -27,6 +27,72 @@ type Step =
   | "profile"
   | "awaiting-email";
 
+/** Evita perder "Profissional" após reload/remount (comum em WebView); alinhado ao userId OAuth ou e-mail do rascunho. */
+const SIGNUP_DRAFT_OAUTH_KEY = "chamo_signup_draft_oauth_v1";
+const SIGNUP_DRAFT_EMAIL_KEY = "chamo_signup_draft_email_v1";
+
+type SignupDraftOAuthV1 = {
+  v: 1;
+  userId: string;
+  accountType: AccountType;
+  step: Step;
+  basicData: BasicData | null;
+  hadDocuments: boolean;
+};
+
+type SignupDraftEmailV1 = {
+  v: 1;
+  email: string;
+  accountType: AccountType;
+  step: Step;
+  basicData: BasicData;
+  hadDocuments: boolean;
+};
+
+function clearSignupDrafts() {
+  try {
+    sessionStorage.removeItem(SIGNUP_DRAFT_OAUTH_KEY);
+    sessionStorage.removeItem(SIGNUP_DRAFT_EMAIL_KEY);
+  } catch {
+    void 0;
+  }
+}
+
+function readOAuthDraft(userId: string): SignupDraftOAuthV1 | null {
+  try {
+    const raw = sessionStorage.getItem(SIGNUP_DRAFT_OAUTH_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as SignupDraftOAuthV1;
+    if (d.v !== 1 || d.userId !== userId) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+function readEmailDraft(): SignupDraftEmailV1 | null {
+  try {
+    const raw = sessionStorage.getItem(SIGNUP_DRAFT_EMAIL_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as SignupDraftEmailV1;
+    if (d.v !== 1 || !d.email || !d.basicData) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+/** Perdeu os File[] no reload: volta a documentos antes do perfil. */
+function resolveRestoredStep(
+  accountType: AccountType,
+  savedStep: Step,
+  hadDocuments: boolean
+): Step {
+  if (accountType !== "professional") return savedStep;
+  if (savedStep === "profile" && hadDocuments) return "documents";
+  return savedStep;
+}
+
 const friendlyError = (msg: string, status?: number) => {
   if (status === 429 || /429|too many|rate limit|rate_limit/i.test(msg))
     return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
@@ -146,7 +212,24 @@ const Signup = () => {
     if (localStorage.getItem("manual_login_intent") === "true") return;
     const checkSocialUser = async () => {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
-      if (!currentSession?.user) return;
+
+      if (!currentSession?.user) {
+        const ed = readEmailDraft();
+        if (ed && ed.step !== "method-choice" && ed.step !== "type") {
+          setAccountType(ed.accountType);
+          setBasicData(ed.basicData);
+          const next = resolveRestoredStep(ed.accountType, ed.step, ed.hadDocuments);
+          setStep(next);
+          if (ed.step === "profile" && ed.hadDocuments && next === "documents") {
+            toast({
+              title: "Envie os documentos novamente",
+              description: "Os arquivos não ficam salvos após recarregar. Anexe de novo para finalizar.",
+            });
+          }
+        }
+        return;
+      }
+
       setLoading(true);
       try {
         const { data: profileRow, error: profileError } = await supabase
@@ -171,29 +254,48 @@ const Signup = () => {
           });
           navigate("/login");
           return;
-        } else {
-          setCreatedUserId(currentSession.user.id);
-          setBasicData({
-            name: currentSession.user.user_metadata?.full_name || "",
-            displayName: currentSession.user.user_metadata?.full_name || "",
-            email: currentSession.user.email || "",
-            password: "",
-            phone: "",
-            document: "",
-            documentType: "cpf",
-            birthDate: "",
-            gender: "prefer_not_say",
-            addressZip: "",
-            addressStreet: "",
-            addressNumber: "",
-            addressComplement: "",
-            addressNeighborhood: "",
-            addressCity: "",
-            addressState: "",
-            addressCountry: "Brasil",
-          });
-          setStep("type");
         }
+
+        const u = currentSession.user;
+        const oauthDefaults: BasicData = {
+          name: u.user_metadata?.full_name || "",
+          displayName: u.user_metadata?.full_name || "",
+          email: u.email || "",
+          password: "",
+          phone: "",
+          document: "",
+          documentType: "cpf",
+          birthDate: "",
+          gender: "prefer_not_say",
+          addressZip: "",
+          addressStreet: "",
+          addressNumber: "",
+          addressComplement: "",
+          addressNeighborhood: "",
+          addressCity: "",
+          addressState: "",
+          addressCountry: "Brasil",
+        };
+
+        const draft = readOAuthDraft(u.id);
+        if (draft && draft.step !== "method-choice" && draft.step !== "type") {
+          const nextStep = resolveRestoredStep(draft.accountType, draft.step, draft.hadDocuments);
+          setCreatedUserId(u.id);
+          setAccountType(draft.accountType);
+          setBasicData(draft.basicData ?? oauthDefaults);
+          setStep(nextStep);
+          if (draft.step === "profile" && draft.hadDocuments && nextStep === "documents") {
+            toast({
+              title: "Envie os documentos novamente",
+              description: "Os arquivos não ficam salvos após recarregar. Anexe de novo para finalizar.",
+            });
+          }
+          return;
+        }
+
+        setCreatedUserId(u.id);
+        setBasicData(oauthDefaults);
+        setStep("type");
       } catch (err) {
         console.error("Erro na Blitz Social:", err);
       } finally {
@@ -219,9 +321,7 @@ const Signup = () => {
       return;
     }
 
-    didAdvanceFromOAuth.current = true;
-    setCreatedUserId(session.user.id);
-    setBasicData({
+    const oauthDefaults: BasicData = {
       name: session.user.user_metadata?.full_name || "",
       displayName: session.user.user_metadata?.full_name || "",
       email: session.user.email || "",
@@ -239,9 +339,61 @@ const Signup = () => {
       addressCity: "",
       addressState: "",
       addressCountry: "Brasil",
-    });
+    };
+
+    const draft = readOAuthDraft(session.user.id);
+    if (draft && draft.step !== "method-choice" && draft.step !== "type") {
+      didAdvanceFromOAuth.current = true;
+      const nextStep = resolveRestoredStep(draft.accountType, draft.step, draft.hadDocuments);
+      setCreatedUserId(session.user.id);
+      setAccountType(draft.accountType);
+      setBasicData(draft.basicData ?? oauthDefaults);
+      setStep(nextStep);
+      if (draft.step === "profile" && draft.hadDocuments && nextStep === "documents") {
+        toast({
+          title: "Envie os documentos novamente",
+          description: "Os arquivos não ficam salvos após recarregar. Anexe de novo para finalizar.",
+        });
+      }
+      return;
+    }
+
+    didAdvanceFromOAuth.current = true;
+    setCreatedUserId(session.user.id);
+    setBasicData(oauthDefaults);
     setStep("type");
   }, [session, profile, authLoading, step, navigate]);
+
+  // Mantém tipo de conta + passo no sessionStorage (evita voltar a "cliente" após remount/reload).
+  useEffect(() => {
+    if (step === "method-choice" || step === "type") return;
+    try {
+      const hadDocuments = docFiles.length > 0;
+      if (createdUserId) {
+        const draft: SignupDraftOAuthV1 = {
+          v: 1,
+          userId: createdUserId,
+          accountType,
+          step,
+          basicData,
+          hadDocuments,
+        };
+        sessionStorage.setItem(SIGNUP_DRAFT_OAUTH_KEY, JSON.stringify(draft));
+      } else if (basicData?.email) {
+        const draft: SignupDraftEmailV1 = {
+          v: 1,
+          email: basicData.email,
+          accountType,
+          step,
+          basicData,
+          hadDocuments,
+        };
+        sessionStorage.setItem(SIGNUP_DRAFT_EMAIL_KEY, JSON.stringify(draft));
+      }
+    } catch {
+      void 0;
+    }
+  }, [createdUserId, accountType, step, basicData, docFiles.length]);
 
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
@@ -489,6 +641,7 @@ const Signup = () => {
       setReferralSignupDiscount(signupDisc);
       setLoading(false);
       localStorage.removeItem("signup_in_progress");
+      clearSignupDrafts();
 
       if (signedUpWithEmail) {
         // Cadastro por e-mail: exige confirmação → modal e depois ir para login

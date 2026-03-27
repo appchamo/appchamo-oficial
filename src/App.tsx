@@ -16,6 +16,7 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import EdgeSwipeBack from "@/components/EdgeSwipeBack";
+import DeepLinkRouter from "@/components/DeepLinkRouter";
 import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
 import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
@@ -568,6 +569,7 @@ const App = () => {
         <BrowserRouter>
           <AuthProvider>
             <RefreshProvider>
+              <DeepLinkRouter />
               <ScrollToTop />
               <AdminRedirectGuard />
               <SponsorRedirectGuard />

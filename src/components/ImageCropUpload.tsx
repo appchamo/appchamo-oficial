@@ -2,9 +2,10 @@ import { useState, useCallback, useRef } from "react";
 import Cropper, { Area } from "react-easy-crop";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
-import { Upload, ZoomIn, Check, X } from "lucide-react";
+import { Upload, ZoomIn, Check, X, Camera } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { Capacitor } from "@capacitor/core";
 
 interface ImageCropUploadProps {
   onUpload: (path: string) => void;
@@ -17,6 +18,8 @@ interface ImageCropUploadProps {
   maxSize?: number;
   /** Qualidade WebP 0–1. Default: 0.65 */
   quality?: number;
+  /** Mostra botão de câmera ao lado do upload (ex.: cadastro — foto de perfil). */
+  showCameraOption?: boolean;
 }
 
 function createImage(url: string): Promise<HTMLImageElement> {
@@ -70,6 +73,7 @@ const ImageCropUpload = ({
   label = "Upload imagem",
   maxSize = 520,
   quality = 0.65,
+  showCameraOption = false,
 }: ImageCropUploadProps) => {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -78,8 +82,9 @@ const ImageCropUpload = ({
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraCaptureRef = useRef<HTMLInputElement>(null);
 
-  const openCropWithFile = (file: File) => {
+  const openCropWithFile = useCallback((file: File) => {
     const allowedTypes = ["image/png", "image/jpeg", "image/jpg"];
     if (!allowedTypes.includes(file.type)) {
       toast({ title: "Formato não permitido", description: "Apenas PNG e JPEG são aceitos.", variant: "destructive" });
@@ -93,6 +98,40 @@ const ImageCropUpload = ({
       setZoom(1);
     };
     reader.readAsDataURL(file);
+  }, []);
+
+  const pickFromCamera = useCallback(async () => {
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const { Camera: CapCamera, CameraResultType, CameraSource } = await import("@capacitor/camera");
+        await CapCamera.requestPermissions({ permissions: ["camera"] }).catch(() => {});
+        const photo = await CapCamera.getPhoto({
+          quality: 85,
+          allowEditing: false,
+          resultType: CameraResultType.Uri,
+          source: CameraSource.Camera,
+        });
+        const webPath = photo.webPath;
+        if (!webPath) return;
+        const res = await fetch(webPath);
+        const blob = await res.blob();
+        const file = new File([blob], `camera-${Date.now()}.jpg`, {
+          type: blob.type && blob.type.startsWith("image/") ? blob.type : "image/jpeg",
+        });
+        openCropWithFile(file);
+      } else {
+        cameraCaptureRef.current?.click();
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Não foi possível usar a câmera", variant: "destructive" });
+    }
+  }, [openCropWithFile]);
+
+  const onCameraCaptureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) openCropWithFile(file);
   };
 
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -161,6 +200,14 @@ onUpload(publicData.publicUrl);
         onChange={onFileSelect}
         className="hidden"
       />
+      <input
+        ref={cameraCaptureRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        capture="environment"
+        onChange={onCameraCaptureChange}
+        className="hidden"
+      />
 
       {label ? (
         <button
@@ -182,6 +229,25 @@ onUpload(publicData.publicUrl);
 
           <span className="text-xs text-muted-foreground">{label}</span>
         </button>
+      ) : showCameraOption ? (
+        <div className="flex items-center gap-1.5" role="group" aria-label="Foto de perfil">
+          <button
+            type="button"
+            onClick={() => void pickFromCamera()}
+            title="Tirar foto"
+            className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md hover:bg-primary/90 transition-colors"
+          >
+            <Camera className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onButtonClick}
+            title="Galeria ou arquivos"
+            className="w-9 h-9 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center shadow-md hover:bg-primary transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+          </button>
+        </div>
       ) : (
         <button
           type="button"

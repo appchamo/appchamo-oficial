@@ -61,7 +61,7 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
       setAvatarError(true);
       toast({
         title: "Foto de perfil obrigatória",
-        description: "Toque no ícone laranja abaixo da foto, escolha uma imagem e confirme o recorte para enviar.",
+        description: "Use a câmera ou a galeria nos botões ao lado da foto e confirme o recorte.",
         variant: "destructive",
       });
       return;
@@ -113,6 +113,7 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
                   label=""
                   maxSize={336}
                   quality={0.7}
+                  showCameraOption
                 />
               </div>
             </div>

@@ -22,7 +22,18 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const body = await req.json();
-    const { userId, accountType, profileData, basicData, docFiles, planId } = body;
+    const { userId, accountType: accountTypeRaw, profileData, basicData, docFiles, planId } = body;
+
+    /** Se o app perder o estado (ex.: remount WebView) pode enviar client com payload de profissional. */
+    const hasProDocs = Array.isArray(docFiles) && docFiles.length > 0;
+    const categoryId = profileData && typeof profileData === "object"
+      ? (profileData as { categoryId?: unknown }).categoryId
+      : undefined;
+    const hasProProfile = categoryId !== undefined && categoryId !== null && String(categoryId).length > 0;
+    let accountType = accountTypeRaw;
+    if (accountType === "client" && (hasProDocs || hasProProfile)) {
+      accountType = "professional";
+    }
 
     if (!userId || !accountType || !basicData) {
       return new Response(

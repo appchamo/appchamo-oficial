@@ -28,6 +28,7 @@ import { diagLog } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
 import CommunityFeed from "@/components/community/CommunityFeed";
+import HomeLaunchBanner from "@/components/home/HomeLaunchBanner";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -580,6 +581,7 @@ const Home = () => {
 
   return (
     <AppLayout>
+      {contentReady ? <HomeLaunchBanner /> : null}
       {!contentReady ? (
         <HomeSkeleton />
       ) : user && homeFeedComunidade ? (

@@ -364,7 +364,9 @@ const AdminWallet = () => {
       });
       if (error) throw new Error(error.message || "Erro ao emitir NF");
       if (data?.error) throw new Error(data.error);
-      const emailHint = data.email_sent ? "E-mail enviado ao prestador." : "Configure RESEND_API_KEY para enviar o PDF por e-mail automaticamente.";
+      const emailHint = data.email_sent
+        ? "E-mail enviado ao prestador."
+        : "Configure SMTP (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM) na função para enviar o PDF por e-mail.";
       toast({
         title: "Nota fiscal emitida",
         description: `${emailHint} Valor: ${fmt(data.value)}.`,

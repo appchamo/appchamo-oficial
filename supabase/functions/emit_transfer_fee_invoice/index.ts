@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -125,18 +126,52 @@ async function fetchPdfBase64(url: string, apiKey: string): Promise<string | nul
   }
 }
 
-async function sendResendEmail(opts: {
+/** SMTP: SMTP_HOST, SMTP_USER (ou SMTP_USERNAME), SMTP_PASSWORD (ou SMTP_PASS), SMTP_FROM.
+ *  Porta padrão 465 + TLS (melhor em Edge/Supabase; use SMTP_PORT=587 e SMTP_SECURE=false se o host exigir STARTTLS). */
+function readSmtpSettings():
+  | {
+    hostname: string;
+    port: number;
+    tls: boolean;
+    auth: { username: string; password: string };
+    from: string;
+  }
+  | null {
+  const hostname = Deno.env.get("SMTP_HOST")?.trim();
+  const username = (Deno.env.get("SMTP_USER") ?? Deno.env.get("SMTP_USERNAME"))?.trim();
+  const password = (Deno.env.get("SMTP_PASSWORD") ?? Deno.env.get("SMTP_PASS"))?.trim();
+  const from = Deno.env.get("SMTP_FROM")?.trim();
+  if (!hostname || !username || !password || !from) return null;
+
+  const portRaw = Deno.env.get("SMTP_PORT")?.trim();
+  const secureRaw = (Deno.env.get("SMTP_SECURE") ?? "").toLowerCase();
+  const explicitSecure = secureRaw === "true" || secureRaw === "1";
+  const explicitInsecure = secureRaw === "false" || secureRaw === "0";
+
+  let port = portRaw ? parseInt(portRaw, 10) : 465;
+  if (Number.isNaN(port)) port = 465;
+
+  let tls: boolean;
+  if (explicitSecure) tls = true;
+  else if (explicitInsecure) tls = false;
+  else tls = port === 465;
+
+  return { hostname, port, tls, auth: { username, password }, from };
+}
+
+async function sendSmtpInvoiceEmail(opts: {
   to: string;
   subject: string;
   html: string;
   pdfBase64: string | null;
   filename: string;
   pdfUrlFallback: string | null;
-}) {
-  const key = Deno.env.get("RESEND_API_KEY");
-  const from = Deno.env.get("RESEND_FROM_EMAIL") || "Chamô <onboarding@resend.dev>";
-  if (!key) {
-    console.warn("RESEND_API_KEY não configurada — e-mail não enviado.");
+}): Promise<boolean> {
+  const cfg = readSmtpSettings();
+  if (!cfg) {
+    console.warn(
+      "SMTP não configurado (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM) — e-mail não enviado.",
+    );
     return false;
   }
 
@@ -145,27 +180,44 @@ async function sendResendEmail(opts: {
     html += `<p style="margin-top:16px;font-size:14px;"><a href="${opts.pdfUrlFallback}" style="color:#ea580c;font-weight:600;">Baixar PDF da nota fiscal</a></p>`;
   }
 
-  const body: Record<string, unknown> = {
-    from,
-    to: [opts.to],
-    subject: opts.subject,
-    html,
-  };
-  if (opts.pdfBase64) {
-    body.attachments = [{ filename: opts.filename, content: opts.pdfBase64 }];
-  }
+  const attachments = opts.pdfBase64
+    ? [{
+      filename: opts.filename,
+      contentType: "application/pdf",
+      encoding: "base64" as const,
+      content: opts.pdfBase64,
+    }]
+    : undefined;
 
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+  const client = new SMTPClient({
+    connection: {
+      hostname: cfg.hostname,
+      port: cfg.port,
+      tls: cfg.tls,
+      auth: cfg.auth,
+    },
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    console.error("Resend error:", data);
+
+  try {
+    await client.send({
+      from: cfg.from,
+      to: opts.to,
+      subject: opts.subject,
+      html,
+      content: "Segue a nota fiscal em anexo ou no link indicado no e-mail HTML.",
+      attachments,
+    });
+    return true;
+  } catch (e) {
+    console.error("SMTP error:", e);
     return false;
+  } finally {
+    try {
+      await client.close();
+    } catch {
+      /* ignore */
+    }
   }
-  return true;
 }
 
 serve(async (req) => {
@@ -366,7 +418,7 @@ serve(async (req) => {
     let emailSent = false;
     if (toEmail) {
       const pdfB64 = pdfUrl ? await fetchPdfBase64(pdfUrl, ASAAS_API_KEY) : null;
-      emailSent = await sendResendEmail({
+      emailSent = await sendSmtpInvoiceEmail({
         to: toEmail,
         subject: "Chamô — sua nota fiscal de comissão da plataforma",
         html: `<div style="max-width:560px;margin:0 auto;padding:24px;">${CHAMO_EMAIL_INTRO_HTML}</div>`,

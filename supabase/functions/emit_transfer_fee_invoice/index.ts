@@ -33,8 +33,8 @@ const ASAAS_BASE_URL = ASAAS_ENV === "production"
   ? "https://api.asaas.com/v3"
   : "https://api-sandbox.asaas.com/v3";
 
-function defaultTaxes() {
-  return {
+function defaultTaxes(): Record<string, unknown> {
+  const taxes: Record<string, unknown> = {
     retainIss: false,
     iss: Number(Deno.env.get("ASAAS_NF_ISS") ?? "2"),
     pis: Number(Deno.env.get("ASAAS_NF_PIS") ?? "0.65"),
@@ -45,6 +45,13 @@ function defaultTaxes() {
     pisCofinsRetentionType: Deno.env.get("ASAAS_NF_PIS_COFINS_RETENTION") ?? "NOT_WITHHELD",
     pisCofinsTaxStatus: Deno.env.get("ASAAS_NF_PIS_COFINS_TAX_STATUS") ?? "STANDARD_TAXABLE_OPERATION",
   };
+  // Algumas prefeituras (ex.: validação de CNAE na NF) usam o código de classificação tributária — 7 dígitos, só números
+  const tccRaw = Deno.env.get("ASAAS_NF_TAX_CLASSIFICATION_CODE")?.trim() ?? "";
+  const tcc = tccRaw.replace(/\D/g, "");
+  if (tcc.length === 7) {
+    taxes.taxClassificationCode = tcc;
+  }
+  return taxes;
 }
 
 async function asaasReq(apiKey: string, path: string, method: string, body?: unknown) {

@@ -445,9 +445,14 @@ const AdminWallet = () => {
         return;
       }
       if (data?.success === false) {
+        const errText = (data.error as string) || "";
+        const hintText = (data.hint as string) || "";
+        const desc = [errText, hintText].filter(Boolean).join("\n\n");
+        const isOnlyPdfWait = errText.includes("PDF ainda não disponível no Asaas");
         toast({
-          title: "PDF ainda indisponível",
-          description: data.error || "O Asaas ainda não gerou o arquivo. Tente de novo em alguns minutos.",
+          title: isOnlyPdfWait ? "PDF ainda indisponível" : "NFS-e / Asaas",
+          description: desc || "O Asaas ainda não gerou o arquivo. Tente de novo em alguns minutos.",
+          variant: isOnlyPdfWait ? "default" : "destructive",
         });
         return;
       }

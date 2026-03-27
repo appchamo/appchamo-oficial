@@ -90,13 +90,38 @@ serve(async (req) => {
     let invStatus = "AUTHORIZED";
 
     for (let i = 0; i < 25; i++) {
-      const inv = await asaasReq(ASAAS_API_KEY, `/invoices/${row.asaas_invoice_id}`, "GET");
-      invStatus = inv.status || invStatus;
-      if (inv.pdfUrl) pdfUrl = inv.pdfUrl;
-      if (inv.xmlUrl) xmlUrl = inv.xmlUrl;
-      if (inv.number || inv.rpsNumber) nfNumber = inv.number || inv.rpsNumber || nfNumber;
+      let inv: Record<string, unknown>;
+      try {
+        inv = await asaasReq(ASAAS_API_KEY, `/invoices/${row.asaas_invoice_id}`, "GET");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: msg,
+            hint:
+              "Se o texto citar CNAE, ajuste no Asaas (conta Chamô): Informações fiscais → CNAE com exatamente 7 números, sem pontos ou barras (ex.: 6311900).",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      invStatus = (inv.status as string) || invStatus;
+      if (inv.pdfUrl) pdfUrl = inv.pdfUrl as string;
+      if (inv.xmlUrl) xmlUrl = inv.xmlUrl as string;
+      if (inv.number || inv.rpsNumber) {
+        nfNumber = (inv.number || inv.rpsNumber) as string || nfNumber;
+      }
       if (inv.status === "ERROR") {
-        throw new Error(inv.statusDescription || "Erro na NFS-e no Asaas");
+        const desc = (inv.statusDescription as string) || "Erro na NFS-e no Asaas";
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: desc,
+            hint:
+              "Corrija o cadastro fiscal da empresa no Asaas (CNAE de 7 dígitos, inscrição municipal, serviço municipal). Esta nota pode precisar ser cancelada/reemitida após o ajuste.",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
       }
       if (pdfUrl) break;
       if (i < 24) await sleep(2000);

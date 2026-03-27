@@ -17,6 +17,9 @@ import {
   MessageSquare,
   Upload,
   Search,
+  BadgeCheck,
+  UserPlus,
+  Check,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -27,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
 
@@ -107,7 +111,13 @@ export default function CommunityFeed({
   const [composerPreview, setComposerPreview] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
 
-  const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
+  const [commentsSheetPost, setCommentsSheetPost] = useState<PostRow | null>(null);
+  const [fullscreenPost, setFullscreenPost] = useState<PostRow | null>(null);
+  const [authorProMeta, setAuthorProMeta] = useState<
+    Record<string, { proId: string; headline: string; verified: boolean }>
+  >({});
+  const [commentReactions, setCommentReactions] = useState<{ comment_id: string; user_id: string }[]>([]);
+  const [replyTarget, setReplyTarget] = useState<{ postId: string; name: string } | null>(null);
   const [expandedBodies, setExpandedBodies] = useState<Record<string, boolean>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentSubmitting, setCommentSubmitting] = useState<string | null>(null);
@@ -162,6 +172,8 @@ export default function CommunityFeed({
         setCommentsByPost({});
         setCommentAuthors({});
         setProPathByUserId({});
+        setAuthorProMeta({});
+        setCommentReactions([]);
         return;
       }
       const authorIds = [...new Set(plist.map((p) => p.author_id))];
@@ -194,6 +206,16 @@ export default function CommunityFeed({
         byPost[c.post_id].push(c);
       });
       setCommentsByPost(byPost);
+      const cids = cList.map((c) => c.id);
+      if (cids.length) {
+        const { data: crxData } = await supabase
+          .from("community_comment_reactions" as any)
+          .select("comment_id, user_id")
+          .in("comment_id", cids);
+        setCommentReactions((crxData || []) as { comment_id: string; user_id: string }[]);
+      } else {
+        setCommentReactions([]);
+      }
       const cAuthorIds = [...new Set(cList.map((c) => c.user_id))];
       const needProfiles = cAuthorIds.filter((id) => !amap[id]);
       if (needProfiles.length) {
@@ -214,16 +236,23 @@ export default function CommunityFeed({
       if (allUids.length) {
         const { data: proRows } = await supabase
           .from("professionals")
-          .select("user_id, id, slug")
+          .select("user_id, id, slug, verified, professions(name), categories(name)")
           .in("user_id", allUids);
         const paths: Record<string, string> = {};
+        const pmeta: Record<string, { proId: string; headline: string; verified: boolean }> = {};
         (proRows || []).forEach((row: any) => {
           const key = String(row.slug || row.id || "").trim();
           if (key) paths[row.user_id] = `/professional/${encodeURIComponent(key)}`;
+          const pn = row.professions?.name;
+          const cn = row.categories?.name;
+          const headline = [pn, cn].filter(Boolean).join(" · ") || "Profissional no Chamô";
+          pmeta[row.user_id] = { proId: row.id, headline, verified: !!row.verified };
         });
         setProPathByUserId(paths);
+        setAuthorProMeta(pmeta);
       } else {
         setProPathByUserId({});
+        setAuthorProMeta({});
       }
     } catch (e: any) {
       console.error(e);
@@ -274,6 +303,16 @@ export default function CommunityFeed({
     });
     return m;
   }, [reactions, user]);
+
+  const commentLikeStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    const my = new Set<string>();
+    commentReactions.forEach((r) => {
+      counts.set(r.comment_id, (counts.get(r.comment_id) || 0) + 1);
+      if (user && r.user_id === user.id) my.add(r.comment_id);
+    });
+    return { counts, my };
+  }, [commentReactions, user]);
 
   const publishPost = async () => {
     if (!user || !canPost) return;
@@ -338,8 +377,12 @@ export default function CommunityFeed({
 
   const submitComment = async (postId: string) => {
     if (!user) return;
-    const body = (commentDrafts[postId] || "").trim();
+    let body = (commentDrafts[postId] || "").trim();
     if (!body) return;
+    if (replyTarget?.postId === postId && replyTarget.name) {
+      const tag = `@${replyTarget.name.split(/\s+/)[0]} `;
+      if (!body.startsWith("@")) body = `${tag}${body}`;
+    }
     setCommentSubmitting(postId);
     try {
       const { error } = await supabase.from("community_post_comments" as any).insert({
@@ -349,6 +392,7 @@ export default function CommunityFeed({
       });
       if (error) throw error;
       setCommentDrafts((d) => ({ ...d, [postId]: "" }));
+      setReplyTarget(null);
       await loadFeed();
     } catch (e: any) {
       toast({ title: "Erro ao comentar", description: e.message, variant: "destructive" });
@@ -364,6 +408,55 @@ export default function CommunityFeed({
       await loadFeed();
     } catch (e: any) {
       toast({ title: "Erro ao apagar", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const toggleFollowAuthor = async (authorUserId: string) => {
+    if (!user) return;
+    const meta = authorProMeta[authorUserId];
+    if (!meta?.proId) return;
+    try {
+      if (followingAuthorIds.has(authorUserId)) {
+        const { error } = await supabase
+          .from("professional_follows" as any)
+          .delete()
+          .eq("user_id", user.id)
+          .eq("professional_id", meta.proId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("professional_follows" as any).insert({
+          user_id: user.id,
+          professional_id: meta.proId,
+        });
+        if (error) throw error;
+      }
+      await loadFeed();
+    } catch (e: any) {
+      toast({ title: "Erro ao seguir", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const toggleCommentLike = async (commentId: string) => {
+    if (!user) return;
+    const liked = commentLikeStats.my.has(commentId);
+    try {
+      if (liked) {
+        const { error } = await supabase
+          .from("community_comment_reactions" as any)
+          .delete()
+          .eq("comment_id", commentId)
+          .eq("user_id", user.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("community_comment_reactions" as any).insert({
+          comment_id: commentId,
+          user_id: user.id,
+        });
+        if (error) throw error;
+      }
+      await loadFeed();
+    } catch (e: any) {
+      toast({ title: "Erro na curtida", description: e.message, variant: "destructive" });
     }
   };
 
@@ -418,7 +511,8 @@ export default function CommunityFeed({
         behavior: "smooth",
         block: "center",
       });
-      setExpandedPostId(highlightPostId);
+      const hp = posts.find((p) => p.id === highlightPostId);
+      if (hp) setCommentsSheetPost(hp);
     });
   }, [highlightPostId, loading, posts]);
 
@@ -744,7 +838,8 @@ export default function CommunityFeed({
             const sum = reactionSummary[post.id] || {};
             const myR = myReactionByPost[post.id];
             const comments = commentsByPost[post.id] || [];
-            const open = expandedPostId === post.id;
+            const sheetOpen = commentsSheetPost?.id === post.id;
+            const proMeta = authorProMeta[post.author_id];
             const totalRx = REACTIONS.reduce((s, r) => s + (sum[r.type] || 0), 0);
             const bodyExpanded = expandedBodies[post.id];
             const longBody = post.body.length > BODY_COLLAPSE_LEN;
@@ -752,6 +847,8 @@ export default function CommunityFeed({
               !longBody || bodyExpanded ? post.body : `${post.body.slice(0, BODY_COLLAPSE_LEN).trim()}…`;
 
             const authorProfileTo = proPathByUserId[post.author_id];
+            const showFollowUI = !!(user && post.author_id !== user.id && proMeta);
+            const isFollowingAuthor = followingAuthorIds.has(post.author_id);
 
             return (
               <article
@@ -760,7 +857,7 @@ export default function CommunityFeed({
                 className="rounded-[20px] bg-white shadow-md shadow-black/[0.05] overflow-hidden border border-border/45 ring-1 ring-black/[0.02] scroll-mt-24"
               >
                 <div className="p-4 pb-2">
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 items-start">
                     {authorProfileTo ? (
                       <Link
                         to={authorProfileTo}
@@ -785,23 +882,56 @@ export default function CommunityFeed({
                         )}
                       </div>
                     )}
-                    <div className="min-w-0 flex-1">
-                      {authorProfileTo ? (
-                        <Link
-                          to={authorProfileTo}
-                          className="font-semibold text-[15px] leading-tight text-foreground hover:text-primary transition-colors block"
-                        >
-                          {authorLabel(author)}
-                        </Link>
-                      ) : (
-                        <p className="font-semibold text-[15px] leading-tight text-foreground">
-                          {authorLabel(author)}
+                    <div className="min-w-0 flex-1 flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        {authorProfileTo ? (
+                          <Link
+                            to={authorProfileTo}
+                            className="inline-flex items-center gap-1 max-w-full font-semibold text-[15px] leading-tight text-foreground hover:text-primary transition-colors"
+                          >
+                            <span className="truncate">{authorLabel(author)}</span>
+                            {proMeta?.verified ? (
+                              <BadgeCheck className="w-4 h-4 shrink-0 text-sky-500" aria-label="Verificado" />
+                            ) : null}
+                          </Link>
+                        ) : (
+                          <p className="inline-flex items-center gap-1 max-w-full font-semibold text-[15px] leading-tight text-foreground">
+                            <span className="truncate">{authorLabel(author)}</span>
+                            {proMeta?.verified ? (
+                              <BadgeCheck className="w-4 h-4 shrink-0 text-sky-500" aria-label="Verificado" />
+                            ) : null}
+                          </p>
+                        )}
+                        {proMeta?.headline ? (
+                          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
+                            {proMeta.headline}
+                          </p>
+                        ) : null}
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {postTimeLabel(post.created_at)} ·{" "}
+                          <span className="text-primary/80 font-medium">Público</span>
                         </p>
-                      )}
-                      <p className="text-[12px] text-muted-foreground mt-0.5">
-                        {postTimeLabel(post.created_at)} ·{" "}
-                        <span className="text-primary/80 font-medium">Público</span>
-                      </p>
+                      </div>
+                      {showFollowUI &&
+                        (isFollowingAuthor ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleFollowAuthor(post.author_id)}
+                            className="shrink-0 inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:bg-muted/70 transition-colors"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            Seguindo
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleFollowAuthor(post.author_id)}
+                            className="shrink-0 inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow-sm hover:opacity-95 transition-opacity"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" />
+                            Seguir
+                          </button>
+                        ))}
                     </div>
                   </div>
                   {post.body ? (
@@ -819,11 +949,17 @@ export default function CommunityFeed({
                     </div>
                   ) : null}
                   {post.image_url ? (
-                    <img
-                      src={post.image_url}
-                      alt=""
-                      className="mt-3 rounded-xl w-full max-h-[min(420px,70vh)] object-cover bg-muted"
-                    />
+                    <button
+                      type="button"
+                      className="mt-3 w-full p-0 border-0 bg-transparent rounded-xl overflow-hidden block text-left cursor-zoom-in active:opacity-95"
+                      onClick={() => setFullscreenPost(post)}
+                    >
+                      <img
+                        src={post.image_url}
+                        alt=""
+                        className="rounded-xl w-full max-h-[min(420px,70vh)] object-cover bg-muted pointer-events-none"
+                      />
+                    </button>
                   ) : null}
                 </div>
 
@@ -850,11 +986,15 @@ export default function CommunityFeed({
                         <span />
                       )}
                     </div>
-                    {comments.length > 0 && (
-                      <span>
+                    {comments.length > 0 ? (
+                      <button
+                        type="button"
+                        className="font-medium text-muted-foreground hover:text-foreground hover:underline"
+                        onClick={() => setCommentsSheetPost(post)}
+                      >
                         {comments.length} comentário{comments.length !== 1 ? "s" : ""}
-                      </span>
-                    )}
+                      </button>
+                    ) : null}
                   </div>
                 )}
 
@@ -887,9 +1027,9 @@ export default function CommunityFeed({
                     type="button"
                     className={cn(
                       "flex items-center justify-center gap-2 py-3.5 text-[13px] font-bold text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors border-r border-border/45",
-                      open && "text-primary bg-primary/[0.07]",
+                      sheetOpen && "text-primary bg-primary/[0.07]",
                     )}
-                    onClick={() => setExpandedPostId(open ? null : post.id)}
+                    onClick={() => setCommentsSheetPost(sheetOpen ? null : post)}
                   >
                     <MessageCircle className="w-[18px] h-[18px]" />
                     Comentar
@@ -903,70 +1043,6 @@ export default function CommunityFeed({
                     Compartilhar
                   </button>
                 </div>
-
-                {open && (
-                  <div className="px-4 py-3 bg-gradient-to-b from-muted/30 to-muted/10 border-t border-border/50 space-y-3">
-                    {comments.map((c) => {
-                      const ca = commentAuthor(c.user_id);
-                      const canDel = user && (c.user_id === user.id || post.author_id === user.id);
-                      const cTo = proPathByUserId[c.user_id];
-                      return (
-                        <div key={c.id} className="flex gap-2 text-sm">
-                          <div className="flex-1 min-w-0">
-                            {cTo ? (
-                              <Link
-                                to={cTo}
-                                className="font-semibold text-[13px] text-foreground hover:text-primary transition-colors"
-                              >
-                                {authorLabel(ca)}
-                              </Link>
-                            ) : (
-                              <span className="font-semibold text-[13px]">{authorLabel(ca)}</span>
-                            )}
-                            <span className="text-muted-foreground text-[11px] ml-2">
-                              {postTimeLabel(c.created_at)}
-                            </span>
-                            <p className="text-foreground mt-0.5 whitespace-pre-wrap text-[14px]">{c.body}</p>
-                          </div>
-                          {canDel && (
-                            <button
-                              type="button"
-                              className="p-1 text-muted-foreground hover:text-destructive shrink-0"
-                              aria-label="Apagar comentário"
-                              onClick={() => deleteComment(c.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <div className="flex gap-2">
-                      <Textarea
-                        placeholder="Adicione um comentário…"
-                        value={commentDrafts[post.id] || ""}
-                        onChange={(e) =>
-                          setCommentDrafts((d) => ({ ...d, [post.id]: e.target.value }))
-                        }
-                        className="min-h-[48px] rounded-xl text-sm flex-1 resize-none bg-white"
-                        data-tab-swipe-ignore
-                      />
-                      <Button
-                        type="button"
-                        size="icon"
-                        className="rounded-xl shrink-0 self-end h-10 w-10"
-                        disabled={commentSubmitting === post.id || !(commentDrafts[post.id] || "").trim()}
-                        onClick={() => submitComment(post.id)}
-                      >
-                        {commentSubmitting === post.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Send className="w-4 h-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </article>
             );
           })}
@@ -1150,6 +1226,266 @@ export default function CommunityFeed({
           </div>
         </SheetContent>
       </Sheet>
+
+      <Sheet
+        open={!!commentsSheetPost}
+        onOpenChange={(o) => {
+          if (!o) {
+            setCommentsSheetPost(null);
+            setReplyTarget(null);
+          }
+        }}
+      >
+        <SheetContent
+          side="bottom"
+          className="rounded-t-[28px] p-0 gap-0 max-h-[min(88vh,720px)] flex flex-col overflow-hidden border-t border-border/60 shadow-[0_-8px_40px_rgba(0,0,0,0.12)]"
+        >
+          <div className="mx-auto mt-2.5 mb-1 h-1 w-11 rounded-full bg-muted-foreground/20 shrink-0" aria-hidden />
+          <SheetHeader className="px-5 pt-1 pb-3 text-left border-b border-border/40">
+            <SheetTitle className="text-lg font-bold tracking-tight">Comentários</SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0">
+            {commentsSheetPost &&
+              (commentsByPost[commentsSheetPost.id] || []).map((c) => {
+                const ca = commentAuthor(c.user_id);
+                const cMeta = authorProMeta[c.user_id];
+                const canDel =
+                  user && (c.user_id === user.id || commentsSheetPost.author_id === user.id);
+                const cTo = proPathByUserId[c.user_id];
+                const liked = commentLikeStats.my.has(c.id);
+                const likeCount = commentLikeStats.counts.get(c.id) || 0;
+                const avatarInner = ca?.avatar_url ? (
+                  <img src={ca.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-[10px] font-bold text-primary">
+                    {authorLabel(ca).slice(0, 2).toUpperCase()}
+                  </span>
+                );
+                return (
+                  <div key={c.id} className="flex gap-3">
+                    {cTo ? (
+                      <Link
+                        to={cTo}
+                        className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50 active:scale-[0.98] transition-transform"
+                      >
+                        {avatarInner}
+                      </Link>
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50">
+                        {avatarInner}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0">
+                        {cTo ? (
+                          <Link
+                            to={cTo}
+                            className="font-bold text-[14px] text-foreground hover:text-primary transition-colors"
+                          >
+                            {authorLabel(ca)}
+                          </Link>
+                        ) : (
+                          <span className="font-bold text-[14px]">{authorLabel(ca)}</span>
+                        )}
+                        {cMeta?.verified ? (
+                          <BadgeCheck className="w-3.5 h-3.5 shrink-0 text-sky-500" aria-label="Verificado" />
+                        ) : null}
+                        <span className="text-[11px] text-muted-foreground">
+                          {postTimeLabel(c.created_at)}
+                        </span>
+                      </div>
+                      {cMeta?.headline ? (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{cMeta.headline}</p>
+                      ) : null}
+                      <p className="text-[14px] text-foreground mt-1 whitespace-pre-wrap leading-snug">
+                        {c.body}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-3 mt-2 text-[12px] font-semibold">
+                        <button
+                          type="button"
+                          className={cn(
+                            "text-muted-foreground hover:text-primary transition-colors",
+                            liked && "text-primary",
+                          )}
+                          onClick={() => toggleCommentLike(c.id)}
+                        >
+                          Curtir{likeCount > 0 ? ` · ${likeCount}` : ""}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-primary transition-colors"
+                          onClick={() =>
+                            setReplyTarget({
+                              postId: commentsSheetPost.id,
+                              name: authorLabel(ca),
+                            })
+                          }
+                        >
+                          Responder
+                        </button>
+                        {canDel ? (
+                          <button
+                            type="button"
+                            className="p-1 text-muted-foreground hover:text-destructive shrink-0 ml-auto"
+                            aria-label="Apagar comentário"
+                            onClick={() => deleteComment(c.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+          {commentsSheetPost ? (
+            <div className="shrink-0 border-t border-border/50 bg-muted/25 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-2">
+              {replyTarget?.postId === commentsSheetPost.id ? (
+                <div className="flex items-center justify-between text-[12px] text-muted-foreground">
+                  <span>
+                    Respondendo a{" "}
+                    <span className="font-semibold text-foreground">{replyTarget.name}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="p-1 rounded-full hover:bg-muted transition-colors"
+                    onClick={() => setReplyTarget(null)}
+                    aria-label="Cancelar resposta"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : null}
+              <div className="flex gap-2">
+                <Textarea
+                  placeholder="Adicione um comentário…"
+                  value={commentDrafts[commentsSheetPost.id] || ""}
+                  onChange={(e) =>
+                    setCommentDrafts((d) => ({ ...d, [commentsSheetPost.id]: e.target.value }))
+                  }
+                  className="min-h-[44px] max-h-[120px] rounded-xl text-sm flex-1 resize-none bg-white"
+                  data-tab-swipe-ignore
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  className="rounded-xl shrink-0 self-end h-10 w-10"
+                  disabled={
+                    commentSubmitting === commentsSheetPost.id ||
+                    !(commentDrafts[commentsSheetPost.id] || "").trim()
+                  }
+                  onClick={() => submitComment(commentsSheetPost.id)}
+                >
+                  {commentSubmitting === commentsSheetPost.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
+      <Dialog open={!!fullscreenPost} onOpenChange={(o) => !o && setFullscreenPost(null)}>
+        <DialogContent className="!fixed !inset-0 !left-0 !top-0 z-50 flex h-[100dvh] max-h-none w-full max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 rounded-none border-0 bg-black p-0 overflow-hidden shadow-none data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 [&>button]:hidden">
+          <DialogTitle className="sr-only">Publicação na comunidade</DialogTitle>
+          {fullscreenPost ? (
+            <>
+              <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center">
+                <button
+                  type="button"
+                  className="absolute left-3 z-20 rounded-full bg-black/50 p-2 text-white backdrop-blur-sm"
+                  style={{ top: "max(0.75rem, env(safe-area-inset-top))" }}
+                  onClick={() => setFullscreenPost(null)}
+                  aria-label="Fechar"
+                >
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
+                {fullscreenPost.image_url ? (
+                  <img
+                    src={fullscreenPost.image_url}
+                    alt=""
+                    className="max-h-full max-w-full object-contain"
+                  />
+                ) : null}
+                <div
+                  className="absolute right-2 z-20 flex flex-col gap-3"
+                  style={{
+                    bottom: "max(5.5rem, calc(env(safe-area-inset-bottom) + 4rem))",
+                  }}
+                >
+                  {REACTIONS.map(({ type, label, Icon }) => {
+                    const sm = reactionSummary[fullscreenPost.id] || {};
+                    const n = sm[type] || 0;
+                    const active = myReactionByPost[fullscreenPost.id] === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setReaction(fullscreenPost.id, type)}
+                        className="flex flex-col items-center gap-0.5 text-white/90"
+                      >
+                        <span
+                          className={cn(
+                            "flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border border-white/15",
+                            active && "bg-primary/35 border-primary/55 text-primary",
+                          )}
+                        >
+                          <Icon
+                            className={cn("h-5 w-5", type === "love" && active && "fill-current")}
+                          />
+                        </span>
+                        <span className="text-[9px] font-bold">{label}</span>
+                        {n > 0 ? <span className="text-[10px] opacity-80">{n}</span> : null}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = fullscreenPost;
+                      setFullscreenPost(null);
+                      setCommentsSheetPost(p);
+                    }}
+                    className="flex flex-col items-center gap-0.5 text-white/90"
+                  >
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border border-white/15">
+                      <MessageCircle className="h-5 w-5" />
+                    </span>
+                    <span className="text-[9px] font-bold">Comentários</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = fullscreenPost;
+                      setFullscreenPost(null);
+                      setSharePost(p);
+                    }}
+                    className="flex flex-col items-center gap-0.5 text-white/90"
+                  >
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border border-white/15">
+                      <Share2 className="h-5 w-5" />
+                    </span>
+                    <span className="text-[9px] font-bold">Partilhar</span>
+                  </button>
+                </div>
+              </div>
+              {fullscreenPost.body ? (
+                <div className="shrink-0 bg-gradient-to-t from-black via-black/95 to-transparent px-4 pt-8 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                  <p className="text-[14px] text-white/95 whitespace-pre-wrap leading-snug">
+                    {fullscreenPost.body}
+                  </p>
+                </div>
+              ) : (
+                <div className="h-[max(0.5rem,env(safe-area-inset-bottom))] shrink-0" />
+              )}
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

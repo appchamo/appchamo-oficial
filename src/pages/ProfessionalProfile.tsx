@@ -492,8 +492,8 @@ const ProfessionalProfile = () => {
       <AppLayout>
         <main className="max-w-screen-lg mx-auto px-4 py-12 text-center">
           <p className="text-muted-foreground mb-4">Profissional não encontrado.</p>
-          <Link to="/search" className="text-sm font-semibold text-primary hover:underline">
-            Voltar à busca
+          <Link to="/home" className="text-sm font-semibold text-primary hover:underline">
+            Ir para o início
           </Link>
         </main>
       </AppLayout>
@@ -513,7 +513,7 @@ const ProfessionalProfile = () => {
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 pt-2 pb-5">
         <Link
-          to="/search"
+          to="/home"
           className="inline-flex items-center gap-2 text-sm font-semibold text-foreground bg-card border border-border/80 hover:border-primary/30 hover:bg-muted/50 px-3 py-2 rounded-xl mb-3 transition-colors shadow-sm"
         >
           <ArrowLeft className="w-4 h-4 shrink-0" /> Voltar

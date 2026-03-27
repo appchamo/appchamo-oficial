@@ -15,7 +15,6 @@ import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import EdgeSwipeBack from "@/components/EdgeSwipeBack";
 import DeepLinkRouter from "@/components/DeepLinkRouter";
 import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
 import RoutesOverlayShell from "@/components/RoutesOverlayShell";
@@ -146,13 +145,24 @@ const NotificationOpenHandler = () => {
 
 const BackButtonHandler = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const pathRef = useRef(location.pathname);
   pathRef.current = location.pathname;
 
   useEffect(() => {
     const handlerPromise = CapacitorApp.addListener("backButton", ({ canGoBack }) => {
-      if (pathRef.current === "/home") {
+      const path = pathRef.current;
+      if (path === "/home") {
         CapacitorApp.minimizeApp();
+        return;
+      }
+      // Alinha com o botão Voltar na UI: perfil profissional e lista de categorias voltam ao início.
+      if (/^\/professional\/[^/]+$/.test(path) || /^\/pro\/[^/]+$/.test(path)) {
+        navigate("/home", { replace: true });
+        return;
+      }
+      if (path === "/categories") {
+        navigate("/home", { replace: true });
         return;
       }
       if (canGoBack) window.history.back();
@@ -161,7 +171,7 @@ const BackButtonHandler = () => {
     return () => {
       handlerPromise.then((h) => h.remove());
     };
-  }, []);
+  }, [navigate]);
   return null;
 };
 
@@ -579,7 +589,6 @@ const App = () => {
               <AndroidPushChannelInit />
               <RoutePrefetcher />
               <BackButtonHandler />
-              <EdgeSwipeBack />
               <ErrorBoundary>
                 <AppContent />
               </ErrorBoundary>

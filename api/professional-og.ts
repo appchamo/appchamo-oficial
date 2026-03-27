@@ -4,6 +4,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
+import { resolveOgApiOrigin } from "../api-utils/resolveOgApiOrigin";
 import { sealImageUrlForMeta } from "../api-utils/resolveSealAssetOrigin";
 
 function escAttr(s: string) {
@@ -18,7 +19,7 @@ function escText(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export const config = { runtime: "edge" };
+export const config = { runtime: "nodejs", maxDuration: 15 };
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
@@ -109,8 +110,9 @@ export default async function handler(req: Request): Promise<Response> {
   const title = `${displayName} - ${rolePart} - Perfil Oficial | Chamô`;
   const description = `Contrate ${displayName} no Chamô — serviços verificados e chat direto.`;
 
-  /** Mesma origem que a página OG — o crawler do WhatsApp acede aqui e nós servimos bytes (evita WebP/signed URL direto no meta). */
-  const ogImage = `${publicApp}/api/professional-og-image?key=${encodeURIComponent(key)}`;
+  /** Host com TLS estável (Vercel) — não usar só o domínio custom se o certificado dele falhar para crawlers. */
+  const imageOrigin = resolveOgApiOrigin(req);
+  const ogImage = `${imageOrigin}/api/professional-og-image?key=${encodeURIComponent(key)}`;
 
   const canonicalKey = (proRow.slug || proRow.id).trim();
   const canonical = `${publicApp}/professional/${encodeURIComponent(canonicalKey)}`;
@@ -125,6 +127,7 @@ export default async function handler(req: Request): Promise<Response> {
 <meta property="og:title" content="${escAttr(title)}" />
 <meta property="og:description" content="${escAttr(description)}" />
 <meta property="og:image" content="${escAttr(ogImage)}" />
+<meta property="og:image:secure_url" content="${escAttr(ogImage)}" />
 <meta property="og:url" content="${escAttr(canonical)}" />
 <meta property="og:site_name" content="Chamô" />
 <meta name="twitter:card" content="summary_large_image" />

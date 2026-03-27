@@ -7,7 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { extractUploadsObjectPath } from "../api-utils/extractUploadsObjectPath";
 import { resolveSealFetchOrigins } from "../api-utils/resolveSealAssetOrigin";
 
-export const config = { runtime: "edge" };
+export const config = { runtime: "nodejs", maxDuration: 15 };
 
 function mimeFromPath(path: string): string {
   const lower = path.toLowerCase();
@@ -115,11 +115,16 @@ export default async function handler(req: Request): Promise<Response> {
     if (!ct.startsWith("image/")) {
       return sealBytesResponse(req);
     }
+    // WhatsApp costuma rejeitar previews acima de ~600KB
+    if (buf.byteLength > 550_000) {
+      return sealBytesResponse(req);
+    }
     return new Response(buf, {
       status: 200,
       headers: {
         "Content-Type": ct,
         "Cache-Control": "public, max-age=86400, s-maxage=86400",
+        "Access-Control-Allow-Origin": "*",
       },
     });
   }
@@ -138,7 +143,7 @@ export default async function handler(req: Request): Promise<Response> {
         return sealBytesResponse(req);
       }
       const buf = await imgRes.arrayBuffer();
-      if (buf.byteLength > 2_500_000) {
+      if (buf.byteLength > 550_000) {
         return sealBytesResponse(req);
       }
       return new Response(buf, {
@@ -146,6 +151,7 @@ export default async function handler(req: Request): Promise<Response> {
         headers: {
           "Content-Type": ct,
           "Cache-Control": "public, max-age=86400, s-maxage=86400",
+          "Access-Control-Allow-Origin": "*",
         },
       });
     } catch {

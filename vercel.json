@@ -25,6 +25,9 @@
       "destination": "/sw.js"
     },
     {
+      "handle": "filesystem"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

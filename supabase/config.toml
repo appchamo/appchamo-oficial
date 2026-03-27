@@ -469,7 +469,7 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/process_transfer/index.ts"
 
-# Pré-visualização Open Graph (WhatsApp); crawlers não enviam JWT — usa apikey na query
+# Redireciona para `/api/professional-og` no Vercel (Supabase não serve HTML em GET)
 [functions.professional-og]
 enabled = true
 verify_jwt = false

@@ -15,6 +15,19 @@ export function getPublicAppBaseUrl(): string {
   return "https://app.chamo.com";
 }
 
+/**
+ * Origem HTTPS onde as rotas `/api/*-og` estão hospedadas (Vercel).
+ * Use quando `VITE_PUBLIC_APP_URL` (ex.: app.chamo.com) tiver SSL inválido mas existir um deploy Vercel com HTTPS válido.
+ */
+export function getOgShareBaseUrl(): string {
+  const raw = (import.meta.env.VITE_SHARE_OG_BASE_URL as string | undefined)?.trim();
+  if (raw) {
+    const u = raw.replace(/\/$/, "");
+    if (u.startsWith("https://") || u.startsWith("http://")) return u;
+  }
+  return getPublicAppBaseUrl();
+}
+
 /** Link que o cliente abre no navegador: perfil público (agendamento pelo botão no perfil). */
 export function getPublicProfessionalProfileUrl(proKey: string): string {
   const key = (proKey || "").trim();
@@ -23,19 +36,13 @@ export function getPublicProfessionalProfileUrl(proKey: string): string {
 }
 
 /**
- * URL para partilhar o perfil em redes (WhatsApp, etc.) com pré-visualização rica (Open Graph).
- * Preferimos a Edge Function no Supabase (HTTPS estável); fallback para `api/professional-og` no Vercel.
+ * URL para partilhar o perfil em redes (WhatsApp, etc.) com Open Graph.
+ * Deve apontar para `api/professional-og` no Vercel — Edge Functions do Supabase reescrevem `text/html` para `text/plain` e quebram pré-visualização.
  */
 export function getProfessionalProfileShareUrl(proKey: string): string {
   const key = (proKey || "").trim();
   if (!key) return "";
-  const enc = encodeURIComponent(key);
-  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, "");
-  const pub = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim();
-  if (supabaseUrl && pub) {
-    return `${supabaseUrl}/functions/v1/professional-og?key=${enc}&apikey=${encodeURIComponent(pub)}`;
-  }
-  return `${getPublicAppBaseUrl()}/api/professional-og?key=${enc}`;
+  return `${getOgShareBaseUrl()}/api/professional-og?key=${encodeURIComponent(key)}`;
 }
 
 /**
@@ -55,7 +62,7 @@ export function getPublicAgendaUrl(proKey: string): string {
 export function getCommunityPostShareUrl(postId: string): string {
   const id = (postId || "").trim();
   if (!id) return "";
-  return `${getPublicAppBaseUrl()}/api/community-post-og?id=${encodeURIComponent(id)}`;
+  return `${getOgShareBaseUrl()}/api/community-post-og?id=${encodeURIComponent(id)}`;
 }
 
 /** Rota in-app para abrir o post na Comunidade (canonical / partilha “bonita”). */

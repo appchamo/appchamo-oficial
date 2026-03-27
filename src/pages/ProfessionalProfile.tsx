@@ -20,6 +20,8 @@ import {
   Timer,
   Award,
   MapPin,
+  UserPlus,
+  Heart,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -34,10 +36,11 @@ import ServiceRequestDialog from "@/components/ServiceRequestDialog";
 import AgendaBookingDialog from "@/components/AgendaBookingDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
+import { getPublicProfessionalProfileUrl, getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
+import { cn } from "@/lib/utils";
 
 interface ProData {
   id: string;
@@ -109,6 +112,11 @@ const ProfessionalProfile = () => {
   const [reviewsVisible, setReviewsVisible] = useState(5);
   const [publicSeals, setPublicSeals] = useState<{ seal_id: string; title: string; icon_variant: string }[]>([]);
   const [sealsModalOpen, setSealsModalOpen] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [socialLoading, setSocialLoading] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -257,6 +265,97 @@ const ProfessionalProfile = () => {
     incrementProfessionalAnalytics(pro.user_id, "profile_click");
   }, [pro?.user_id, isOwner]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!pro || isOwner) {
+        setIsFollowing(false);
+        setIsFavorite(false);
+        setSocialLoading(false);
+        return;
+      }
+      if (!user?.id) {
+        setIsFollowing(false);
+        setIsFavorite(false);
+        setSocialLoading(false);
+        return;
+      }
+      setSocialLoading(true);
+      const [fr, fav] = await Promise.all([
+        supabase.from("professional_follows").select("id").eq("user_id", user.id).eq("professional_id", pro.id).maybeSingle(),
+        supabase.from("professional_favorites").select("id").eq("user_id", user.id).eq("professional_id", pro.id).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setIsFollowing(!!fr.data);
+      setIsFavorite(!!fav.data);
+      setSocialLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pro?.id, isOwner, user?.id]);
+
+  const requireUserForSocial = async () => {
+    if (authLoading) {
+      toast({ title: "Aguarde", description: "Carregando seus dados…" });
+      return null;
+    }
+    const u = user ?? (await supabase.auth.getUser()).data.user;
+    if (!u) {
+      navigate("/login", { state: { from: location.pathname } });
+      return null;
+    }
+    return u;
+  };
+
+  const toggleFollow = async () => {
+    if (!pro || followBusy) return;
+    const u = await requireUserForSocial();
+    if (!u) return;
+    setFollowBusy(true);
+    try {
+      if (isFollowing) {
+        const { error } = await supabase.from("professional_follows").delete().eq("user_id", u.id).eq("professional_id", pro.id);
+        if (error) throw error;
+        setIsFollowing(false);
+        toast({ title: "Você deixou de seguir" });
+      } else {
+        const { error } = await supabase.from("professional_follows").insert({ user_id: u.id, professional_id: pro.id });
+        if (error) throw error;
+        setIsFollowing(true);
+        toast({ title: "Seguindo!" });
+      }
+    } catch {
+      toast({ title: "Não foi possível atualizar", variant: "destructive" });
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  const toggleFavorite = async () => {
+    if (!pro || favoriteBusy) return;
+    const u = await requireUserForSocial();
+    if (!u) return;
+    setFavoriteBusy(true);
+    try {
+      if (isFavorite) {
+        const { error } = await supabase.from("professional_favorites").delete().eq("user_id", u.id).eq("professional_id", pro.id);
+        if (error) throw error;
+        setIsFavorite(false);
+        toast({ title: "Removido dos favoritos" });
+      } else {
+        const { error } = await supabase.from("professional_favorites").insert({ user_id: u.id, professional_id: pro.id });
+        if (error) throw error;
+        setIsFavorite(true);
+        toast({ title: "Salvo nos favoritos" });
+      }
+    } catch {
+      toast({ title: "Não foi possível atualizar", variant: "destructive" });
+    } finally {
+      setFavoriteBusy(false);
+    }
+  };
+
   const handlePhotoUpload = async (url: string) => {
     if (!pro) return;
     const { error } = await supabase.from("profiles").update({ avatar_url: url }).eq("user_id", pro.user_id);
@@ -323,16 +422,28 @@ const ProfessionalProfile = () => {
   };
 
   const profilePathKey = pro && (pro.slug || id) ? (pro.slug || id)!.trim() : "";
+  /** Link direto ao perfil (mostrar na UI). */
   const profileLink = profilePathKey ? getPublicProfessionalProfileUrl(profilePathKey) : null;
+  /** Link com meta tags para WhatsApp / Instagram (pré-visualização). */
+  const profileShareLink = profilePathKey ? getProfessionalProfileShareUrl(profilePathKey) : null;
   const profileLinkDisplay = profileLink ? profileLink.replace(/^https?:\/\//, "") : null;
 
-  // Botão compartilhar (ícone no header) — abre menu nativo de compartilhamento
+  // Compartilhar / copiar usam URL OG para pré-visualização rica nas redes
   const handleShareLink = async () => {
-    if (!profileLink) return;
+    if (!profileShareLink || !pro) return;
     if (navigator.share) {
       try {
-        // Só passa URL para o sistema nativo não juntar textos extras ao copiar
-        await navigator.share({ title: `${pro!.full_name} no Chamô`, url: profileLink });
+        const role =
+          pro.profession_name && pro.profession_name !== "—"
+            ? pro.profession_name
+            : pro.category_name && pro.category_name !== "—"
+              ? pro.category_name
+              : "Profissional";
+        await navigator.share({
+          title: `${pro.full_name} - ${role} - Perfil Oficial | Chamô`,
+          text: `Confira o perfil de ${pro.full_name} no Chamô.`,
+          url: profileShareLink,
+        });
         return;
       } catch {
         // cancelado ou não suportado — cai para cópia
@@ -341,14 +452,13 @@ const ProfessionalProfile = () => {
     handleCopyLink();
   };
 
-  // Botão "Copiar" — sempre copia só o link puro para a área de transferência
   const handleCopyLink = async () => {
-    if (!profileLink) return;
+    if (!profileShareLink) return;
     try {
-      await navigator.clipboard.writeText(profileLink);
-      toast({ title: "Link copiado!", description: profileLink });
+      await navigator.clipboard.writeText(profileShareLink);
+      toast({ title: "Link copiado!", description: "Pronto para colar no WhatsApp com pré-visualização." });
     } catch {
-      toast({ title: "Seu link:", description: profileLink });
+      toast({ title: "Seu link:", description: profileShareLink });
     }
   };
 
@@ -640,6 +750,9 @@ const ProfessionalProfile = () => {
                 {profileLink && profileLinkDisplay && (
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Seu link público</label>
+                    <p className="text-[10px] text-muted-foreground mb-1.5 leading-snug">
+                      O botão Compartilhar / Copiar usa um link otimizado para pré-visualização rica no WhatsApp (foto e título).
+                    </p>
                     <div className="flex items-center gap-2 bg-muted/80 border border-border/60 rounded-xl px-3 py-2.5">
                       <span className="text-xs text-foreground flex-1 truncate font-mono">{profileLinkDisplay}</span>
                       <button type="button" onClick={handleCopyLink} className="text-xs text-primary font-bold hover:underline shrink-0">
@@ -654,34 +767,85 @@ const ProfessionalProfile = () => {
               </div>
             )}
 
-            {/* Botões de ação (visitante) */}
-            {!isOwner && pro.availability_status !== "unavailable" && (
+            {/* Visitante: seguir, favoritar, compartilhar + chamar / indisponível */}
+            {!isOwner && (
               <div className="mt-5 rounded-2xl border border-border/70 bg-gradient-to-b from-muted/30 to-background p-4 space-y-3 shadow-sm">
-                <button
-                  type="button"
-                  onClick={handleCall}
-                  className="w-full min-h-[48px] py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
-                >
-                  CHAMAR
-                </button>
-                {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setAgendaDialogOpen(true)}
-                    className="w-full min-h-[48px] py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border-primary/50 text-primary hover:bg-primary/5 active:scale-[0.98]"
-                  >
-                    <Calendar className="w-5 h-5 shrink-0" />
-                    Agendar serviço
-                  </Button>
+                {profileLink && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleFollow}
+                      disabled={followBusy || (!!user && socialLoading)}
+                      className={cn(
+                        "flex flex-col items-center justify-center gap-1 min-h-[72px] rounded-xl border text-[11px] font-bold transition-colors active:scale-[0.98] disabled:opacity-50",
+                        isFollowing
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/80 bg-card text-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      {followBusy ? (
+                        <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                      ) : (
+                        <UserPlus className={cn("w-5 h-5", isFollowing && "text-primary")} />
+                      )}
+                      <span>{isFollowing ? "Seguindo" : "Seguir"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleFavorite}
+                      disabled={favoriteBusy || (!!user && socialLoading)}
+                      className={cn(
+                        "flex flex-col items-center justify-center gap-1 min-h-[72px] rounded-xl border text-[11px] font-bold transition-colors active:scale-[0.98] disabled:opacity-50",
+                        isFavorite
+                          ? "border-rose-400 bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300"
+                          : "border-border/80 bg-card text-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      {favoriteBusy ? (
+                        <Loader2 className="w-5 h-5 animate-spin text-rose-500" />
+                      ) : (
+                        <Heart className={cn("w-5 h-5", isFavorite && "fill-current")} />
+                      )}
+                      <span>{isFavorite ? "Favorito" : "Favoritar"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleShareLink}
+                      className="flex flex-col items-center justify-center gap-1 min-h-[72px] rounded-xl border border-border/80 bg-card text-foreground hover:bg-muted/60 text-[11px] font-bold transition-colors active:scale-[0.98]"
+                    >
+                      <Share2 className="w-5 h-5" />
+                      <span>Compartilhar</span>
+                    </button>
+                  </div>
                 )}
-              </div>
-            )}
-            {!isOwner && pro.availability_status === "unavailable" && (
-              <div className="mt-5 rounded-2xl border border-dashed border-muted-foreground/30 bg-muted/40 px-4 py-4 text-center">
-                <CalendarOff className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-70" />
-                <p className="text-sm font-semibold text-foreground">Indisponível no momento</p>
-                <p className="text-xs text-muted-foreground mt-1">Este profissional não está aceitando contatos agora.</p>
+                {pro.availability_status !== "unavailable" ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleCall}
+                      className="w-full min-h-[48px] py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
+                    >
+                      CHAMAR
+                    </button>
+                    {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setAgendaDialogOpen(true)}
+                        className="w-full min-h-[48px] py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border-primary/50 text-primary hover:bg-primary/5 active:scale-[0.98]"
+                      >
+                        <Calendar className="w-5 h-5 shrink-0" />
+                        Agendar serviço
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-muted-foreground/30 bg-muted/40 px-4 py-4 text-center">
+                    <CalendarOff className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-70" />
+                    <p className="text-sm font-semibold text-foreground">Indisponível no momento</p>
+                    <p className="text-xs text-muted-foreground mt-1">Este profissional não está aceitando contatos agora.</p>
+                  </div>
+                )}
               </div>
             )}
           </div>

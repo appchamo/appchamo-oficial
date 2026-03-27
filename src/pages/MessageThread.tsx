@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Heart } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
@@ -152,6 +152,9 @@ const MessageThread = () => {
   const [proSlug, setProSlug] = useState<string | null>(null); // guarda o ID do profissional para navegação
   /** user_id do destinatário (quem recebe a mensagem) — usado para push de nova mensagem */
   const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
+  /** Cliente segue o profissional desta conversa — anel verde no avatar do cabeçalho. */
+  const [peerFollowRing, setPeerFollowRing] = useState(false);
+  const [threadPeerFavorite, setThreadPeerFavorite] = useState(false);
 
   // Billing state
   const [billingOpen, setBillingOpen] = useState(false);
@@ -512,8 +515,29 @@ const MessageThread = () => {
           .eq("request_id", threadId)
           .eq("user_id", user.id)
           .maybeSingle();
+        const favQ = supabase
+          .from("professional_favorites" as any)
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("professional_id", req.professional_id)
+          .maybeSingle();
+        const followQ = supabase
+          .from("professional_follows" as any)
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("professional_id", req.professional_id)
+          .maybeSingle();
 
-        const [proRes, reviewRes, appRes, crsRes] = await Promise.all([proQuery, reviewCountQuery, appointmentQuery, crsQuery]);
+        const [proRes, reviewRes, appRes, crsRes, favRes, followRes] = await Promise.all([
+          proQuery,
+          reviewCountQuery,
+          appointmentQuery,
+          crsQuery,
+          favQ,
+          followQ,
+        ]);
+        setThreadPeerFavorite(!!favRes.data);
+        setPeerFollowRing(isClient && !!followRes.data);
         const pro = proRes.data;
         const allowedLabelColors = new Set(["blue", "green", "orange", "red"]);
         const crsRow = crsRes.data as { label_color?: string | null; label_text?: string | null } | null;
@@ -560,6 +584,9 @@ const MessageThread = () => {
             if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
           }
         }
+      } else {
+        setThreadPeerFavorite(false);
+        setPeerFollowRing(false);
       }
     } catch (err) {
       console.error("Erro ao carregar chat:", err);
@@ -2516,30 +2543,73 @@ const MessageThread = () => {
             onClick={() => { if (!isProfessional && proSlug) navigate(`/professional/${proSlug}`); }}
             style={{ cursor: !isProfessional && proSlug ? "pointer" : "default" }}
           >
-            {otherParty.avatar_url ? (
-              <img
-                src={otherParty.avatar_url}
-                alt={otherParty.name}
-                loading="eager"
-                className="w-9 h-9 rounded-full object-cover flex-shrink-0"
-                onError={(e) => {
-                  const t = e.currentTarget;
-                  t.onerror = null;
-                  t.style.display = "none";
-                  const fb = t.nextElementSibling as HTMLElement | null;
-                  if (fb) fb.style.display = "flex";
-                }}
-              />
-            ) : null}
-            <div
-              className="w-9 h-9 rounded-full bg-primary/10 items-center justify-center text-xs font-bold text-primary flex-shrink-0"
-              style={{ display: otherParty.avatar_url ? "none" : "flex" }}
-            >
-              {otherInitials}
+            <div className="relative flex-shrink-0">
+              {peerFollowRing && !isProfessional ? (
+                <div className="rounded-full p-[2.5px] bg-gradient-to-br from-emerald-400 via-green-500 to-teal-600">
+                  <div className="rounded-full bg-card p-[1.5px]">
+                    {otherParty.avatar_url ? (
+                      <img
+                        src={otherParty.avatar_url}
+                        alt={otherParty.name}
+                        loading="eager"
+                        className="w-8 h-8 rounded-full object-cover"
+                        onError={(e) => {
+                          const t = e.currentTarget;
+                          t.onerror = null;
+                          t.style.display = "none";
+                          const fb = t.nextElementSibling as HTMLElement | null;
+                          if (fb) fb.style.display = "flex";
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className="w-8 h-8 rounded-full bg-primary/10 items-center justify-center text-[10px] font-bold text-primary"
+                      style={{ display: otherParty.avatar_url ? "none" : "flex" }}
+                    >
+                      {otherInitials}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {otherParty.avatar_url ? (
+                    <img
+                      src={otherParty.avatar_url}
+                      alt={otherParty.name}
+                      loading="eager"
+                      className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                      onError={(e) => {
+                        const t = e.currentTarget;
+                        t.onerror = null;
+                        t.style.display = "none";
+                        const fb = t.nextElementSibling as HTMLElement | null;
+                        if (fb) fb.style.display = "flex";
+                      }}
+                    />
+                  ) : null}
+                  <div
+                    className="w-9 h-9 rounded-full bg-primary/10 items-center justify-center text-xs font-bold text-primary flex-shrink-0"
+                    style={{ display: otherParty.avatar_url ? "none" : "flex" }}
+                  >
+                    {otherInitials}
+                  </div>
+                </>
+              )}
+              {threadPeerFavorite && !isProfessional && (
+                <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-400 text-white flex items-center justify-center shadow border border-white">
+                  <Heart className="w-2.5 h-2.5 fill-white" />
+                </span>
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 min-w-0">
-                <p className="text-sm font-semibold text-foreground truncate">{otherParty.name}</p>
+                <p
+                  className={`text-sm font-semibold truncate ${
+                    threadPeerFavorite && !isProfessional ? "text-amber-900 dark:text-amber-100" : "text-foreground"
+                  }`}
+                >
+                  {otherParty.name}
+                </p>
                 {threadLabel ? (
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 max-w-[100px] truncate ${threadLabelPillClass(threadLabel.color)}`}>
                     {threadLabel.text}

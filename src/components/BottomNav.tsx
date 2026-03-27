@@ -1,5 +1,5 @@
 import { Home, Search, MessageSquare, Bell, User } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
@@ -17,6 +17,7 @@ const tabs = [
 
 const BottomNav = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [badges, setBadges] = useState<{ chat: number; notifications: number }>({ chat: 0, notifications: 0 });
 
   // 🛡️ TRAVA DE DEBOUNCE: Impede que o Realtime crie loops de requisição
@@ -163,6 +164,15 @@ const BottomNav = () => {
           const isActive = location.pathname === tab.path || location.pathname.startsWith(tab.path + "/");
           const badgeCount = tab.badgeKey ? badges[tab.badgeKey] : 0;
           const handleTabClick = (e: React.MouseEvent) => {
+            const onHomeComunidade =
+              tab.path === MAIN_APP_TAB_PATHS[0] &&
+              location.pathname === "/home" &&
+              new URLSearchParams(location.search).get("feed") === "comunidade";
+            if (onHomeComunidade) {
+              e.preventDefault();
+              navigate("/home", { replace: true });
+              return;
+            }
             if (isActive) {
               e.preventDefault();
               window.scrollTo({ top: 0, behavior: "smooth" });

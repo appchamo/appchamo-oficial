@@ -705,6 +705,64 @@ export type Database = {
           },
         ]
       }
+      professional_favorites: {
+        Row: {
+          created_at: string
+          id: string
+          professional_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          professional_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          professional_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "professional_favorites_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      professional_follows: {
+        Row: {
+          created_at: string
+          id: string
+          professional_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          professional_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          professional_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "professional_follows_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       professional_analytics_counters: {
         Row: {
           appointment_bookings: number

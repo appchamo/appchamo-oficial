@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Menu, Clock, Crown, Bell, LogIn, XCircle, CalendarCheck } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
 import { useAuth } from "@/hooks/useAuth";
 import { useMenu } from "@/contexts/MenuContext";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 type NextAppt = {
   start_time: string;
@@ -25,6 +26,9 @@ const Header = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isHomePath = location.pathname === "/home";
+  const homeFeedComunidade = searchParams.get("feed") === "comunidade";
   
   const [proStatus, setProStatus] = useState<string | null>(null);
   const [planName, setPlanName] = useState<string | null>(null);
@@ -254,13 +258,50 @@ const Header = () => {
     <>
       <header className="relative z-30 flex-shrink-0 bg-card/90 backdrop-blur-md border-b border-secondary">
         <div className="flex items-center justify-between gap-2 px-4 py-3 max-w-screen-lg mx-auto min-w-0">
-          <span className="text-lg font-bold text-foreground truncate min-w-0 flex-1">
-            {user ? (
-              <span className="text-primary">Chamô</span>
+          <div className="truncate min-w-0 flex-1 flex items-center">
+            {user && isHomePath ? (
+              <div
+                className="inline-flex p-0.5 rounded-full bg-muted/90 border border-border/70 shadow-inner"
+                role="tablist"
+                aria-label="Alternar Início ou Comunidade"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!homeFeedComunidade}
+                  onClick={() => setSearchParams({}, { replace: true })}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full text-xs font-bold transition-all",
+                    !homeFeedComunidade
+                      ? "bg-card text-primary shadow-sm ring-1 ring-black/5"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Início
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={homeFeedComunidade}
+                  onClick={() => setSearchParams({ feed: "comunidade" }, { replace: true })}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full text-xs font-bold transition-all max-w-[110px] truncate",
+                    homeFeedComunidade
+                      ? "bg-card text-primary shadow-sm ring-1 ring-black/5"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Comunidade
+                </button>
+              </div>
+            ) : user ? (
+              <span className="text-lg font-bold text-primary">Chamô</span>
             ) : (
-              <>Explorar <span className="text-primary">Chamô</span></>
+              <span className="text-lg font-bold text-foreground truncate">
+                Explorar <span className="text-primary">Chamô</span>
+              </span>
             )}
-          </span>
+          </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             
             {/* Selo REPROVADO (cliente com cadastro profissional rejeitado) */}

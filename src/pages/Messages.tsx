@@ -2,7 +2,7 @@ import AppLayout from "@/components/AppLayout";
 import {
   MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle,
   Inbox, Mic, Package, CheckCheck, Trash2, XCircle, Search,
-  CheckSquare, Square, Check, X, Pin, Tag,
+  CheckSquare, Square, Check, X, Pin, Tag, Heart,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
@@ -43,6 +43,10 @@ interface Thread {
   is_pinned: boolean;
   label_color: ThreadLabelColor | null;
   label_text: string | null;
+  /** Profissional desta conversa está nos favoritos do utilizador. */
+  isFavoritePro?: boolean;
+  /** Cliente a ver conversa com profissional que segue — anel verde no avatar. */
+  peerIsFollowedPro?: boolean;
 }
 
 const MAX_PINNED_THREADS = 3;
@@ -132,6 +136,13 @@ const Messages = () => {
     }
     userIdRef.current = user.id;
     setCurrentUserId(user.id);
+
+    const [{ data: favRows }, { data: followRows }] = await Promise.all([
+      supabase.from("professional_favorites" as any).select("professional_id").eq("user_id", user.id),
+      supabase.from("professional_follows" as any).select("professional_id").eq("user_id", user.id),
+    ]);
+    const favoriteProIds = new Set<string>((favRows || []).map((r: any) => String(r.professional_id)));
+    const followedProIds = new Set<string>((followRows || []).map((r: any) => String(r.professional_id)));
 
     const PAGE_SIZE = 7;
     const baseLimit = (page + 1) * PAGE_SIZE;
@@ -248,6 +259,8 @@ const Messages = () => {
         is_pinned: !!statusData.is_pinned,
         label_color: label_text ? label_color : null,
         label_text,
+        isFavoritePro: favoriteProIds.has(String(req.professional_id)),
+        peerIsFollowedPro: isClient && followedProIds.has(String(req.professional_id)),
       };
     }).filter((t) => t !== null) as Thread[];
 
@@ -741,7 +754,11 @@ const Messages = () => {
     const peerAct = peerActivityByThread[t.id];
 
     return (
-      <div className={`flex items-center gap-3 px-4 py-3 border-b border-border/60 active:bg-muted/50 transition-colors select-none ${hasUnread ? "bg-primary/[0.04]" : ""}`}>
+      <div
+        className={`flex items-center gap-3 px-4 py-3 border-b border-border/60 active:bg-muted/50 transition-colors select-none ${
+          hasUnread ? "bg-primary/[0.04]" : ""
+        } ${t.isFavoritePro ? "bg-amber-500/[0.07] border-l-[3px] border-l-amber-400 pl-[13px]" : ""}`}
+      >
         {isCancelled && canceladosSelectMode && (
           <button type="button" onClick={() => toggleCanceladoSelection(t.id)} className="flex-shrink-0">
             {isSelected ? <CheckSquare className="w-5 h-5 text-primary" /> : <Square className="w-5 h-5 text-muted-foreground" />}
@@ -764,9 +781,30 @@ const Messages = () => {
           }}
           className="flex flex-1 items-center gap-3 cursor-pointer min-w-0"
         >
-          {/* Avatar */}
+          {/* Avatar — anel verde (Instagram “close friends”) quando o cliente segue o profissional */}
           <div className="relative flex-shrink-0">
-            {t.otherAvatar ? (
+            {t.peerIsFollowedPro ? (
+              <div className="rounded-full p-[3px] bg-gradient-to-br from-emerald-400 via-green-500 to-teal-600 shadow-sm">
+                <div className="rounded-full bg-card p-[2px]">
+                  {t.otherAvatar ? (
+                    <img
+                      src={getOptimizedAvatar(t.otherAvatar)}
+                      alt={t.otherName}
+                      loading="lazy"
+                      className="w-[46px] h-[46px] rounded-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className={`w-[46px] h-[46px] rounded-full flex items-center justify-center text-sm font-bold ${
+                        isCancelled ? "bg-muted text-muted-foreground" : "bg-primary/15 text-primary"
+                      }`}
+                    >
+                      {initials}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : t.otherAvatar ? (
               <img
                 src={getOptimizedAvatar(t.otherAvatar)}
                 alt={t.otherName}
@@ -774,9 +812,21 @@ const Messages = () => {
                 className="w-[52px] h-[52px] rounded-full object-cover"
               />
             ) : (
-              <div className={`w-[52px] h-[52px] rounded-full flex items-center justify-center text-sm font-bold ${isCancelled ? "bg-muted text-muted-foreground" : "bg-primary/15 text-primary"}`}>
+              <div
+                className={`w-[52px] h-[52px] rounded-full flex items-center justify-center text-sm font-bold ${
+                  isCancelled ? "bg-muted text-muted-foreground" : "bg-primary/15 text-primary"
+                }`}
+              >
                 {initials}
               </div>
+            )}
+            {t.isFavoritePro && (
+              <span
+                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-amber-400 text-white flex items-center justify-center shadow border border-white"
+                title="Favorito"
+              >
+                <Heart className="w-3 h-3 fill-white" />
+              </span>
             )}
           </div>
 
@@ -785,7 +835,11 @@ const Messages = () => {
             <div className="flex items-center justify-between gap-2 mb-0.5 min-w-0">
               <div className="flex items-center gap-1.5 min-w-0 flex-1">
                 {t.is_pinned ? <Pin className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden /> : null}
-                <p className={`text-[15px] truncate ${hasUnread ? "font-bold text-foreground" : "font-medium text-foreground"}`}>
+                <p
+                  className={`text-[15px] truncate ${hasUnread ? "font-bold text-foreground" : "font-medium text-foreground"} ${
+                    t.isFavoritePro ? "text-amber-900 dark:text-amber-100" : ""
+                  }`}
+                >
                   {t.otherName}
                 </p>
                 {t.label_text && t.label_color ? (

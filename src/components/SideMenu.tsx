@@ -33,7 +33,7 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
         ...(profile?.user_type === "professional" || profile?.user_type === "company"
           ? [
               { icon: Wallet, label: "Carteira", path: "/pro/financeiro" },
-              { icon: UsersRound, label: "Comunidade", path: "/pro/comunidade" },
+              { icon: UsersRound, label: "Comunidade", path: "/home?feed=comunidade" },
               ...(profile?.user_type === "company"
                 ? [
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },
@@ -103,7 +103,11 @@ const SideMenu = ({ isOpen, onClose }: SideMenuProps) => {
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1">{section.title}</p>
               )}
               {section.items.map((item) => {
-                const isActive = location.pathname === item.path;
+                const isComunidadeHome = item.path === "/home?feed=comunidade";
+                const isActive = isComunidadeHome
+                  ? location.pathname === "/home" &&
+                    new URLSearchParams(location.search).get("feed") === "comunidade"
+                  : location.pathname === item.path;
                 const isTornarSePro = item.path === "/signup-pro";
                 const isFinanceiro = item.path === "/pro/financeiro";
                 return (

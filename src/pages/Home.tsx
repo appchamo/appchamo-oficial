@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefreshAtKey, useIsRefreshing } from "@/contexts/RefreshContext";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight, Crown, Sparkles, Building2, Star } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,6 +27,7 @@ import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { diagLog } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
+import CommunityFeed from "@/components/community/CommunityFeed";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -105,7 +106,16 @@ function HomeHeavyPlaceholder({ kind, title }: { kind: "sponsors" | "featured" |
 
 const Home = () => {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const homeFeedComunidade = searchParams.get("feed") === "comunidade";
+  const communityHighlightPostId = searchParams.get("post");
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!user && homeFeedComunidade) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [user, homeFeedComunidade, setSearchParams]);
   const { isFreePlan, callsRemaining, loading: subLoading, plan } = useSubscription();
   const isBusiness = plan?.id === "business";
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
@@ -572,6 +582,8 @@ const Home = () => {
     <AppLayout>
       {!contentReady ? (
         <HomeSkeleton />
+      ) : user && homeFeedComunidade ? (
+        <CommunityFeed variant="embedded" highlightPostId={communityHighlightPostId} />
       ) : (
         <div
           className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary transition-opacity duration-300"

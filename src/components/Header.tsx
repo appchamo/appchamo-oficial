@@ -243,7 +243,21 @@ const Header = () => {
 
   // Regra de Exibição dos Selos
   const showRejectedBadge = !isPro && proStatus === "rejected";
-  const showPendingBadge = isPro && (proStatus === "pending" || (planId !== "free" && subStatus && subStatus.toUpperCase() !== "ACTIVE"));
+  /** Ocupa o mesmo espaço do botão Planos (evita sobrepor as abas Início | Comunidade). */
+  const profileAwaitingApproval = !!isPro && proStatus === "pending";
+  const subscriptionAwaitingActivation =
+    !!isPro &&
+    !!planId &&
+    planId !== "free" &&
+    !!subStatus &&
+    subStatus.toUpperCase() !== "ACTIVE";
+  const pendingReplacesPlanos = profileAwaitingApproval || subscriptionAwaitingActivation;
+  /** Perfil pendente tem prioridade no texto; senão, assinatura/plano aguardando ativação. */
+  const pendingSlotKind: "profile" | "subscription" | null = profileAwaitingApproval
+    ? "profile"
+    : subscriptionAwaitingActivation
+      ? "subscription"
+      : null;
   const showPlanBadge = isPro && proStatus === "approved" && (!subStatus || subStatus.toUpperCase() === "ACTIVE" || planId === "free") && planName;
 
   const handleVipOrPlanosClick = () => {
@@ -312,14 +326,6 @@ const Header = () => {
               </div>
             )}
 
-            {/* Selo Em Análise (Aparece para perfil pendente ou pagamento aguardando aprovação) */}
-            {showPendingBadge && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 animate-pulse">
-                <Clock className="w-3.5 h-3.5 text-amber-600" />
-                <span className="text-[11px] font-semibold text-amber-700">Em análise</span>
-              </div>
-            )}
-            
             {/* Não logado: botão "Entrar" no mesmo lugar do VIP (como na landing). Logado (só pro/empresa): VIP/Planos — cliente não vê para não cair na tela "exclusivo para profissionais" */}
             {!user && (
               <button
@@ -330,12 +336,33 @@ const Header = () => {
                 <span className="text-[11px] font-semibold">Entrar</span>
               </button>
             )}
-            {user && isPro && (
+            {/* Profissional: selo no lugar do Planos — texto distinto para cadastro vs assinatura */}
+            {user && isPro && pendingReplacesPlanos && pendingSlotKind && (
+              <div
+                className="flex items-center justify-center gap-1.5 min-w-[6.75rem] max-w-[9.5rem] px-2 py-1.5 rounded-xl border border-amber-500/35 bg-amber-500/10 text-amber-800 flex-shrink-0"
+                role="status"
+                aria-live="polite"
+                title={
+                  pendingSlotKind === "profile"
+                    ? "Seu cadastro profissional está sendo analisado pela equipe Chamô."
+                    : "Sua assinatura ou pagamento ainda está em processamento."
+                }
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 animate-pulse" />
+                <span className="flex flex-col items-center justify-center leading-[1.15] min-w-0 text-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-amber-800/90">
+                    {pendingSlotKind === "profile" ? "Perfil" : "Assinatura"}
+                  </span>
+                  <span className="text-[11px] font-bold">em análise</span>
+                </span>
+              </div>
+            )}
+            {user && isPro && !pendingReplacesPlanos && (
               <button
                 type="button"
                 onClick={handleVipOrPlanosClick}
                 aria-label="Ver planos e assinatura VIP"
-                className="flex items-center gap-1 max-w-[7.5rem] sm:max-w-[9rem] px-2 py-1.5 rounded-xl border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 active:scale-95 transition-all touch-manipulation"
+                className="flex items-center gap-1 max-w-[7.5rem] sm:max-w-[9rem] px-2 py-1.5 rounded-xl border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 active:scale-95 transition-all touch-manipulation flex-shrink-0"
               >
                 <Crown className="w-3 h-3 flex-shrink-0 text-primary" />
                 <span className="text-[11px] font-bold leading-none truncate">

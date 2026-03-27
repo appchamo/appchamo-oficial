@@ -137,81 +137,90 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
             </button>
           </div>
 
-          <div className="bg-card border rounded-2xl p-5 shadow-card space-y-4">
-            <p className="text-xs text-muted-foreground">
-              Tire fotos com a câmera ou envie imagem/PDF da galeria ou dos arquivos. Boas luzes e documento na horizontal.
+          <div className="bg-card border border-primary/10 rounded-2xl p-5 shadow-card space-y-4 ring-1 ring-primary/5">
+            <p className="text-xs text-muted-foreground leading-relaxed text-center px-1">
+              Use a câmera ou envie <strong className="text-foreground font-semibold">foto ou PDF</strong>. Documento na horizontal e bem iluminado.
             </p>
 
             {slots.map((slot) => {
               const uploaded = docs.find((d) => d.label === slot.label);
               return (
-                <div key={slot.key} className="border rounded-xl p-3">
-                  <p className="text-xs font-medium text-foreground mb-2">{slot.label}</p>
+                <div
+                  key={slot.key}
+                  className="rounded-2xl border border-border/80 bg-gradient-to-b from-primary/[0.06] to-transparent p-4 space-y-3"
+                >
+                  <p className="text-sm font-semibold text-foreground tracking-tight">{slot.label}</p>
 
                   {uploaded ? (
-                    <div className="flex items-center gap-3">
-                      <div className="relative w-16 h-12 rounded-lg overflow-hidden border flex-shrink-0 bg-muted flex items-center justify-center">
+                    <div className="flex items-center gap-3 rounded-xl bg-card border border-border/60 p-2 pr-1 shadow-sm">
+                      <div className="relative w-[4.5rem] h-[3.25rem] rounded-lg overflow-hidden border border-border/50 flex-shrink-0 bg-muted flex items-center justify-center">
                         {uploaded.isPdf ? (
                           <FileText className="w-7 h-7 text-primary" />
                         ) : (
                           <img src={uploaded.preview} alt="" className="w-full h-full object-cover" />
                         )}
-                        <div className="absolute top-0.5 right-0.5 bg-green-500 rounded-full">
+                        <div className="absolute top-0.5 right-0.5 bg-emerald-500 rounded-full shadow-sm">
                           <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                         </div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs text-foreground font-medium truncate">
+                        <p className="text-xs font-semibold text-foreground truncate">
                           {uploaded.isPdf ? "PDF enviado" : "Arquivo enviado"}
                         </p>
-                        <p className="text-[10px] text-muted-foreground truncate">{uploaded.file.name}</p>
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[11px] text-muted-foreground truncate">{uploaded.file.name}</p>
+                        <p className="text-[11px] text-muted-foreground tabular-nums">
                           {(uploaded.file.size / 1024).toFixed(0)} KB
                         </p>
-                        <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
+                        <div className="flex flex-wrap gap-2 mt-2">
                           <button
                             type="button"
                             onClick={() => openCamera(slot.label)}
-                            className="text-[10px] text-primary hover:underline"
+                            className="text-[11px] font-semibold text-primary hover:underline"
                           >
-                            Câmera
+                            Tirar outra
                           </button>
-                          <span className="text-[10px] text-muted-foreground">·</span>
                           <button
                             type="button"
                             onClick={() => openFilePicker(slot.label)}
-                            className="text-[10px] text-primary hover:underline"
+                            className="text-[11px] font-semibold text-primary hover:underline"
                           >
-                            Galeria / PDF
+                            Trocar arquivo
                           </button>
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={() => removeDoc(slot.label)}
-                        className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive flex-shrink-0"
+                        className="p-2 rounded-xl hover:bg-destructive/10 text-destructive flex-shrink-0 transition-colors"
                         aria-label="Remover"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-3">
                       <button
                         type="button"
                         onClick={() => openCamera(slot.label)}
-                        className="flex items-center justify-center gap-2 py-3 border-2 border-dashed border-primary/40 rounded-xl text-xs font-medium text-primary hover:bg-primary/5 transition-colors active:scale-[0.98]"
+                        className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90 active:scale-[0.98] transition-all"
                       >
-                        <Camera className="w-4 h-4 shrink-0" />
-                        Câmera
+                        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+                          <Camera className="w-5 h-5 shrink-0" />
+                        </span>
+                        <span className="text-xs font-bold leading-tight">Câmera</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => openFilePicker(slot.label)}
-                        className="flex items-center justify-center gap-2 py-3 border-2 border-dashed border-border rounded-xl text-xs font-medium text-foreground hover:bg-muted/60 transition-colors active:scale-[0.98]"
+                        className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl border-2 border-primary/25 bg-card text-foreground hover:border-primary/45 hover:bg-primary/[0.04] active:scale-[0.98] transition-all"
                       >
-                        <ImageIcon className="w-4 h-4 shrink-0" />
-                        Galeria / PDF
+                        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary group-hover:bg-primary/15 transition-colors">
+                          <ImageIcon className="w-5 h-5 shrink-0" />
+                        </span>
+                        <span className="text-xs font-bold leading-tight text-center">
+                          Galeria
+                          <span className="block text-[10px] font-semibold text-muted-foreground">ou PDF</span>
+                        </span>
                       </button>
                     </div>
                   )}

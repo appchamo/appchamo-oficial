@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { Camera, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { UserRound, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ImageCropUpload from "@/components/ImageCropUpload";
+import { cn } from "@/lib/utils";
 
 export interface StepProfileData {
   avatarUrl: string;
@@ -61,7 +62,7 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
       setAvatarError(true);
       toast({
         title: "Foto de perfil obrigatória",
-        description: "Use a câmera ou a galeria nos botões ao lado da foto e confirme o recorte.",
+        description: "Toque em Adicionar foto (galeria ou câmera) e confirme o recorte.",
         variant: "destructive",
       });
       return;
@@ -95,16 +96,21 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
 
         <div className="bg-card border rounded-2xl p-5 shadow-card space-y-4">
           {/* Avatar */}
-          <div className="flex flex-col items-center gap-2">
-            <div className="relative">
-              <div className="w-24 h-24 rounded-full bg-muted flex items-center justify-center overflow-hidden border-2 border-border">
+          <div className="flex flex-col items-center gap-3">
+            <div className="relative flex flex-col items-center pt-1">
+              <div
+                className={cn(
+                  "w-28 h-28 rounded-full flex items-center justify-center overflow-hidden border-2 transition-colors",
+                  avatarUrl ? "border-primary/25 ring-2 ring-primary/10" : "border-border bg-gradient-to-b from-muted/80 to-muted/40",
+                )}
+              >
                 {avatarUrl ? (
                   <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
-                  <Camera className="w-8 h-8 text-muted-foreground" />
+                  <UserRound className="w-12 h-12 text-muted-foreground/50" strokeWidth={1.25} />
                 )}
               </div>
-              <div className="absolute bottom-0 right-0">
+              <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 z-10">
                 <ImageCropUpload
                   onUpload={(url) => setAvatarUrl(url)}
                   aspect={1}
@@ -113,11 +119,11 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
                   label=""
                   maxSize={336}
                   quality={0.7}
-                  showCameraOption
+                  signupAvatarMode
                 />
               </div>
             </div>
-            <p className={`text-xs ${avatarError ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+            <p className={`text-xs text-center mt-4 max-w-[16rem] ${avatarError ? "text-destructive font-medium" : "text-muted-foreground"}`}>
               {avatarError ? "⚠ Foto de perfil obrigatória" : "Adicione uma foto de perfil *"}
             </p>
           </div>

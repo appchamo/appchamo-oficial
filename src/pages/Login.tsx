@@ -222,10 +222,16 @@ const Login = () => {
   useEffect(() => {
     const onOAuthDone = (e: CustomEvent<{ success: boolean }>) => {
       if (e.detail?.success) return;
+      const hadOAuthAttempt =
+        oauthBrowserOpenedRef.current || socialLoginInProgressRef.current;
       oauthBrowserOpenedRef.current = false;
+      socialLoginInProgressRef.current = false;
       setLoading(false);
       setProcessingOAuth(false);
-      toast({ title: "Não foi possível concluir o login. Tente novamente.", variant: "destructive" });
+      // Só avisar falha de login se o usuário tinha iniciado Google/Apple (evita toast falso ao sair e ir para /login)
+      if (hadOAuthAttempt) {
+        toast({ title: "Não foi possível concluir o login. Tente novamente.", variant: "destructive" });
+      }
     };
     window.addEventListener("chamo-oauth-done", onOAuthDone as EventListener);
     return () => window.removeEventListener("chamo-oauth-done", onOAuthDone as EventListener);

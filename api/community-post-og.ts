@@ -4,6 +4,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
+import { resolveStorageImageForOg } from "../api-utils/resolveStorageImageForOg";
 
 function escAttr(s: string) {
   return s
@@ -33,10 +34,14 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (!supabaseUrl || !serviceKey) {
     const title = escAttr("Comunidade Chamô");
+    const seal = escAttr(`${publicApp}/seals/push/seal_chamo.png`);
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="Publicação na Comunidade Chamô" />
+<meta property="og:image" content="${seal}" />
 <meta property="og:site_name" content="Chamô" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="${seal}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(`${publicApp}/home?feed=comunidade&post=${postId}`)}" />
 </head><body><p><a href="${escAttr(`${publicApp}/home?feed=comunidade&post=${postId}`)}">Abrir no Chamô</a></p></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -66,10 +71,8 @@ export default async function handler(req: Request): Promise<Response> {
     .slice(0, 220);
   const description = bodySnippet.length > 0 ? bodySnippet : "Publicação na Comunidade Chamô";
   const title = `${authorName} no Chamô`;
-  const ogImage =
-    post.image_url && String(post.image_url).startsWith("http")
-      ? String(post.image_url)
-      : `${publicApp}/seals/push/seal_chamo.png`;
+  const sealUrl = `${publicApp}/seals/push/seal_chamo.png`;
+  const ogImage = await resolveStorageImageForOg(supabase, post.image_url, supabaseUrl, sealUrl);
 
   const canonical = `${publicApp}/p/comunidade/${postId}`;
   const appOpen = `${publicApp}/home?feed=comunidade&post=${encodeURIComponent(postId)}`;

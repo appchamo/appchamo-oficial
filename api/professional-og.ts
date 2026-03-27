@@ -4,6 +4,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
+import { resolveStorageImageForOg } from "../api-utils/resolveStorageImageForOg";
 
 function escAttr(s: string) {
   return s
@@ -15,18 +16,6 @@ function escAttr(s: string) {
 
 function escText(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function absoluteAvatarUrl(
-  avatarUrl: string | null | undefined,
-  supabaseBase: string,
-  publicApp: string,
-): string {
-  const u = (avatarUrl || "").trim();
-  if (!u) return `${publicApp}/seals/push/seal_chamo.png`;
-  if (u.startsWith("http")) return u;
-  const base = supabaseBase.replace(/\/$/, "");
-  return `${base}/storage/v1/object/public/uploads/${u}`;
 }
 
 export const config = { runtime: "edge" };
@@ -49,9 +38,15 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (!supabaseUrl || !serviceKey) {
     const t = escAttr("Profissional no Chamô");
+    const seal = escAttr(`${publicApp}/seals/push/seal_chamo.png`);
+    const desc = escAttr("Ver perfil no Chamô — serviços verificados e chat direto.");
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
 <meta property="og:title" content="${t}" />
+<meta property="og:description" content="${desc}" />
+<meta property="og:image" content="${seal}" />
 <meta property="og:site_name" content="Chamô" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="${seal}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(fallbackRedirect)}" />
 </head><body><p><a href="${escAttr(fallbackRedirect)}">Abrir no Chamô</a></p></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -114,7 +109,8 @@ export default async function handler(req: Request): Promise<Response> {
   const title = `${displayName} - ${rolePart} - Perfil Oficial | Chamô`;
   const description = `Contrate ${displayName} no Chamô — serviços verificados e chat direto.`;
 
-  const avatar = absoluteAvatarUrl(profRow?.avatar_url, supabaseUrl, publicApp);
+  const sealUrl = `${publicApp}/seals/push/seal_chamo.png`;
+  const avatar = await resolveStorageImageForOg(supabase, profRow?.avatar_url, supabaseUrl, sealUrl);
 
   const canonicalKey = (proRow.slug || proRow.id).trim();
   const canonical = `${publicApp}/professional/${encodeURIComponent(canonicalKey)}`;

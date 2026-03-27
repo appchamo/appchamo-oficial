@@ -7,7 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { extractUploadsObjectPath } from "../api-utils/extractUploadsObjectPath";
 import { resolveSealFetchOrigins } from "../api-utils/resolveSealAssetOrigin";
 
-export const config = { runtime: "nodejs", maxDuration: 15 };
+export const config = { runtime: "edge" };
 
 function mimeFromPath(path: string): string {
   const lower = path.toLowerCase();

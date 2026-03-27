@@ -19,7 +19,7 @@ function escText(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export const config = { runtime: "nodejs", maxDuration: 15 };
+export const config = { runtime: "edge" };
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);

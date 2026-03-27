@@ -53,12 +53,28 @@ ${brandIconLinkTags(publicApp, escAttr)}
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
   const { data: post } = await supabase
     .from("community_posts")
-    .select("id, body, image_url, author_id, created_at")
+    .select("id, body, image_url, author_id, created_at, audience")
     .eq("id", postId)
     .maybeSingle();
 
   if (!post) {
     return new Response("Not found", { status: 404 });
+  }
+
+  const audience = (post as { audience?: string }).audience;
+  if (audience === "followers") {
+    const title = escAttr("Comunidade Chamô");
+    const description = escAttr("Publicação visível para seguidores no app Chamô.");
+    const seal = escAttr(sealImageUrlForMeta(req));
+    const appOpen = `${publicApp}/home?feed=comunidade`;
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
+${brandIconLinkTags(publicApp, escAttr)}
+<meta property="og:title" content="${title}" />
+<meta property="og:description" content="${description}" />
+<meta property="og:image" content="${seal}" />
+<meta http-equiv="refresh" content="0;url=${escAttr(appOpen)}" />
+</head><body><p><a href="${escAttr(appOpen)}">Abrir o Chamô</a></p></body></html>`;
+    return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
   const { data: prof } = await supabase

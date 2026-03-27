@@ -7,10 +7,9 @@ import {
   Lightbulb,
   ThumbsUp,
   MessageCircle,
-  Share2,
+  Send,
   ImagePlus,
   Loader2,
-  Send,
   Trash2,
   X,
   Link2,
@@ -20,6 +19,10 @@ import {
   BadgeCheck,
   UserPlus,
   Check,
+  Video,
+  Globe,
+  Users,
+  Maximize2,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -33,6 +36,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
+import { compressImageForChat } from "@/lib/compressChatImage";
 
 export type CommunityFeedVariant = "embedded" | "standalone";
 
@@ -45,11 +49,78 @@ const REACTIONS: { type: ReactionType; label: string; Icon: typeof ThumbsUp }[] 
   { type: "genius", label: "Genial", Icon: Lightbulb },
 ];
 
+function reactionRowLabelClass(type: ReactionType, active: boolean): string {
+  if (!active) return "text-muted-foreground hover:bg-white/60";
+  switch (type) {
+    case "like":
+      return "text-sky-700 font-semibold";
+    case "love":
+      return "text-red-600 font-semibold";
+    case "congrats":
+      return "text-amber-600 font-semibold [text-shadow:0_0_8px_rgba(59,130,246,0.45)]";
+    case "genius":
+      return "text-violet-700 font-semibold";
+    default:
+      return "text-primary font-semibold";
+  }
+}
+
+function reactionRowIconClass(type: ReactionType, active: boolean): string {
+  if (!active) return "text-muted-foreground";
+  switch (type) {
+    case "like":
+      return "text-sky-600";
+    case "love":
+      return "text-red-500 fill-red-500";
+    case "congrats":
+      return "text-amber-500";
+    case "genius":
+      return "text-amber-400 fill-amber-200";
+    default:
+      return "";
+  }
+}
+
+function reactionSummaryIconClass(type: ReactionType): string {
+  switch (type) {
+    case "like":
+      return "text-sky-600";
+    case "love":
+      return "text-red-500 fill-red-500";
+    case "congrats":
+      return "text-amber-500";
+    case "genius":
+      return "text-amber-400 fill-amber-200";
+    default:
+      return "text-primary";
+  }
+}
+
+function reactionFullscreenCircle(type: ReactionType, active: boolean): string {
+  const base =
+    "flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border";
+  if (!active) return cn(base, "border-white/15 text-white/90");
+  switch (type) {
+    case "like":
+      return cn(base, "border-sky-400/60 bg-sky-500/20 text-sky-300");
+    case "love":
+      return cn(base, "border-red-400/60 bg-red-500/25 text-red-400");
+    case "congrats":
+      return cn(base, "border-amber-400/60 bg-amber-500/20 text-amber-300");
+    case "genius":
+      return cn(base, "border-violet-400/50 bg-violet-500/15 text-amber-300");
+    default:
+      return cn(base, "border-white/15");
+  }
+}
+
 interface PostRow {
   id: string;
   author_id: string;
   body: string;
   image_url: string | null;
+  video_url?: string | null;
+  audience?: string | null;
   created_at: string;
 }
 
@@ -107,9 +178,14 @@ export default function CommunityFeed({
   const [commentAuthors, setCommentAuthors] = useState<Record<string, AuthorRow>>({});
 
   const [composerText, setComposerText] = useState("");
-  const [composerFile, setComposerFile] = useState<File | null>(null);
+  const [composerMedia, setComposerMedia] = useState<{ kind: "image" | "video"; file: File } | null>(
+    null,
+  );
   const [composerPreview, setComposerPreview] = useState<string | null>(null);
+  const [composerModalOpen, setComposerModalOpen] = useState(false);
+  const [postAudience, setPostAudience] = useState<"public" | "followers">("public");
   const [publishing, setPublishing] = useState(false);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [commentsSheetPost, setCommentsSheetPost] = useState<PostRow | null>(null);
   const [fullscreenPost, setFullscreenPost] = useState<PostRow | null>(null);
@@ -138,13 +214,13 @@ export default function CommunityFeed({
   const canPost =
     profile?.user_type === "professional" || profile?.user_type === "company";
 
-  const loadFeed = useCallback(async () => {
+  const loadFeed = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user) {
       setFollowingAuthorIds(new Set());
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     try {
       const { data: myFollows } = await supabase
         .from("professional_follows" as any)
@@ -160,7 +236,7 @@ export default function CommunityFeed({
 
       const { data: postRows, error: pe } = await supabase
         .from("community_posts" as any)
-        .select("id, author_id, body, image_url, created_at")
+        .select("id, author_id, body, image_url, video_url, audience, created_at")
         .order("created_at", { ascending: false })
         .limit(50);
       if (pe) throw pe;
@@ -244,8 +320,7 @@ export default function CommunityFeed({
           const key = String(row.slug || row.id || "").trim();
           if (key) paths[row.user_id] = `/professional/${encodeURIComponent(key)}`;
           const pn = row.professions?.name;
-          const cn = row.categories?.name;
-          const headline = [pn, cn].filter(Boolean).join(" · ") || "Profissional no Chamô";
+          const headline = pn && String(pn).trim() ? String(pn).trim() : "";
           pmeta[row.user_id] = { proId: row.id, headline, verified: !!row.verified };
         });
         setProPathByUserId(paths);
@@ -262,7 +337,7 @@ export default function CommunityFeed({
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [user]);
 
@@ -271,14 +346,14 @@ export default function CommunityFeed({
   }, [loadFeed]);
 
   useEffect(() => {
-    if (!composerFile) {
+    if (!composerMedia) {
       setComposerPreview(null);
       return;
     }
-    const url = URL.createObjectURL(composerFile);
+    const url = URL.createObjectURL(composerMedia.file);
     setComposerPreview(url);
     return () => URL.revokeObjectURL(url);
-  }, [composerFile]);
+  }, [composerMedia]);
 
   const displayPosts = useMemo(() => {
     if (feedScope === "all") return posts;
@@ -317,33 +392,64 @@ export default function CommunityFeed({
   const publishPost = async () => {
     if (!user || !canPost) return;
     const text = composerText.trim();
-    if (!text && !composerFile) {
-      toast({ title: "Escreva algo ou adicione uma foto", variant: "destructive" });
+    if (!text && !composerMedia) {
+      toast({ title: "Escreva algo ou adicione uma foto ou vídeo", variant: "destructive" });
       return;
     }
     setPublishing(true);
     try {
       let imageUrl: string | null = null;
-      if (composerFile) {
-        const ext = composerFile.name.split(".").pop() || "jpg";
+      let videoUrl: string | null = null;
+      if (composerMedia?.kind === "image") {
+        const blob = await compressImageForChat(composerMedia.file, {
+          maxEdge: 1600,
+          webpQuality: 0.82,
+          jpegQuality: 0.85,
+        });
+        const ext = blob.type.includes("webp") ? "webp" : "jpg";
         const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+        const file = new File([blob], `post.${ext}`, { type: blob.type });
         const { error: upErr } = await supabase.storage
           .from("community-feed")
-          .upload(path, composerFile, { upsert: false, contentType: composerFile.type });
+          .upload(path, file, { upsert: false, contentType: blob.type || "image/jpeg" });
         if (upErr) throw upErr;
         const { data: pub } = supabase.storage.from("community-feed").getPublicUrl(path);
         imageUrl = pub.publicUrl;
+      } else if (composerMedia?.kind === "video") {
+        const f = composerMedia.file;
+        if (f.size > 45 * 1024 * 1024) {
+          toast({
+            title: "Vídeo muito grande",
+            description: "Use um arquivo de até 45 MB.",
+            variant: "destructive",
+          });
+          return;
+        }
+        const rawExt = (f.name.split(".").pop() || "mp4").toLowerCase();
+        const ext = /^[a-z0-9]{1,8}$/.test(rawExt) ? rawExt : "mp4";
+        const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+        const ct = f.type?.startsWith("video/") ? f.type : "video/mp4";
+        const { error: upErr } = await supabase.storage
+          .from("community-feed")
+          .upload(path, f, { upsert: false, contentType: ct });
+        if (upErr) throw upErr;
+        const { data: pub } = supabase.storage.from("community-feed").getPublicUrl(path);
+        videoUrl = pub.publicUrl;
       }
       const { error: insErr } = await supabase.from("community_posts" as any).insert({
         author_id: user.id,
         body: text,
         image_url: imageUrl,
+        video_url: videoUrl,
+        audience: postAudience,
       });
       if (insErr) throw insErr;
       setComposerText("");
-      setComposerFile(null);
+      setComposerMedia(null);
+      setPostAudience("public");
+      setComposerModalOpen(false);
       toast({ title: "Publicado na Comunidade" });
-      await loadFeed();
+      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro ao publicar", description: e.message, variant: "destructive" });
     } finally {
@@ -369,7 +475,7 @@ export default function CommunityFeed({
         );
         if (error) throw error;
       }
-      await loadFeed();
+      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro na reação", description: e.message, variant: "destructive" });
     }
@@ -393,7 +499,7 @@ export default function CommunityFeed({
       if (error) throw error;
       setCommentDrafts((d) => ({ ...d, [postId]: "" }));
       setReplyTarget(null);
-      await loadFeed();
+      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro ao comentar", description: e.message, variant: "destructive" });
     } finally {
@@ -405,7 +511,7 @@ export default function CommunityFeed({
     try {
       const { error } = await supabase.from("community_post_comments" as any).delete().eq("id", commentId);
       if (error) throw error;
-      await loadFeed();
+      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro ao apagar", description: e.message, variant: "destructive" });
     }
@@ -430,7 +536,7 @@ export default function CommunityFeed({
         });
         if (error) throw error;
       }
-      await loadFeed();
+      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro ao seguir", description: e.message, variant: "destructive" });
     }
@@ -454,7 +560,7 @@ export default function CommunityFeed({
         });
         if (error) throw error;
       }
-      await loadFeed();
+      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro na curtida", description: e.message, variant: "destructive" });
     }
@@ -746,66 +852,183 @@ export default function CommunityFeed({
       )}
 
       {canPost && (
-        <div
-          className={cn(
-            "rounded-[20px] bg-white p-3.5 mb-4 border border-border/50 shadow-md shadow-black/[0.04]",
-            embedded && "ring-1 ring-primary/[0.12]",
-          )}
-        >
-          <div className="flex gap-3 items-start">
-            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-primary/15 to-primary/5 overflow-hidden shrink-0 flex items-center justify-center ring-2 ring-primary/20">
-              {profile?.avatar_url ? (
-                <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-sm font-bold text-primary">
-                  {(profile?.full_name || "V").slice(0, 1).toUpperCase()}
-                </span>
-              )}
-            </div>
-            <div className="flex-1 min-w-0 space-y-2">
-              <Textarea
-                placeholder="No que você está pensando?"
-                value={composerText}
-                onChange={(e) => setComposerText(e.target.value)}
-                className="min-h-[72px] rounded-xl resize-none border-0 bg-muted/40 focus-visible:ring-1 focus-visible:ring-primary/30 text-[15px]"
-                data-tab-swipe-ignore
-              />
-              {composerPreview && (
-                <div className="relative rounded-xl overflow-hidden border">
-                  <img src={composerPreview} alt="" className="w-full max-h-52 object-cover" />
-                  <button
-                    type="button"
-                    className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center"
-                    onClick={() => setComposerFile(null)}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-              <div className="flex items-center justify-between gap-2 pt-1">
-                <label className="inline-flex items-center gap-2 text-sm font-semibold text-primary cursor-pointer">
-                  <ImagePlus className="w-5 h-5" />
-                  <span>Foto</span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    className="hidden"
-                    onChange={(e) => setComposerFile(e.target.files?.[0] || null)}
-                  />
-                </label>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="rounded-full px-5 font-semibold"
-                  disabled={publishing || (!composerText.trim() && !composerFile)}
-                  onClick={publishPost}
-                >
-                  {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Publicar"}
-                </Button>
+        <>
+          <div
+            className={cn(
+              "rounded-[20px] bg-white p-3.5 mb-4 border border-border/50 shadow-md shadow-black/[0.04]",
+              embedded && "ring-1 ring-primary/[0.12]",
+            )}
+          >
+            <div className="flex gap-3 items-start">
+              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-primary/15 to-primary/5 overflow-hidden shrink-0 flex items-center justify-center ring-2 ring-primary/20">
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-sm font-bold text-primary">
+                    {(profile?.full_name || "V").slice(0, 1).toUpperCase()}
+                  </span>
+                )}
               </div>
+              <button
+                type="button"
+                onClick={() => setComposerModalOpen(true)}
+                className="flex-1 min-h-[72px] rounded-xl bg-muted/40 px-3 py-3 text-left text-[15px] text-muted-foreground hover:bg-muted/55 active:bg-muted/65 transition-colors"
+              >
+                {!composerText.trim() && !composerMedia ? (
+                  "No que você está pensando?"
+                ) : (
+                  <span className="text-foreground line-clamp-4 block whitespace-pre-wrap break-words">
+                    {[
+                      composerText.trim() &&
+                        composerText.trim().slice(0, 280) +
+                          (composerText.trim().length > 280 ? "…" : ""),
+                      composerMedia &&
+                        (composerMedia.kind === "video" ? "Vídeo anexado" : "Foto anexada"),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
-        </div>
+
+          <Dialog open={composerModalOpen} onOpenChange={setComposerModalOpen}>
+            <DialogContent
+              className="!fixed !inset-0 !left-0 !top-0 z-[60] flex h-[100dvh] max-h-none w-full max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 rounded-none border-0 bg-background p-0 overflow-hidden shadow-none data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 [&>button]:hidden"
+              onOpenAutoFocus={(e) => {
+                e.preventDefault();
+                queueMicrotask(() => composerTextareaRef.current?.focus());
+              }}
+            >
+              <DialogTitle className="sr-only">Nova publicação na comunidade</DialogTitle>
+              <div className="flex items-center gap-2 px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] border-b border-border/50 shrink-0 bg-background">
+                <button
+                  type="button"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-muted"
+                  onClick={() => setComposerModalOpen(false)}
+                  aria-label="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <span className="font-bold text-[17px] flex-1 text-center pr-10">Criar publicação</span>
+              </div>
+              <div className="flex-1 flex flex-col gap-4 overflow-y-auto px-4 py-4 min-h-0">
+                <Textarea
+                  ref={composerTextareaRef}
+                  placeholder="No que você está pensando?"
+                  value={composerText}
+                  onChange={(e) => setComposerText(e.target.value)}
+                  className="min-h-[140px] rounded-xl resize-none text-[16px] border-border/60"
+                  data-tab-swipe-ignore
+                />
+                <div>
+                  <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
+                    Quem pode ver
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPostAudience("public")}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold border transition-colors",
+                        postAudience === "public"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted/50 border-border text-muted-foreground",
+                      )}
+                    >
+                      <Globe className="w-4 h-4" />
+                      Todos no Chamô
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPostAudience("followers")}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold border transition-colors",
+                        postAudience === "followers"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted/50 border-border text-muted-foreground",
+                      )}
+                    >
+                      <Users className="w-4 h-4" />
+                      Só meus seguidores
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
+                    Mídia
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <label className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-4 py-2.5 text-sm font-semibold text-foreground cursor-pointer hover:bg-muted/50">
+                      <ImagePlus className="w-5 h-5 text-primary" />
+                      Foto
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) setComposerMedia({ kind: "image", file: f });
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    <label className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-4 py-2.5 text-sm font-semibold text-foreground cursor-pointer hover:bg-muted/50">
+                      <Video className="w-5 h-5 text-primary" />
+                      Vídeo
+                      <input
+                        type="file"
+                        accept="video/mp4,video/webm,video/quicktime,video/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) setComposerMedia({ kind: "video", file: f });
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    Fotos são comprimidas automaticamente. Vídeos: até 45 MB.
+                  </p>
+                </div>
+                {composerPreview && composerMedia ? (
+                  <div className="relative rounded-xl overflow-hidden border border-border/60 bg-black">
+                    {composerMedia.kind === "video" ? (
+                      <video
+                        src={composerPreview}
+                        controls
+                        className="w-full max-h-64 object-contain"
+                        playsInline
+                      />
+                    ) : (
+                      <img src={composerPreview} alt="" className="w-full max-h-64 object-cover" />
+                    )}
+                    <button
+                      type="button"
+                      className="absolute top-2 right-2 w-9 h-9 rounded-full bg-black/65 text-white flex items-center justify-center"
+                      onClick={() => setComposerMedia(null)}
+                      aria-label="Remover mídia"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="shrink-0 border-t border-border/50 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-background">
+                <Button
+                  type="button"
+                  className="w-full rounded-xl h-12 text-base font-bold"
+                  disabled={publishing || (!composerText.trim() && !composerMedia)}
+                  onClick={publishPost}
+                >
+                  {publishing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publicar"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </>
       )}
 
       {!canPost && (
@@ -909,7 +1132,9 @@ export default function CommunityFeed({
                         ) : null}
                         <p className="text-[11px] text-muted-foreground mt-0.5">
                           {postTimeLabel(post.created_at)} ·{" "}
-                          <span className="text-primary/80 font-medium">Público</span>
+                          <span className="text-primary/80 font-medium">
+                            {post.audience === "followers" ? "Seguidores" : "Público"}
+                          </span>
                         </p>
                       </div>
                       {showFollowUI &&
@@ -948,7 +1173,24 @@ export default function CommunityFeed({
                       )}
                     </div>
                   ) : null}
-                  {post.image_url ? (
+                  {post.video_url ? (
+                    <div className="relative mt-3 rounded-xl overflow-hidden bg-black">
+                      <video
+                        src={post.video_url}
+                        controls
+                        className="w-full max-h-[min(420px,70vh)] object-contain bg-black"
+                        playsInline
+                      />
+                      <button
+                        type="button"
+                        className="absolute top-2 right-2 rounded-full bg-black/55 p-2 text-white backdrop-blur-sm"
+                        onClick={() => setFullscreenPost(post)}
+                        aria-label="Ver em tela cheia"
+                      >
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : post.image_url ? (
                     <button
                       type="button"
                       className="mt-3 w-full p-0 border-0 bg-transparent rounded-xl overflow-hidden block text-left cursor-zoom-in active:opacity-95"
@@ -976,7 +1218,7 @@ export default function CommunityFeed({
                                   key={r.type}
                                   className="w-5 h-5 rounded-full bg-white border border-border flex items-center justify-center text-[10px]"
                                 >
-                                  <r.Icon className="w-3 h-3 text-primary" />
+                                  <r.Icon className={cn("w-3 h-3", reactionSummaryIconClass(r.type))} />
                                 </span>
                               ))}
                           </span>
@@ -1008,13 +1250,13 @@ export default function CommunityFeed({
                         type="button"
                         onClick={() => setReaction(post.id, type)}
                         className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold transition-colors",
-                          active
-                            ? "bg-primary/15 text-primary"
-                            : "text-muted-foreground hover:bg-white/80",
+                          "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-colors",
+                          reactionRowLabelClass(type, active),
                         )}
                       >
-                        <Icon className={cn("w-3.5 h-3.5", type === "love" && active && "fill-primary")} />
+                        <Icon
+                          className={cn("w-3.5 h-3.5 shrink-0", reactionRowIconClass(type, active))}
+                        />
                         {label}
                         {n > 0 && <span className="opacity-70">({n})</span>}
                       </button>
@@ -1039,7 +1281,7 @@ export default function CommunityFeed({
                     className="flex items-center justify-center gap-2 py-3.5 text-[13px] font-bold text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors"
                     onClick={() => setSharePost(post)}
                   >
-                    <Share2 className="w-[18px] h-[18px]" />
+                    <Send className="w-[18px] h-[18px] -rotate-12" />
                     Compartilhar
                   </button>
                 </div>
@@ -1061,6 +1303,7 @@ export default function CommunityFeed({
       >
         <SheetContent
           side="bottom"
+          onOpenAutoFocus={(e) => e.preventDefault()}
           className="rounded-t-[28px] p-0 gap-0 max-h-[min(92vh,760px)] flex flex-col overflow-hidden border-t border-border/60 shadow-[0_-8px_40px_rgba(0,0,0,0.12)]"
         >
           <div className="mx-auto mt-2.5 mb-1 h-1 w-11 rounded-full bg-muted-foreground/20 shrink-0" aria-hidden />
@@ -1078,6 +1321,7 @@ export default function CommunityFeed({
                 placeholder="Pesquisar"
                 value={shareQuery}
                 onChange={(e) => setShareQuery(e.target.value)}
+                autoFocus={false}
                 className="rounded-full bg-muted/70 border-0 h-11 pl-10 text-[15px] focus-visible:ring-primary/25"
               />
             </div>
@@ -1304,8 +1548,10 @@ export default function CommunityFeed({
                         <button
                           type="button"
                           className={cn(
-                            "text-muted-foreground hover:text-primary transition-colors",
-                            liked && "text-primary",
+                            "transition-colors",
+                            liked
+                              ? "text-red-500 font-semibold"
+                              : "text-muted-foreground hover:text-red-500/90",
                           )}
                           onClick={() => toggleCommentLike(c.id)}
                         >
@@ -1404,7 +1650,14 @@ export default function CommunityFeed({
                 >
                   <ArrowLeft className="w-6 h-6" />
                 </button>
-                {fullscreenPost.image_url ? (
+                {fullscreenPost.video_url ? (
+                  <video
+                    src={fullscreenPost.video_url}
+                    controls
+                    className="max-h-full max-w-full object-contain"
+                    playsInline
+                  />
+                ) : fullscreenPost.image_url ? (
                   <img
                     src={fullscreenPost.image_url}
                     alt=""
@@ -1428,12 +1681,7 @@ export default function CommunityFeed({
                         onClick={() => setReaction(fullscreenPost.id, type)}
                         className="flex flex-col items-center gap-0.5 text-white/90"
                       >
-                        <span
-                          className={cn(
-                            "flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border border-white/15",
-                            active && "bg-primary/35 border-primary/55 text-primary",
-                          )}
-                        >
+                        <span className={reactionFullscreenCircle(type, active)}>
                           <Icon
                             className={cn("h-5 w-5", type === "love" && active && "fill-current")}
                           />
@@ -1467,7 +1715,7 @@ export default function CommunityFeed({
                     className="flex flex-col items-center gap-0.5 text-white/90"
                   >
                     <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border border-white/15">
-                      <Share2 className="h-5 w-5" />
+                      <Send className="h-5 w-5 -rotate-12" />
                     </span>
                     <span className="text-[9px] font-bold">Partilhar</span>
                   </button>

@@ -29,6 +29,6 @@ export function resolveSealFetchOrigins(req: Request): string[] {
 
 export function sealImageUrlForMeta(req: Request): string {
   const origins = resolveSealFetchOrigins(req);
-  const base = origins[0] || "https://app.chamo.com";
+  const base = origins[0] || "https://appchamo.com";
   return `${base.replace(/\/$/, "")}/seals/push/seal_chamo.png`;
 }

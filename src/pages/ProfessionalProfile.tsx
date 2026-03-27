@@ -36,7 +36,7 @@ import ServiceRequestDialog from "@/components/ServiceRequestDialog";
 import AgendaBookingDialog from "@/components/AgendaBookingDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { getPublicProfessionalProfileUrl, getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
+import { getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
@@ -422,16 +422,12 @@ const ProfessionalProfile = () => {
   };
 
   const profilePathKey = pro && (pro.slug || id) ? (pro.slug || id)!.trim() : "";
-  /** Link direto ao perfil (mostrar na UI). */
-  const profileLink = profilePathKey ? getPublicProfessionalProfileUrl(profilePathKey) : null;
-  /** Link com meta tags para WhatsApp / Instagram (pré-visualização). */
-  const profileShareLink = profilePathKey ? getProfessionalProfileShareUrl(profilePathKey) : null;
+  /** URL canónica `/professional/...` — crawlers recebem OG via middleware na Vercel. */
+  const profileLink = profilePathKey ? getProfessionalProfileShareUrl(profilePathKey) : null;
   const profileLinkDisplay = profileLink ? profileLink.replace(/^https?:\/\//, "") : null;
-  const profileShareDisplay = profileShareLink ? profileShareLink.replace(/^https?:\/\//, "") : null;
 
-  // Compartilhar / copiar usam URL OG para pré-visualização rica nas redes
   const handleShareLink = async () => {
-    if (!profileShareLink || !pro) return;
+    if (!profileLink || !pro) return;
     if (navigator.share) {
       try {
         const role =
@@ -443,7 +439,7 @@ const ProfessionalProfile = () => {
         await navigator.share({
           title: `${pro.full_name} - ${role} - Perfil Oficial | Chamô`,
           text: `Confira o perfil de ${pro.full_name} no Chamô.`,
-          url: profileShareLink,
+          url: profileLink,
         });
         return;
       } catch {
@@ -454,22 +450,12 @@ const ProfessionalProfile = () => {
   };
 
   const handleCopyLink = async () => {
-    if (!profileShareLink) return;
-    try {
-      await navigator.clipboard.writeText(profileShareLink);
-      toast({ title: "Link copiado!", description: "Pronto para colar no WhatsApp com pré-visualização." });
-    } catch {
-      toast({ title: "Seu link:", description: profileShareLink });
-    }
-  };
-
-  const handleCopyPublicLink = async () => {
     if (!profileLink) return;
     try {
       await navigator.clipboard.writeText(profileLink);
-      toast({ title: "Link do perfil copiado!", description: "Abre a página pública direto no navegador." });
+      toast({ title: "Link copiado!", description: "Pronto para WhatsApp, Instagram ou navegador." });
     } catch {
-      toast({ title: "Link do perfil:", description: profileLink });
+      toast({ title: "Seu link:", description: profileLink });
     }
   };
 
@@ -758,34 +744,21 @@ const ProfessionalProfile = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                {profileShareLink && profileShareDisplay && (
+                {profileLink && profileLinkDisplay && (
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                      Link para WhatsApp / Instagram (pré-visualização)
+                      Link do seu perfil (WhatsApp, Instagram, navegador)
                     </label>
                     <p className="text-[10px] text-muted-foreground mb-1.5 leading-snug">
-                      O app usa este link ao compartilhar — o WhatsApp lê foto e título a partir dele. Para testar: Depurador da Meta com a URL{" "}
-                      <span className="font-mono">…/api/professional-og?key=…</span> (não use só <span className="font-mono">professional-og-image</span>).
+                      URL curta em <span className="font-mono">/professional/…</span>. Nas redes, o cartão de prévia usa a mesma página — o WhatsApp lê título e foto automaticamente. Para testar: Depurador da Meta com este URL.
                     </p>
                     <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-3 py-2.5">
-                      <span className="text-xs text-foreground flex-1 truncate font-mono">{profileShareDisplay}</span>
+                      <span className="text-xs text-foreground flex-1 truncate font-mono">{profileLinkDisplay}</span>
                       <button type="button" onClick={handleCopyLink} className="text-xs text-primary font-bold hover:underline shrink-0">
                         Copiar
                       </button>
                       <button type="button" onClick={handleShareLink} className="text-muted-foreground hover:text-primary shrink-0 p-1" title="Compartilhar">
                         <Share2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {profileLink && profileLinkDisplay && (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Link direto do perfil</label>
-                    <p className="text-[10px] text-muted-foreground mb-1.5 leading-snug">Para abrir no navegador ou colar em bio (sem cartão de prévia nas redes).</p>
-                    <div className="flex items-center gap-2 bg-muted/80 border border-border/60 rounded-xl px-3 py-2.5">
-                      <span className="text-xs text-foreground flex-1 truncate font-mono">{profileLinkDisplay}</span>
-                      <button type="button" onClick={handleCopyPublicLink} className="text-xs text-primary font-bold hover:underline shrink-0">
-                        Copiar
                       </button>
                     </div>
                   </div>

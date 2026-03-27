@@ -14,5 +14,5 @@ export function resolveOgPublicAppOrigin(req: Request): string {
   } catch {
     /* ignore */
   }
-  return (process.env.VITE_PUBLIC_APP_URL || process.env.PUBLIC_APP_URL || "https://app.chamo.com").replace(/\/$/, "");
+  return (process.env.VITE_PUBLIC_APP_URL || process.env.PUBLIC_APP_URL || "https://appchamo.com").replace(/\/$/, "");
 }

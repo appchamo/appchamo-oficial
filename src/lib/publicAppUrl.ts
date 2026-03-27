@@ -12,7 +12,7 @@ export function getPublicAppBaseUrl(): string {
     const o = (window.location.origin || "").replace(/\/$/, "");
     if (o.startsWith("https://") || o.startsWith("http://")) return o;
   }
-  return "https://app.chamo.com";
+  return "https://appchamo.com";
 }
 
 /**
@@ -37,15 +37,11 @@ export function getPublicProfessionalProfileUrl(proKey: string): string {
 }
 
 /**
- * URL para partilhar o perfil em redes (WhatsApp, etc.) com Open Graph (`/api/professional-og`).
- *
- * Opcional: `VITE_SHARE_OG_BASE_URL` se precisares de outra origem para `/api/*-og` (SSL no custom).
- * Na Vercel: `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` para o HTML/ imagem OG dinâmicos (senão cai no selo genérico).
+ * URL para partilhar o perfil (WhatsApp, etc.): mesmo path canónico `/professional/:key`.
+ * Crawlers recebem OG via middleware → `/api/professional-og`.
  */
 export function getProfessionalProfileShareUrl(proKey: string): string {
-  const key = (proKey || "").trim();
-  if (!key) return "";
-  return `${getOgShareBaseUrl()}/api/professional-og?key=${encodeURIComponent(key)}`;
+  return getPublicProfessionalProfileUrl(proKey);
 }
 
 /**

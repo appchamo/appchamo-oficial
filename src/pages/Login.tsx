@@ -7,7 +7,7 @@ import { useAuth, OAUTH_FAILED_KEY } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { resolveAuthReturnPath, setPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
-import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
+import { getAuthEmailRedirectUrl } from "@/lib/authEmailRedirect";
 import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -526,11 +526,10 @@ const Login = () => {
     }
     setResending(true);
     try {
-      const emailRedirectTo = `${getPublicAppBaseUrl().replace(/\/$/, "")}/login`;
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: em,
-        options: { emailRedirectTo },
+        options: { emailRedirectTo: getAuthEmailRedirectUrl() },
       });
       if (error) {
         toast({ title: "Erro ao reenviar", description: translateError(error.message), variant: "destructive" });
@@ -634,7 +633,11 @@ const Login = () => {
     } catch (err: any) {
       console.error("💥 [LOGIN] ERRO CAPTURADO:", err);
       localStorage.removeItem("manual_login_intent");
-      toast({ title: "Erro ao logar", description: err.message, variant: "destructive" });
+      toast({
+        title: "Erro ao logar",
+        description: translateError(typeof err?.message === "string" ? err.message : ""),
+        variant: "destructive",
+      });
       setLoading(false);
     } finally {
       if (!oauthBrowserOpenedRef.current) socialLoginInProgressRef.current = false;

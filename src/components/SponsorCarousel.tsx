@@ -30,7 +30,7 @@ function getSponsorLogoUrl(logoUrl: string | null): string | null {
   return logoUrl;
 }
 
-const ITEMS_PER_PAGE = 4;
+const DEFAULT_ITEMS_PER_PAGE = 4;
 const AUTO_ADVANCE_MS = 6000;
 
 interface Sponsor {
@@ -66,9 +66,13 @@ function sponsorMatchesLocation(
 
 interface SponsorCarouselProps {
   section?: { title?: string; subtitle?: string };
+  /** Por página no carrossel (Home usa 4; Comunidade pode usar 6). */
+  itemsPerPage?: number;
+  /** Este patrocinador aparece sempre primeiro (ex.: conta patrocinador na Home). */
+  pinnedSponsorId?: string | null;
 }
 
-const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
+const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinnedSponsorId = null }: SponsorCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -84,19 +88,28 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
 
   const sponsors = useMemo(() => {
     const filtered = allSponsors.filter((s) => sponsorMatchesLocation(s, userState, userCity));
-    // Ordem aleatória a cada sessão
+    if (pinnedSponsorId) {
+      const pin = filtered.find((s) => s.id === pinnedSponsorId);
+      const rest = filtered.filter((s) => s.id !== pinnedSponsorId);
+      for (let i = rest.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [rest[i], rest[j]] = [rest[j], rest[i]];
+      }
+      return pin ? [pin, ...rest] : rest;
+    }
     for (let i = filtered.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
     }
     return filtered;
-  }, [allSponsors, userState, userCity]);
+  }, [allSponsors, userState, userCity, pinnedSponsorId]);
 
   const pages = useMemo(() => {
     const p: Sponsor[][] = [];
-    for (let i = 0; i < sponsors.length; i += ITEMS_PER_PAGE) p.push(sponsors.slice(i, i + ITEMS_PER_PAGE));
+    const step = Math.max(1, itemsPerPage);
+    for (let i = 0; i < sponsors.length; i += step) p.push(sponsors.slice(i, i + step));
     return p;
-  }, [sponsors]);
+  }, [sponsors, itemsPerPage]);
 
   // Inclui uma cópia da primeira página no final para sempre avançar (sem “voltar”)
   const displayPages = useMemo(() => {
@@ -345,11 +358,12 @@ const SponsorCarousel = ({ section }: SponsorCarouselProps) => {
   };
 
   if (!loaded) {
+    const n = Math.min(Math.max(itemsPerPage, 4), 8);
     return (
       <section>
         <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">{section?.title ?? "Patrocinadores"}</h3>
         <div className="flex gap-3 overflow-hidden">
-          {[1, 2, 3, 4].map((i) => (
+          {Array.from({ length: n }, (_, i) => (
             <div key={i} className="w-[65px] h-[65px] rounded-full bg-muted animate-pulse shrink-0" />
           ))}
         </div>

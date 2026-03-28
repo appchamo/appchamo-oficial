@@ -27,6 +27,7 @@ const FULL_PAGE_SCROLL_EXACT = new Set([
   "/signup",
   "/complete-signup",
   "/login",
+  "/auth/email-confirm",
   "/reset-password",
   "/oauth-callback",
   "/post-login",

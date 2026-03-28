@@ -22,6 +22,7 @@ import AudioPlayer from "@/components/AudioPlayer";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { isSupportBotMessage } from "@/lib/supportBot";
 import { parseAnySupportAttachment } from "@/lib/supportMessageAttachments";
+import CommunityReportedPostPreview from "@/components/community/CommunityReportedPostPreview";
 
 export interface TicketThread {
   id: string;
@@ -125,6 +126,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const [viewingReportChat, setViewingReportChat] = useState<string | null>(null);
   const [reportedMessages, setReportedMessages] = useState<ReportedChatMessage[]>([]);
   const [loadingReportedChat, setLoadingReportedChat] = useState(false);
+  const [previewCommunityPostId, setPreviewCommunityPostId] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setAdminId(data.user?.id || null));
@@ -952,12 +954,21 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                         </div>
 
                         {r.post_id ? (
-                          <Link
-                            to={`/home?feed=comunidade&post=${r.post_id}`}
-                            className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
-                          >
-                            <Eye className="w-4 h-4" /> Ver publicação na Comunidade
-                          </Link>
+                          <div className="flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewCommunityPostId(r.post_id)}
+                              className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-95 transition-opacity text-center"
+                            >
+                              <Eye className="w-4 h-4" /> Ver publicação
+                            </button>
+                            <Link
+                              to={`/home?feed=comunidade&post=${r.post_id}`}
+                              className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
+                            >
+                              Abrir na Comunidade
+                            </Link>
+                          </div>
                         ) : null}
 
                         {r.status !== "resolvido" ? (
@@ -1042,11 +1053,18 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                         </div>
 
                         <div className="flex flex-col gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewCommunityPostId(r.post_id)}
+                            className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-95 transition-opacity text-center"
+                          >
+                            <Eye className="w-4 h-4" /> Ver publicação
+                          </button>
                           <Link
                             to={`/home?feed=comunidade&post=${r.post_id}`}
                             className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
                           >
-                            <Eye className="w-4 h-4" /> Ver na Comunidade
+                            Abrir na Comunidade
                           </Link>
                           {r.status !== "resolvido" ? (
                             <button
@@ -1215,6 +1233,14 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <CommunityReportedPostPreview
+        postId={previewCommunityPostId}
+        open={!!previewCommunityPostId}
+        onOpenChange={(o) => {
+          if (!o) setPreviewCommunityPostId(null);
+        }}
+      />
     </>
   );
 

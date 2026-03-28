@@ -10,7 +10,7 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefreshAtKey, useIsRefreshing } from "@/contexts/RefreshContext";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight, Crown, Sparkles, Building2, Star } from "lucide-react";
+import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight, Crown, Sparkles, Building2, Star, Megaphone } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
@@ -29,6 +29,8 @@ import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
 import CommunityFeed from "@/components/community/CommunityFeed";
 import HomeLaunchBanner from "@/components/home/HomeLaunchBanner";
+import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
+import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -111,6 +113,7 @@ const Home = () => {
   const homeFeedComunidade = searchParams.get("feed") === "comunidade";
   const communityHighlightPostId = searchParams.get("post");
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
+  const { sponsor: linkedSponsor } = useLinkedSponsor(user?.id);
 
   useEffect(() => {
     if (!user && homeFeedComunidade) {
@@ -187,23 +190,32 @@ const Home = () => {
     });
   }, [user?.id, isPro]);
 
-  // Busca saldo da carteira para profissionais
+  // Profissional: id + carteira num único efeito (liberta o header da Home assim que o id existe).
   useEffect(() => {
-    if (!user?.id || !isPro) return;
-    const fetchWallet = async () => {
+    if (!user?.id || !isPro) {
+      setProId(null);
+      setWalletBalance(0);
+      setWalletLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
       const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
-      if (!pro?.id) return;
+      if (cancelled || !pro?.id) return;
       setProId(pro.id);
       const { data } = await supabase
         .from("wallet_transactions")
         .select("amount")
         .eq("professional_id", pro.id)
         .eq("status", "pending");
+      if (cancelled) return;
       const total = (data || []).reduce((s, t) => s + Number(t.amount), 0);
       setWalletBalance(total);
       setWalletLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
     };
-    fetchWallet();
   }, [user?.id, isPro]);
 
   useEffect(() => {
@@ -281,7 +293,10 @@ const Home = () => {
       .in("status", base.status)
       .gte("appointment_date", base.date);
 
-    const { data: proRow } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+    const proRowPromise = supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+
+    const [clientRes, proRowRes] = await Promise.all([asClient, proRowPromise]);
+    const proRow = proRowRes.data;
     const asPro = proRow?.id
       ? supabase
           .from("agenda_appointments")
@@ -291,12 +306,9 @@ const Home = () => {
           .gte("appointment_date", base.date)
       : null;
 
-    const [clientRes, proRes] = await Promise.all([
-      asClient,
-      asPro ? asPro : Promise.resolve({ count: 0 }),
-    ]);
+    const proRes = asPro ? await asPro : { count: 0 };
     const clientCount = clientRes.count ?? 0;
-    const proCount = (proRes as { count?: number })?.count ?? 0;
+    const proCount = (proRes as { count?: number }).count ?? 0;
     const has = clientCount > 0 || proCount > 0;
     setHasUpcomingAppointment(has);
     if (!has) {
@@ -367,23 +379,22 @@ const Home = () => {
     return () => clearTimeout(fallback);
   }, [sections]);
 
-  // Nativo: abre janela antes de montar Sponsors/Featured/Categories.
-  // Delay reduzido para 600ms (era 1600ms) — WebView já está estabilizado nesse ponto.
+  // Nativo: liberta patrocinadores/destaque no próximo frame (perfil já estabilizou em useAuth).
+  // O efeito abaixo ainda força “ready” quando user_id do perfil bate com a sessão.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
       setHeavySectionsReady(true);
       return;
     }
     setHeavySectionsReady(false);
-    const ms = user?.id ? 600 : 300;
-    const t = setTimeout(() => setHeavySectionsReady(true), ms);
-    return () => clearTimeout(t);
+    const id = requestAnimationFrame(() => setHeavySectionsReady(true));
+    return () => cancelAnimationFrame(id);
   }, [user?.id]);
 
-  // Se o timer acima for cancelado (remontagens rápidas, corrida pós-login), não ficar eternamente no placeholder.
+  // Se rAF não correr (edge), não ficar no skeleton indefinidamente.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    const failsafe = window.setTimeout(() => setHeavySectionsReady(true), 3200);
+    const failsafe = window.setTimeout(() => setHeavySectionsReady(true), 2200);
     return () => clearTimeout(failsafe);
   }, []);
 
@@ -395,18 +406,23 @@ const Home = () => {
     }
   }, [user?.id, profile?.user_id]);
 
-  // ✅ Pós-OAuth: no web remonta seções; no nativo NÃO dar contentSeed cedo (disparava 3× montagem + trava).
+  // Pós-login: atualiza layout e contagens sem esperar 450ms (percepção mais rápida na 1ª entrada).
   useEffect(() => {
-    const t = setTimeout(() => {
+    const run = () => {
       refreshLayout();
       if (!Capacitor.isNativePlatform()) {
         setContentSeed((s) => s + 1);
       }
-      supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true).then(({ count }) => setJobCount(count ?? 0));
-      if (user?.id) fetchUpcomingAppointments();
-    }, 450);
+      supabase
+        .from("job_postings")
+        .select("id", { count: "exact", head: true })
+        .eq("active", true)
+        .then(({ count }) => setJobCount(count ?? 0));
+      if (user?.id) void fetchUpcomingAppointments();
+    };
+    const t = window.setTimeout(run, 0);
     return () => clearTimeout(t);
-  }, [user?.id]);
+  }, [user?.id, refreshLayout, fetchUpcomingAppointments]);
 
   // Fechou o tutorial: libera seções pesadas + um remount limpo no nativo
   useEffect(() => {
@@ -555,7 +571,13 @@ const Home = () => {
 
   const sectionComponents: Record<string, React.ReactNode> = {
     welcome: <HomeWelcome key="welcome" userName={userName} section={getSection("welcome")} />,
-    sponsors: <SponsorCarousel key={`sponsors-${contentSeed}`} section={getSection("sponsors")} />,
+    sponsors: (
+      <SponsorCarousel
+        key={`sponsors-${contentSeed}-${linkedSponsor?.id ?? "none"}`}
+        section={getSection("sponsors")}
+        pinnedSponsorId={linkedSponsor?.id ?? null}
+      />
+    ),
     jobs: null,
     search: <HomeSearchBar key={`search-${profile?.address_city}-${profile?.address_state}`} section={getSection("search")} />,
     featured: <FeaturedProfessionals key={`featured-${contentSeed}`} section={getSection("featured")} />,
@@ -662,6 +684,16 @@ const Home = () => {
             </div>
           ) : null}
 
+          {user && linkedSponsor && !homeFeedComunidade && (profile?.job_posting_enabled || profile?.user_type === "company") ? (
+            <Link
+              to="/my-jobs"
+              className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-md shadow-primary/25 mb-2 active:scale-[0.99] transition-transform"
+            >
+              <Briefcase className="w-5 h-5 shrink-0" />
+              Publicar vaga de emprego
+            </Link>
+          ) : null}
+
           {user && needsProfileCompletion && (
             <Link
               to="/profile"
@@ -754,6 +786,18 @@ const Home = () => {
                 )}
                 {block}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
+                {section.id === "sponsors" && linkedSponsor && !homeFeedComunidade ? (
+                  <div className="mt-3 flex flex-col gap-3">
+                    <Link
+                      to="/sponsor/dashboard?novidade=1"
+                      className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-primary/35 bg-primary/5 text-primary font-semibold text-sm hover:bg-primary/10 transition-colors"
+                    >
+                      <Megaphone className="w-5 h-5 shrink-0" />
+                      Lançar novidade
+                    </Link>
+                    <SponsorPatrocinadorPanel sponsorId={linkedSponsor.id} />
+                  </div>
+                ) : null}
                 {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
                 {section.id === "categories" && (
                   <div className="mt-3">

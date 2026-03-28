@@ -28,6 +28,8 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useHomeLayout } from "@/hooks/useHomeLayout";
+import SponsorCarousel from "@/components/SponsorCarousel";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -64,6 +66,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export type CommunityFeedVariant = "embedded" | "standalone";
+
+const FEED_PAGE_SIZE = 4;
 
 type ReactionType = "like" | "love" | "congrats" | "genius";
 
@@ -302,6 +306,7 @@ export default function CommunityFeed({
 }) {
   const embedded = variant === "embedded";
   const { user, profile } = useAuth();
+  const { getSection } = useHomeLayout();
   const [loading, setLoading] = useState(true);
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [authors, setAuthors] = useState<Record<string, AuthorRow>>({});
@@ -356,8 +361,12 @@ export default function CommunityFeed({
   const [proPathByUserId, setProPathByUserId] = useState<Record<string, string>>({});
   const [favoritesForShare, setFavoritesForShare] = useState<AuthorRow[]>([]);
   const [loadingFavoritesShare, setLoadingFavoritesShare] = useState(false);
-  const [feedScope, setFeedScope] = useState<"all" | "following">("all");
+  const [feedScope, setFeedScope] = useState<"all" | "following" | "hidden">("all");
   const [favoritedAuthorUserIds, setFavoritedAuthorUserIds] = useState<Set<string>>(() => new Set());
+  const feedDbNextOffsetRef = useRef(0);
+  const [hasMoreFeed, setHasMoreFeed] = useState(true);
+  const [loadingMoreFeed, setLoadingMoreFeed] = useState(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   const highlightPostIdRef = useRef<string | null | undefined>(highlightPostId);
   useEffect(() => {
@@ -374,150 +383,218 @@ export default function CommunityFeed({
   const canPost =
     profile?.user_type === "professional" || profile?.user_type === "company";
 
-  const loadFeed = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!user) {
-      setFavoritedAuthorUserIds(new Set());
-      setHiddenPostIds(new Set());
-      if (!opts?.silent) setLoading(false);
+  const applyHydrationForPosts = useCallback(async (mergedList: PostRow[]) => {
+    if (!mergedList.length) {
+      setAuthors({});
+      setReactions([]);
+      setCommentsByPost({});
+      setCommentAuthors({});
+      setProPathByUserId({});
+      setAuthorProMeta({});
+      setCommentReactions([]);
       return;
     }
-    if (!opts?.silent) setLoading(true);
+    const authorIds = [...new Set(mergedList.map((p) => p.author_id))];
+    const { data: profs } = await supabase
+      .from("profiles")
+      .select("user_id, display_name, full_name, avatar_url")
+      .in("user_id", authorIds);
+    const amap: Record<string, AuthorRow> = {};
+    (profs || []).forEach((p: any) => {
+      amap[p.user_id] = p as AuthorRow;
+    });
+    setAuthors(amap);
+
+    const pids = mergedList.map((p) => p.id);
+    const { data: rx } = await supabase
+      .from("community_post_reactions" as any)
+      .select("post_id, user_id, reaction_type")
+      .in("post_id", pids);
+    setReactions((rx || []) as ReactionRow[]);
+
+    const { data: cmts } = await supabase
+      .from("community_post_comments" as any)
+      .select("id, post_id, user_id, body, created_at, parent_id")
+      .in("post_id", pids)
+      .order("created_at", { ascending: true });
+    const cList = (cmts || []) as CommentRow[];
+    const byPost: Record<string, CommentRow[]> = {};
+    cList.forEach((c) => {
+      if (!byPost[c.post_id]) byPost[c.post_id] = [];
+      byPost[c.post_id].push(c);
+    });
+    setCommentsByPost(byPost);
+    const cids = cList.map((c) => c.id);
+    if (cids.length) {
+      const { data: crxData } = await supabase
+        .from("community_comment_reactions" as any)
+        .select("comment_id, user_id, reaction_type")
+        .in("comment_id", cids);
+      setCommentReactions((crxData || []) as CommentReactionRow[]);
+    } else {
+      setCommentReactions([]);
+    }
+    const cAuthorIds = [...new Set(cList.map((c) => c.user_id))];
+    const needProfiles = cAuthorIds.filter((id) => !amap[id]);
+    if (needProfiles.length) {
+      const { data: cprofs } = await supabase
+        .from("profiles")
+        .select("user_id, display_name, full_name, avatar_url")
+        .in("user_id", needProfiles);
+      const cmap: Record<string, AuthorRow> = {};
+      (cprofs || []).forEach((p: any) => {
+        cmap[p.user_id] = p as AuthorRow;
+      });
+      setCommentAuthors(cmap);
+    } else {
+      setCommentAuthors({});
+    }
+
+    const allUids = [...new Set([...authorIds, ...cAuthorIds])];
+    if (allUids.length) {
+      const { data: proRows } = await supabase
+        .from("professionals")
+        .select(
+          "user_id, id, slug, verified, profile_status, rating, total_reviews, total_services, created_at, professions(name), categories(name)",
+        )
+        .in("user_id", allUids);
+      const paths: Record<string, string> = {};
+      const pmeta: Record<string, AuthorProMetaEntry> = {};
+      (proRows || []).forEach((row: any) => {
+        const key = String(row.slug || row.id || "").trim();
+        if (key) paths[row.user_id] = `/professional/${encodeURIComponent(key)}`;
+        pmeta[row.user_id] = buildAuthorProMetaEntry(row);
+      });
+      setProPathByUserId(paths);
+      setAuthorProMeta(pmeta);
+    } else {
+      setProPathByUserId({});
+      setAuthorProMeta({});
+    }
+  }, []);
+
+  const refreshLoadedPostsSideData = useCallback(async () => {
+    if (!user) return;
+    const list = postsRef.current;
+    if (!list.length) return;
     try {
-      const seguindoUids = await fetchSeguindoFeedAuthorUserIds(supabase, user.id);
-      setFavoritedAuthorUserIds(new Set(seguindoUids));
+      await applyHydrationForPosts(list);
+    } catch (e: any) {
+      console.error(e);
+    }
+  }, [user, applyHydrationForPosts]);
 
-      const { data: hideRows } = await supabase
-        .from("community_comment_user_hides" as any)
-        .select("comment_id")
-        .eq("user_id", user.id);
-      setHiddenCommentIds(new Set((hideRows || []).map((h: any) => h.comment_id as string)));
-      const { data: postHideRows } = await supabase
-        .from("community_post_user_hides" as any)
-        .select("post_id")
-        .eq("user_id", user.id);
-      setHiddenPostIds(new Set((postHideRows || []).map((h: any) => h.post_id as string)));
+  const loadFeed = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!user) {
+        setFavoritedAuthorUserIds(new Set());
+        setHiddenPostIds(new Set());
+        setPosts([]);
+        postsRef.current = [];
+        feedDbNextOffsetRef.current = 0;
+        setHasMoreFeed(false);
+        if (!opts?.silent) setLoading(false);
+        return;
+      }
+      if (!opts?.silent) setLoading(true);
+      try {
+        const seguindoUids = await fetchSeguindoFeedAuthorUserIds(supabase, user.id);
+        setFavoritedAuthorUserIds(new Set(seguindoUids));
 
+        const { data: hideRows } = await supabase
+          .from("community_comment_user_hides" as any)
+          .select("comment_id")
+          .eq("user_id", user.id);
+        setHiddenCommentIds(new Set((hideRows || []).map((h: any) => h.comment_id as string)));
+        const { data: postHideRows } = await supabase
+          .from("community_post_user_hides" as any)
+          .select("post_id")
+          .eq("user_id", user.id);
+        setHiddenPostIds(new Set((postHideRows || []).map((h: any) => h.post_id as string)));
+
+        feedDbNextOffsetRef.current = 0;
+        const { data: postRows, error: pe } = await supabase
+          .from("community_posts" as any)
+          .select("id, author_id, body, image_url, video_url, audience, created_at")
+          .order("created_at", { ascending: false })
+          .range(0, FEED_PAGE_SIZE - 1);
+        if (pe) throw pe;
+        const plist = (postRows || []) as PostRow[];
+        const hId = String(highlightPostIdRef.current || "").trim();
+        const prevPosts = postsRef.current;
+        let mergedList = plist;
+        if (hId) {
+          const extra = prevPosts.find((p) => p.id === hId);
+          if (extra && !plist.some((p) => p.id === hId)) {
+            mergedList = [extra, ...plist];
+          }
+        }
+        postsRef.current = mergedList;
+        setPosts(mergedList);
+        feedDbNextOffsetRef.current = plist.length;
+        setHasMoreFeed(plist.length === FEED_PAGE_SIZE);
+        await applyHydrationForPosts(mergedList);
+      } catch (e: any) {
+        console.error(e);
+        toast({
+          title: "Erro ao carregar Comunidade",
+          description: e.message || "Tente novamente.",
+          variant: "destructive",
+        });
+      } finally {
+        if (!opts?.silent) setLoading(false);
+      }
+    },
+    [user, applyHydrationForPosts],
+  );
+
+  const loadMoreFeed = useCallback(async () => {
+    if (!user || loadingMoreFeed || loading || !hasMoreFeed) return;
+    setLoadingMoreFeed(true);
+    try {
+      const start = feedDbNextOffsetRef.current;
       const { data: postRows, error: pe } = await supabase
         .from("community_posts" as any)
         .select("id, author_id, body, image_url, video_url, audience, created_at")
         .order("created_at", { ascending: false })
-        .limit(50);
+        .range(start, start + FEED_PAGE_SIZE - 1);
       if (pe) throw pe;
-      const plist = (postRows || []) as PostRow[];
-      const hId = String(highlightPostIdRef.current || "").trim();
-      const prevPosts = postsRef.current;
-      let mergedList = plist;
-      if (hId) {
-        const extra = prevPosts.find((p) => p.id === hId);
-        if (extra && !plist.some((p) => p.id === hId)) {
-          mergedList = [extra, ...plist];
-        }
-      }
-      setPosts(mergedList);
-      if (!mergedList.length) {
-        setAuthors({});
-        setReactions([]);
-        setCommentsByPost({});
-        setCommentAuthors({});
-        setProPathByUserId({});
-        setAuthorProMeta({});
-        setCommentReactions([]);
+      const batch = (postRows || []) as PostRow[];
+      if (batch.length === 0) {
+        setHasMoreFeed(false);
         return;
       }
-      const authorIds = [...new Set(mergedList.map((p) => p.author_id))];
-      const { data: profs } = await supabase
-        .from("profiles")
-        .select("user_id, display_name, full_name, avatar_url")
-        .in("user_id", authorIds);
-      const amap: Record<string, AuthorRow> = {};
-      (profs || []).forEach((p: any) => {
-        amap[p.user_id] = p as AuthorRow;
-      });
-      setAuthors(amap);
-
-      const pids = mergedList.map((p) => p.id);
-      const { data: rx } = await supabase
-        .from("community_post_reactions" as any)
-        .select("post_id, user_id, reaction_type")
-        .in("post_id", pids);
-      setReactions((rx || []) as ReactionRow[]);
-
-      const { data: cmts } = await supabase
-        .from("community_post_comments" as any)
-        .select("id, post_id, user_id, body, created_at, parent_id")
-        .in("post_id", pids)
-        .order("created_at", { ascending: true });
-      const cList = (cmts || []) as CommentRow[];
-      const byPost: Record<string, CommentRow[]> = {};
-      cList.forEach((c) => {
-        if (!byPost[c.post_id]) byPost[c.post_id] = [];
-        byPost[c.post_id].push(c);
-      });
-      setCommentsByPost(byPost);
-      const cids = cList.map((c) => c.id);
-      if (cids.length) {
-        const { data: crxData } = await supabase
-          .from("community_comment_reactions" as any)
-          .select("comment_id, user_id, reaction_type")
-          .in("comment_id", cids);
-        setCommentReactions((crxData || []) as CommentReactionRow[]);
-      } else {
-        setCommentReactions([]);
+      feedDbNextOffsetRef.current = start + batch.length;
+      setHasMoreFeed(batch.length === FEED_PAGE_SIZE);
+      const prev = postsRef.current;
+      const seen = new Set(prev.map((p) => p.id));
+      const merged = [...prev];
+      for (const p of batch) {
+        if (!seen.has(p.id)) {
+          seen.add(p.id);
+          merged.push(p);
+        }
       }
-      const cAuthorIds = [...new Set(cList.map((c) => c.user_id))];
-      const needProfiles = cAuthorIds.filter((id) => !amap[id]);
-      if (needProfiles.length) {
-        const { data: cprofs } = await supabase
-          .from("profiles")
-          .select("user_id, display_name, full_name, avatar_url")
-          .in("user_id", needProfiles);
-        const cmap: Record<string, AuthorRow> = {};
-        (cprofs || []).forEach((p: any) => {
-          cmap[p.user_id] = p as AuthorRow;
-        });
-        setCommentAuthors(cmap);
-      } else {
-        setCommentAuthors({});
-      }
-
-      const allUids = [...new Set([...authorIds, ...cAuthorIds])];
-      if (allUids.length) {
-        const { data: proRows } = await supabase
-          .from("professionals")
-          .select(
-            "user_id, id, slug, verified, profile_status, rating, total_reviews, total_services, created_at, professions(name), categories(name)",
-          )
-          .in("user_id", allUids);
-        const paths: Record<string, string> = {};
-        const pmeta: Record<string, AuthorProMetaEntry> = {};
-        (proRows || []).forEach((row: any) => {
-          const key = String(row.slug || row.id || "").trim();
-          if (key) paths[row.user_id] = `/professional/${encodeURIComponent(key)}`;
-          pmeta[row.user_id] = buildAuthorProMetaEntry(row);
-        });
-        setProPathByUserId(paths);
-        setAuthorProMeta(pmeta);
-      } else {
-        setProPathByUserId({});
-        setAuthorProMeta({});
-      }
+      postsRef.current = merged;
+      setPosts(merged);
+      await applyHydrationForPosts(merged);
     } catch (e: any) {
       console.error(e);
       toast({
-        title: "Erro ao carregar Comunidade",
+        title: "Erro ao carregar mais publicações",
         description: e.message || "Tente novamente.",
         variant: "destructive",
       });
     } finally {
-      if (!opts?.silent) setLoading(false);
+      setLoadingMoreFeed(false);
     }
-  }, [user]);
+  }, [user, loadingMoreFeed, loading, hasMoreFeed, applyHydrationForPosts]);
 
   useEffect(() => {
     loadFeed();
   }, [loadFeed]);
 
-  /** Deep link / suporte: post fora dos últimos 50 ou denúncia antiga — carrega o post pelo id. */
+  /** Deep link / suporte: post fora do primeiro lote carregado — carrega o post pelo id. */
   useEffect(() => {
     if (!user || !highlightPostId) return;
     if (loading) return;
@@ -641,6 +718,7 @@ export default function CommunityFeed({
   );
 
   const displayPosts = useMemo(() => {
+    if (feedScope === "hidden") return [];
     const scope =
       feedScope === "all" ? posts : posts.filter((p) => favoritedAuthorUserIds.has(p.author_id));
     return scope.filter(
@@ -663,7 +741,7 @@ export default function CommunityFeed({
   }, [hiddenPostIds, posts, hiddenPostStubs]);
 
   useEffect(() => {
-    if (!hiddenPostsSheetOpen || !user) return;
+    if ((!hiddenPostsSheetOpen && feedScope !== "hidden") || !user) return;
     const missing = [...hiddenPostIds].filter((id) => !posts.some((p) => p.id === id));
     if (!missing.length) return;
     let cancelled = false;
@@ -686,7 +764,20 @@ export default function CommunityFeed({
     return () => {
       cancelled = true;
     };
-  }, [hiddenPostsSheetOpen, user, hiddenPostIds, posts]);
+  }, [hiddenPostsSheetOpen, feedScope, user, hiddenPostIds, posts]);
+
+  useEffect(() => {
+    const el = loadMoreSentinelRef.current;
+    if (!el || !user || feedScope === "hidden" || !hasMoreFeed || loading) return;
+    const ob = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !loadingMoreFeed) void loadMoreFeed();
+      },
+      { root: null, rootMargin: "160px", threshold: 0 },
+    );
+    ob.observe(el);
+    return () => ob.disconnect();
+  }, [user, feedScope, hasMoreFeed, loading, loadingMoreFeed, loadMoreFeed]);
 
   const reactionSummary = useMemo(() => {
     const m: Record<string, Partial<Record<ReactionType, number>>> = {};
@@ -855,7 +946,7 @@ export default function CommunityFeed({
       }
     } catch (e: any) {
       toast({ title: "Erro na reação", description: e.message, variant: "destructive" });
-      await loadFeed({ silent: true });
+      await refreshLoadedPostsSideData();
     }
   };
 
@@ -881,7 +972,7 @@ export default function CommunityFeed({
       if (error) throw error;
       setCommentDrafts((d) => ({ ...d, [postId]: "" }));
       setReplyTarget(null);
-      await loadFeed({ silent: true });
+      await refreshLoadedPostsSideData();
     } catch (e: any) {
       toast({ title: "Erro ao comentar", description: e.message, variant: "destructive" });
     } finally {
@@ -893,7 +984,7 @@ export default function CommunityFeed({
     try {
       const { error } = await supabase.from("community_post_comments" as any).delete().eq("id", commentId);
       if (error) throw error;
-      await loadFeed({ silent: true });
+      await refreshLoadedPostsSideData();
     } catch (e: any) {
       toast({ title: "Erro ao apagar", description: e.message, variant: "destructive" });
     }
@@ -927,7 +1018,7 @@ export default function CommunityFeed({
       }
     } catch (e: any) {
       toast({ title: "Erro na reação", description: e.message, variant: "destructive" });
-      await loadFeed({ silent: true });
+      await refreshLoadedPostsSideData();
     }
   };
 
@@ -1037,12 +1128,13 @@ export default function CommunityFeed({
       if (error) throw error;
       setHiddenPostIds((prev) => new Set([...prev, postId]));
       setUndoHidePostId(postId);
+      setFeedScope("hidden");
       if (commentsSheetPost?.id === postId) setCommentsSheetPost(null);
       if (fullscreenPost?.id === postId) setFullscreenPost(null);
       if (sharePost?.id === postId) setSharePost(null);
       toast({
         title: "Publicação oculta para você",
-        description: "Só afeta a tua conta. Usa Desfazer ou “Ocultas” para voltar a ver.",
+        description: "Estás em Ocultos: podes desfazer aqui ou voltar ao feed com Ver todos.",
       });
     } catch (e: any) {
       toast({ title: "Erro", description: e.message, variant: "destructive" });
@@ -1593,48 +1685,73 @@ export default function CommunityFeed({
       )}
 
       {user && (
-        <div className="flex flex-wrap gap-2.5 mb-5 items-center">
-          <button
-            type="button"
-            onClick={() => setFeedScope("all")}
-            className={cn(
-              "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
-              feedScope === "all"
-                ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
-                : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",
-            )}
-          >
-            Ver todos
-          </button>
-          <button
-            type="button"
-            onClick={() => setFeedScope("following")}
-            className={cn(
-              "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
-              feedScope === "following"
-                ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
-                : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",
-            )}
-          >
-            Seguindo
-          </button>
-          {hiddenPostIds.size > 0 ? (
+        <div className="mb-5 -mx-0.5">
+          <SponsorCarousel
+            key="community-sponsors"
+            section={getSection("sponsors")}
+            itemsPerPage={6}
+          />
+        </div>
+      )}
+
+      {user && (
+        <div className="flex flex-wrap items-center gap-2 mb-5 w-full">
+          <div className="flex flex-wrap gap-2.5 flex-1 min-w-0 items-center">
             <button
               type="button"
-              onClick={() => setHiddenPostsSheetOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-[12px] font-semibold border border-black/[0.06] bg-white/80 text-zinc-600 hover:bg-white dark:bg-zinc-900/60 dark:text-zinc-300 dark:border-white/10 transition-colors"
+              onClick={() => setFeedScope("all")}
+              className={cn(
+                "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
+                feedScope === "all"
+                  ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
+                  : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",
+              )}
             >
-              <EyeOff className="w-3.5 h-3.5" />
-              Ocultas ({hiddenPostIds.size})
+              Ver todos
             </button>
-          ) : null}
+            <button
+              type="button"
+              onClick={() => setFeedScope("following")}
+              className={cn(
+                "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
+                feedScope === "following"
+                  ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
+                  : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",
+              )}
+            >
+              Seguindo
+            </button>
+          </div>
+          <div className="flex items-center gap-1 shrink-0 ml-auto">
+            {hiddenPostIds.size > 0 ? (
+              <button
+                type="button"
+                onClick={() => setHiddenPostsSheetOpen(true)}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-full border border-black/[0.06] bg-white/70 text-zinc-400 hover:text-zinc-700 hover:bg-white dark:bg-zinc-900/60 dark:border-white/10 dark:text-zinc-500 transition-colors"
+                aria-label="Lista de publicações ocultas"
+              >
+                <EyeOff className="w-3.5 h-3.5" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setFeedScope("hidden")}
+              className={cn(
+                "px-1.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors border border-transparent",
+                feedScope === "hidden" &&
+                  "text-primary border-primary/20 bg-primary/5 dark:bg-primary/10",
+              )}
+            >
+              Ocultos
+            </button>
+          </div>
         </div>
       )}
 
       {user && undoHidePostId ? (
         <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/[0.06] bg-white/90 dark:bg-zinc-900/70 px-4 py-3 mb-4 text-[13px] shadow-sm shadow-black/[0.04]">
           <p className="text-muted-foreground leading-snug min-w-0">
-            Publicação oculta na tua conta. Podes desfazer agora ou gerir em <strong className="text-foreground">Ocultas</strong>.
+            Publicação oculta na tua conta. Podes desfazer agora ou gerir no filtro <strong className="text-foreground">Ocultos</strong>.
           </p>
           <Button
             type="button"
@@ -1783,6 +1900,51 @@ export default function CommunityFeed({
       {loading ? (
         <div className="flex justify-center py-24">
           <Loader2 className="w-9 h-9 animate-spin text-primary" />
+        </div>
+      ) : feedScope === "hidden" ? (
+        <div className="space-y-4">
+          {hiddenPostIds.size === 0 ? (
+            <div className="rounded-[22px] bg-white/95 dark:bg-zinc-900/80 border border-black/[0.05] dark:border-white/10 py-16 px-5 text-center shadow-lg shadow-black/[0.06]">
+              <p className="text-zinc-600 dark:text-zinc-300 text-[15px] font-medium">Nenhuma publicação oculta.</p>
+              <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
+                Quando usares <strong className="text-zinc-700 dark:text-zinc-200">Não quero ver isto</strong>, elas aparecem
+                aqui para poderes <strong className="text-zinc-700 dark:text-zinc-200">mostrar novamente</strong>.
+              </p>
+            </div>
+          ) : (
+            hiddenPostsList.map((row) => {
+              const preview = (row.body || "").trim().slice(0, 220);
+              const label =
+                preview.length > 0
+                  ? preview + (row.body && row.body.length > 220 ? "…" : "")
+                  : "Sem pré-visualização de texto";
+              return (
+                <div
+                  key={row.id}
+                  className="rounded-[20px] border border-black/[0.06] dark:border-white/10 bg-white/95 dark:bg-zinc-900/85 p-4 shadow-sm"
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Oculto para ti</p>
+                  <p className="text-[14px] text-zinc-800 dark:text-zinc-100 leading-snug whitespace-pre-wrap line-clamp-6">
+                    {label}
+                  </p>
+                  {row.created_at ? (
+                    <p className="text-[11px] text-zinc-400 mt-2">
+                      {formatDistanceToNow(new Date(row.created_at), { addSuffix: true, locale: ptBR })}
+                    </p>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-4 h-9 font-bold text-primary border-primary/30"
+                    onClick={() => void undoHidePost(row.id)}
+                  >
+                    Mostrar novamente
+                  </Button>
+                </div>
+              );
+            })
+          )}
         </div>
       ) : posts.length === 0 ? (
         <div className="rounded-[22px] bg-white/95 dark:bg-zinc-900/80 border border-black/[0.05] dark:border-white/10 py-16 px-5 text-center shadow-lg shadow-black/[0.06]">
@@ -2082,6 +2244,15 @@ export default function CommunityFeed({
           })}
         </div>
       )}
+
+      {user && !loading && feedScope !== "hidden" && hasMoreFeed ? (
+        <div ref={loadMoreSentinelRef} className="h-10 w-full shrink-0" aria-hidden />
+      ) : null}
+      {user && !loading && feedScope !== "hidden" && loadingMoreFeed ? (
+        <div className="flex justify-center py-4">
+          <Loader2 className="w-7 h-7 animate-spin text-primary" />
+        </div>
+      ) : null}
 
       <Sheet
         open={!!sharePost}

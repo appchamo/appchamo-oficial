@@ -6,6 +6,7 @@ import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { consumePostAuthRedirect } from "@/lib/chamoAuthReturn";
 import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
+import { getAuthEmailRedirectUrl } from "@/lib/authEmailRedirect";
 import {
   PENDING_EMAIL_SIGNUP_KEY,
   type PendingEmailSignupV1,
@@ -575,7 +576,7 @@ const Signup = () => {
       let userId = createdUserId;
       let signedUpWithEmail = false;
       let signupSession: Session | null = null;
-      const emailConfirmRedirect = `${getPublicAppBaseUrl().replace(/\/$/, "")}/login`;
+      const emailConfirmRedirect = getAuthEmailRedirectUrl();
 
       // Se não logou via Social, faz o cadastro manual por e-mail/senha
       if (!userId) {
@@ -755,7 +756,7 @@ const Signup = () => {
     const { error } = await supabase.auth.resend({
       type: "signup",
       email: basicData.email,
-      options: { emailRedirectTo: `${getPublicAppBaseUrl().replace(/\/$/, "")}/login` },
+      options: { emailRedirectTo: getAuthEmailRedirectUrl() },
     });
     if (error) toast({ title: "Aguarde um pouco", variant: "destructive" });
     else toast({ title: "E-mail reenviado!" });

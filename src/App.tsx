@@ -27,6 +27,7 @@ import { diagLog, diagEnabled } from "@/lib/diag";
 const Index = lazy(() => import("./pages/Index"));
 const SponsorDashboard = lazy(() => import("./pages/SponsorDashboard"));
 const Login = lazy(() => import("./pages/Login"));
+const AuthEmailConfirm = lazy(() => import("./pages/AuthEmailConfirm"));
 const Signup = lazy(() => import("./pages/Signup"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
@@ -175,23 +176,8 @@ const BackButtonHandler = () => {
   return null;
 };
 
-/** Patrocinador sempre fica no painel: se estiver logado como sponsor e em rota que não seja /sponsor/*, redireciona para /sponsor/dashboard */
-const SponsorRedirectGuard = () => {
-  const { profile, loading } = useAuth();
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (loading || !profile) return;
-    if (profile.user_type !== "sponsor") return;
-    const path = location.pathname;
-    if (path.startsWith("/sponsor")) return;
-    if (path === "/login" || path === "/reset-password") return;
-    navigate("/sponsor/dashboard", { replace: true });
-  }, [loading, profile, location.pathname, navigate]);
-
-  return null;
-};
+/** Patrocinador usa a mesma app que o cliente (Home + extras); não redireciona mais para /sponsor/dashboard. */
+const SponsorRedirectGuard = () => null;
 
 /** Admin sempre fica no painel: se estiver logado como admin e em rota do app (não admin), redireciona para /admin */
 const AdminRedirectGuard = () => {
@@ -252,8 +238,7 @@ const RedirectLoggedIn = () => {
     );
   }
 
-  // Patrocinador → vai direto pro painel deles
-  if (profile?.user_type === "sponsor") return <Navigate to="/sponsor/dashboard" replace />;
+  if (profile?.user_type === "sponsor") return <Navigate to="/home" replace />;
 
   if (signupInProgress) {
     return <Navigate to="/signup" replace />;
@@ -314,7 +299,7 @@ const OAuthCallbackRedirectGuard = () => {
     const path = location.pathname;
     if (path === "/oauth-callback" || path === "/login") {
       if (profile?.user_type === "sponsor") {
-        navigate("/sponsor/dashboard", { replace: true });
+        navigate("/home", { replace: true });
         return;
       }
       let fromSignup = false;
@@ -472,6 +457,7 @@ const AppContent = () => {
         <Routes>
         <Route path="/" element={session ? <RedirectLoggedIn /> : <Index />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/auth/email-confirm" element={<AuthEmailConfirm />} />
         <Route path="/oauth-callback" element={<OAuthCallback />} />
         <Route path="/post-login" element={<PostLoginGate />} />
         <Route path="/hard-reload" element={<HardReload />} />

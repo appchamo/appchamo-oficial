@@ -67,7 +67,7 @@ export default function PostLoginGate() {
                 navigate(pending, { replace: true });
                 return;
               }
-              navigate(userType === "sponsor" ? "/sponsor/dashboard" : "/home", { replace: true });
+              navigate("/home", { replace: true });
               return;
             }
           } catch (_) {
@@ -100,7 +100,7 @@ export default function PostLoginGate() {
       navigate(pending, { replace: true });
       return;
     }
-    navigate(profile?.user_type === "sponsor" ? "/sponsor/dashboard" : "/home", { replace: true });
+    navigate("/home", { replace: true });
   }, [loading, session?.user, profile, navigate]);
 
   return (

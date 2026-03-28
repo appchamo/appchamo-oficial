@@ -270,6 +270,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    /** Query + fragment (Supabase envia tokens no #). */
+    const collectParamsFromDeepLink = (urlStr: string): Record<string, string> => {
+      const out: Record<string, string> = {};
+      const consume = (segment: string) => {
+        if (!segment) return;
+        const clean = segment.startsWith("?") || segment.startsWith("#") ? segment.slice(1) : segment;
+        try {
+          new URLSearchParams(clean).forEach((v, k) => {
+            out[k] = v;
+          });
+        } catch {
+          /* ignore */
+        }
+      };
+      const q = urlStr.indexOf("?");
+      const h = urlStr.indexOf("#");
+      if (q >= 0) {
+        const end = h > q ? h : urlStr.length;
+        consume(urlStr.slice(q, end));
+      }
+      if (h >= 0) consume(urlStr.slice(h));
+      return out;
+    };
+
+    /**
+     * Link de confirmação de e-mail abre o app via `com.chamo.app://auth/email-confirm#access_token=…`.
+     * (No nativo detectSessionInUrl está desligado — precisamos de setSession explícito.)
+     */
+    const handleEmailConfirmTokensUrl = async (urlStr: string): Promise<boolean> => {
+      if (!Capacitor.isNativePlatform() || !urlStr) return false;
+      if (!urlStr.includes("com.chamo.app://")) return false;
+      const params = collectParamsFromDeepLink(urlStr);
+      const access_token = params.access_token;
+      const refresh_token = params.refresh_token;
+      if (!access_token || !refresh_token) return false;
+      const type = params.type || "";
+      const allowed = ["signup", "email", "magiclink", "invite", "email_change", "recovery"];
+      if (type && !allowed.includes(type)) return false;
+
+      const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+      if (error) {
+        console.error("[auth] email confirm setSession:", error.message);
+        return false;
+      }
+      try {
+        localStorage.removeItem("manual_login_intent");
+      } catch {
+        /* ignore */
+      }
+      const origin = window.location.origin || "";
+      const hashRest = urlStr.includes("#") ? `#${urlStr.split("#").slice(1).join("#")}` : "";
+      if (type === "recovery") {
+        window.location.replace(`${origin}/reset-password${hashRest}`);
+      } else {
+        window.location.replace(`${origin}/post-login`);
+      }
+      return true;
+    };
+
     const handleUrl = async (urlStr: string): Promise<boolean> => {
       if (!urlStr || !urlStr.includes('code=')) return false;
       let fixedUrl = urlStr.replace('#', '?');
@@ -315,18 +374,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else if (exchangeData?.session) {
           exchangeOk = true;
           await Preferences.remove({ key: OAUTH_FAILED_KEY }).catch(() => {});
-          // Marca pós-OAuth para a Home forçar carregamento (inclui caso de usuário sem perfil ainda)
-          try {
-            sessionStorage.setItem("chamo_oauth_just_landed", "1");
-            localStorage.setItem("chamo_oauth_just_landed", "1");
-            // iOS: esta flag aciona um único hard reload após SIGNED_IN (evita piscar em loops)
-            localStorage.setItem("chamo_force_hard_reload", "1");
-            // Apple às vezes não dispara SIGNED_IN como o Google; garante janela p/reload na Home (Featured)
-            if (Capacitor.isNativePlatform()) {
-              sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
-              sessionStorage.removeItem("chamo_featured_reload_after_oauth");
+          const isEmailConfirmLink = /email-confirm/i.test(urlStr);
+          if (isEmailConfirmLink) {
+            // Confirmação de e-mail (PKCE com ?code=): não usar flags de OAuth + reload da Home (evita +5s).
+            try {
+              localStorage.removeItem("manual_login_intent");
+              window.location.replace(`${window.location.origin || ""}/post-login`);
+            } catch {
+              /* ignore */
             }
-          } catch (_) {}
+          } else {
+            try {
+              sessionStorage.setItem("chamo_oauth_just_landed", "1");
+              localStorage.setItem("chamo_oauth_just_landed", "1");
+              localStorage.setItem("chamo_force_hard_reload", "1");
+              if (Capacitor.isNativePlatform()) {
+                sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
+                sessionStorage.removeItem("chamo_featured_reload_after_oauth");
+              }
+            } catch {
+              /* ignore */
+            }
+          }
         }
       } catch (e) {
         console.error("[OAuth] Deep link error:", e);
@@ -363,17 +432,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const launch = await CapacitorApp.getLaunchUrl();
           const url = launch?.url;
-          if (url && url.includes('code=')) {
-            // Pode ser retorno do nosso próprio redirect após login ok (página recarregou em /home).
-            // Se já temos sessão, não trocar o código de novo (evita erro e tela branca).
-            const { data: { session: existing } } = await supabase.auth.getSession();
-            if (existing?.user) {
+          if (url) {
+            if (await handleEmailConfirmTokensUrl(url)) return;
+            if (url.includes("code=")) {
+              // Pode ser retorno do nosso próprio redirect após login ok (página recarregou em /home).
+              // Se já temos sessão, não trocar o código de novo (evita erro e tela branca).
+              const {
+                data: { session: existing },
+              } = await supabase.auth.getSession();
+              if (existing?.user) {
+                await loadInitialSession();
+                return;
+              }
+              await handleUrl(url);
               await loadInitialSession();
               return;
             }
-            await handleUrl(url);
-            await loadInitialSession();
-            return;
           }
         } catch (_) {}
       }
@@ -486,7 +560,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     subscription = sub;
 
     if (Capacitor.isNativePlatform()) {
-      urlListener = CapacitorApp.addListener('appUrlOpen', (data: { url: string }) => handleUrl(data.url));
+      urlListener = CapacitorApp.addListener("appUrlOpen", async (data: { url: string }) => {
+        if (await handleEmailConfirmTokensUrl(data.url)) return;
+        await handleUrl(data.url);
+      });
     }
 
     return () => {

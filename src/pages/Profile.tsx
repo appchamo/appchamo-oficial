@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Loader2 } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Loader2, Megaphone } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,6 +10,8 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
+import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
+import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
 const availabilityOptions = [
   { value: "available", label: "Disponível", icon: Circle, color: "text-green-500" },
   { value: "quotes_only", label: "Somente orçamentos", icon: FileQuestion, color: "text-amber-500" },
@@ -30,6 +32,7 @@ const getOptimizedAvatar = (url: string | null | undefined) => {
 const Profile = () => {
   const navigate = useNavigate();
   const { profile, user, signOut, refreshProfile } = useAuth();
+  const { sponsor: linkedSponsor } = useLinkedSponsor(user?.id);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -235,6 +238,19 @@ const Profile = () => {
             </button>
           )}
         </div>
+
+        {linkedSponsor ? (
+          <div className="mb-4 space-y-3">
+            <Link
+              to="/sponsor/dashboard?novidade=1"
+              className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-primary/35 bg-primary/5 text-primary font-semibold text-sm hover:bg-primary/10 transition-colors"
+            >
+              <Megaphone className="w-5 h-5 shrink-0" />
+              Lançar novidade
+            </Link>
+            <SponsorPatrocinadorPanel sponsorId={linkedSponsor.id} />
+          </div>
+        ) : null}
 
         {/* ── Pendências de cadastro ── */}
         {hasPending && !editing && (

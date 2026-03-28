@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
@@ -67,6 +67,7 @@ const isActive = (story: Story) => new Date(story.expires_at) > new Date();
 const SponsorDashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sponsor, setSponsor] = useState<Sponsor | null>(null);
   const [stories, setStories] = useState<Story[]>([]);
   const [loading, setLoading] = useState(true);
@@ -128,6 +129,13 @@ const SponsorDashboard = () => {
     setWeeklyUsed(typeof weekData === "number" ? weekData : 0);
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (searchParams.get("novidade") === "1") {
+      setNewStoryOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     load();

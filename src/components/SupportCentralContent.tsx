@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import AudioPlayer from "@/components/AudioPlayer";
@@ -69,6 +70,19 @@ interface CommentCommunityReport {
   comment_author_id: string | null;
 }
 
+interface PostCommunityReport {
+  id: string;
+  post_id: string;
+  reporter_id: string;
+  reason: string;
+  status: string;
+  created_at: string;
+  reporter_name: string;
+  reporter_avatar: string | null;
+  post_preview: string;
+  post_author_id: string | null;
+}
+
 interface ReportedChatMessage {
   id: string;
   sender_id: string;
@@ -105,6 +119,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const [commentCommunityReports, setCommentCommunityReports] = useState<CommentCommunityReport[]>(
     [],
   );
+  const [postCommunityReports, setPostCommunityReports] = useState<PostCommunityReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [viewingReportChat, setViewingReportChat] = useState<string | null>(null);
   const [reportedMessages, setReportedMessages] = useState<ReportedChatMessage[]>([]);
@@ -234,6 +249,49 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         });
         setCommentCommunityReports(enriched);
       }
+
+      const { data: pRepRows, error: pRepErr } = await supabase
+        .from("community_post_reports" as any)
+        .select("id, post_id, reporter_id, reason, status, created_at")
+        .order("created_at", { ascending: false });
+
+      if (pRepErr || !pRepRows?.length) {
+        if (pRepErr) console.error(pRepErr);
+        setPostCommunityReports([]);
+      } else {
+        const rows = pRepRows as any[];
+        const pids = [...new Set(rows.map((r) => r.post_id))];
+        const { data: postData } = await supabase
+          .from("community_posts" as any)
+          .select("id, body, author_id")
+          .in("id", pids);
+        const pMap = new Map((postData || []).map((p: any) => [p.id, p]));
+        const pruids = [...new Set(rows.map((r) => r.reporter_id))];
+        const { data: prProfs } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, avatar_url")
+          .in("user_id", pruids);
+        const prMap = new Map((prProfs || []).map((p: any) => [p.user_id, p]));
+        const enrichedPosts: PostCommunityReport[] = rows.map((r) => {
+          const post = pMap.get(r.post_id) as { body?: string; author_id?: string } | undefined;
+          return {
+            id: r.id,
+            post_id: r.post_id,
+            reporter_id: r.reporter_id,
+            reason: r.reason,
+            status: r.status,
+            created_at: r.created_at,
+            reporter_name: prMap.get(r.reporter_id)?.full_name || "Usuário",
+            reporter_avatar: prMap.get(r.reporter_id)?.avatar_url || null,
+            post_preview:
+              post?.body != null
+                ? String(post.body).slice(0, 400)
+                : "(publicação removida ou indisponível)",
+            post_author_id: post?.author_id ?? null,
+          };
+        });
+        setPostCommunityReports(enrichedPosts);
+      }
     } finally {
       setLoadingReports(false);
     }
@@ -300,6 +358,19 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
       return;
     }
     toast({ title: "Denúncia de comentário marcada como resolvida" });
+    fetchReports();
+  };
+
+  const handleResolvePostReport = async (reportId: string) => {
+    const { error } = await supabase
+      .from("community_post_reports" as any)
+      .update({ status: "resolvido" })
+      .eq("id", reportId);
+    if (error) {
+      toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Denúncia de publicação marcada como resolvida" });
     fetchReports();
   };
 
@@ -464,7 +535,8 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const openTickets = tickets.filter(t => t.status !== "closed");
   const pendingReports = reports.filter((r) => r.status !== "resolvido");
   const pendingCommentReports = commentCommunityReports.filter((r) => r.status !== "resolvido");
-  const pendingReportsTotal = pendingReports.length + pendingCommentReports.length;
+  const pendingPostReports = postCommunityReports.filter((r) => r.status !== "resolvido");
+  const pendingReportsTotal = pendingReports.length + pendingCommentReports.length + pendingPostReports.length;
 
   const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/\u0300-\u036f/g, "");
   const filteredTickets = !searchSupport.trim()
@@ -710,7 +782,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         <>
           {loadingReports ? (
             <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-destructive border-t-transparent rounded-full" /></div>
-          ) : reports.length === 0 && commentCommunityReports.length === 0 ? (
+          ) : reports.length === 0 && commentCommunityReports.length === 0 && postCommunityReports.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
               <CheckCircle2 className="w-10 h-10 text-green-500/50" />
               <p className="text-sm font-medium">Nenhuma denúncia registrada.</p>
@@ -846,6 +918,95 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                             <CheckCircle2 className="w-4 h-4" /> Marcar resolvido
                           </button>
                         ) : null}
+                      </div>
+                    );
+                  })}
+                </>
+              ) : null}
+
+              {postCommunityReports.length > 0 ? (
+                <>
+                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide px-1 mt-4">
+                    Comunidade (publicações)
+                  </p>
+                  {postCommunityReports.map((r) => {
+                    const initials = r.reporter_name
+                      .split(" ")
+                      .map((w) => w[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase();
+                    return (
+                      <div
+                        key={r.id}
+                        className={`flex flex-col gap-3 p-4 border rounded-xl ${
+                          r.status === "resolvido" ? "bg-muted/30 opacity-70" : "bg-card"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {r.reporter_avatar ? (
+                              <img
+                                src={r.reporter_avatar}
+                                alt=""
+                                className="w-10 h-10 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center text-xs font-bold text-destructive">
+                                {initials}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-sm font-bold text-foreground">{r.reporter_name}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {new Date(r.created_at).toLocaleString("pt-BR")}
+                              </p>
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] px-2 py-1 rounded-full font-bold ${
+                              r.status === "resolvido"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {r.status === "resolvido" ? "Resolvido" : "Pendente"}
+                          </span>
+                        </div>
+
+                        <div className="bg-muted/40 border border-border/60 p-3 rounded-lg">
+                          <p className="text-[10px] font-semibold text-muted-foreground mb-1">
+                            Publicação denunciada
+                          </p>
+                          <p className="text-sm text-foreground whitespace-pre-wrap line-clamp-6">
+                            {r.post_preview}
+                          </p>
+                        </div>
+
+                        <div className="bg-destructive/5 border border-destructive/10 p-3 rounded-lg">
+                          <p className="text-xs font-semibold text-destructive mb-1 flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Motivo da denúncia
+                          </p>
+                          <p className="text-sm text-foreground">{r.reason}</p>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <Link
+                            to={`/home?feed=comunidade&post=${encodeURIComponent(r.post_id)}`}
+                            className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
+                          >
+                            <Eye className="w-4 h-4" /> Ver na Comunidade
+                          </Link>
+                          {r.status !== "resolvido" ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleResolvePostReport(r.id)}
+                              className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Marcar resolvido
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     );
                   })}

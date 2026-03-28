@@ -9,6 +9,7 @@ import { syncAppIconBadge } from "@/lib/appBadge";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import UserPreviewModal from "@/components/UserPreviewModal";
 
 interface Notification {
   id: string;
@@ -19,6 +20,7 @@ interface Notification {
   link: string | null;
   created_at: string;
   metadata?: Record<string, unknown> | null;
+  image_url?: string | null;
 }
 
 type SealNotifMeta = {
@@ -47,6 +49,7 @@ const resolveAction = (n: Notification): "navigate" | "modal" => {
   if (n.type === "coupon" || t.includes("cupom")) return "navigate";
   if (n.type === "appointment" || t.includes("agendamento")) return "navigate";
   if (n.type === "reminder" && n.link) return "navigate";
+  if (n.type === "follow" && n.link) return "navigate";
   if (n.link?.includes("/messages/")) return "navigate";
   if (n.type === "admin" && n.link) return "navigate";
   if (n.type === "support" && n.link) return "navigate";
@@ -86,6 +89,7 @@ const Notifications = () => {
   const [rejectionNotif, setRejectionNotif] = useState<Notification | null>(null);
   const [expandedNotif, setExpandedNotif] = useState<Notification | null>(null);
   const [sealCelebrateNotif, setSealCelebrateNotif] = useState<Notification | null>(null);
+  const [followPreviewUserId, setFollowPreviewUserId] = useState<string | null>(null);
 
   const fetchNotifications = useCallback(async (pageIndex = 0, append = false) => {
     if (!user) return;
@@ -96,7 +100,7 @@ const Notifications = () => {
 
     const { data } = await supabase
       .from("notifications")
-      .select("id, title, message, type, read, link, created_at, metadata")
+      .select("id, title, message, type, read, link, created_at, metadata, image_url")
       .eq("user_id", user.id)
       .neq("type", "chat")
       .order("created_at", { ascending: false })
@@ -161,6 +165,19 @@ const Notifications = () => {
       setSealCelebrateNotif(n);
       return;
     }
+    if (n.type === "follow") {
+      const meta =
+        n.metadata && typeof n.metadata === "object" ? (n.metadata as Record<string, unknown>) : null;
+      const uid = typeof meta?.follower_user_id === "string" ? meta.follower_user_id : null;
+      if (n.link) {
+        navigate(n.link);
+        return;
+      }
+      if (uid) {
+        setFollowPreviewUserId(uid);
+        return;
+      }
+    }
     const action = resolveAction(n);
     if (action === "navigate") {
       navigate(resolveDestination(n));
@@ -188,6 +205,14 @@ const Notifications = () => {
 
   return (
     <AppLayout>
+      <UserPreviewModal
+        userId={followPreviewUserId}
+        open={followPreviewUserId !== null}
+        onOpenChange={(o) => {
+          if (!o) setFollowPreviewUserId(null);
+        }}
+      />
+
       {/* Modal: cadastro reprovado */}
       <Dialog open={!!rejectionNotif} onOpenChange={(o) => !o && setRejectionNotif(null)}>
         <DialogContent className="max-w-sm">
@@ -376,10 +401,29 @@ const Notifications = () => {
                   } hover:bg-muted/50 active:scale-[0.99]`}
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "bg-transparent" : "bg-primary"}`} />
+                    {n.image_url ? (
+                      <div className="relative flex-shrink-0 mt-0.5">
+                        <img
+                          src={n.image_url}
+                          alt=""
+                          className="w-10 h-10 rounded-full object-cover ring-2 ring-background"
+                        />
+                        {!n.read ? (
+                          <span className="absolute -left-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div
+                        className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "bg-transparent" : "bg-primary"}`}
+                      />
+                    )}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>{n.title}</p>
-                      {message && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>}
+                      <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>
+                        {n.type === "follow" && message ? `${n.title} ${message}` : n.title}
+                      </p>
+                      {message && n.type !== "follow" ? (
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                       <span className="text-[10px] text-muted-foreground">{timeAgo(n.created_at)}</span>

@@ -23,6 +23,7 @@ import {
   UserPlus,
   Heart,
   MessageSquare,
+  Users,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -119,6 +120,7 @@ const ProfessionalProfile = () => {
   const [followBusy, setFollowBusy] = useState(false);
   const [dmOpening, setDmOpening] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [friendsCount, setFriendsCount] = useState<number | null>(null);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -188,6 +190,11 @@ const ProfessionalProfile = () => {
           .maybeSingle();
         if (sub && (sub as { plan_id: string }).plan_id) setPlanId((sub as { plan_id: string }).plan_id);
 
+        const { data: fc } = await supabase.rpc("count_professional_mutual_followers", {
+          p_professional_id: data.id,
+        });
+        setFriendsCount(typeof fc === "number" ? fc : 0);
+
         if (user && user.id === data.user_id) {
           const [catRes, profRes] = await Promise.all([
             supabase.from("categories").select("id, name").eq("active", true).order("sort_order"),
@@ -238,6 +245,7 @@ const ProfessionalProfile = () => {
         );
       } else {
         setPublicSeals([]);
+        setFriendsCount(null);
       }
     setLoading(false);
   }, [id]);
@@ -1037,6 +1045,20 @@ const ProfessionalProfile = () => {
               <p className="text-xs text-muted-foreground mt-0.5">Baseado em avaliações de clientes</p>
             </div>
           </div>
+
+          {friendsCount !== null && (
+            <div className="flex items-center gap-2 mb-4 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
+              <Users className="w-4 h-4 text-primary shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-foreground">
+                  {friendsCount} {friendsCount === 1 ? "amigo" : "amigos"}
+                </p>
+                <p className="text-[11px] text-muted-foreground leading-tight">
+                  Seguimento mútuo: vocês seguem o perfil profissional um do outro
+                </p>
+              </div>
+            </div>
+          )}
 
           {reviews.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">Nenhuma avaliação ainda.</p>

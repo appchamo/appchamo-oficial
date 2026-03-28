@@ -371,10 +371,27 @@ const MessageThread = () => {
   /** Push para o destinatário: "Fulano enviou uma mensagem para você" + preview.
    *  A notificação inclui o avatar do REMETENTE para identificação visual. */
   const sendMessagePushNotification = async (recipientId: string | null, preview: string) => {
-    if (!recipientId || !threadId) return;
+    if (!recipientId || !threadId || !userId) return;
     const senderName = profile?.full_name?.trim() || "Alguém";
     const title = `${senderName} enviou uma mensagem para você`;
-    const body = preview.slice(0, 120);
+    let friendHint = "";
+    try {
+      const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", userId).maybeSingle();
+      const { data: theirPro } = await supabase.from("professionals").select("id").eq("user_id", recipientId).maybeSingle();
+      const myPid = (myPro as { id?: string } | null)?.id;
+      const theirPid = (theirPro as { id?: string } | null)?.id;
+      if (myPid && theirPid) {
+        const [{ data: rowA }, { data: rowB }] = await Promise.all([
+          supabase.from("professional_follows" as any).select("id").eq("user_id", userId).eq("professional_id", theirPid).maybeSingle(),
+          supabase.from("professional_follows" as any).select("id").eq("user_id", recipientId).eq("professional_id", myPid).maybeSingle(),
+        ]);
+        if (rowA && rowB) friendHint = " · Amigo no Chamô";
+      }
+    } catch {
+      /* ignore */
+    }
+    const base = preview.slice(0, Math.max(40, 120 - friendHint.length));
+    const body = (base + friendHint).slice(0, 160);
     const senderAvatar = profile?.avatar_url || null;
     try {
       await supabase.from("notifications").insert({

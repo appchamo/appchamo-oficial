@@ -238,7 +238,12 @@ export default function CommunityFeed({
   } | null>(null);
   const [hiddenCommentIds, setHiddenCommentIds] = useState<Set<string>>(() => new Set());
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
-  const [reportDialog, setReportDialog] = useState<{ commentId: string } | null>(null);
+  const [reportDialog, setReportDialog] = useState<
+    | { kind: "comment"; commentId: string }
+    | { kind: "post"; postId: string }
+    | null
+  >(null);
+  const [hiddenPostIds, setHiddenPostIds] = useState<Set<string>>(() => new Set());
   const [reportReason, setReportReason] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [undoHideId, setUndoHideId] = useState<string | null>(null);
@@ -265,6 +270,7 @@ export default function CommunityFeed({
   const loadFeed = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user) {
       setFollowingAuthorIds(new Set());
+      setHiddenPostIds(new Set());
       if (!opts?.silent) setLoading(false);
       return;
     }
@@ -282,6 +288,17 @@ export default function CommunityFeed({
         setFollowingAuthorIds(new Set());
       }
 
+      const { data: hideRows } = await supabase
+        .from("community_comment_user_hides" as any)
+        .select("comment_id")
+        .eq("user_id", user.id);
+      setHiddenCommentIds(new Set((hideRows || []).map((h: any) => h.comment_id as string)));
+      const { data: postHideRows } = await supabase
+        .from("community_post_user_hides" as any)
+        .select("post_id")
+        .eq("user_id", user.id);
+      setHiddenPostIds(new Set((postHideRows || []).map((h: any) => h.post_id as string)));
+
       const { data: postRows, error: pe } = await supabase
         .from("community_posts" as any)
         .select("id, author_id, body, image_url, video_url, audience, created_at")
@@ -298,15 +315,8 @@ export default function CommunityFeed({
         setProPathByUserId({});
         setAuthorProMeta({});
         setCommentReactions([]);
-        setHiddenCommentIds(new Set());
         return;
       }
-
-      const { data: hideRows } = await supabase
-        .from("community_comment_user_hides" as any)
-        .select("comment_id")
-        .eq("user_id", user.id);
-      setHiddenCommentIds(new Set((hideRows || []).map((h: any) => h.comment_id as string)));
       const authorIds = [...new Set(plist.map((p) => p.author_id))];
       const { data: profs } = await supabase
         .from("profiles")
@@ -410,10 +420,16 @@ export default function CommunityFeed({
     return () => URL.revokeObjectURL(url);
   }, [composerMedia]);
 
+  const hasPostsFromFollowing = useMemo(
+    () => posts.some((p) => followingAuthorIds.has(p.author_id)),
+    [posts, followingAuthorIds],
+  );
+
   const displayPosts = useMemo(() => {
-    if (feedScope === "all") return posts;
-    return posts.filter((p) => followingAuthorIds.has(p.author_id));
-  }, [posts, feedScope, followingAuthorIds]);
+    const scope =
+      feedScope === "all" ? posts : posts.filter((p) => followingAuthorIds.has(p.author_id));
+    return scope.filter((p) => !hiddenPostIds.has(p.id));
+  }, [posts, feedScope, followingAuthorIds, hiddenPostIds]);
 
   const reactionSummary = useMemo(() => {
     const m: Record<string, Partial<Record<ReactionType, number>>> = {};
@@ -704,32 +720,55 @@ export default function CommunityFeed({
     }
   };
 
-  const submitCommentReport = async () => {
+  const submitCommunityReport = async () => {
     if (!user || !reportDialog || reportReason.trim().length < 10) {
       toast({ title: "Descreva o motivo (mín. 10 caracteres)", variant: "destructive" });
       return;
     }
     setReportSubmitting(true);
     try {
-      const { error } = await supabase.from("community_comment_reports" as any).insert({
-        comment_id: reportDialog.commentId,
-        reporter_id: user.id,
-        reason: reportReason.trim(),
-      });
-      if (error) throw error;
-      const { data: sp } = await supabase
-        .from("profiles")
-        .select("user_id")
-        .eq("email", "suporte@appchamo.com")
-        .maybeSingle();
-      if (sp?.user_id) {
-        await supabase.from("notifications").insert({
-          user_id: sp.user_id,
-          title: "Denúncia de comentário na Comunidade",
-          message: "Um comentário foi denunciado. Revise na Central de Suporte.",
-          type: "support",
-          link: "/suporte-desk",
+      if (reportDialog.kind === "comment") {
+        const { error } = await supabase.from("community_comment_reports" as any).insert({
+          comment_id: reportDialog.commentId,
+          reporter_id: user.id,
+          reason: reportReason.trim(),
         });
+        if (error) throw error;
+        const { data: sp } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .eq("email", "suporte@appchamo.com")
+          .maybeSingle();
+        if (sp?.user_id) {
+          await supabase.from("notifications").insert({
+            user_id: sp.user_id,
+            title: "Denúncia de comentário na Comunidade",
+            message: "Um comentário foi denunciado. Revise na Central de Suporte.",
+            type: "support",
+            link: "/suporte-desk",
+          });
+        }
+      } else {
+        const { error } = await supabase.from("community_post_reports" as any).insert({
+          post_id: reportDialog.postId,
+          reporter_id: user.id,
+          reason: reportReason.trim(),
+        });
+        if (error) throw error;
+        const { data: sp } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .eq("email", "suporte@appchamo.com")
+          .maybeSingle();
+        if (sp?.user_id) {
+          await supabase.from("notifications").insert({
+            user_id: sp.user_id,
+            title: "Denúncia de publicação na Comunidade",
+            message: "Uma publicação foi denunciada. Revise na Central de Suporte.",
+            type: "support",
+            link: "/suporte-desk",
+          });
+        }
       }
       setReportDialog(null);
       setReportReason("");
@@ -738,6 +777,24 @@ export default function CommunityFeed({
       toast({ title: "Erro ao denunciar", description: e.message, variant: "destructive" });
     } finally {
       setReportSubmitting(false);
+    }
+  };
+
+  const hidePostForMe = async (postId: string) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase.from("community_post_user_hides" as any).insert({
+        user_id: user.id,
+        post_id: postId,
+      });
+      if (error) throw error;
+      setHiddenPostIds((prev) => new Set([...prev, postId]));
+      if (commentsSheetPost?.id === postId) setCommentsSheetPost(null);
+      if (fullscreenPost?.id === postId) setFullscreenPost(null);
+      if (sharePost?.id === postId) setSharePost(null);
+      toast({ title: "Publicação oculta para você" });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e.message, variant: "destructive" });
     }
   };
 
@@ -1175,7 +1232,7 @@ export default function CommunityFeed({
                       {canFollowMenu ? <DropdownMenuSeparator /> : null}
                       <DropdownMenuItem
                         onClick={() => {
-                          setReportDialog({ commentId: c.id });
+                          setReportDialog({ kind: "comment", commentId: c.id });
                         }}
                       >
                         Denunciar comentário
@@ -1552,11 +1609,19 @@ export default function CommunityFeed({
           <p className="text-muted-foreground text-sm">Nenhuma publicação ainda.</p>
           {canPost && <p className="text-xs text-muted-foreground mt-2">Seja o primeiro a compartilhar.</p>}
         </div>
-      ) : displayPosts.length === 0 && feedScope === "following" ? (
+      ) : displayPosts.length === 0 && feedScope === "following" && !hasPostsFromFollowing ? (
         <div className="rounded-[20px] bg-white border border-border/50 py-14 px-4 text-center shadow-md shadow-black/[0.04]">
           <p className="text-muted-foreground text-sm">Nenhuma publicação de quem você segue.</p>
           <p className="text-xs text-muted-foreground mt-2">
             Explore perfis e toque em <strong>Seguir</strong> para ver os posts aqui.
+          </p>
+        </div>
+      ) : displayPosts.length === 0 && posts.length > 0 ? (
+        <div className="rounded-[20px] bg-white border border-border/50 py-14 px-4 text-center shadow-md shadow-black/[0.04]">
+          <p className="text-muted-foreground text-sm">Nenhuma publicação para mostrar aqui.</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Você pode ter ocultado os posts com <strong>Não quero ver isto</strong> ou pode mudar o filtro
+            acima.
           </p>
         </div>
       ) : (
@@ -1612,7 +1677,7 @@ export default function CommunityFeed({
                         )}
                       </div>
                     )}
-                    <div className="min-w-0 flex-1 flex items-start gap-2">
+                    <div className="min-w-0 flex-1 flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         {authorProfileTo ? (
                           <Link
@@ -1644,26 +1709,65 @@ export default function CommunityFeed({
                           </span>
                         </p>
                       </div>
-                      {showFollowUI &&
-                        (isFollowingAuthor ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleFollowAuthor(post.author_id)}
-                            className="shrink-0 inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:bg-muted/70 transition-colors"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            Seguindo
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => toggleFollowAuthor(post.author_id)}
-                            className="shrink-0 inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow-sm hover:opacity-95 transition-opacity"
-                          >
-                            <UserPlus className="w-3.5 h-3.5" />
-                            Seguir
-                          </button>
-                        ))}
+                      <div className="flex items-start gap-1 shrink-0">
+                        {showFollowUI &&
+                          (isFollowingAuthor ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleFollowAuthor(post.author_id)}
+                              className="shrink-0 inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:bg-muted/70 transition-colors"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              Seguindo
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => toggleFollowAuthor(post.author_id)}
+                              className="shrink-0 inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow-sm hover:opacity-95 transition-opacity"
+                            >
+                              <UserPlus className="w-3.5 h-3.5" />
+                              Seguir
+                            </button>
+                          ))}
+                        {user ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className="p-1 rounded-full text-muted-foreground hover:bg-muted transition-colors"
+                                aria-label="Opções da publicação"
+                              >
+                                <MoreHorizontal className="w-4 h-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                              {post.author_id !== user.id ? (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => setReportDialog({ kind: "post", postId: post.id })}
+                                  >
+                                    Denunciar publicação
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => void hidePostForMe(post.id)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    Não quero ver isto
+                                  </DropdownMenuItem>
+                                </>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() => void hidePostForMe(post.id)}
+                                  className="text-destructive focus:text-destructive"
+                                >
+                                  Não quero ver isto
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                   {post.body ? (
@@ -2136,7 +2240,9 @@ export default function CommunityFeed({
       >
         <DialogContent className="rounded-2xl sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Denunciar comentário</DialogTitle>
+            <DialogTitle>
+              {reportDialog?.kind === "post" ? "Denunciar publicação" : "Denunciar comentário"}
+            </DialogTitle>
             <DialogDescription>
               A denúncia será analisada pela equipa de suporte. Descreva o motivo (mínimo de 10
               caracteres).
@@ -2164,7 +2270,7 @@ export default function CommunityFeed({
               type="button"
               className="rounded-xl"
               disabled={reportSubmitting || reportReason.trim().length < 10}
-              onClick={() => void submitCommentReport()}
+              onClick={() => void submitCommunityReport()}
             >
               {reportSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Enviar denúncia"}
             </Button>

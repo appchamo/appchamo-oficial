@@ -312,12 +312,18 @@ const ProfessionalProfile = () => {
         return;
       }
       setSocialLoading(true);
-      const [fr, fav] = await Promise.all([
+      const [fr, uf, fav] = await Promise.all([
         supabase.from("professional_follows").select("id").eq("user_id", user.id).eq("professional_id", pro.id).maybeSingle(),
+        supabase
+          .from("user_follows" as any)
+          .select("follower_user_id")
+          .eq("follower_user_id", user.id)
+          .eq("followed_user_id", pro.user_id)
+          .maybeSingle(),
         supabase.from("professional_favorites").select("id").eq("user_id", user.id).eq("professional_id", pro.id).maybeSingle(),
       ]);
       if (cancelled) return;
-      setIsFollowing(!!fr.data);
+      setIsFollowing(!!fr.data || !!uf.data);
       setIsFavorite(!!fav.data);
       setSocialLoading(false);
     })();
@@ -346,8 +352,14 @@ const ProfessionalProfile = () => {
     setFollowBusy(true);
     try {
       if (isFollowing) {
-        const { error } = await supabase.from("professional_follows").delete().eq("user_id", u.id).eq("professional_id", pro.id);
-        if (error) throw error;
+        const { error: ePro } = await supabase.from("professional_follows").delete().eq("user_id", u.id).eq("professional_id", pro.id);
+        if (ePro) throw ePro;
+        const { error: eUf } = await supabase
+          .from("user_follows" as any)
+          .delete()
+          .eq("follower_user_id", u.id)
+          .eq("followed_user_id", pro.user_id);
+        if (eUf) throw eUf;
         setIsFollowing(false);
         setMutualWithViewer(false);
         toast({ title: "Você deixou de seguir" });

@@ -57,6 +57,16 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
           if (cancelled) return;
           setFollowing(!!fo.data);
           setFavorite(!!fa.data);
+        } else if (user?.id && userId !== user.id) {
+          const { data: ufo } = await supabase
+            .from("user_follows" as any)
+            .select("follower_user_id")
+            .eq("follower_user_id", user.id)
+            .eq("followed_user_id", userId)
+            .maybeSingle();
+          if (cancelled) return;
+          setFollowing(!!ufo);
+          setFavorite(false);
         } else {
           setFollowing(false);
           setFavorite(false);
@@ -73,17 +83,35 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
   const initials = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 
   const toggleFollow = async () => {
-    if (!me || !proId) return;
+    if (!me || !userId || userId === me) return;
     setSocialBusy(true);
     try {
-      if (following) {
-        const { error } = await supabase.from("professional_follows" as any).delete().eq("user_id", me).eq("professional_id", proId);
-        if (error) throw error;
-        setFollowing(false);
+      if (proId) {
+        if (following) {
+          const { error } = await supabase.from("professional_follows" as any).delete().eq("user_id", me).eq("professional_id", proId);
+          if (error) throw error;
+          setFollowing(false);
+        } else {
+          const { error } = await supabase.from("professional_follows" as any).insert({ user_id: me, professional_id: proId });
+          if (error) throw error;
+          setFollowing(true);
+        }
       } else {
-        const { error } = await supabase.from("professional_follows" as any).insert({ user_id: me, professional_id: proId });
-        if (error) throw error;
-        setFollowing(true);
+        if (following) {
+          const { error } = await supabase
+            .from("user_follows" as any)
+            .delete()
+            .eq("follower_user_id", me)
+            .eq("followed_user_id", userId);
+          if (error) throw error;
+          setFollowing(false);
+        } else {
+          const { error } = await supabase
+            .from("user_follows" as any)
+            .insert({ follower_user_id: me, followed_user_id: userId });
+          if (error) throw error;
+          setFollowing(true);
+        }
       }
     } catch {
       toast({ title: "Não foi possível atualizar", variant: "destructive" });
@@ -170,6 +198,19 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
                   }}
                 >
                   Abrir perfil completo
+                </Button>
+              </DialogFooter>
+            ) : me && userId && userId !== me ? (
+              <DialogFooter className="flex-col sm:flex-col gap-2 w-full">
+                <Button
+                  type="button"
+                  variant={following ? "secondary" : "outline"}
+                  className="rounded-xl font-semibold gap-2 w-full"
+                  disabled={socialBusy}
+                  onClick={() => void toggleFollow()}
+                >
+                  <UserPlus className={`w-4 h-4 ${following ? "text-primary" : ""}`} />
+                  {following ? "Seguindo" : "Seguir"}
                 </Button>
               </DialogFooter>
             ) : null}

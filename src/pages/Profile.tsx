@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
+import UserPreviewModal from "@/components/UserPreviewModal";
 
 const availabilityOptions = [
   { value: "available", label: "Disponível", icon: Circle, color: "text-green-500" },
@@ -45,10 +46,11 @@ const Profile = () => {
 
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [mutualFriends, setMutualFriends] = useState<
-    { user_id: string; full_name: string; avatar_url: string | null; pro_key: string }[]
+    { user_id: string; full_name: string; avatar_url: string | null; pro_key: string | null }[]
   >([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [mutualCount, setMutualCount] = useState<number | null>(null);
+  const [friendPreviewUserId, setFriendPreviewUserId] = useState<string | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
   const metaName = ((user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined)?.trim() || "";
@@ -126,21 +128,21 @@ const Profile = () => {
   }, [user, profile]);
 
   useEffect(() => {
-    if (!proData?.id) {
+    if (!user?.id) {
       setMutualCount(null);
       return;
     }
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase.rpc("count_professional_mutual_followers" as any, {
-        p_professional_id: proData.id,
+      const { data, error } = await supabase.rpc("count_user_mutual_friends" as any, {
+        p_user_id: user.id,
       });
       if (!cancelled && !error && typeof data === "number") setMutualCount(data);
     })();
     return () => {
       cancelled = true;
     };
-  }, [proData?.id]);
+  }, [user?.id]);
 
   // Sempre que o usuário abrir/atualizar o Perfil, marcamos se o cadastro está incompleto.
   useEffect(() => {
@@ -220,43 +222,85 @@ const Profile = () => {
   };
 
   const loadMutualFriends = useCallback(async () => {
-    if (!proData?.id || !user?.id) return;
+    if (!user?.id) return;
     setFriendsLoading(true);
     try {
-      const { data, error } = await supabase.rpc("list_professional_mutual_followers" as any, {
-        p_professional_id: proData.id,
-      });
-      if (error) throw error;
-      const raw = data as unknown;
-      const asList = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? [raw] : [];
+      type FriendRow = {
+        user_id: string;
+        full_name: string;
+        avatar_url: string | null;
+        pro_key: string | null;
+      };
 
-      const fromRpc = asList
-        .filter((r): r is Record<string, unknown> => r != null && typeof r === "object")
-        .map((r) => {
-          const uid = String(
-            r.friend_user_id ?? r.user_id ?? r.FriendUserId ?? "",
-          ).trim();
-          const pk = String(r.friend_pro_key ?? r.pro_key ?? r.FriendProKey ?? "").trim();
-          const name =
-            typeof r.friend_full_name === "string"
-              ? r.friend_full_name
-              : typeof r.full_name === "string"
-                ? r.full_name
-                : "Profissional";
-          const av =
-            typeof r.friend_avatar_url === "string"
-              ? r.friend_avatar_url
-              : typeof r.avatar_url === "string"
-                ? r.avatar_url
-                : null;
-          return {
-            user_id: uid,
-            full_name: name,
-            avatar_url: av as string | null,
-            pro_key: pk,
-          };
-        })
-        .filter((r) => r.user_id.length >= 32 && r.pro_key.length > 0);
+      const parseLegacyTableRpc = (raw: unknown): FriendRow[] => {
+        const asList = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? [raw] : [];
+        return asList
+          .filter((r): r is Record<string, unknown> => r != null && typeof r === "object")
+          .map((r) => {
+            const uid = String(r.friend_user_id ?? r.user_id ?? "").trim();
+            const pkRaw = String(r.friend_pro_key ?? r.pro_key ?? "").trim();
+            const pk = pkRaw.length > 0 ? pkRaw : null;
+            const name =
+              typeof r.friend_full_name === "string"
+                ? r.friend_full_name
+                : typeof r.full_name === "string"
+                  ? r.full_name
+                  : "Profissional";
+            const av =
+              typeof r.friend_avatar_url === "string"
+                ? r.friend_avatar_url
+                : typeof r.avatar_url === "string"
+                  ? r.avatar_url
+                  : null;
+            return {
+              user_id: uid,
+              full_name: name,
+              avatar_url: av as string | null,
+              pro_key: pk,
+            };
+          })
+          .filter((r) => r.user_id.length > 0);
+      };
+
+      let fromRpc: FriendRow[] = [];
+
+      const jsonRpc = await supabase.rpc("get_user_mutual_friends_json" as any, {
+        p_user_id: user.id,
+      });
+      if (!jsonRpc.error && jsonRpc.data != null) {
+        let parsed: unknown = jsonRpc.data;
+        if (typeof parsed === "string") {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch {
+            parsed = [];
+          }
+        }
+        const arr = Array.isArray(parsed) ? parsed : [];
+        fromRpc = arr
+          .filter((x): x is Record<string, unknown> => x != null && typeof x === "object")
+          .map((o) => {
+            const pkRaw = o.pro_key != null ? String(o.pro_key).trim() : "";
+            return {
+              user_id: String(o.user_id ?? "").trim(),
+              pro_key: pkRaw.length > 0 ? pkRaw : null,
+              full_name: "Profissional",
+              avatar_url: null as string | null,
+            };
+          })
+          .filter((r) => r.user_id.length > 0);
+      }
+
+      if (fromRpc.length === 0) {
+        const legacy = await supabase.rpc("list_user_mutual_followers" as any, {
+          p_user_id: user.id,
+        });
+        if (legacy.error) {
+          if (jsonRpc.error) throw jsonRpc.error;
+          throw legacy.error;
+        }
+        fromRpc = parseLegacyTableRpc(legacy.data);
+      }
 
       const uids = [...new Set(fromRpc.map((r) => r.user_id))];
       let merged = fromRpc;
@@ -290,15 +334,15 @@ const Profile = () => {
 
       if (merged.length === 0 && mutualCount !== null && mutualCount > 0) {
         toast({
-          title: "Lista de amigos desatualizada no servidor",
+          title: "Lista de amigos vazia",
           description:
-            "A contagem aparece, mas a lista não. Aplique a migração mais recente do Supabase (list_mutual_followers) ou contacte o suporte.",
+            "Confirme se aplicou a migração user_follows (supabase db push). Se já aplicou, verifique o consola do browser.",
           variant: "destructive",
         });
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Erro desconhecido";
-      console.error("list_professional_mutual_followers", e);
+      console.error("loadMutualFriends", e);
       toast({
         title: "Não foi possível carregar amigos",
         description: msg,
@@ -308,7 +352,7 @@ const Profile = () => {
     } finally {
       setFriendsLoading(false);
     }
-  }, [proData?.id, user?.id, mutualCount]);
+  }, [user?.id, mutualCount]);
 
   const handleLogout = async () => {
     await signOut();
@@ -521,19 +565,17 @@ const Profile = () => {
                           <Share2 className="w-4 h-4" />
                         </button>
                       )}
-                      {proData && (profile.user_type === "professional" || profile.user_type === "company") && (
-                        <button
-                          type="button"
-                          onClick={() => setFriendsOpen(true)}
-                          className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/8 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/15 transition-colors"
-                        >
-                          <Users className="w-3.5 h-3.5" />
-                          Amigos
-                          {mutualCount !== null && mutualCount > 0 ? (
-                            <span className="min-w-[1.1rem] text-center tabular-nums">{mutualCount}</span>
-                          ) : null}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setFriendsOpen(true)}
+                        className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/8 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/15 transition-colors"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        Amigos
+                        {mutualCount !== null && mutualCount > 0 ? (
+                          <span className="min-w-[1.1rem] text-center tabular-nums">{mutualCount}</span>
+                        ) : null}
+                      </button>
                     </div>
                   </div>
                   <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5"><Mail className="w-3.5 h-3.5" /> {profile.email}</p>
@@ -693,7 +735,7 @@ const Profile = () => {
             <SheetHeader className="px-5 pt-6 pb-3 border-b border-border/50 text-left space-y-1">
               <SheetTitle className="text-lg font-bold">Amigos no Chamô</SheetTitle>
               <p className="text-[13px] text-muted-foreground font-normal leading-snug pr-2">
-                Perfis profissionais em que vocês se seguem mutuamente. Toque para abrir o perfil.
+                Pessoas com quem você tem seguimento mútuo (clientes, profissionais ou empresas). Toque para abrir o perfil ou a pré-visualização.
               </p>
             </SheetHeader>
             <div className="flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))] min-h-0">
@@ -703,7 +745,7 @@ const Profile = () => {
                 </div>
               ) : mutualFriends.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-12 px-4 leading-relaxed">
-                  Ainda não há amigos aqui. Quando alguém seguir seu perfil profissional e você seguir o de volta,
+                  Ainda não há amigos aqui. Quando alguém o seguir e você seguir de volta (em qualquer tipo de conta),
                   aparecerá nesta lista.
                 </p>
               ) : (
@@ -715,29 +757,58 @@ const Profile = () => {
                       .join("")
                       .slice(0, 2)
                       .toUpperCase();
+                    const rowClass =
+                      "flex items-center gap-3 rounded-2xl px-3 py-2.5 hover:bg-muted/80 transition-colors w-full text-left";
                     return (
                       <li key={f.user_id}>
-                        <Link
-                          to={`/professional/${encodeURIComponent(f.pro_key)}`}
-                          onClick={() => setFriendsOpen(false)}
-                          className="flex items-center gap-3 rounded-2xl px-3 py-2.5 hover:bg-muted/80 transition-colors"
-                        >
-                          {f.avatar_url ? (
-                            <img
-                              src={getOptimizedAvatar(f.avatar_url)}
-                              alt=""
-                              className="w-11 h-11 rounded-full object-cover ring-2 ring-background shrink-0"
-                            />
-                          ) : (
-                            <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-                              {initials}
-                            </div>
-                          )}
-                          <span className="font-semibold text-foreground text-[15px] leading-tight flex-1 min-w-0 truncate">
-                            {f.full_name}
-                          </span>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                        </Link>
+                        {f.pro_key ? (
+                          <Link
+                            to={`/professional/${encodeURIComponent(f.pro_key)}`}
+                            onClick={() => setFriendsOpen(false)}
+                            className={rowClass}
+                          >
+                            {f.avatar_url ? (
+                              <img
+                                src={getOptimizedAvatar(f.avatar_url)}
+                                alt=""
+                                className="w-11 h-11 rounded-full object-cover ring-2 ring-background shrink-0"
+                              />
+                            ) : (
+                              <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                                {initials}
+                              </div>
+                            )}
+                            <span className="font-semibold text-foreground text-[15px] leading-tight flex-1 min-w-0 truncate">
+                              {f.full_name}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            className={rowClass}
+                            onClick={() => {
+                              setFriendsOpen(false);
+                              setFriendPreviewUserId(f.user_id);
+                            }}
+                          >
+                            {f.avatar_url ? (
+                              <img
+                                src={getOptimizedAvatar(f.avatar_url)}
+                                alt=""
+                                className="w-11 h-11 rounded-full object-cover ring-2 ring-background shrink-0"
+                              />
+                            ) : (
+                              <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                                {initials}
+                              </div>
+                            )}
+                            <span className="font-semibold text-foreground text-[15px] leading-tight flex-1 min-w-0 truncate">
+                              {f.full_name}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                          </button>
+                        )}
                       </li>
                     );
                   })}
@@ -746,6 +817,14 @@ const Profile = () => {
             </div>
           </SheetContent>
         </Sheet>
+
+        <UserPreviewModal
+          userId={friendPreviewUserId}
+          open={friendPreviewUserId != null}
+          onOpenChange={(o) => {
+            if (!o) setFriendPreviewUserId(null);
+          }}
+        />
 
         <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
           <DialogContent className="max-w-sm">

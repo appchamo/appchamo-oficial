@@ -278,17 +278,21 @@ export default function CommunityFeed({
     }
     if (!opts?.silent) setLoading(true);
     try {
-      const { data: myFollows } = await supabase
-        .from("professional_follows" as any)
-        .select("professional_id")
-        .eq("user_id", user.id);
+      const [{ data: myFollows }, { data: userFollowRows }] = await Promise.all([
+        supabase.from("professional_follows" as any).select("professional_id").eq("user_id", user.id),
+        supabase.from("user_follows" as any).select("followed_user_id").eq("follower_user_id", user.id),
+      ]);
+      const uidSet = new Set<string>();
+      (userFollowRows || []).forEach((r: any) => {
+        const uid = r.followed_user_id as string | undefined;
+        if (uid) uidSet.add(uid);
+      });
       const followedProIds = [...new Set((myFollows || []).map((r: any) => r.professional_id as string))];
       if (followedProIds.length) {
         const { data: proUs } = await supabase.from("professionals").select("user_id").in("id", followedProIds);
-        setFollowingAuthorIds(new Set((proUs || []).map((r: any) => r.user_id as string)));
-      } else {
-        setFollowingAuthorIds(new Set());
+        (proUs || []).forEach((r: any) => uidSet.add(r.user_id as string));
       }
+      setFollowingAuthorIds(uidSet);
 
       const { data: hideRows } = await supabase
         .from("community_comment_user_hides" as any)
@@ -665,21 +669,34 @@ export default function CommunityFeed({
   };
 
   const toggleFollowAuthor = async (authorUserId: string) => {
-    if (!user) return;
+    if (!user || authorUserId === user.id) return;
     const meta = authorProMeta[authorUserId];
-    if (!meta?.proId) return;
     try {
       if (followingAuthorIds.has(authorUserId)) {
-        const { error } = await supabase
-          .from("professional_follows" as any)
+        if (meta?.proId) {
+          const { error } = await supabase
+            .from("professional_follows" as any)
+            .delete()
+            .eq("user_id", user.id)
+            .eq("professional_id", meta.proId);
+          if (error) throw error;
+        }
+        const { error: uErr } = await supabase
+          .from("user_follows" as any)
           .delete()
-          .eq("user_id", user.id)
-          .eq("professional_id", meta.proId);
-        if (error) throw error;
-      } else {
+          .eq("follower_user_id", user.id)
+          .eq("followed_user_id", authorUserId);
+        if (uErr) throw uErr;
+      } else if (meta?.proId) {
         const { error } = await supabase.from("professional_follows" as any).insert({
           user_id: user.id,
           professional_id: meta.proId,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("user_follows" as any).insert({
+          follower_user_id: user.id,
+          followed_user_id: authorUserId,
         });
         if (error) throw error;
       }
@@ -848,17 +865,12 @@ export default function CommunityFeed({
         }
         const term = `%${raw.split(/\s+/)[0]}%`;
 
-        const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
-        const myPid = (myPro as { id?: string } | null)?.id;
-        if (!myPid) {
-          setShareResults([]);
-          return;
-        }
-        const { data: revRows } = await supabase
-          .from("professional_follows" as any)
-          .select("user_id")
-          .eq("professional_id", myPid);
-        const whoFollowsMe = new Set((revRows || []).map((r: { user_id: string }) => r.user_id));
+        const [{ data: inRows }, { data: outRows }] = await Promise.all([
+          supabase.from("user_follows" as any).select("follower_user_id").eq("followed_user_id", user.id),
+          supabase.from("user_follows" as any).select("followed_user_id").eq("follower_user_id", user.id),
+        ]);
+        const whoFollowsMe = new Set((inRows || []).map((r: { follower_user_id: string }) => r.follower_user_id));
+        const iFollow = new Set((outRows || []).map((r: { followed_user_id: string }) => r.followed_user_id));
 
         const { data, error } = await supabase
           .from("profiles")
@@ -868,29 +880,7 @@ export default function CommunityFeed({
           .limit(20);
         if (error) throw error;
         const rows = (data || []) as AuthorRow[];
-        const uids = rows.map((r) => r.user_id);
-        if (uids.length === 0) {
-          setShareResults([]);
-          return;
-        }
-        const { data: theirPros } = await supabase.from("professionals").select("id, user_id").in("user_id", uids);
-        const uidToPid = new Map((theirPros || []).map((p: { id: string; user_id: string }) => [p.user_id, p.id]));
-        const theirPids = [...new Set(uidToPid.values())];
-        if (theirPids.length === 0) {
-          setShareResults([]);
-          return;
-        }
-        const { data: myFollows } = await supabase
-          .from("professional_follows" as any)
-          .select("professional_id")
-          .eq("user_id", user.id)
-          .in("professional_id", theirPids);
-        const iFollow = new Set((myFollows || []).map((x: { professional_id: string }) => x.professional_id));
-
-        const filtered = rows.filter((r) => {
-          const pid = uidToPid.get(r.user_id);
-          return pid && iFollow.has(pid) && whoFollowsMe.has(r.user_id);
-        });
+        const filtered = rows.filter((r) => iFollow.has(r.user_id) && whoFollowsMe.has(r.user_id));
         setShareResults(filtered);
       } catch {
         setShareResults([]);
@@ -936,45 +926,29 @@ export default function CommunityFeed({
     (async () => {
       setLoadingFollowedShare(true);
       try {
-        const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
-        const myPid = (myPro as { id?: string } | null)?.id;
-        if (!myPid) {
-          if (!cancelled) setFollowedForShare([]);
-          return;
-        }
-
-        const [{ data: myFollowRows }, { data: revRows }] = await Promise.all([
-          supabase
-            .from("professional_follows" as any)
-            .select("professional_id, created_at")
-            .eq("user_id", user.id),
-          supabase.from("professional_follows" as any).select("user_id").eq("professional_id", myPid),
+        const [{ data: outRows }, { data: inRows }] = await Promise.all([
+          supabase.from("user_follows" as any).select("followed_user_id, created_at").eq("follower_user_id", user.id),
+          supabase.from("user_follows" as any).select("follower_user_id, created_at").eq("followed_user_id", user.id),
         ]);
 
-        const whoFollowsMe = new Set((revRows || []).map((r: { user_id: string }) => r.user_id));
-        const followRows = (myFollowRows || []) as { professional_id: string; created_at: string }[];
-        if (followRows.length === 0) {
-          if (!cancelled) setFollowedForShare([]);
-          return;
-        }
+        const whoFollowsMe = new Set((inRows || []).map((r: { follower_user_id: string }) => r.follower_user_id));
+        const outgoing = (outRows || []) as { followed_user_id: string; created_at: string }[];
+        const incoming = (inRows || []) as { follower_user_id: string; created_at: string }[];
 
-        const uniquePids = [...new Set(followRows.map((r) => r.professional_id))];
-        const { data: pros } = await supabase.from("professionals").select("id, user_id").in("id", uniquePids);
-        const uidByPid = new Map((pros || []).map((p: any) => [p.id as string, p.user_id as string]));
-
+        const mutualUids = new Set<string>();
         const lastFollowAt = new Map<string, string>();
-        for (const r of followRows) {
-          const uid = uidByPid.get(r.professional_id);
-          if (!uid || uid === user.id) continue;
+        for (const r of outgoing) {
+          const uid = r.followed_user_id;
+          if (!uid || uid === user.id || !whoFollowsMe.has(uid)) continue;
+          mutualUids.add(uid);
           const cur = lastFollowAt.get(uid);
           if (!cur || r.created_at > cur) lastFollowAt.set(uid, r.created_at);
         }
-
-        const mutualUids = new Set<string>();
-        for (const r of followRows) {
-          const uid = uidByPid.get(r.professional_id);
-          if (!uid || uid === user.id) continue;
-          if (whoFollowsMe.has(uid)) mutualUids.add(uid);
+        for (const r of incoming) {
+          const uid = r.follower_user_id;
+          if (!uid || uid === user.id || !mutualUids.has(uid)) continue;
+          const cur = lastFollowAt.get(uid);
+          if (!cur || r.created_at > cur) lastFollowAt.set(uid, r.created_at);
         }
 
         const orderedUids = [...mutualUids].sort((a, b) => {
@@ -1011,27 +985,24 @@ export default function CommunityFeed({
     if (!user || !sharePost) return;
     setShareSending(true);
     try {
-      const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
-      const myPid = (myPro as { id?: string } | null)?.id;
-      const { data: theirPro } = await supabase.from("professionals").select("id").eq("user_id", toUserId).maybeSingle();
-      const theirPid = (theirPro as { id?: string } | null)?.id;
-      if (!myPid || !theirPid) {
-        toast({
-          title: "Não é possível enviar",
-          description:
-            "A partilha na conversa só funciona entre perfis profissionais com seguimento mútuo (vocês seguem o perfil um do outro).",
-          variant: "destructive",
-        });
-        return;
-      }
       const [{ data: iFollowRow }, { data: theyFollowRow }] = await Promise.all([
-        supabase.from("professional_follows" as any).select("id").eq("user_id", user.id).eq("professional_id", theirPid).maybeSingle(),
-        supabase.from("professional_follows" as any).select("id").eq("user_id", toUserId).eq("professional_id", myPid).maybeSingle(),
+        supabase
+          .from("user_follows" as any)
+          .select("follower_user_id")
+          .eq("follower_user_id", user.id)
+          .eq("followed_user_id", toUserId)
+          .maybeSingle(),
+        supabase
+          .from("user_follows" as any)
+          .select("follower_user_id")
+          .eq("follower_user_id", toUserId)
+          .eq("followed_user_id", user.id)
+          .maybeSingle(),
       ]);
       if (!iFollowRow || !theyFollowRow) {
         toast({
           title: "Seguimento mútuo necessário",
-          description: "Só pode partilhar com quem você segue e que também segue o seu perfil profissional.",
+          description: "Só pode partilhar com quem o segue e que também o segue de volta.",
           variant: "destructive",
         });
         return;
@@ -1163,7 +1134,7 @@ export default function CommunityFeed({
     const rxTotal = totalReactionCount(sum);
     const myRx = myReactionByComment[c.id];
     const isFollowing = followingAuthorIds.has(c.user_id);
-    const canFollowMenu = !!(user && c.user_id !== user.id && cMeta?.proId);
+    const canFollowMenu = !!(user && c.user_id !== user.id);
     const avatarInner = ca?.avatar_url ? (
       <img src={ca.avatar_url} alt="" className="w-full h-full object-cover" />
     ) : (
@@ -1692,7 +1663,7 @@ export default function CommunityFeed({
               !longBody || bodyExpanded ? post.body : `${post.body.slice(0, BODY_COLLAPSE_LEN).trim()}…`;
 
             const authorProfileTo = proPathByUserId[post.author_id];
-            const showFollowUI = !!(user && post.author_id !== user.id && proMeta);
+            const showFollowUI = !!(user && post.author_id !== user.id);
             const isFollowingAuthor = followingAuthorIds.has(post.author_id);
 
             return (

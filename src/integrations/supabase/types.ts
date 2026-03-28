@@ -763,6 +763,24 @@ export type Database = {
           },
         ]
       }
+      user_follows: {
+        Row: {
+          created_at: string
+          followed_user_id: string
+          follower_user_id: string
+        }
+        Insert: {
+          created_at?: string
+          followed_user_id: string
+          follower_user_id: string
+        }
+        Update: {
+          created_at?: string
+          followed_user_id?: string
+          follower_user_id?: string
+        }
+        Relationships: []
+      }
       professional_analytics_counters: {
         Row: {
           appointment_bookings: number

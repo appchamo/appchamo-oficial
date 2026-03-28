@@ -1,4 +1,5 @@
--- Lista amigos (seguimento mútuo entre perfis profissionais) para o dono do perfil.
+-- A contagem de amigos não usa profiles; a listagem usava INNER JOIN profiles e omitia
+-- quem não tinha linha em profiles — gerando contagem > 0 e lista vazia.
 
 CREATE OR REPLACE FUNCTION public.list_professional_mutual_followers(p_professional_id uuid)
 RETURNS TABLE (
@@ -26,7 +27,11 @@ BEGIN
   RETURN QUERY
   SELECT
     p_follower.user_id,
-    COALESCE(NULLIF(TRIM(pr.display_name), ''), NULLIF(TRIM(pr.full_name), ''), 'Profissional')::text AS full_name,
+    COALESCE(
+      NULLIF(TRIM(pr.display_name), ''),
+      NULLIF(TRIM(pr.full_name), ''),
+      'Profissional'
+    )::text AS full_name,
     pr.avatar_url,
     COALESCE(NULLIF(TRIM(p_follower.slug), ''), p_follower.id::text)::text AS pro_key
   FROM public.professional_follows f_in
@@ -39,7 +44,3 @@ BEGIN
   ORDER BY 2;
 END;
 $$;
-
-ALTER FUNCTION public.list_professional_mutual_followers(uuid) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.list_professional_mutual_followers(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.list_professional_mutual_followers(uuid) TO authenticated;

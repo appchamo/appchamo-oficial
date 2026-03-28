@@ -227,15 +227,26 @@ const Profile = () => {
         p_professional_id: proData.id,
       });
       if (error) throw error;
-      const rows = (data || []) as {
-        user_id: string;
-        full_name: string;
-        avatar_url: string | null;
-        pro_key: string;
-      }[];
+      const raw = data as unknown;
+      const asList = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? [raw] : [];
+      const rows = asList
+        .filter((r): r is Record<string, unknown> => r != null && typeof r === "object")
+        .map((r) => ({
+          user_id: String(r.user_id ?? ""),
+          full_name: typeof r.full_name === "string" ? r.full_name : "Profissional",
+          avatar_url: (typeof r.avatar_url === "string" ? r.avatar_url : null) as string | null,
+          pro_key: String(r.pro_key ?? ""),
+        }))
+        .filter((r) => r.user_id.length > 0 && r.pro_key.length > 0);
       setMutualFriends(rows);
-    } catch {
-      toast({ title: "Não foi possível carregar amigos", variant: "destructive" });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      console.error("list_professional_mutual_followers", e);
+      toast({
+        title: "Não foi possível carregar amigos",
+        description: msg,
+        variant: "destructive",
+      });
       setMutualFriends([]);
     } finally {
       setFriendsLoading(false);

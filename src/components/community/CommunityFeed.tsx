@@ -1413,9 +1413,10 @@ export default function CommunityFeed({
             )}
           </div>
 
-          <div className={cn("flex flex-wrap items-center gap-1", ctx.isReply ? "mt-1.5" : "mt-2")}>
+          <div className={cn("flex flex-wrap items-center gap-x-1.5 gap-y-1", ctx.isReply ? "mt-1.5" : "mt-2")}>
             <div className="flex items-center gap-0.5">
               <LinkedInLikeControl
+                compact
                 fillRow={false}
                 label="Curtir"
                 activeType={myRx}
@@ -1423,12 +1424,17 @@ export default function CommunityFeed({
                 onQuickLikeToggle={() => void setCommentReaction(c.id, "like")}
               />
               {rxTotal > 0 ? (
-                <span className="text-[11px] font-semibold text-muted-foreground tabular-nums">{rxTotal}</span>
+                <span className="text-[11px] font-semibold text-muted-foreground tabular-nums">
+                  {rxTotal}
+                </span>
               ) : null}
             </div>
             <button
               type="button"
-              className="flex items-center gap-1 text-[12px] font-semibold text-muted-foreground hover:text-primary transition-colors ml-1"
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted-foreground transition-colors hover:bg-muted/70 hover:text-primary active:bg-muted/80",
+              )}
+              aria-label="Responder"
               onClick={() =>
                 setReplyTarget({
                   postId: ctx.post.id,
@@ -1437,23 +1443,11 @@ export default function CommunityFeed({
                 })
               }
             >
-              <MessageCircle className="w-[15px] h-[15px]" />
-              {threadReplyCount > 0 ? (
-                <span className="tabular-nums">· {threadReplyCount}</span>
-              ) : null}
+              <MessageCircle className="h-[18px] w-[18px] stroke-[1.85]" />
             </button>
-            {rxTotal > 0 ? (
-              <span className="flex -space-x-1 ml-auto pl-2">
-                {REACTIONS.filter((r) => (sum[r.type] || 0) > 0)
-                  .slice(0, 3)
-                  .map((r) => (
-                    <span
-                      key={r.type}
-                      className="w-5 h-5 rounded-full bg-white border border-border flex items-center justify-center text-[10px]"
-                    >
-                      <r.Icon className={cn("w-3 h-3", reactionSummaryIconClass(r.type))} />
-                    </span>
-                  ))}
+            {threadReplyCount > 0 ? (
+              <span className="text-[11px] font-semibold text-muted-foreground tabular-nums">
+                {threadReplyCount}
               </span>
             ) : null}
           </div>

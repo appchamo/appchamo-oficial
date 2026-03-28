@@ -50,6 +50,7 @@ const resolveAction = (n: Notification): "navigate" | "modal" => {
   if (n.type === "appointment" || t.includes("agendamento")) return "navigate";
   if (n.type === "reminder" && n.link) return "navigate";
   if (n.type === "follow" && n.link) return "navigate";
+  if (n.type === "community" && n.link) return "navigate";
   if (n.link?.includes("/messages/")) return "navigate";
   if (n.type === "admin" && n.link) return "navigate";
   if (n.type === "support" && n.link) return "navigate";
@@ -339,9 +340,10 @@ const Notifications = () => {
         </DialogContent>
       </Dialog>
 
-      <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-foreground">Notificações</h1>
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24">
+        <div className="mb-5">
+          <h1 className="text-xl font-bold tracking-tight text-foreground">Notificações</h1>
+          <p className="text-xs text-muted-foreground mt-1">Pedidos, mensagens e atualizações do Chamô</p>
         </div>
 
         {loading ? (
@@ -357,7 +359,7 @@ const Notifications = () => {
             <p className="text-xs text-muted-foreground mt-1">Você será notificado sobre novos pedidos, mensagens e atualizações.</p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {notifications.map((n) => {
               const message = sanitizeMessage(n.message);
               const action = resolveAction(n);

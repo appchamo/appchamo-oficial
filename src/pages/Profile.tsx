@@ -223,11 +223,14 @@ const Profile = () => {
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-foreground">Meu Perfil</h1>
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold tracking-tight text-foreground">Meu Perfil</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Dados da conta e preferências</p>
+          </div>
           {!editing && (
-            <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 transition-colors">
+            <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 transition-colors shrink-0">
               <Pencil className="w-3.5 h-3.5" /> Editar
             </button>
           )}

@@ -111,7 +111,7 @@ const ProfessionalReports = () => {
   const { profile, loading: authLoading } = useAuth();
   const [data, setData] = useState<ProfessionalAnalyticsPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [preset, setPreset] = useState<PeriodPreset>("d7");
+  const [preset, setPreset] = useState<PeriodPreset>("lifetime");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
@@ -235,9 +235,11 @@ const ProfessionalReports = () => {
           <ArrowLeft className="w-4 h-4" /> Voltar
         </Link>
 
-        <h1 className="text-xl font-bold text-foreground mb-1">Relatórios</h1>
-        <p className="text-sm text-muted-foreground mb-4">
-          Resumo de como seu perfil aparece e como os clientes interagem com você no Chamô.
+        <h1 className="text-xl font-bold tracking-tight text-foreground mb-1">Relatórios</h1>
+        <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+          Resumo de como seu perfil aparece e como os clientes interagem com você no Chamô. Cada visita de outra pessoa à
+          sua página pública conta em <strong className="text-foreground font-semibold">Cliques no perfil</strong>
+          (não conta quando você mesmo abre o perfil).
         </p>
 
         <p className="text-xs text-muted-foreground mb-2 font-medium">Período</p>
@@ -297,7 +299,7 @@ const ProfessionalReports = () => {
               icon={MousePointerClick}
               label="Cliques no perfil"
               value={stats.profile_clicks}
-              hint="Aberturas do seu perfil a partir de qualquer lugar do app."
+              hint="Cada vez que alguém (autenticado ou não) abre a página pública do seu perfil no Chamô. Períodos filtrados usam dados a partir da migração de eventos; use Todo período para o total acumulado."
             />
             <StatCard
               icon={Phone}

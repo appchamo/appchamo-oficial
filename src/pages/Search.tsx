@@ -48,7 +48,7 @@ function SearchProCard({ pro }: { pro: Pro }) {
     <div ref={impressionRef} className="min-w-0">
       <Link
         to={`/professional/${pro.id}`}
-        className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 transition-all group w-full"
+        className="flex items-center gap-3 bg-card border border-border/70 rounded-2xl p-4 shadow-sm hover:border-primary/35 hover:shadow-md transition-all group w-full"
       >
         <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
           {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" alt="" /> : pro.full_name[0]}
@@ -362,9 +362,11 @@ const Search = () => {
           </div>
         </div>
 
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-lg font-bold text-foreground">Explorar</h1>
-          
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold tracking-tight text-foreground">Explorar</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Busque por nome, serviço ou categoria</p>
+          </div>
           <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) setShowStateList(false); }}>
             <SheetTrigger asChild>
               <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-card hover:bg-muted transition-colors text-xs font-semibold">

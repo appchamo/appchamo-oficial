@@ -24,19 +24,49 @@ export function searchQueryMatchesDisplayName(queryRaw: string, displayName: str
   return normalizeNameForSearchMatch(displayName) === q;
 }
 
+/** Evita duplo disparo (ex.: React Strict Mode) no mesmo perfil em sequência. */
+const profileClickLastAt = new Map<string, number>();
+const PROFILE_CLICK_DEDUP_MS = 2200;
+
+function runIncrementRpc(
+  targetUserId: string,
+  event: ProfessionalAnalyticsEvent,
+  isRetry: boolean,
+): void {
+  void supabase
+    .rpc("increment_professional_analytics", {
+      p_target_user_id: targetUserId,
+      p_event: event,
+    })
+    .then(({ error }) => {
+      if (!error) return;
+      if (import.meta.env.DEV) {
+        console.warn("[proAnalytics] RPC increment_professional_analytics:", event, error.message);
+      }
+      if (!isRetry) {
+        window.setTimeout(() => runIncrementRpc(targetUserId, event, true), 900);
+      }
+    });
+}
+
 /**
  * Incrementa contador de métrica para o user_id do profissional.
- * Falhas são ignoradas (não bloqueia UI).
+ * Falhas não bloqueiam a UI; em dev regista aviso e tenta uma vez de novo.
  */
 export function incrementProfessionalAnalytics(
   targetUserId: string | undefined | null,
   event: ProfessionalAnalyticsEvent,
 ): void {
   if (!targetUserId) return;
-  void supabase.rpc("increment_professional_analytics", {
-    p_target_user_id: targetUserId,
-    p_event: event,
-  });
+
+  if (event === "profile_click") {
+    const now = Date.now();
+    const prev = profileClickLastAt.get(targetUserId) ?? 0;
+    if (now - prev < PROFILE_CLICK_DEDUP_MS) return;
+    profileClickLastAt.set(targetUserId, now);
+  }
+
+  runIncrementRpc(targetUserId, event, false);
 }
 
 export interface ProfessionalAnalyticsPayload {

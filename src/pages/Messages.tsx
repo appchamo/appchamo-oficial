@@ -511,7 +511,6 @@ const Messages = () => {
     if (!user) return;
 
     const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
-    const isFollowingKind = (t: Thread) => (t.request_kind ?? "service") === "following";
     const pool = threads.filter((t) => !isCancelledOrRejected(t));
     const tabThreads =
       chatTab === "favoritos" ? pool.filter((t) => t.isFavoritePro) : pool.filter((t) => !t.isFavoritePro);
@@ -793,8 +792,8 @@ const Messages = () => {
       <div
         className={`flex items-center gap-3 transition-colors select-none ${
           directStyle
-            ? `mx-3 mb-2 rounded-2xl border border-border/50 bg-gradient-to-b from-background via-background to-violet-500/[0.06] dark:to-violet-500/[0.09] shadow-sm px-3 py-3 active:bg-muted/40 ${
-                hasUnread ? "ring-1 ring-violet-500/25" : ""
+            ? `mx-3 mb-2 rounded-2xl border border-border/50 bg-gradient-to-b from-background via-background to-rose-500/[0.06] dark:to-amber-500/[0.08] shadow-sm px-3 py-3 active:bg-muted/40 ${
+                hasUnread ? "ring-1 ring-rose-400/30" : ""
               }`
             : `px-4 py-3 border-b border-border/60 active:bg-muted/50 ${hasUnread ? "bg-primary/[0.04]" : ""}`
         } ${!directStyle && t.isFavoritePro ? "bg-amber-500/[0.07] border-l-[3px] border-l-amber-400 pl-[13px]" : ""}`}
@@ -956,10 +955,10 @@ const Messages = () => {
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto">
+      <main className="max-w-screen-lg mx-auto pb-24">
         {/* ── Header ── */}
         <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border/60 gap-2">
-          <h1 className="text-xl font-bold text-foreground shrink-0">Conversas</h1>
+          <h1 className="text-xl font-bold tracking-tight text-foreground shrink-0">Conversas</h1>
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
             {!showCancelados && !showArchived && (chatTab === "geral" || chatTab === "favoritos") && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
               <button
@@ -1026,24 +1025,24 @@ const Messages = () => {
             </TabsTrigger>
             <TabsTrigger
               value="favoritos"
-              className="rounded-lg text-xs font-bold data-[state=active]:shadow-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-rose-600 data-[state=active]:to-amber-600 data-[state=active]:text-white flex flex-col gap-0.5 h-auto py-2 px-1 leading-tight"
+              className="group rounded-lg text-xs font-bold data-[state=active]:shadow-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-rose-600 data-[state=active]:to-amber-600 data-[state=active]:text-white flex flex-col gap-0.5 h-auto py-2 px-1 leading-tight"
             >
               <span className="flex items-center justify-center gap-1 w-full">
-                <Heart className="w-3.5 h-3.5 shrink-0 data-[state=active]:fill-white" />
+                <Heart className="w-3.5 h-3.5 shrink-0 text-rose-600 group-data-[state=active]:text-white group-data-[state=active]:fill-white" />
                 <span className="tracking-wide">FAVORITOS</span>
                 {favoritosPendingTotal > 0 ? (
-                  <span className="min-w-[22px] h-[22px] rounded-full bg-rose-500 text-white text-[11px] font-black flex items-center justify-center px-1 shadow-sm data-[state=active]:bg-white data-[state=active]:text-rose-600">
+                  <span className="min-w-[22px] h-[22px] rounded-full bg-rose-500 text-white text-[11px] font-black flex items-center justify-center px-1 shadow-sm group-data-[state=active]:bg-white group-data-[state=active]:text-rose-600">
                     {favoritosPendingTotal > 99 ? "99+" : favoritosPendingTotal}
                   </span>
                 ) : null}
               </span>
               {favoritosPendingTotal > 0 ? (
-                <span className="text-[9px] font-semibold opacity-90 data-[state=inactive]:text-muted-foreground data-[state=active]:text-white/90">
+                <span className="text-[9px] font-semibold text-muted-foreground group-data-[state=active]:text-white/90">
                   {favoritosPendingTotal}{" "}
                   {favoritosPendingTotal === 1 ? "mensagem nova" : "mensagens novas"}
                 </span>
               ) : threadsFavoritosTab.length > 0 ? (
-                <span className="text-[9px] font-medium opacity-70 data-[state=inactive]:text-muted-foreground data-[state=active]:text-white/80">
+                <span className="text-[9px] font-medium text-muted-foreground group-data-[state=active]:text-white/85">
                   {threadsFavoritosTab.length}{" "}
                   {threadsFavoritosTab.length === 1 ? "conversa" : "conversas"}
                 </span>
@@ -1144,10 +1143,12 @@ const Messages = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="seguindo" className="mt-3 -mx-4 px-1">
-            <div className="px-3 pb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Sparkles className="w-3.5 h-3.5 text-violet-500 shrink-0" />
-              <span>Mensagens diretas com perfis que você segue — sem fluxo de chamada.</span>
+          <TabsContent value="favoritos" className="mt-3 -mx-4 px-1">
+            <div className="px-3 pb-2 flex items-start gap-2 text-[11px] text-muted-foreground leading-snug">
+              <Heart className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5 fill-rose-500/30" />
+              <span>
+                Chamadas e chats com profissionais que você marcou como <strong className="text-foreground/90">favoritos</strong> no perfil deles.
+              </span>
             </div>
             {searchChat.trim() && currentList.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground text-sm px-4">
@@ -1155,12 +1156,12 @@ const Messages = () => {
               </div>
             ) : currentList.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center px-4">
-                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/15 flex items-center justify-center mb-4 shadow-inner">
-                  <Sparkles className="w-9 h-9 text-violet-500" />
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-rose-500/20 to-amber-500/15 flex items-center justify-center mb-4 shadow-inner border border-rose-500/10">
+                  <Heart className="w-9 h-9 text-rose-500 fill-rose-500/20" />
                 </div>
-                <p className="font-semibold text-foreground text-base mb-1">Nenhuma mensagem direta</p>
+                <p className="font-semibold text-foreground text-base mb-1">Nenhuma conversa com favoritos</p>
                 <p className="text-sm text-muted-foreground max-w-xs">
-                  Abra o perfil de alguém que você segue e toque em Mensagem, ou partilhe um post da Comunidade.
+                  Abra um perfil profissional, toque em <strong className="text-foreground">Favoritar</strong> e depois em CHAMAR ou Mensagem — a conversa aparece aqui.
                 </p>
               </div>
             ) : (
@@ -1168,7 +1169,7 @@ const Messages = () => {
             )}
             {hasMore && !showArchived && (
               <div className="flex justify-center py-4 px-4">
-                <Button variant="outline" onClick={() => setPage(p => p + 1)} className="rounded-full text-xs px-6 border-violet-500/25 hover:bg-violet-500/5">
+                <Button variant="outline" onClick={() => setPage(p => p + 1)} className="rounded-full text-xs px-6 border-rose-500/25 hover:bg-rose-500/5">
                   Carregar mais
                 </Button>
               </div>

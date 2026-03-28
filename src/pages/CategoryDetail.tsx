@@ -33,7 +33,7 @@ function CategoryProRow({ pro }: { pro: Pro }) {
     <div ref={impressionRef}>
       <Link
         to={`/professional/${pro.id}`}
-        className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-primary/30 hover:shadow-card transition-all w-full"
+        className="flex items-center gap-3 bg-card border border-border/70 rounded-xl p-4 shadow-sm hover:border-primary/35 hover:shadow-md transition-all w-full"
       >
         <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden">
           {pro.avatar_url ? <img src={pro.avatar_url} alt={pro.full_name} className="w-full h-full object-cover" /> : initials}
@@ -202,7 +202,7 @@ const CategoryDetail = () => {
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5">
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24">
         {selectedProfession ? (
           <button onClick={goBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-4 transition-colors">
             <ArrowLeft className="w-4 h-4" /> {categoryName}
@@ -213,9 +213,12 @@ const CategoryDetail = () => {
           </Link>
         )}
 
-        <h1 className="text-xl font-bold text-foreground mb-4">
+        <h1 className="text-xl font-bold tracking-tight text-foreground mb-1">
           {selectedProfession ? selectedProfession.name : categoryName}
         </h1>
+        <p className="text-xs text-muted-foreground mb-4">
+          {selectedProfession ? "Profissionais nesta especialidade" : "Escolha uma especialidade"}
+        </p>
 
         {loading ? (
           <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
@@ -226,7 +229,7 @@ const CategoryDetail = () => {
               <button
                 key={prof.id}
                 onClick={() => loadProsByProfession(prof)}
-                className="flex items-center justify-between bg-card border rounded-xl p-4 hover:border-primary/30 hover:shadow-card transition-all text-left"
+                className="flex items-center justify-between bg-card border border-border/70 rounded-xl p-4 shadow-sm hover:border-primary/35 hover:shadow-md transition-all text-left"
               >
                 <div>
                   <p className="font-semibold text-sm text-foreground">{prof.name}</p>

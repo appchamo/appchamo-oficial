@@ -1282,16 +1282,17 @@ export default function CommunityFeed({
       )}
     >
       {!embedded && (
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-3 mb-5">
           <Link
             to="/pro"
-            className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-muted hover:bg-muted/80 transition-colors"
+            className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-border/70 bg-card shadow-sm hover:bg-muted/60 transition-colors"
+            aria-label="Voltar"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-5 h-5 text-foreground" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-foreground">Comunidade</h1>
-            <p className="text-xs text-muted-foreground">Rede de profissionais Chamô</p>
+            <h1 className="text-xl font-bold tracking-tight text-foreground">Comunidade</h1>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">Rede de profissionais Chamô</p>
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ import CategoriesGrid from "@/components/CategoriesGrid";
 const Categories = () => {
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5">
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24">
         <Link
           to="/home"
           className="inline-flex items-center gap-2 text-sm font-semibold text-foreground bg-card border border-border/80 hover:border-primary/30 hover:bg-muted/50 px-3 py-2 rounded-xl mb-4 transition-colors shadow-sm"
@@ -14,7 +14,8 @@ const Categories = () => {
           <ArrowLeft className="w-4 h-4 shrink-0" aria-hidden />
           Voltar
         </Link>
-        <h1 className="text-xl font-bold text-foreground mb-4">Categorias</h1>
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Categorias</h1>
+        <p className="text-xs text-muted-foreground mt-1 mb-5">Escolha uma área para ver profissionais</p>
         <CategoriesGrid />
       </main>
     </AppLayout>

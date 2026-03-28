@@ -1169,6 +1169,7 @@ export type Database = {
           id: string
           professional_id: string
           protocol: string | null
+          request_kind: string
           status: string
           updated_at: string
         }
@@ -1181,6 +1182,7 @@ export type Database = {
           id?: string
           professional_id: string
           protocol?: string | null
+          request_kind?: string
           status?: string
           updated_at?: string
         }
@@ -1193,6 +1195,7 @@ export type Database = {
           id?: string
           professional_id?: string
           protocol?: string | null
+          request_kind?: string
           status?: string
           updated_at?: string
         }
@@ -1738,6 +1741,10 @@ export type Database = {
       increment_sponsor_clicks: {
         Args: { _sponsor_id: string }
         Returns: undefined
+      }
+      ensure_following_direct_thread: {
+        Args: { p_professional_id: string }
+        Returns: string
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       submit_review: {

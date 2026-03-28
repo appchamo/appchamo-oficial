@@ -22,6 +22,7 @@ import {
   MapPin,
   UserPlus,
   Heart,
+  MessageSquare,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -116,6 +117,7 @@ const ProfessionalProfile = () => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [dmOpening, setDmOpening] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
 
   const loadProfile = useCallback(async () => {
@@ -456,6 +458,41 @@ const ProfessionalProfile = () => {
       toast({ title: "Link copiado!", description: "Pronto para WhatsApp, Instagram ou navegador." });
     } catch {
       toast({ title: "Seu link:", description: profileLink });
+    }
+  };
+
+  const openFollowingDirectMessage = async () => {
+    if (!pro) return;
+    if (authLoading) {
+      toast({ title: "Aguarde", description: "Carregando seus dados…" });
+      return;
+    }
+    const u = user ?? (await supabase.auth.getUser()).data.user;
+    if (!u) {
+      navigate("/login", { state: { from: location.pathname } });
+      return;
+    }
+    if (!isFollowing) {
+      toast({ title: "Siga o perfil", description: "Para enviar mensagem direta, siga este profissional primeiro." });
+      return;
+    }
+    setDmOpening(true);
+    try {
+      const { data: threadId, error } = await supabase.rpc("ensure_following_direct_thread", {
+        p_professional_id: pro.id,
+      });
+      if (error) throw error;
+      if (!threadId) throw new Error("Thread não retornada");
+      navigate(`/messages/${threadId}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast({
+        title: "Não foi possível abrir o chat",
+        description: msg || "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+    } finally {
+      setDmOpening(false);
     }
   };
 
@@ -816,6 +853,17 @@ const ProfessionalProfile = () => {
                       <span>Compartilhar</span>
                     </button>
                   </div>
+                )}
+                {isFollowing && (
+                  <button
+                    type="button"
+                    onClick={() => void openFollowingDirectMessage()}
+                    disabled={dmOpening || followBusy || (!!user && socialLoading)}
+                    className="w-full min-h-[44px] py-3 rounded-xl border-2 border-violet-500/40 bg-violet-500/5 text-violet-700 dark:text-violet-200 font-bold text-sm hover:bg-violet-500/10 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {dmOpening ? <Loader2 className="w-5 h-5 animate-spin" /> : <MessageSquare className="w-5 h-5" />}
+                    Mensagem
+                  </button>
                 )}
                 {pro.availability_status !== "unavailable" ? (
                   <>

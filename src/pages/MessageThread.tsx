@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Heart } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Heart, Sparkles } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
@@ -21,6 +21,7 @@ import {
 } from "@/lib/chatAppointmentRequest";
 import { subscribeThreadActivity, sendThreadActivity, type ThreadActivityKind } from "@/lib/threadActivityChannels";
 import { compressImageForChat } from "@/lib/compressChatImage";
+import { getCommunityPostInAppPath } from "@/lib/publicAppUrl";
 
 type ReactionAgg = { likes: number; dislikes: number; mine: "like" | "dislike" | null };
 
@@ -199,6 +200,7 @@ const MessageThread = () => {
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [requestStatus, setRequestStatus] = useState<string>("pending");
+  const [requestKind, setRequestKind] = useState<"service" | "following">("service");
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
   const [couponDiscount, setCouponDiscount] = useState<{type: string;value: number;} | null>(null);
@@ -269,12 +271,13 @@ const MessageThread = () => {
 
   const isChatClosedByMessage = messages.some(m => m.content.includes("🔒 CHAMADA ENCERRADA") || m.content.includes("🚫 Solicitação cancelada"));
   const isChatFinished = requestStatus === "completed" || requestStatus === "closed" || requestStatus === "rejected" || requestStatus === "cancelled" || isChatClosedByMessage;
+  const isFollowingDm = requestKind === "following";
   const canSendChatMedia = requestStatus === "accepted" && !isChatFinished;
   const hasPaymentConfirmed = messages.some(m => m.content && m.content.includes("PAGAMENTO CONFIRMADO"));
 
   // Detecta se profissional não respondeu o cliente há mais de 4h
   const canCloseByDelay = (() => {
-    if (isProfessional || isChatFinished || !userId) return false;
+    if (isFollowingDm || isProfessional || isChatFinished || !userId) return false;
     const realMsgs = messages.filter(m => !m.id.startsWith("temp-"));
     if (realMsgs.length === 0) return false;
     const last = realMsgs[realMsgs.length - 1];
@@ -497,6 +500,7 @@ const MessageThread = () => {
       if (expectedGen !== loadGenerationRef.current) return;
       if (req && user) {
         setRequestStatus(req.status);
+        setRequestKind((req as { request_kind?: string | null }).request_kind === "following" ? "following" : "service");
         setRequestProtocol((req as any).protocol || null);
         const isClient = req.client_id === user.id;
 
@@ -585,6 +589,7 @@ const MessageThread = () => {
           }
         }
       } else {
+        setRequestKind("service");
         setThreadPeerFavorite(false);
         setPeerFollowRing(false);
       }
@@ -2255,6 +2260,11 @@ const MessageThread = () => {
     return null;
   };
 
+  const parseCommunityPostId = (content: string) => {
+    const m = content.trim().match(/^\[COMMUNITY_POST:([a-f0-9-]{36})\]\s*$/i);
+    return m ? m[1] : null;
+  };
+
   const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userId || !threadId) return;
@@ -2301,9 +2311,31 @@ const MessageThread = () => {
     const isReceipt = msg.content.includes("📄 COMPROVANTE ENVIADO");
     const isProductReq = msg.content.includes("🛍️ INTERESSE EM PRODUTO");
     const audioData = parseAudio(msg.content);
+    const communityPostId = parseCommunityPostId(msg.content);
 
     if (audioData) {
       return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={isMine} />;
+    }
+
+    if (communityPostId) {
+      return (
+        <Link
+          to={getCommunityPostInAppPath(communityPostId)}
+          className={`block min-w-[200px] max-w-[260px] rounded-xl border px-3 py-2.5 text-left transition-opacity hover:opacity-95 active:scale-[0.99] ${
+            isMine
+              ? "border-primary-foreground/35 bg-primary-foreground/10"
+              : "border-violet-500/35 bg-violet-500/10 dark:bg-violet-500/15"
+          }`}
+        >
+          <span className="flex items-center gap-2 text-xs font-bold">
+            <Sparkles className="w-3.5 h-3.5 shrink-0 text-violet-600 dark:text-violet-300" />
+            Publicação na Comunidade
+          </span>
+          <span className={`text-[11px] mt-1 block ${isMine ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+            Toque para abrir
+          </span>
+        </Link>
+      );
     }
 
     if (isProductReq && product) {
@@ -2616,7 +2648,7 @@ const MessageThread = () => {
                   </span>
                 ) : null}
               </div>
-              {!isProfessional && proAvailabilityStatus ? (
+              {!isProfessional && !isFollowingDm && proAvailabilityStatus ? (
                 <p className={`text-[10px] font-medium ${
                   proAvailabilityStatus === "available" ? "text-green-500" :
                   proAvailabilityStatus === "quotes_only" ? "text-amber-500" :
@@ -2643,7 +2675,7 @@ const MessageThread = () => {
         </div>
 
         {/* ── Barra de ações: botões maiores abaixo da linha do perfil ── */}
-        {isProfessional && !isChatFinished && requestStatus === "accepted" && (
+        {isProfessional && !isFollowingDm && !isChatFinished && requestStatus === "accepted" && (
           <div className="flex gap-2.5 px-4 pb-3 max-w-screen-lg mx-auto">
             <button
               onClick={async () => { await loadFeeSettings(); setBillingOpen(true); }}
@@ -2673,7 +2705,7 @@ const MessageThread = () => {
           </div>
         )}
 
-        {!isProfessional && !isChatFinished && requestStatus === "accepted" && hasPaymentConfirmed && !canCloseByDelay && (
+        {!isProfessional && !isFollowingDm && !isChatFinished && requestStatus === "accepted" && hasPaymentConfirmed && !canCloseByDelay && (
           <div className="px-4 pb-3 max-w-screen-lg mx-auto">
             <button
               onClick={async () => {
@@ -2739,7 +2771,7 @@ const MessageThread = () => {
       >
         {/* Banner de aviso: profissional sem resposta há +2h (antes das 4h) */}
         {(() => {
-          if (isProfessional || isChatFinished || !userId || canCloseByDelay) return null;
+          if (isFollowingDm || isProfessional || isChatFinished || !userId || canCloseByDelay) return null;
           const realMsgs = messages.filter(m => !m.id.startsWith("temp-"));
           if (realMsgs.length === 0) return null;
           const last = realMsgs[realMsgs.length - 1];
@@ -2756,7 +2788,7 @@ const MessageThread = () => {
             </div>
           );
         })()}
-        {!isProfessional && requestStatus === "pending" && !isChatFinished &&
+        {!isFollowingDm && !isProfessional && requestStatus === "pending" && !isChatFinished &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 shadow-sm">
             <p className="text-sm font-semibold text-foreground text-center">Aguardando resposta</p>
             <p className="text-xs text-muted-foreground text-center">O profissional ainda não aceitou. Se desejar desistir, você pode cancelar a solicitação.</p>
@@ -2784,7 +2816,7 @@ const MessageThread = () => {
         </div>
         }
 
-        {isProfessional && requestStatus === "pending" && !isChatFinished && appointment?.status === "pending" &&
+        {!isFollowingDm && isProfessional && requestStatus === "pending" && !isChatFinished && appointment?.status === "pending" &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 flex-shrink-0">
             <p className="text-sm font-semibold text-foreground text-center leading-snug flex items-center justify-center gap-1.5">
               <Calendar className="w-4 h-4 text-primary" /> Novo agendamento
@@ -2838,7 +2870,7 @@ const MessageThread = () => {
           </div>
         }
 
-        {isProfessional && requestStatus === "accepted" && !isChatFinished && appointment && (appointment.status === "confirmed" || appointment.status === "pending") &&
+        {!isFollowingDm && isProfessional && requestStatus === "accepted" && !isChatFinished && appointment && (appointment.status === "confirmed" || appointment.status === "pending") &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 flex-shrink-0">
             <p className="text-sm font-semibold text-foreground text-center leading-snug flex items-center justify-center gap-1.5">
               <Calendar className="w-4 h-4 text-primary" /> Agendamento confirmado
@@ -2857,7 +2889,7 @@ const MessageThread = () => {
           </div>
         }
 
-        {isProfessional && requestStatus === "pending" && !isChatFinished && !appointment &&
+        {!isFollowingDm && isProfessional && requestStatus === "pending" && !isChatFinished && !appointment &&
         <div className="bg-card border rounded-2xl p-4 space-y-3 mb-2 flex-shrink-0">
             <p className="text-sm font-semibold text-foreground text-center leading-snug">Nova solicitação de serviço</p>
             <p className="text-xs text-muted-foreground text-center">Deseja aceitar esta chamada?</p>

@@ -1,13 +1,13 @@
 import AppLayout from "@/components/AppLayout";
 import {
   MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle,
-  Inbox, Mic, Package, CheckCheck, Trash2, XCircle, Search,
-  CheckSquare, Square, Check, X, Pin, Tag, Heart,
+  Inbox, Mic, Package, CheckCheck, Trash2, XCircle,   Search,
+  CheckSquare, Square, Check, X, Pin, Tag, Heart, Sparkles,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { subscribeThreadActivity } from "@/lib/threadActivityChannels";
@@ -47,6 +47,8 @@ interface Thread {
   isFavoritePro?: boolean;
   /** Cliente a ver conversa com profissional que segue — anel verde no avatar. */
   peerIsFollowedPro?: boolean;
+  /** `following` = chat directo (Seguindo); omitido ou `service` = chamados normais. */
+  request_kind?: string | null;
 }
 
 const MAX_PINNED_THREADS = 3;
@@ -95,7 +97,8 @@ const Messages = () => {
   const [supportLastTime, setSupportLastTime] = useState<string | null>(null);
   const [hasSupportMessages, setHasSupportMessages] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [chatTab, setChatTab] = useState<"geral" | "cancelados">("geral");
+  const [showCancelados, setShowCancelados] = useState(false);
+  const [chatTab, setChatTab] = useState<"geral" | "seguindo">("geral");
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [searchChat, setSearchChat] = useState("");
@@ -122,6 +125,50 @@ const Messages = () => {
   const skipNextNavRef = useRef(false);
   const [peerActivityByThread, setPeerActivityByThread] = useState<Record<string, "typing" | "recording">>({});
   const navigate = useNavigate();
+
+  const listSlices = useMemo(() => {
+    const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
+    const isFollowingKind = (t: Thread) => (t.request_kind ?? "service") === "following";
+
+    const threadsCancelados = sortThreadsByPinAndTime(threads.filter(isCancelledOrRejected));
+    const threadsNonCancelled = sortThreadsByPinAndTime(threads.filter((t) => !isCancelledOrRejected(t)));
+    const threadsServiceTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => !isFollowingKind(t)));
+    const threadsSeguindoTab = sortThreadsByPinAndTime(threadsNonCancelled.filter(isFollowingKind));
+
+    const tabPool = chatTab === "seguindo" ? threadsSeguindoTab : threadsServiceTab;
+    const activeThreads = tabPool.filter((t) => !t.is_archived);
+    const archivedThreads = tabPool.filter((t) => t.is_archived);
+
+    const baseList = showCancelados ? threadsCancelados : showArchived ? archivedThreads : activeThreads;
+
+    const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const currentList = !searchChat.trim()
+      ? baseList
+      : baseList.filter((t) => {
+          const q = normalizeSearch(searchChat);
+          return normalizeSearch(t.otherName).includes(q) || normalizeSearch(t.protocol || "").includes(q);
+        });
+
+    const canceladosListToShow = !searchChat.trim()
+      ? threadsCancelados
+      : threadsCancelados.filter((t) => {
+          const q = normalizeSearch(searchChat);
+          return normalizeSearch(t.otherName).includes(q) || normalizeSearch(t.protocol || "").includes(q);
+        });
+
+    const subscriptionWatchList = showCancelados ? canceladosListToShow : currentList;
+    const subscriptionIds = [...new Set(subscriptionWatchList.slice(0, 45).map((t) => t.id))];
+
+    return {
+      threadsCancelados,
+      threadsSeguindoTab,
+      activeThreads,
+      archivedThreads,
+      currentList,
+      canceladosListToShow,
+      subscriptionIds,
+    };
+  }, [threads, chatTab, showArchived, showCancelados, searchChat]);
 
   const load = useCallback(async (isBackgroundUpdate = false, opts?: { widenFetch?: boolean }) => {
     if (!isBackgroundUpdate && _threadsCache.length === 0) setLoading(true);
@@ -249,6 +296,7 @@ const Messages = () => {
           : null;
       return {
         ...req,
+        request_kind: (req as { request_kind?: string | null }).request_kind ?? "service",
         otherName: profile?.full_name || (isClient ? "Profissional" : "Cliente"),
         otherAvatar: profile?.avatar_url || null,
         lastMessage: sum?.lastMessage ?? null,
@@ -379,27 +427,7 @@ const Messages = () => {
     const uid = currentUserId;
     if (!uid) return;
 
-    const isC = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
-    const tGeral = sortThreadsByPinAndTime(threads.filter((t) => !isC(t)));
-    const tCan = sortThreadsByPinAndTime(threads.filter(isC));
-    const active = tGeral.filter((t) => !t.is_archived);
-    const arch = tGeral.filter((t) => t.is_archived);
-    const base = chatTab === "cancelados" ? tCan : showArchived ? arch : active;
-    const norm = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const cur = !searchChat.trim()
-      ? base
-      : base.filter((t) => {
-          const q = norm(searchChat);
-          return norm(t.otherName).includes(q) || norm(t.protocol || "").includes(q);
-        });
-    const canShow = !searchChat.trim()
-      ? tCan
-      : tCan.filter((t) => {
-          const q = norm(searchChat);
-          return norm(t.otherName).includes(q) || norm(t.protocol || "").includes(q);
-        });
-    const arr = chatTab === "geral" ? cur : canShow;
-    const ids = [...new Set(arr.slice(0, 45).map((t) => t.id))];
+    const ids = listSlices.subscriptionIds;
 
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const unsubs: (() => void)[] = [];
@@ -445,7 +473,7 @@ const Messages = () => {
       timers.forEach((t) => clearTimeout(t));
       setPeerActivityByThread({});
     };
-  }, [currentUserId, threads, chatTab, showArchived, searchChat]);
+  }, [currentUserId, listSlices.subscriptionIds]);
 
   const handleArchive = async (chatId: string, current: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -692,6 +720,7 @@ const Messages = () => {
     if (msg.startsWith("[AUDIO:")) return <span className="flex items-center gap-1 text-muted-foreground"><Mic className="w-3 h-3" /> Áudio</span>;
     if (msg === "📷 Foto" || msg.startsWith("📷 ")) return <span className="flex items-center gap-1 text-muted-foreground">📷 Foto</span>;
     if (msg.includes("[PRODUCT:")) return <span className="flex items-center gap-1 text-emerald-600 font-medium"><Package className="w-3 h-3" /> Produto</span>;
+    if (msg.startsWith("[COMMUNITY_POST:")) return <span className="flex items-center gap-1 text-violet-600 dark:text-violet-300 font-medium"><Sparkles className="w-3 h-3" /> Publicação</span>;
     return <span className="truncate">{msg}</span>;
   };
 
@@ -719,23 +748,14 @@ const Messages = () => {
     );
   }
 
-  const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
-  const threadsGeral = sortThreadsByPinAndTime(threads.filter((t) => !isCancelledOrRejected(t)));
-  const threadsCancelados = sortThreadsByPinAndTime(threads.filter(isCancelledOrRejected));
-  const activeThreads = threadsGeral.filter((t) => !t.is_archived);
-  const archivedThreads = threadsGeral.filter((t) => t.is_archived);
-  const baseList = chatTab === "cancelados" ? threadsCancelados : showArchived ? archivedThreads : activeThreads;
-
-  const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const currentList = !searchChat.trim() ? baseList : baseList.filter((t) => {
-    const q = normalizeSearch(searchChat);
-    return normalizeSearch(t.otherName).includes(q) || normalizeSearch(t.protocol || "").includes(q);
-  });
-
-  const canceladosListToShow = !searchChat.trim() ? threadsCancelados : threadsCancelados.filter((t) => {
-    const q = normalizeSearch(searchChat);
-    return normalizeSearch(t.otherName).includes(q) || normalizeSearch(t.protocol || "").includes(q);
-  });
+  const {
+    threadsCancelados,
+    activeThreads,
+    archivedThreads,
+    currentList,
+    canceladosListToShow,
+    threadsSeguindoTab,
+  } = listSlices;
 
   const toggleCanceladoSelection = (id: string) => {
     setSelectedCanceladosIds((prev) => {
@@ -746,7 +766,7 @@ const Messages = () => {
   };
 
   // ── Thread item component ──────────────────────────────────────────
-  const ThreadItem = ({ t, isCancelled = false }: { t: Thread; isCancelled?: boolean }) => {
+  const ThreadItem = ({ t, isCancelled = false, directStyle = false }: { t: Thread; isCancelled?: boolean; directStyle?: boolean }) => {
     const initials = t.otherName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
     const hasUnread = t.unreadCount > 0 || t.manual_unread;
     const isChatFinished = t.status === "completed" || t.status === "closed" || t.status === "cancelled" || t.status === "rejected";
@@ -755,9 +775,13 @@ const Messages = () => {
 
     return (
       <div
-        className={`flex items-center gap-3 px-4 py-3 border-b border-border/60 active:bg-muted/50 transition-colors select-none ${
-          hasUnread ? "bg-primary/[0.04]" : ""
-        } ${t.isFavoritePro ? "bg-amber-500/[0.07] border-l-[3px] border-l-amber-400 pl-[13px]" : ""}`}
+        className={`flex items-center gap-3 transition-colors select-none ${
+          directStyle
+            ? `mx-3 mb-2 rounded-2xl border border-border/50 bg-gradient-to-b from-background via-background to-violet-500/[0.06] dark:to-violet-500/[0.09] shadow-sm px-3 py-3 active:bg-muted/40 ${
+                hasUnread ? "ring-1 ring-violet-500/25" : ""
+              }`
+            : `px-4 py-3 border-b border-border/60 active:bg-muted/50 ${hasUnread ? "bg-primary/[0.04]" : ""}`
+        } ${!directStyle && t.isFavoritePro ? "bg-amber-500/[0.07] border-l-[3px] border-l-amber-400 pl-[13px]" : ""}`}
       >
         {isCancelled && canceladosSelectMode && (
           <button type="button" onClick={() => toggleCanceladoSelection(t.id)} className="flex-shrink-0">
@@ -940,11 +964,12 @@ const Messages = () => {
     <AppLayout>
       <main className="max-w-screen-lg mx-auto">
         {/* ── Header ── */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border/60">
-          <h1 className="text-xl font-bold text-foreground">Conversas</h1>
-          <div className="flex items-center gap-2">
-            {chatTab === "geral" && !showArchived && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border/60 gap-2">
+          <h1 className="text-xl font-bold text-foreground shrink-0">Conversas</h1>
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {!showCancelados && !showArchived && (chatTab === "geral" || chatTab === "seguindo") && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
               <button
+                type="button"
                 onClick={handleMarkAllRead}
                 className="text-xs font-semibold text-primary flex items-center gap-1 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-full transition-all"
               >
@@ -952,10 +977,36 @@ const Messages = () => {
                 Ler tudo
               </button>
             )}
-            {chatTab === "geral" && archivedThreads.length > 0 && (
+            {threadsCancelados.length > 0 && (
               <button
-                onClick={() => setShowArchived(!showArchived)}
-                className="text-xs font-semibold text-primary flex items-center gap-1 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-full transition-all"
+                type="button"
+                onClick={() => {
+                  setShowCancelados((v) => !v);
+                  if (!showCancelados) setShowArchived(false);
+                }}
+                className={`text-xs font-semibold flex items-center gap-1 px-3 py-1.5 rounded-full transition-all ${
+                  showCancelados
+                    ? "bg-destructive/15 text-destructive border border-destructive/25"
+                    : "text-muted-foreground bg-muted/50 hover:bg-muted/70 border border-transparent"
+                }`}
+              >
+                {showCancelados ? <Inbox className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                Cancelados
+                {!showCancelados && (
+                  <span className="min-w-[18px] h-[18px] rounded-full bg-muted-foreground/20 text-muted-foreground text-[9px] font-bold flex items-center justify-center px-1">
+                    {threadsCancelados.length}
+                  </span>
+                )}
+              </button>
+            )}
+            {!showCancelados && archivedThreads.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowArchived(!showArchived);
+                  if (!showArchived) setShowCancelados(false);
+                }}
+                className="text-xs font-semibold text-primary flex items-center gap-1 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-full transition-all border border-primary/10"
               >
                 {showArchived ? <Inbox className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                 {showArchived ? "Entrada" : `Arquivados (${archivedThreads.length})`}
@@ -965,24 +1016,37 @@ const Messages = () => {
         </div>
 
         {/* ── Tabs ── */}
-        <Tabs value={chatTab} onValueChange={(v) => setChatTab(v as "geral" | "cancelados")} className="px-4 pt-3">
-          <TabsList className="w-full grid grid-cols-2 rounded-xl h-10 p-1 bg-muted/50">
+        <Tabs
+          value={chatTab}
+          onValueChange={(v) => {
+            setChatTab(v as "geral" | "seguindo");
+            setShowCancelados(false);
+          }}
+          className="px-4 pt-3"
+        >
+          <TabsList className={`w-full grid grid-cols-2 rounded-xl h-10 p-1 ${showCancelados ? "opacity-40 pointer-events-none" : "bg-muted/50"}`}>
             <TabsTrigger value="geral" className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm">
               Geral
             </TabsTrigger>
-            <TabsTrigger value="cancelados" className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm flex items-center gap-1.5">
-              Cancelados
-              {threadsCancelados.length > 0 && (
-                <span className="min-w-[18px] h-[18px] rounded-full bg-muted-foreground/20 text-muted-foreground text-[9px] font-bold flex items-center justify-center px-1">
-                  {threadsCancelados.length}
+            <TabsTrigger
+              value="seguindo"
+              className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-violet-600 data-[state=active]:to-fuchsia-600 data-[state=active]:text-white gap-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5 opacity-80 hidden sm:inline" />
+              Seguindo
+              {threadsSeguindoTab.length > 0 && (
+                <span className="min-w-[18px] h-[18px] rounded-full bg-background/25 data-[state=active]:bg-white/25 text-[9px] font-bold flex items-center justify-center px-1">
+                  {threadsSeguindoTab.length}
                 </span>
               )}
             </TabsTrigger>
           </TabsList>
 
           {/* ── Search ── */}
-          {((chatTab === "geral" && (activeThreads.length > 0 || archivedThreads.length > 0)) ||
-            (chatTab === "cancelados" && threadsCancelados.length > 0)) && (
+          {((!showCancelados &&
+            ((chatTab === "geral" && (activeThreads.length > 0 || archivedThreads.length > 0 || hasSupportMessages)) ||
+              (chatTab === "seguindo" && (activeThreads.length > 0 || archivedThreads.length > 0)))) ||
+            (showCancelados && threadsCancelados.length > 0)) && (
             <div className="relative mt-3">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               <input
@@ -1010,6 +1074,8 @@ const Messages = () => {
           )}
 
           {/* ── TAB: Geral ── */}
+          {!showCancelados ? (
+            <>
           <TabsContent value="geral" className="mt-3 -mx-4">
             {!showArchived && hasSupportMessages && (
               <Link
@@ -1069,43 +1135,75 @@ const Messages = () => {
             )}
           </TabsContent>
 
-          {/* ── TAB: Cancelados ── */}
-          <TabsContent value="cancelados" className="mt-3 -mx-4">
-            {threadsCancelados.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 mb-3 px-4">
-                {!canceladosSelectMode ? (
-                  <Button variant="outline" size="sm" className="rounded-xl h-8 text-xs" onClick={() => setCanceladosSelectMode(true)}>
-                    Selecionar
-                  </Button>
-                ) : (
-                  <>
-                    <Button variant="ghost" size="sm" className="rounded-xl h-8 text-xs" onClick={() => { setCanceladosSelectMode(false); setSelectedCanceladosIds(new Set()); }}>
-                      Cancelar
-                    </Button>
-                    <Button variant="outline" size="sm" className="rounded-xl h-8 text-xs" onClick={() => setSelectedCanceladosIds(new Set(canceladosListToShow.map((t) => t.id)))}>
-                      Todas
-                    </Button>
-                    <Button variant="destructive" size="sm" className="rounded-xl h-8 text-xs" disabled={selectedCanceladosIds.size === 0} onClick={() => setDeletingBatchIds(Array.from(selectedCanceladosIds))}>
-                      <Trash2 className="w-3 h-3 mr-1" />
-                      Excluir {selectedCanceladosIds.size > 0 ? `(${selectedCanceladosIds.size})` : ""}
-                    </Button>
-                  </>
-                )}
+          <TabsContent value="seguindo" className="mt-3 -mx-4 px-1">
+            <div className="px-3 pb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <Sparkles className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+              <span>Mensagens diretas com perfis que você segue — sem fluxo de chamada.</span>
+            </div>
+            {searchChat.trim() && currentList.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm px-4">
+                Nenhuma conversa encontrada para &quot;{searchChat}&quot;
               </div>
-            )}
-
-            {threadsCancelados.length === 0 ? (
+            ) : currentList.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center px-4">
-                <XCircle className="w-12 h-12 mb-3 text-muted-foreground/30" />
-                <p className="text-sm font-medium text-foreground">Nenhuma conversa cancelada</p>
-                <p className="text-xs mt-1 text-muted-foreground">Chamados cancelados ou recusados aparecem aqui.</p>
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/15 flex items-center justify-center mb-4 shadow-inner">
+                  <Sparkles className="w-9 h-9 text-violet-500" />
+                </div>
+                <p className="font-semibold text-foreground text-base mb-1">Nenhuma mensagem direta</p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  Abra o perfil de alguém que você segue e toque em Mensagem, ou partilhe um post da Comunidade.
+                </p>
               </div>
-            ) : searchChat.trim() && canceladosListToShow.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground text-sm px-4">Nenhum resultado</div>
             ) : (
-              canceladosListToShow.map((t) => <ThreadItem key={t.id} t={t} isCancelled />)
+              currentList.map((t) => <ThreadItem key={t.id} t={t} directStyle />)
+            )}
+            {hasMore && !showArchived && (
+              <div className="flex justify-center py-4 px-4">
+                <Button variant="outline" onClick={() => setPage(p => p + 1)} className="rounded-full text-xs px-6 border-violet-500/25 hover:bg-violet-500/5">
+                  Carregar mais
+                </Button>
+              </div>
             )}
           </TabsContent>
+            </>
+          ) : (
+            <div className="mt-3 -mx-4">
+              {threadsCancelados.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mb-3 px-4">
+                  {!canceladosSelectMode ? (
+                    <Button variant="outline" size="sm" className="rounded-xl h-8 text-xs" onClick={() => setCanceladosSelectMode(true)}>
+                      Selecionar
+                    </Button>
+                  ) : (
+                    <>
+                      <Button variant="ghost" size="sm" className="rounded-xl h-8 text-xs" onClick={() => { setCanceladosSelectMode(false); setSelectedCanceladosIds(new Set()); }}>
+                        Cancelar
+                      </Button>
+                      <Button variant="outline" size="sm" className="rounded-xl h-8 text-xs" onClick={() => setSelectedCanceladosIds(new Set(canceladosListToShow.map((t) => t.id)))}>
+                        Todas
+                      </Button>
+                      <Button variant="destructive" size="sm" className="rounded-xl h-8 text-xs" disabled={selectedCanceladosIds.size === 0} onClick={() => setDeletingBatchIds(Array.from(selectedCanceladosIds))}>
+                        <Trash2 className="w-3 h-3 mr-1" />
+                        Excluir {selectedCanceladosIds.size > 0 ? `(${selectedCanceladosIds.size})` : ""}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {threadsCancelados.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                  <XCircle className="w-12 h-12 mb-3 text-muted-foreground/30" />
+                  <p className="text-sm font-medium text-foreground">Nenhuma conversa cancelada</p>
+                  <p className="text-xs mt-1 text-muted-foreground">Chamados cancelados ou recusados aparecem aqui.</p>
+                </div>
+              ) : searchChat.trim() && canceladosListToShow.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground text-sm px-4">Nenhum resultado</div>
+              ) : (
+                canceladosListToShow.map((t) => <ThreadItem key={t.id} t={t} isCancelled />)
+              )}
+            </div>
+          )}
         </Tabs>
 
         {/* ── Dialogs ── */}

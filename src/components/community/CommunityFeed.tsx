@@ -861,6 +861,25 @@ export default function CommunityFeed({
         to_user_id: toUserId,
       });
       if (sErr) throw sErr;
+
+      const { data: proRow, error: proErr } = await supabase
+        .from("professionals")
+        .select("id")
+        .eq("user_id", toUserId)
+        .maybeSingle();
+      if (!proErr && proRow?.id) {
+        const { data: threadId, error: rpcErr } = await supabase.rpc("ensure_following_direct_thread", {
+          p_professional_id: proRow.id,
+        });
+        if (!rpcErr && threadId) {
+          await supabase.from("chat_messages").insert({
+            request_id: threadId,
+            sender_id: user.id,
+            content: `[COMMUNITY_POST:${sharePost.id}]`,
+          });
+        }
+      }
+
       const me = (profile?.full_name || "Alguém").trim();
       await supabase.from("notifications").insert({
         user_id: toUserId,

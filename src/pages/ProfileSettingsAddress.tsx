@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEffect, useState } from "react";
 import { fetchViaCep } from "@/lib/viacep";
 import { forwardGeocodeBrazil } from "@/lib/geocode";
+import { setHomeLocationCache } from "@/lib/locationUtils";
 
 const ProfileSettingsAddress = () => {
   const { user, refreshProfile } = useAuth();
@@ -100,6 +101,7 @@ const ProfileSettingsAddress = () => {
     }
 
     await refreshProfile();
+    setHomeLocationCache(payload.address_city, payload.address_state);
     toast({ title: "Endereço salvo!" });
     setSaving(false);
   };

@@ -22,6 +22,13 @@ function json(data: unknown, status = 200) {
   });
 }
 
+/** Com verify_jwt=false, o gateway não exige JWT; exigimos apikey da app (publishable ou anon injetada no projeto). */
+function apiKeyOk(req: Request): boolean {
+  const got = (req.headers.get("apikey") ?? "").trim();
+  const expected = (Deno.env.get("SUPABASE_ANON_KEY") ?? "").trim();
+  return !!got && !!expected && got === expected;
+}
+
 function randomToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -39,6 +46,10 @@ function subPathAfterQrLogin(pathname: string): string {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+
+  if (!apiKeyOk(req)) {
+    return json({ code: 401, message: "Invalid or missing apikey" }, 401);
+  }
 
   const url = new URL(req.url);
   const path = subPathAfterQrLogin(url.pathname);

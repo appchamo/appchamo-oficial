@@ -4,7 +4,11 @@ import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { sameCityState } from "@/lib/locationUtils";
+import {
+  getHomeLocationCache,
+  matchesFeaturedRegion,
+  writeHomeLocationCacheOnly,
+} from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import { useProProfileImpression } from "@/hooks/useProProfileImpression";
@@ -12,26 +16,6 @@ import { cn } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
-
-// Location cache — shared between Sponsors & Featured for a single DB read per session
-const LOCATION_CACHE_KEY = "chamo_user_location_v1";
-const LOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
-
-function getCachedLocation(): { city: string | null; state: string | null } | null {
-  try {
-    const raw = localStorage.getItem(LOCATION_CACHE_KEY);
-    if (!raw) return null;
-    const { city, state, ts } = JSON.parse(raw);
-    if (Date.now() - ts > LOCATION_CACHE_TTL_MS) return null;
-    return { city: city ?? null, state: state ?? null };
-  } catch { return null; }
-}
-
-function setCachedLocation(city: string | null, state: string | null) {
-  try {
-    localStorage.setItem(LOCATION_CACHE_KEY, JSON.stringify({ city, state, ts: Date.now() }));
-  } catch { /* ignore */ }
-}
 
 interface Pro {
   id: string;
@@ -186,7 +170,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const [prosLoaded, setProsLoaded] = useState(false);
 
   // Init from localStorage immediately — avoids waiting for DB before first render
-  const cachedLoc = useMemo(() => getCachedLocation(), []);
+  const cachedLoc = useMemo(() => getHomeLocationCache(), []);
   const [userCity, setUserCity] = useState<string | null>(cachedLoc?.city ?? null);
   const [userState, setUserState] = useState<string | null>(cachedLoc?.state ?? null);
 
@@ -208,7 +192,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     if (!data) return;
     const city = data.address_city ?? null;
     const state = data.address_state ?? null;
-    setCachedLocation(city, state);
+    writeHomeLocationCacheOnly(city, state);
     setUserCity(city);
     setUserState(state);
   }, []);
@@ -238,93 +222,99 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     try {
       diagLog("info", "featured", "pros fetch start", { city: userCity, state: userState });
 
-      // ── Passo 1: filtro de localização SERVER-SIDE ──────────────────────────
-      // Se o usuário tem cidade/estado definido, buscamos primeiro os user_ids
-      // de profissionais que estão nessa localização, para depois buscar apenas eles.
+      // ── Passo 1: user_ids em profiles que batem com a região do cliente ─────
+      // Com cidade definida: só essa cidade (normalizada), sem fallback para estado/país
+      // (evita mostrar SP quando o cliente escolheu Patrocínio e não há match na query exata).
       let locationUserIds: string[] | null = null;
+      const cityTrim = (userCity || "").trim();
+      const hasCityFilter = cityTrim.length > 0;
 
-      if (userCity || userState) {
+      const escapeIlike = (s: string) => s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+
+      if (hasCityFilter || userState) {
         try {
-          let locQuery = supabase
-            .from("profiles")
-            .select("user_id")
-            .limit(200);
-
-          // Usa ilike para ser case-insensitive e aguentar variações de acento
-          if (userCity) locQuery = locQuery.ilike("address_city", userCity);
-          if (userState) {
-            // Aceita tanto sigla quanto nome completo (guardado como sigla ou nome)
+          if (hasCityFilter) {
+            const pattern = `%${escapeIlike(cityTrim)}%`;
+            const { data: cand } = await supabase
+              .from("profiles")
+              .select("user_id, address_city, address_state")
+              .ilike("address_city", pattern)
+              .limit(500);
+            const matched = (cand || []).filter((row) =>
+              matchesFeaturedRegion(cityTrim, userState, row.address_city, row.address_state),
+            );
+            locationUserIds = matched.map((p) => p.user_id);
+            diagLog("info", "featured", "location city filter", {
+              city: cityTrim,
+              candidates: cand?.length ?? 0,
+              matched: locationUserIds.length,
+            });
+          } else if (userState) {
             const uf = userState.length === 2 ? userState.toUpperCase() : userState;
-            locQuery = locQuery.or(`address_state.ilike.${uf},address_state.ilike.${userState}`);
-          }
-
-          const { data: locProfiles } = await locQuery;
-          if (locProfiles && locProfiles.length > 0) {
-            locationUserIds = locProfiles.map((p: any) => p.user_id);
-          } else {
-            // Sem profissionais encontrados na cidade — cai no fallback (estado)
-            locationUserIds = [];
+            const { data: cand } = await supabase
+              .from("profiles")
+              .select("user_id, address_city, address_state")
+              .or(`address_state.ilike.${uf},address_state.ilike.${userState}`)
+              .limit(500);
+            const matched = (cand || []).filter((row) =>
+              matchesFeaturedRegion(null, userState, row.address_city, row.address_state),
+            );
+            locationUserIds = matched.map((p) => p.user_id);
+            diagLog("info", "featured", "location state filter", { matched: locationUserIds.length });
           }
         } catch {
-          diagLog("warn", "featured", "location pre-filter failed, fallback to all");
-          locationUserIds = null;
+          diagLog("warn", "featured", "location pre-filter failed");
+          locationUserIds = hasCityFilter ? [] : null;
         }
       }
 
-      // ── Passo 2: busca profissionais ──────────────────────────────────────
-      // Removido .eq("verified", true): mostra todos os aprovados, não só verificados.
-      // O badge "Verificado" ainda aparece no card quando verified === true.
-      let prosQuery = supabase
-        .from("professionals")
-        .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
-        .eq("active", true)
-        .eq("profile_status", "approved")
-        .neq("availability_status", "unavailable");
+      // ── Passo 2: profissionais ─────────────────────────────────────────────
+      let finalPros: any[] | null = null;
+      let prosErr: { message: string } | null = null;
 
-      if (locationUserIds && locationUserIds.length > 0) {
-        // Filtro server-side por cidade/estado
-        prosQuery = prosQuery.in("user_id", locationUserIds);
-      }
-      // Se locationUserIds === [] (ninguém na cidade), buscamos do estado/geral abaixo
-      prosQuery = prosQuery.limit(60);
+      if (hasCityFilter && locationUserIds !== null && locationUserIds.length === 0) {
+        diagLog("info", "featured", "strict city: no professionals in region — empty list");
+        finalPros = [];
+      } else {
+        let prosQuery = supabase
+          .from("professionals")
+          .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
+          .eq("active", true)
+          .eq("profile_status", "approved")
+          .neq("availability_status", "unavailable");
 
-      const { data: pros, error: prosErr } = await prosQuery;
+        if (locationUserIds !== null) {
+          if (locationUserIds.length > 0) {
+            prosQuery = prosQuery.in("user_id", locationUserIds);
+          } else {
+            finalPros = [];
+          }
+        }
 
-      // Fallback 1: nenhum pro na cidade → busca do mesmo estado sem filtro de cidade
-      let finalPros = pros;
-      if ((!finalPros || finalPros.length === 0) && locationUserIds !== null && locationUserIds.length === 0 && userState) {
-        diagLog("info", "featured", "city fallback: fetching state-level pros");
-        const uf = userState.length === 2 ? userState.toUpperCase() : userState;
-        const { data: stateProfiles } = await supabase
-          .from("profiles")
-          .select("user_id")
-          .or(`address_state.ilike.${uf},address_state.ilike.${userState}`)
-          .limit(200);
-        const stateIds = (stateProfiles || []).map((p: any) => p.user_id);
-        if (stateIds.length > 0) {
-          const { data: statePros } = await supabase
-            .from("professionals")
-            .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
-            .eq("active", true)
-            .eq("profile_status", "approved")
-            .neq("availability_status", "unavailable")
-            .in("user_id", stateIds)
-            .limit(60);
-          finalPros = statePros;
+        if (finalPros === null) {
+          const { data: pros, error: qErr } = await prosQuery.limit(60);
+          if (qErr) prosErr = qErr;
+          else finalPros = pros || [];
         }
       }
 
-      // Fallback 2: ainda vazio → mostra todos aprovados
-      if (!finalPros || finalPros.length === 0) {
-        diagLog("info", "featured", "global fallback: no location filter");
-        const { data: allPros } = await supabase
+      if (
+        !prosErr &&
+        finalPros &&
+        finalPros.length === 0 &&
+        !hasCityFilter &&
+        !userState
+      ) {
+        diagLog("info", "featured", "no location on profile — global list");
+        const { data: allPros, error: gErr } = await supabase
           .from("professionals")
           .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
           .eq("active", true)
           .eq("profile_status", "approved")
           .neq("availability_status", "unavailable")
           .limit(60);
-        finalPros = allPros;
+        if (gErr) prosErr = gErr;
+        else finalPros = allPros || [];
       }
 
       clearTimeout(watchdog);
@@ -375,22 +365,26 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         ((locationsRes.data || []) as { user_id: string; address_city: string | null; address_state: string | null }[]).map((p) => [p.user_id, p])
       );
 
-      const withLocation = finalPros.map((p) => {
-        const loc = locationMap.get(p.user_id);
-        return {
-          id: p.id,
-          rating: p.rating,
-          total_services: p.total_services,
-          verified: p.verified,
-          user_id: p.user_id,
-          profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
-          full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
-          avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
-          address_city: loc?.address_city ?? null,
-          address_state: loc?.address_state ?? null,
-          created_at: (p as any).created_at as string | null,
-        };
-      });
+      const withLocation = finalPros
+        .map((p) => {
+          const loc = locationMap.get(p.user_id);
+          return {
+            id: p.id,
+            rating: p.rating,
+            total_services: p.total_services,
+            verified: p.verified,
+            user_id: p.user_id,
+            profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
+            full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+            avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
+            address_city: loc?.address_city ?? null,
+            address_state: loc?.address_state ?? null,
+            created_at: (p as any).created_at as string | null,
+          };
+        })
+        .filter((p) =>
+          matchesFeaturedRegion(userCity, userState, p.address_city, p.address_state),
+        );
 
       // Critério 1: mais serviços → Critério 2: maior rating → Critério 3: quem se cadastrou primeiro
       withLocation.sort((a, b) => {
@@ -473,6 +467,17 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   useEffect(() => {
     refreshUserLocation();
   }, [refreshUserLocation]);
+
+  useEffect(() => {
+    const onLoc = (e: Event) => {
+      const d = (e as CustomEvent<{ city: string | null; state: string | null }>).detail;
+      if (!d) return;
+      setUserCity(d.city ?? null);
+      setUserState(d.state ?? null);
+    };
+    window.addEventListener("chamo_home_location_updated", onLoc);
+    return () => window.removeEventListener("chamo_home_location_updated", onLoc);
+  }, []);
 
   useEffect(() => {
     loadPros();

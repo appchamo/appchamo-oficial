@@ -219,6 +219,25 @@ export default function HomeProCarousel({
       <div className="absolute -bottom-6 -left-6 w-28 h-28 bg-white/5 rounded-full pointer-events-none z-0" />
       <div className="absolute top-4 right-16 w-10 h-10 bg-white/10 rounded-full pointer-events-none z-0" />
 
+      {/* Localização em destaque — acima do bloco de boas-vindas / carteira */}
+      <div className="relative z-[2] px-4 pt-4 pb-1">
+        <p className="text-[10px] font-semibold text-white/90 uppercase tracking-wide mb-1.5 px-0.5">
+          A localização que você atende
+        </p>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onLocationClick();
+          }}
+          className="w-full flex items-center gap-2.5 rounded-xl bg-white/20 backdrop-blur-sm border border-white/45 px-3 py-2.5 text-left shadow-md shadow-black/15 active:scale-[0.99] transition-transform"
+        >
+          <MapPin className="w-4 h-4 text-white shrink-0" />
+          <span className="flex-1 text-sm font-bold text-white truncate">{locationLabel}</span>
+          <span className="text-[11px] font-bold text-white/95 shrink-0">Alterar</span>
+        </button>
+      </div>
+
       {/* ── track: cada slide ocupa 100% do container ── */}
       <div
         className="flex transition-transform duration-300 ease-out relative z-[1]"
@@ -228,7 +247,7 @@ export default function HomeProCarousel({
         {/* ════ SLIDE 0 — Carteira ════ */}
         <div className="min-w-full">
           <div
-            className="p-5 cursor-pointer active:opacity-90"
+            className="px-5 pt-2 pb-5 cursor-pointer active:opacity-90"
             onClick={() => navigate("/pro/financeiro")}
           >
             {/* avatar + saudação + prévia da próxima missão */}
@@ -249,14 +268,6 @@ export default function HomeProCarousel({
                 <div className="flex-1 min-w-0">
                   <p className="text-white/75 text-xs leading-none mb-0.5">{welcomeWord} de volta,</p>
                   <p className="text-white font-bold text-lg leading-tight truncate">{userName} 👋</p>
-                  <button
-                    type="button"
-                    onClick={e => { e.stopPropagation(); onLocationClick(); }}
-                    className="flex items-center gap-1 text-white/60 text-[10px] mt-1 hover:text-white/90 transition-colors"
-                  >
-                    <MapPin className="w-2.5 h-2.5" />
-                    <span className="truncate max-w-[140px] sm:max-w-[160px]">{locationLabel}</span>
-                  </button>
                 </div>
               </div>
               {nextMission && (

@@ -24,6 +24,7 @@ import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
 import { fetchViaCep } from "@/lib/viacep";
 import { forwardGeocodeBrazil } from "@/lib/geocode";
+import { setHomeLocationCache } from "@/lib/locationUtils";
 import { diagLog } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
@@ -572,6 +573,7 @@ const Home = () => {
       return;
     }
     await refreshProfile();
+    setHomeLocationCache(city, state);
     setLocationOpen(false);
     toast({ title: "Localização atualizada! Os profissionais dessa região serão exibidos." });
   };
@@ -709,6 +711,9 @@ const Home = () => {
                   </p>
                 </div>
               </div>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground px-0.5 -mb-1">
+                A região onde você vê profissionais e destaques
+              </p>
               {needsLocationSetup ? (
                 <button
                   type="button"
@@ -728,12 +733,12 @@ const Home = () => {
                 <button
                   type="button"
                   onClick={handleOpenLocation}
-                  className="w-full flex items-center gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3 text-left hover:bg-muted/70 active:scale-[0.99] transition-colors"
+                  className="w-full flex items-center gap-3 rounded-xl border-2 border-primary/40 bg-primary/5 px-4 py-3.5 text-left hover:bg-primary/10 active:scale-[0.99] transition-colors shadow-sm"
                 >
                   <MapPin className="w-5 h-5 text-primary shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sua região</p>
-                    <p className="text-sm font-semibold text-foreground truncate">{locationLabel}</p>
+                    <p className="text-sm font-bold text-foreground truncate">{locationLabel}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Toque para alterar cidade ou CEP</p>
                   </div>
                   <span className="text-xs font-bold text-primary shrink-0">Alterar</span>
                 </button>

@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { supabaseEdgeAnonymousHeaders } from "@/lib/supabaseEdgeFunctionHeaders";
 import { QrCode, RefreshCw, Smartphone, CheckCircle2, AlertCircle, Loader2, ArrowLeft, Globe } from "lucide-react";
 
 const BG_PHOTO = "https://wfxeiuqxzrlnvlopcrwd.supabase.co/storage/v1/object/public/uploads/tutorials/135419.png";
@@ -53,8 +54,7 @@ export default function QrAuthWeb() {
       const res = await fetch(`${EDGE_URL}/generate`, {
         method: "POST",
         headers: {
-          apikey: SUPABASE_ANON_OR_PUBLISHABLE,
-          Authorization: `Bearer ${SUPABASE_ANON_OR_PUBLISHABLE}`,
+          ...supabaseEdgeAnonymousHeaders(SUPABASE_ANON_OR_PUBLISHABLE),
           "Content-Type": "application/json",
         },
       });
@@ -82,10 +82,7 @@ export default function QrAuthWeb() {
       pollRef.current = setInterval(async () => {
         try {
           const statusRes = await fetch(`${EDGE_URL}/status/${t}`, {
-            headers: {
-              apikey: SUPABASE_ANON_OR_PUBLISHABLE,
-              Authorization: `Bearer ${SUPABASE_ANON_OR_PUBLISHABLE}`,
-            },
+            headers: supabaseEdgeAnonymousHeaders(SUPABASE_ANON_OR_PUBLISHABLE),
           });
           if (!statusRes.ok) return;
           const data = await statusRes.json();

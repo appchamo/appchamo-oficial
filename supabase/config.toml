@@ -480,3 +480,10 @@ entrypoint = "./functions/process_transfer/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/professional-og/index.ts"
+
+# QR login web: publishable key não é JWT (Bearer quebra no gateway); scan usa JWT do utilizador (ES256).
+# A função valida header `apikey` === SUPABASE_ANON_KEY e, no scan, getUser() com o Bearer do app.
+[functions.qr-login]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/qr-login/index.ts"

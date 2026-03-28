@@ -2,30 +2,14 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import { supabase } from "@/integrations/supabase/client";
-import { normalizeLocation } from "@/lib/locationUtils";
+import {
+  getHomeLocationCache,
+  normalizeLocation,
+  writeHomeLocationCacheOnly,
+} from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import SponsorStoryViewer, { SponsorStory } from "./SponsorStoryViewer";
-
-// Shared location cache (same key as FeaturedProfessionals)
-const LOCATION_CACHE_KEY = "chamo_user_location_v1";
-const LOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
-
-function getCachedLocation(): { city: string | null; state: string | null } | null {
-  try {
-    const raw = localStorage.getItem(LOCATION_CACHE_KEY);
-    if (!raw) return null;
-    const { city, state, ts } = JSON.parse(raw);
-    if (Date.now() - ts > LOCATION_CACHE_TTL_MS) return null;
-    return { city: city ?? null, state: state ?? null };
-  } catch { return null; }
-}
-
-function setCachedLocation(city: string | null, state: string | null) {
-  try {
-    localStorage.setItem(LOCATION_CACHE_KEY, JSON.stringify({ city, state, ts: Date.now() }));
-  } catch { /* ignore */ }
-}
 
 function getSponsorLogoUrl(logoUrl: string | null): string | null {
   if (!logoUrl) return null;
@@ -92,7 +76,7 @@ const SponsorCarousel = ({
   const [isPaused, setIsPaused] = useState(false);
   const [allSponsors, setAllSponsors] = useState<Sponsor[]>([]);
   // Init from cache immediately to avoid extra DB round-trip
-  const cachedLoc = useMemo(() => getCachedLocation(), []);
+  const cachedLoc = useMemo(() => getHomeLocationCache(), []);
   const [userState, setUserState] = useState<string | null>(cachedLoc?.state ?? null);
   const [userCity, setUserCity] = useState<string | null>(cachedLoc?.city ?? null);
   const [loaded, setLoaded] = useState(false);
@@ -286,12 +270,23 @@ const SponsorCarousel = ({
         const city = res.data.address_city || null;
         const state = res.data.address_state || null;
         diagLog("info", "sponsors", "user location refreshed", { state, city });
-        setCachedLocation(city, state);
+        writeHomeLocationCacheOnly(city, state);
         setUserState(state);
         setUserCity(city);
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const onLoc = (e: Event) => {
+      const d = (e as CustomEvent<{ city: string | null; state: string | null }>).detail;
+      if (!d) return;
+      setUserCity(d.city ?? null);
+      setUserState(d.state ?? null);
+    };
+    window.addEventListener("chamo_home_location_updated", onLoc);
+    return () => window.removeEventListener("chamo_home_location_updated", onLoc);
   }, []);
 
   const scrollToPage = useCallback((pageIndex: number) => {

@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Loader2, Megaphone } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Loader2, Megaphone, MapPin } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -401,6 +401,54 @@ const Profile = () => {
             <p className="text-sm font-medium text-emerald-800">Cadastro completo</p>
           </div>
         )}
+
+        {(() => {
+          const locLine =
+            profile.address_city && profile.address_state
+              ? `${profile.address_city}, ${profile.address_state}`
+              : profile.address_city || profile.address_state || "Definir localização";
+          const locIncomplete = !profile.address_city || !profile.address_state;
+          const consumerSide = profile.user_type === "client" || !!linkedSponsor;
+          const locCaption = consumerSide
+            ? "A região onde você vê profissionais e destaques"
+            : "A localização que você atende";
+          return (
+            <Link
+              to="/profile/settings/endereco"
+              className={`block mb-3 rounded-2xl border-2 px-4 py-3.5 transition-colors active:scale-[0.99] ${
+                locIncomplete
+                  ? "border-amber-400 bg-amber-50/90 dark:bg-amber-950/30"
+                  : "border-primary/50 bg-primary/5 hover:bg-primary/10"
+              }`}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-1.5">
+                {locCaption}
+              </p>
+              <div className="flex items-center gap-3">
+                <MapPin
+                  className={`w-5 h-5 shrink-0 ${locIncomplete ? "text-amber-700 dark:text-amber-400" : "text-primary"}`}
+                />
+                <div className="flex-1 min-w-0">
+                  <p
+                    className={`text-sm font-bold truncate ${
+                      locIncomplete ? "text-amber-950 dark:text-amber-50" : "text-foreground"
+                    }`}
+                  >
+                    {locLine}
+                  </p>
+                  {locIncomplete ? (
+                    <p className="text-xs text-amber-900/90 dark:text-amber-100/85 mt-1 leading-snug">
+                      Toque para informar cidade e CEP — destaques e patrocinadores seguem essa região.
+                    </p>
+                  ) : null}
+                </div>
+                <ChevronRight
+                  className={`w-5 h-5 shrink-0 ${locIncomplete ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
+                />
+              </div>
+            </Link>
+          );
+        })()}
 
         <div className="bg-card border rounded-2xl shadow-card mb-4 overflow-hidden">
           {/* Capa do perfil */}

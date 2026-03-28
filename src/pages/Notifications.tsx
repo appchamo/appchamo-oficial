@@ -51,9 +51,12 @@ const resolveAction = (n: Notification): "navigate" | "modal" => {
   if (n.type === "reminder" && n.link) return "navigate";
   if (n.type === "follow" && n.link) return "navigate";
   if (n.type === "community" && n.link) return "navigate";
+  if (n.link && (n.link.includes("feed=comunidade") || n.link.includes("feed%3Dcomunidade")))
+    return "navigate";
   if (n.link?.includes("/messages/")) return "navigate";
   if (n.type === "admin" && n.link) return "navigate";
   if (n.type === "support" && n.link) return "navigate";
+  if (n.title.toLowerCase().includes("suporte") && n.link) return "navigate";
   if (t.includes("plano") && n.link) return "navigate";
   if ((t.includes("repasse") || t.includes("transferi")) && n.link) return "navigate";
   // Pagamento e qualquer coisa sem destino claro → modal

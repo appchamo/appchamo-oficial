@@ -21,6 +21,7 @@ import {
   Maximize2,
   MoreHorizontal,
   ChevronDown,
+  EyeOff,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -30,7 +31,13 @@ import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
@@ -243,6 +250,12 @@ export default function CommunityFeed({
   const [reportReason, setReportReason] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [undoHideId, setUndoHideId] = useState<string | null>(null);
+  const [undoHidePostId, setUndoHidePostId] = useState<string | null>(null);
+  const [hiddenPostsSheetOpen, setHiddenPostsSheetOpen] = useState(false);
+  /** Posts ocultos que já não estão no feed carregado (só para o painel Ocultas). */
+  const [hiddenPostStubs, setHiddenPostStubs] = useState<
+    Record<string, { id: string; body: string | null; created_at: string }>
+  >({});
   const [expandedBodies, setExpandedBodies] = useState<Record<string, boolean>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentSubmitting, setCommentSubmitting] = useState<string | null>(null);
@@ -259,6 +272,16 @@ export default function CommunityFeed({
   const [loadingFavoritesShare, setLoadingFavoritesShare] = useState(false);
   const [feedScope, setFeedScope] = useState<"all" | "favorites">("all");
   const [favoritedAuthorUserIds, setFavoritedAuthorUserIds] = useState<Set<string>>(() => new Set());
+
+  const highlightPostIdRef = useRef<string | null | undefined>(highlightPostId);
+  useEffect(() => {
+    highlightPostIdRef.current = highlightPostId;
+  }, [highlightPostId]);
+
+  const postsRef = useRef<PostRow[]>([]);
+  useEffect(() => {
+    postsRef.current = posts;
+  }, [posts]);
 
   const communityLink = "/home?feed=comunidade";
 
@@ -295,8 +318,17 @@ export default function CommunityFeed({
         .limit(50);
       if (pe) throw pe;
       const plist = (postRows || []) as PostRow[];
-      setPosts(plist);
-      if (!plist.length) {
+      const hId = String(highlightPostIdRef.current || "").trim();
+      const prevPosts = postsRef.current;
+      let mergedList = plist;
+      if (hId) {
+        const extra = prevPosts.find((p) => p.id === hId);
+        if (extra && !plist.some((p) => p.id === hId)) {
+          mergedList = [extra, ...plist];
+        }
+      }
+      setPosts(mergedList);
+      if (!mergedList.length) {
         setAuthors({});
         setReactions([]);
         setCommentsByPost({});
@@ -306,7 +338,7 @@ export default function CommunityFeed({
         setCommentReactions([]);
         return;
       }
-      const authorIds = [...new Set(plist.map((p) => p.author_id))];
+      const authorIds = [...new Set(mergedList.map((p) => p.author_id))];
       const { data: profs } = await supabase
         .from("profiles")
         .select("user_id, display_name, full_name, avatar_url")
@@ -317,7 +349,7 @@ export default function CommunityFeed({
       });
       setAuthors(amap);
 
-      const pids = plist.map((p) => p.id);
+      const pids = mergedList.map((p) => p.id);
       const { data: rx } = await supabase
         .from("community_post_reactions" as any)
         .select("post_id, user_id, reaction_type")
@@ -399,6 +431,114 @@ export default function CommunityFeed({
     loadFeed();
   }, [loadFeed]);
 
+  /** Deep link / suporte: post fora dos últimos 50 ou denúncia antiga — carrega o post pelo id. */
+  useEffect(() => {
+    if (!user || !highlightPostId) return;
+    if (loading) return;
+    if (posts.some((p) => p.id === highlightPostId)) return;
+
+    let cancelled = false;
+    const hid = highlightPostId;
+
+    void (async () => {
+      try {
+        const { data: row, error: pe } = await supabase
+          .from("community_posts" as any)
+          .select("id, author_id, body, image_url, video_url, audience, created_at")
+          .eq("id", hid)
+          .maybeSingle();
+        if (cancelled || pe || !row) return;
+
+        const pr = row as PostRow;
+        setPosts((prev) => (prev.some((p) => p.id === pr.id) ? prev : [pr, ...prev]));
+
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("user_id, display_name, full_name, avatar_url")
+          .eq("user_id", pr.author_id)
+          .maybeSingle();
+        if (!cancelled && prof) {
+          setAuthors((a) => ({ ...a, [pr.author_id]: prof as AuthorRow }));
+        }
+
+        const { data: rx } = await supabase
+          .from("community_post_reactions" as any)
+          .select("post_id, user_id, reaction_type")
+          .eq("post_id", hid);
+        if (!cancelled && rx?.length) {
+          setReactions((prev) => [...prev.filter((r) => r.post_id !== hid), ...(rx as ReactionRow[])]);
+        }
+
+        const { data: cmts } = await supabase
+          .from("community_post_comments" as any)
+          .select("id, post_id, user_id, body, created_at, parent_id")
+          .eq("post_id", hid)
+          .order("created_at", { ascending: true });
+        if (!cancelled) {
+          const cList = (cmts || []) as CommentRow[];
+          setCommentsByPost((prev) => ({ ...prev, [hid]: cList }));
+          const cAuthorIds = [...new Set(cList.map((c) => c.user_id))].filter((id) => id !== pr.author_id);
+          if (cAuthorIds.length) {
+            const { data: cprofs } = await supabase
+              .from("profiles")
+              .select("user_id, display_name, full_name, avatar_url")
+              .in("user_id", cAuthorIds);
+            if (!cancelled && cprofs?.length) {
+              setCommentAuthors((prev) => {
+                const m = { ...prev };
+                (cprofs as any[]).forEach((p) => {
+                  m[p.user_id] = p as AuthorRow;
+                });
+                return m;
+              });
+            }
+          }
+          const cids = cList.map((c) => c.id);
+          if (cids.length) {
+            const { data: crxData } = await supabase
+              .from("community_comment_reactions" as any)
+              .select("comment_id, user_id, reaction_type")
+              .in("comment_id", cids);
+            if (!cancelled && crxData?.length) {
+              setCommentReactions((prev) => [
+                ...prev.filter((r) => !cids.includes(r.comment_id)),
+                ...(crxData as CommentReactionRow[]),
+              ]);
+            }
+          }
+        }
+
+        const { data: proRow } = await supabase
+          .from("professionals")
+          .select("user_id, id, slug, verified, professions(name), categories(name)")
+          .eq("user_id", pr.author_id)
+          .maybeSingle();
+        if (!cancelled && proRow) {
+          const r: any = proRow;
+          const key = String(r.slug || r.id || "").trim();
+          if (key) {
+            setProPathByUserId((prev) => ({
+              ...prev,
+              [pr.author_id]: `/professional/${encodeURIComponent(key)}`,
+            }));
+          }
+          const pn = r.professions?.name;
+          const headline = pn && String(pn).trim() ? String(pn).trim() : "";
+          setAuthorProMeta((prev) => ({
+            ...prev,
+            [pr.author_id]: { proId: r.id, headline, verified: !!r.verified },
+          }));
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, highlightPostId, loading, posts]);
+
   useEffect(() => {
     if (!composerMedia) {
       setComposerPreview(null);
@@ -417,8 +557,50 @@ export default function CommunityFeed({
   const displayPosts = useMemo(() => {
     const scope =
       feedScope === "all" ? posts : posts.filter((p) => favoritedAuthorUserIds.has(p.author_id));
-    return scope.filter((p) => !hiddenPostIds.has(p.id));
-  }, [posts, feedScope, favoritedAuthorUserIds, hiddenPostIds]);
+    return scope.filter(
+      (p) =>
+        !hiddenPostIds.has(p.id) ||
+        (!!highlightPostId && highlightPostId.length > 0 && p.id === highlightPostId),
+    );
+  }, [posts, feedScope, favoritedAuthorUserIds, hiddenPostIds, highlightPostId]);
+
+  const hiddenPostsList = useMemo(() => {
+    const rows: { id: string; body: string | null; created_at: string }[] = [];
+    hiddenPostIds.forEach((id) => {
+      const p = posts.find((x) => x.id === id);
+      const s = hiddenPostStubs[id];
+      if (p) rows.push({ id: p.id, body: p.body, created_at: p.created_at });
+      else if (s) rows.push(s);
+      else rows.push({ id, body: null, created_at: "" });
+    });
+    return rows.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  }, [hiddenPostIds, posts, hiddenPostStubs]);
+
+  useEffect(() => {
+    if (!hiddenPostsSheetOpen || !user) return;
+    const missing = [...hiddenPostIds].filter((id) => !posts.some((p) => p.id === id));
+    if (!missing.length) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("community_posts" as any)
+        .select("id, body, created_at")
+        .in("id", missing);
+      if (cancelled || error) return;
+      const next: Record<string, { id: string; body: string | null; created_at: string }> = {};
+      (data || []).forEach((row: any) => {
+        next[row.id] = {
+          id: row.id,
+          body: row.body ?? null,
+          created_at: row.created_at ?? "",
+        };
+      });
+      setHiddenPostStubs((prev) => ({ ...prev, ...next }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hiddenPostsSheetOpen, user, hiddenPostIds, posts]);
 
   const reactionSummary = useMemo(() => {
     const m: Record<string, Partial<Record<ReactionType, number>>> = {};
@@ -785,12 +967,38 @@ export default function CommunityFeed({
       });
       if (error) throw error;
       setHiddenPostIds((prev) => new Set([...prev, postId]));
+      setUndoHidePostId(postId);
       if (commentsSheetPost?.id === postId) setCommentsSheetPost(null);
       if (fullscreenPost?.id === postId) setFullscreenPost(null);
       if (sharePost?.id === postId) setSharePost(null);
-      toast({ title: "Publicação oculta para você" });
+      toast({
+        title: "Publicação oculta para você",
+        description: "Só afeta a tua conta. Usa Desfazer ou “Ocultas” para voltar a ver.",
+      });
     } catch (e: any) {
       toast({ title: "Erro", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const undoHidePost = async (postId?: string) => {
+    const pid = postId ?? undoHidePostId;
+    if (!user || !pid) return;
+    try {
+      const { error } = await supabase
+        .from("community_post_user_hides" as any)
+        .delete()
+        .eq("user_id", user.id)
+        .eq("post_id", pid);
+      if (error) throw error;
+      setHiddenPostIds((prev) => {
+        const n = new Set(prev);
+        n.delete(pid);
+        return n;
+      });
+      if (undoHidePostId === pid) setUndoHidePostId(null);
+      toast({ title: "Publicação visível outra vez" });
+    } catch (e: any) {
+      toast({ title: "Erro ao desfazer", description: e.message, variant: "destructive" });
     }
   };
 
@@ -1309,7 +1517,7 @@ export default function CommunityFeed({
       )}
 
       {user && (
-        <div className="flex gap-2 mb-3">
+        <div className="flex flex-wrap gap-2 mb-3 items-center">
           <button
             type="button"
             onClick={() => setFeedScope("all")}
@@ -1334,8 +1542,35 @@ export default function CommunityFeed({
           >
             Ver favoritos
           </button>
+          {hiddenPostIds.size > 0 ? (
+            <button
+              type="button"
+              onClick={() => setHiddenPostsSheetOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border border-border/70 bg-muted/40 text-muted-foreground hover:bg-muted/70 transition-colors"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+              Ocultas ({hiddenPostIds.size})
+            </button>
+          ) : null}
         </div>
       )}
+
+      {user && undoHidePostId ? (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/35 px-3 py-2.5 mb-3 text-[13px]">
+          <p className="text-muted-foreground leading-snug min-w-0">
+            Publicação oculta na tua conta. Podes desfazer agora ou gerir em <strong className="text-foreground">Ocultas</strong>.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="shrink-0 h-8 font-bold text-primary"
+            onClick={() => void undoHidePost()}
+          >
+            Desfazer
+          </Button>
+        </div>
+      ) : null}
 
       {canPost && (
         <>
@@ -1456,8 +1691,9 @@ export default function CommunityFeed({
                       <video
                         src={composerPreview}
                         controls
-                        className="w-full max-h-64 object-contain"
                         playsInline
+                        preload="metadata"
+                        className="w-full max-h-64 object-contain"
                       />
                     ) : (
                       <img src={composerPreview} alt="" className="w-full max-h-64 object-cover" />
@@ -1654,10 +1890,12 @@ export default function CommunityFeed({
                   {post.video_url ? (
                     <div className="relative mt-3 rounded-xl overflow-hidden bg-black">
                       <video
+                        key={post.video_url}
                         src={post.video_url}
                         controls
-                        className="w-full max-h-[min(420px,70vh)] object-contain bg-black"
                         playsInline
+                        preload="metadata"
+                        className="w-full max-h-[min(420px,70vh)] object-contain bg-black"
                       />
                       <button
                         type="button"
@@ -2112,6 +2350,63 @@ export default function CommunityFeed({
         </SheetContent>
       </Sheet>
 
+      <Sheet
+        open={hiddenPostsSheetOpen}
+        onOpenChange={(o) => {
+          setHiddenPostsSheetOpen(o);
+        }}
+      >
+        <SheetContent
+          side="bottom"
+          className="rounded-t-[28px] p-0 gap-0 max-h-[min(85vh,640px)] flex flex-col overflow-hidden border-t border-border/60"
+        >
+          <div className="mx-auto mt-2.5 mb-1 h-1 w-11 rounded-full bg-muted-foreground/20 shrink-0" aria-hidden />
+          <SheetHeader className="px-5 pt-1 pb-3 text-left border-b border-border/40 space-y-1">
+            <SheetTitle className="text-lg font-bold tracking-tight">Publicações ocultas</SheetTitle>
+            <SheetDescription className="text-[13px] text-muted-foreground leading-snug">
+              Só deixam de aparecer no teu feed — ninguém mais é afetado. Podes voltar a mostrar qualquer uma aqui.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 min-h-0">
+            {hiddenPostsList.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-6">Não tens publicações ocultas.</p>
+            ) : (
+              hiddenPostsList.map((row) => {
+                const preview = (row.body || "").trim().slice(0, 120);
+                const label =
+                  preview.length > 0
+                    ? preview + (row.body && row.body.length > 120 ? "…" : "")
+                    : "Sem texto";
+                return (
+                  <div
+                    key={row.id}
+                    className="flex items-start justify-between gap-3 rounded-xl border border-border/50 bg-muted/25 px-3 py-2.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] text-foreground leading-snug line-clamp-3">{label}</p>
+                      {row.created_at ? (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          {formatDistanceToNow(new Date(row.created_at), { addSuffix: true, locale: ptBR })}
+                        </p>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 h-8 text-xs font-bold"
+                      onClick={() => void undoHidePost(row.id)}
+                    >
+                      Mostrar
+                    </Button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <Dialog
         open={!!reportDialog}
         onOpenChange={(o) => {
@@ -2178,10 +2473,12 @@ export default function CommunityFeed({
                 </button>
                 {fullscreenPost.video_url ? (
                   <video
+                    key={fullscreenPost.video_url}
                     src={fullscreenPost.video_url}
                     controls
-                    className="max-h-full max-w-full object-contain"
                     playsInline
+                    preload="metadata"
+                    className="max-h-full max-w-full object-contain"
                   />
                 ) : fullscreenPost.image_url ? (
                   <img

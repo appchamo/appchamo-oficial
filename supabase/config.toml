@@ -403,6 +403,12 @@ verify_jwt = true
 import_map = "./functions/send-push-notification/deno.json"
 entrypoint = "./functions/send-push-notification/index.ts"
 
+# IA do suporte: valida ticket no código com service role; JWT no gateway falha com ES256 (401).
+[functions.support-ai-reply]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/support-ai-reply/index.ts"
+
 [functions.agenda-reminders]
 enabled = true
 verify_jwt = false

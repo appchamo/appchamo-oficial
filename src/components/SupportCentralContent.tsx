@@ -60,6 +60,7 @@ interface ChatReport {
 interface CommentCommunityReport {
   id: string;
   comment_id: string;
+  post_id: string | null;
   reporter_id: string;
   reason: string;
   status: string;
@@ -223,7 +224,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         const cids = [...new Set(rows.map((r) => r.comment_id))];
         const { data: cmtData } = await supabase
           .from("community_post_comments" as any)
-          .select("id, body, user_id")
+          .select("id, body, user_id, post_id")
           .in("id", cids);
         const cMap = new Map((cmtData || []).map((c: any) => [c.id, c]));
         const ruids = [...new Set(rows.map((r) => r.reporter_id))];
@@ -233,10 +234,11 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
           .in("user_id", ruids);
         const rMap = new Map((rProfs || []).map((p: any) => [p.user_id, p]));
         const enriched: CommentCommunityReport[] = rows.map((r) => {
-          const c = cMap.get(r.comment_id) as { body?: string; user_id?: string } | undefined;
+          const c = cMap.get(r.comment_id) as { body?: string; user_id?: string; post_id?: string } | undefined;
           return {
             id: r.id,
             comment_id: r.comment_id,
+            post_id: c?.post_id ?? null,
             reporter_id: r.reporter_id,
             reason: r.reason,
             status: r.status,
@@ -342,13 +344,38 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
     setLoadingReportedChat(false);
   };
 
-  const handleResolveReport = async (reportId: string) => {
-    await supabase.from("chat_reports" as any).update({ status: 'resolvido' }).eq("id", reportId);
+  const notifyReporterResolved = async (
+    reporterId: string,
+    opts: { kind: "chat" | "comment" | "post"; postId?: string | null },
+  ) => {
+    const link =
+      opts.kind === "post" || opts.kind === "comment"
+        ? opts.postId
+          ? `/home?feed=comunidade&post=${opts.postId}`
+          : "/home?feed=comunidade"
+        : "/messages";
+    const msg =
+      opts.kind === "chat"
+        ? "A sua denúncia de conversa foi analisada e marcada como resolvida."
+        : "A sua denúncia na Comunidade foi analisada e marcada como resolvida.";
+    await supabase.from("notifications").insert({
+      user_id: reporterId,
+      title: "Denúncia resolvida",
+      message: msg,
+      type: "support",
+      read: false,
+      link,
+    });
+  };
+
+  const handleResolveReport = async (reportId: string, reporterId: string) => {
+    await supabase.from("chat_reports" as any).update({ status: "resolvido" }).eq("id", reportId);
+    await notifyReporterResolved(reporterId, { kind: "chat" });
     toast({ title: "Denúncia resolvida com sucesso!" });
     fetchReports();
   };
 
-  const handleResolveCommentReport = async (reportId: string) => {
+  const handleResolveCommentReport = async (reportId: string, reporterId: string, postId: string | null) => {
     const { error } = await supabase
       .from("community_comment_reports" as any)
       .update({ status: "resolvido" })
@@ -357,11 +384,12 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
       toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
       return;
     }
+    await notifyReporterResolved(reporterId, { kind: "comment", postId });
     toast({ title: "Denúncia de comentário marcada como resolvida" });
     fetchReports();
   };
 
-  const handleResolvePostReport = async (reportId: string) => {
+  const handleResolvePostReport = async (reportId: string, reporterId: string, postId: string) => {
     const { error } = await supabase
       .from("community_post_reports" as any)
       .update({ status: "resolvido" })
@@ -370,6 +398,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
       toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
       return;
     }
+    await notifyReporterResolved(reporterId, { kind: "post", postId });
     toast({ title: "Denúncia de publicação marcada como resolvida" });
     fetchReports();
   };
@@ -399,14 +428,26 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
       return;
     }
     setSending(true);
+    const trimmed = text.trim();
     const { error } = await supabase.from("support_messages").insert({
       user_id: selected.user_id,
       sender_id: adminId,
-      content: text.trim(),
+      content: trimmed,
       ticket_id: selected.id,
     });
     if (error) toast({ title: "Erro ao enviar", variant: "destructive" });
-    else setText("");
+    else {
+      setText("");
+      const preview = trimmed.length > 140 ? `${trimmed.slice(0, 140)}…` : trimmed;
+      await supabase.from("notifications").insert({
+        user_id: selected.user_id,
+        title: "Suporte Chamô",
+        message: preview || "Nova mensagem no seu atendimento.",
+        type: "support",
+        read: false,
+        link: `/support/${selected.id}`,
+      });
+    }
     setSending(false);
   };
 
@@ -424,6 +465,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
       title: "Suporte encerrado",
       message: `Sua solicitação ${selected.protocol || ""} foi concluída. Caso precise, abra uma nova solicitação.`,
       type: "support",
+      read: false,
       link: "/support",
     });
     setCloseOpen(false);
@@ -832,7 +874,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
 
                       {r.status !== 'resolvido' && (
                         <button
-                          onClick={() => handleResolveReport(r.id)}
+                          onClick={() => void handleResolveReport(r.id, r.reporter_id)}
                           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
                         >
                           <CheckCircle2 className="w-4 h-4" /> Marcar Resolvido
@@ -909,10 +951,19 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                           <p className="text-sm text-foreground">{r.reason}</p>
                         </div>
 
+                        {r.post_id ? (
+                          <Link
+                            to={`/home?feed=comunidade&post=${r.post_id}`}
+                            className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
+                          >
+                            <Eye className="w-4 h-4" /> Ver publicação na Comunidade
+                          </Link>
+                        ) : null}
+
                         {r.status !== "resolvido" ? (
                           <button
                             type="button"
-                            onClick={() => void handleResolveCommentReport(r.id)}
+                            onClick={() => void handleResolveCommentReport(r.id, r.reporter_id, r.post_id)}
                             className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
                           >
                             <CheckCircle2 className="w-4 h-4" /> Marcar resolvido
@@ -992,7 +1043,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
 
                         <div className="flex flex-col gap-2">
                           <Link
-                            to={`/home?feed=comunidade&post=${encodeURIComponent(r.post_id)}`}
+                            to={`/home?feed=comunidade&post=${r.post_id}`}
                             className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
                           >
                             <Eye className="w-4 h-4" /> Ver na Comunidade
@@ -1000,7 +1051,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                           {r.status !== "resolvido" ? (
                             <button
                               type="button"
-                              onClick={() => void handleResolvePostReport(r.id)}
+                              onClick={() => void handleResolvePostReport(r.id, r.reporter_id, r.post_id)}
                               className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
                             >
                               <CheckCircle2 className="w-4 h-4" /> Marcar resolvido

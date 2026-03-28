@@ -62,10 +62,15 @@ const SupportThread = () => {
   } | null>(null);
   const [mediaViewerFullscreen, setMediaViewerFullscreen] = useState(false);
 
-  /** Chama a edge function de IA sem verificação de JWT duplicada */
+  /** Edge function com service role; em projetos com verify_jwt=true no dashboard, enviar JWT evita 401 no gateway. */
   const invokeAI = async () => {
     try {
-      await supabase.functions.invoke("support-ai-reply", { body: { ticket_id: ticketId } });
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      await supabase.functions.invoke("support-ai-reply", {
+        body: { ticket_id: ticketId },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
     } catch (e) {
       console.error("[Suporte IA] Falha:", e);
     }

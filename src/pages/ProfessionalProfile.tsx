@@ -121,6 +121,8 @@ const ProfessionalProfile = () => {
   const [dmOpening, setDmOpening] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
   const [friendsCount, setFriendsCount] = useState<number | null>(null);
+  /** Visitante: há seguimento mútuo profissional com o perfil que está a ver? */
+  const [mutualWithViewer, setMutualWithViewer] = useState<boolean | null>(null);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -190,10 +192,28 @@ const ProfessionalProfile = () => {
           .maybeSingle();
         if (sub && (sub as { plan_id: string }).plan_id) setPlanId((sub as { plan_id: string }).plan_id);
 
-        const { data: fc } = await supabase.rpc("count_professional_mutual_followers", {
-          p_professional_id: data.id,
-        });
-        setFriendsCount(typeof fc === "number" ? fc : 0);
+        if (user && user.id === data.user_id) {
+          const { data: fc } = await supabase.rpc("count_professional_mutual_followers", {
+            p_professional_id: data.id,
+          });
+          setFriendsCount(typeof fc === "number" ? fc : 0);
+        } else {
+          setFriendsCount(null);
+        }
+
+        if (user && user.id !== data.user_id) {
+          const { data: mut, error: mutErr } = await supabase.rpc("professional_is_mutual_with_viewer" as any, {
+            p_professional_id: data.id,
+          });
+          if (mutErr) {
+            console.warn("professional_is_mutual_with_viewer", mutErr);
+            setMutualWithViewer(false);
+          } else {
+            setMutualWithViewer(mut === true);
+          }
+        } else {
+          setMutualWithViewer(null);
+        }
 
         if (user && user.id === data.user_id) {
           const [catRes, profRes] = await Promise.all([
@@ -246,6 +266,7 @@ const ProfessionalProfile = () => {
       } else {
         setPublicSeals([]);
         setFriendsCount(null);
+        setMutualWithViewer(null);
       }
     setLoading(false);
   }, [id]);
@@ -328,11 +349,16 @@ const ProfessionalProfile = () => {
         const { error } = await supabase.from("professional_follows").delete().eq("user_id", u.id).eq("professional_id", pro.id);
         if (error) throw error;
         setIsFollowing(false);
+        setMutualWithViewer(false);
         toast({ title: "Você deixou de seguir" });
       } else {
         const { error } = await supabase.from("professional_follows").insert({ user_id: u.id, professional_id: pro.id });
         if (error) throw error;
         setIsFollowing(true);
+        const { data: mut, error: mutErr } = await supabase.rpc("professional_is_mutual_with_viewer" as any, {
+          p_professional_id: pro.id,
+        });
+        setMutualWithViewer(!mutErr && mut === true);
         toast({ title: "Seguindo!" });
       }
     } catch {
@@ -650,6 +676,18 @@ const ProfessionalProfile = () => {
                 <span>{pro.total_services} serviços</span>
               </div>
             </div>
+
+            {mutualWithViewer === true && (
+              <div className="mb-3 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2.5 flex items-start gap-2.5">
+                <Users className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-foreground">Amigos no Chamô</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Vocês seguem o perfil profissional um do outro.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Nome + edição */}
             {editingName ? (
@@ -1046,7 +1084,7 @@ const ProfessionalProfile = () => {
             </div>
           </div>
 
-          {friendsCount !== null && (
+          {isOwner && friendsCount !== null && (
             <div className="flex items-center gap-2 mb-4 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
               <Users className="w-4 h-4 text-primary shrink-0" />
               <div className="min-w-0">
@@ -1054,7 +1092,7 @@ const ProfessionalProfile = () => {
                   {friendsCount} {friendsCount === 1 ? "amigo" : "amigos"}
                 </p>
                 <p className="text-[11px] text-muted-foreground leading-tight">
-                  Seguimento mútuo: vocês seguem o perfil profissional um do outro
+                  Perfis profissionais com seguimento mútuo com você (rede no Chamô).
                 </p>
               </div>
             </div>

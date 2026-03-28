@@ -50,6 +50,7 @@ const resolveAction = (n: Notification): "navigate" | "modal" => {
   if (n.type === "appointment" || t.includes("agendamento")) return "navigate";
   if (n.type === "reminder" && n.link) return "navigate";
   if (n.type === "follow" && n.link) return "navigate";
+  if (n.type === "friend_request" && n.link) return "navigate";
   if (n.link?.includes("/messages/")) return "navigate";
   if (n.type === "admin" && n.link) return "navigate";
   if (n.type === "support" && n.link) return "navigate";
@@ -64,6 +65,7 @@ const resolveDestination = (n: Notification): string => {
   if (n.type === "coupon" || t.includes("cupom")) return "/coupons";
   if (n.type === "appointment" || t.includes("agendamento")) return n.link || "/meus-agendamentos";
   if (n.type === "seal_award") return "/pro";
+  if (n.type === "friend_request") return n.link || "/profile?friends=1";
   return n.link || "/home";
 };
 
@@ -419,9 +421,9 @@ const Notifications = () => {
                     )}
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>
-                        {n.type === "follow" && message ? `${n.title} ${message}` : n.title}
+                        {n.type === "follow" && message ? `${n.title} ${message}` : n.type === "friend_request" && message ? `${n.title} ${message}` : n.title}
                       </p>
-                      {message && n.type !== "follow" ? (
+                      {message && n.type !== "follow" && n.type !== "friend_request" ? (
                         <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>
                       ) : null}
                     </div>

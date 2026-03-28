@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
-import { getMutualFriendUserIds, usersAreMutualFriends } from "@/lib/userMutualFriends";
+import { areFriends, fetchAcceptedFriendUserIds } from "@/lib/chamoFriends";
 import { compressImageForChat } from "@/lib/compressChatImage";
 import { LinkedInLikeControl, type LinkedInReactionType } from "@/components/community/LinkedInLikeControl";
 import {
@@ -866,7 +866,7 @@ export default function CommunityFeed({
         }
         const term = `%${raw.split(/\s+/)[0]}%`;
 
-        const mutualIds = await getMutualFriendUserIds(supabase, user.id);
+        const mutualIds = await fetchAcceptedFriendUserIds(supabase, user.id);
         const mutualSet = new Set(mutualIds);
 
         const { data, error } = await supabase
@@ -923,7 +923,7 @@ export default function CommunityFeed({
     (async () => {
       setLoadingFollowedShare(true);
       try {
-        const mutualUids = await getMutualFriendUserIds(supabase, user.id);
+        const mutualUids = await fetchAcceptedFriendUserIds(supabase, user.id);
         if (mutualUids.length === 0) {
           if (!cancelled) setFollowedForShare([]);
           return;
@@ -957,11 +957,11 @@ export default function CommunityFeed({
     if (!user || !sharePost) return;
     setShareSending(true);
     try {
-      const mutualOk = await usersAreMutualFriends(supabase, user.id, toUserId);
+      const mutualOk = await areFriends(supabase, user.id, toUserId);
       if (!mutualOk) {
         toast({
-          title: "Seguimento mútuo necessário",
-          description: "Só pode partilhar com quem o segue e que também o segue de volta.",
+          title: "Só com amigos",
+          description: "Partilhe na conversa apenas com quem aceitou amizade consigo no Chamô.",
           variant: "destructive",
         });
         return;

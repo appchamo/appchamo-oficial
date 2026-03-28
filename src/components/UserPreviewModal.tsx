@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
-import { Heart, UserPlus, Loader2 } from "lucide-react";
+import { Heart, UserPlus, Loader2, UserRoundCheck, Send } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import {
+  acceptFriendRequest,
+  declineOrCancelFriendRequest,
+  getFriendRelationshipState,
+  sendFriendRequest,
+  type FriendRelationshipState,
+} from "@/lib/chamoFriends";
 
 const getOptimizedAvatar = (url: string | null | undefined) => {
   if (!url) return undefined;
@@ -32,6 +39,8 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
   const [following, setFollowing] = useState(false);
   const [favorite, setFavorite] = useState(false);
   const [me, setMe] = useState<string | null>(null);
+  const [friendRel, setFriendRel] = useState<FriendRelationshipState | null>(null);
+  const [friendBusy, setFriendBusy] = useState(false);
 
   useEffect(() => {
     if (!open || !userId) return;
@@ -70,6 +79,17 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
         } else {
           setFollowing(false);
           setFavorite(false);
+        }
+
+        if (user?.id && userId && user.id !== userId) {
+          try {
+            const rel = await getFriendRelationshipState(supabase, user.id, userId);
+            if (!cancelled) setFriendRel(rel);
+          } catch {
+            if (!cancelled) setFriendRel({ status: "none" });
+          }
+        } else if (!cancelled) {
+          setFriendRel(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -117,6 +137,69 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
       toast({ title: "Não foi possível atualizar", variant: "destructive" });
     } finally {
       setSocialBusy(false);
+    }
+  };
+
+  const friendToast = (r: string) => {
+    switch (r) {
+      case "request_sent":
+        toast({ title: "Pedido enviado", description: "A pessoa precisa aceitar." });
+        break;
+      case "became_friends":
+        toast({ title: "Vocês são amigos!" });
+        break;
+      case "already_friends":
+        toast({ title: "Já são amigos" });
+        break;
+      case "request_already_pending":
+        toast({ title: "Pedido já enviado" });
+        break;
+      default:
+        toast({ title: "Concluído" });
+    }
+  };
+
+  const handleAddFriend = async () => {
+    if (!me || !userId || !friendRel || friendRel.status !== "none") return;
+    setFriendBusy(true);
+    try {
+      const r = await sendFriendRequest(supabase, userId);
+      friendToast(r);
+      setFriendRel(await getFriendRelationshipState(supabase, me, userId));
+    } catch {
+      toast({ title: "Não foi possível enviar", variant: "destructive" });
+    } finally {
+      setFriendBusy(false);
+    }
+  };
+
+  const handleAcceptFriend = async () => {
+    if (!me || !friendRel || friendRel.status !== "incoming_pending") return;
+    setFriendBusy(true);
+    try {
+      await acceptFriendRequest(supabase, friendRel.requestId);
+      toast({ title: "Amizade aceita!" });
+      setFriendRel(await getFriendRelationshipState(supabase, me, userId!));
+    } catch {
+      toast({ title: "Não foi possível aceitar", variant: "destructive" });
+    } finally {
+      setFriendBusy(false);
+    }
+  };
+
+  const handleDeclineOrCancelFriend = async () => {
+    if (!me || !friendRel || (friendRel.status !== "incoming_pending" && friendRel.status !== "outgoing_pending")) return;
+    setFriendBusy(true);
+    try {
+      await declineOrCancelFriendRequest(supabase, friendRel.requestId);
+      toast({
+        title: friendRel.status === "incoming_pending" ? "Recusado" : "Pedido cancelado",
+      });
+      setFriendRel(await getFriendRelationshipState(supabase, me, userId!));
+    } catch {
+      toast({ title: "Não foi possível atualizar", variant: "destructive" });
+    } finally {
+      setFriendBusy(false);
     }
   };
 
@@ -213,6 +296,67 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
                   {following ? "Seguindo" : "Seguir"}
                 </Button>
               </DialogFooter>
+            ) : null}
+            {me && userId && userId !== me && friendRel && friendRel.status !== "self" ? (
+              <div className="w-full space-y-2 border-t border-border/60 pt-3 mt-1">
+                {friendRel.status === "none" ? (
+                  <Button
+                    type="button"
+                    className="rounded-xl font-bold w-full gap-2 bg-primary/12 text-primary border border-primary/35 hover:bg-primary/18"
+                    disabled={friendBusy}
+                    onClick={() => void handleAddFriend()}
+                  >
+                    {friendBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                    Adicionar aos amigos
+                  </Button>
+                ) : null}
+                {friendRel.status === "outgoing_pending" ? (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5 shrink-0" />
+                      Pedido enviado — aguardando
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full h-8 text-xs"
+                      disabled={friendBusy}
+                      onClick={() => void handleDeclineOrCancelFriend()}
+                    >
+                      Cancelar pedido
+                    </Button>
+                  </div>
+                ) : null}
+                {friendRel.status === "incoming_pending" ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl font-bold text-xs"
+                      disabled={friendBusy}
+                      onClick={() => void handleDeclineOrCancelFriend()}
+                    >
+                      Recusar
+                    </Button>
+                    <Button
+                      type="button"
+                      className="rounded-xl font-bold text-xs gap-1"
+                      disabled={friendBusy}
+                      onClick={() => void handleAcceptFriend()}
+                    >
+                      {friendBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserRoundCheck className="w-4 h-4" />}
+                      Aceitar
+                    </Button>
+                  </div>
+                ) : null}
+                {friendRel.status === "friends" ? (
+                  <div className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/8 py-2 text-xs font-bold text-primary">
+                    <UserRoundCheck className="w-4 h-4" />
+                    Amigos no Chamô
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </div>
         )}

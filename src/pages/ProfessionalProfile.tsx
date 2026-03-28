@@ -24,6 +24,8 @@ import {
   Heart,
   MessageSquare,
   Users,
+  UserRoundCheck,
+  Send,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -42,7 +44,14 @@ import { getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
-import { getMutualFriendUserIds } from "@/lib/userMutualFriends";
+import {
+  acceptFriendRequest,
+  declineOrCancelFriendRequest,
+  fetchAcceptedFriendUserIds,
+  getFriendRelationshipState,
+  sendFriendRequest,
+  type FriendRelationshipState,
+} from "@/lib/chamoFriends";
 import { cn } from "@/lib/utils";
 
 interface ProData {
@@ -122,8 +131,8 @@ const ProfessionalProfile = () => {
   const [dmOpening, setDmOpening] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
   const [friendsCount, setFriendsCount] = useState<number | null>(null);
-  /** Visitante: há seguimento mútuo profissional com o perfil que está a ver? */
-  const [mutualWithViewer, setMutualWithViewer] = useState<boolean | null>(null);
+  const [friendRel, setFriendRel] = useState<FriendRelationshipState | null>(null);
+  const [friendBusy, setFriendBusy] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -195,7 +204,7 @@ const ProfessionalProfile = () => {
 
         if (user && user.id === data.user_id) {
           try {
-            const ids = await getMutualFriendUserIds(supabase, data.user_id);
+            const ids = await fetchAcceptedFriendUserIds(supabase, data.user_id);
             setFriendsCount(ids.length);
           } catch {
             setFriendsCount(0);
@@ -205,17 +214,14 @@ const ProfessionalProfile = () => {
         }
 
         if (user && user.id !== data.user_id) {
-          const { data: mut, error: mutErr } = await supabase.rpc("professional_is_mutual_with_viewer" as any, {
-            p_professional_id: data.id,
-          });
-          if (mutErr) {
-            console.warn("professional_is_mutual_with_viewer", mutErr);
-            setMutualWithViewer(false);
-          } else {
-            setMutualWithViewer(mut === true);
+          try {
+            const rel = await getFriendRelationshipState(supabase, user.id, data.user_id);
+            setFriendRel(rel);
+          } catch {
+            setFriendRel({ status: "none" });
           }
         } else {
-          setMutualWithViewer(null);
+          setFriendRel(null);
         }
 
         if (user && user.id === data.user_id) {
@@ -269,7 +275,7 @@ const ProfessionalProfile = () => {
       } else {
         setPublicSeals([]);
         setFriendsCount(null);
-        setMutualWithViewer(null);
+        setFriendRel(null);
       }
     setLoading(false);
   }, [id]);
@@ -364,22 +370,87 @@ const ProfessionalProfile = () => {
           .eq("followed_user_id", pro.user_id);
         if (eUf) throw eUf;
         setIsFollowing(false);
-        setMutualWithViewer(false);
         toast({ title: "Você deixou de seguir" });
       } else {
         const { error } = await supabase.from("professional_follows").insert({ user_id: u.id, professional_id: pro.id });
         if (error) throw error;
         setIsFollowing(true);
-        const { data: mut, error: mutErr } = await supabase.rpc("professional_is_mutual_with_viewer" as any, {
-          p_professional_id: pro.id,
-        });
-        setMutualWithViewer(!mutErr && mut === true);
         toast({ title: "Seguindo!" });
       }
     } catch {
       toast({ title: "Não foi possível atualizar", variant: "destructive" });
     } finally {
       setFollowBusy(false);
+    }
+  };
+
+  const friendActionToast = (r: string) => {
+    switch (r) {
+      case "request_sent":
+        toast({ title: "Pedido enviado", description: "A pessoa precisa aceitar para virarem amigos." });
+        break;
+      case "became_friends":
+        toast({ title: "Vocês são amigos!" });
+        break;
+      case "already_friends":
+        toast({ title: "Já são amigos" });
+        break;
+      case "request_already_pending":
+        toast({ title: "Pedido já enviado" });
+        break;
+      default:
+        toast({ title: "Concluído" });
+    }
+  };
+
+  const handleAddFriend = async () => {
+    if (!pro || friendBusy || !friendRel || friendRel.status !== "none") return;
+    const u = await requireUserForSocial();
+    if (!u) return;
+    setFriendBusy(true);
+    try {
+      const r = await sendFriendRequest(supabase, pro.user_id);
+      friendActionToast(r);
+      await loadProfile();
+    } catch {
+      toast({ title: "Não foi possível enviar o pedido", variant: "destructive" });
+    } finally {
+      setFriendBusy(false);
+    }
+  };
+
+  const handleAcceptFriendInvite = async () => {
+    if (!pro || friendBusy || friendRel?.status !== "incoming_pending") return;
+    const u = await requireUserForSocial();
+    if (!u) return;
+    setFriendBusy(true);
+    try {
+      await acceptFriendRequest(supabase, friendRel.requestId);
+      toast({ title: "Amizade aceita!" });
+      await loadProfile();
+    } catch {
+      toast({ title: "Não foi possível aceitar", variant: "destructive" });
+    } finally {
+      setFriendBusy(false);
+    }
+  };
+
+  const handleDeclineOrCancelFriend = async () => {
+    if (!pro || friendBusy || !friendRel) return;
+    if (friendRel.status !== "incoming_pending" && friendRel.status !== "outgoing_pending") return;
+    const u = await requireUserForSocial();
+    if (!u) return;
+    setFriendBusy(true);
+    try {
+      await declineOrCancelFriendRequest(supabase, friendRel.requestId);
+      toast({
+        title: friendRel.status === "incoming_pending" ? "Pedido recusado" : "Pedido cancelado",
+      });
+      await loadProfile();
+    } catch {
+      toast({ title: "Não foi possível atualizar", variant: "destructive" });
+    } finally {
+      setFriendBusy(false);
     }
   };
 
@@ -692,13 +763,13 @@ const ProfessionalProfile = () => {
               </div>
             </div>
 
-            {mutualWithViewer === true && (
+            {friendRel?.status === "friends" && (
               <div className="mb-3 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2.5 flex items-start gap-2.5">
                 <Users className="w-4 h-4 text-primary shrink-0 mt-0.5" />
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-foreground">Amigos no Chamô</p>
                   <p className="text-[11px] text-muted-foreground leading-snug">
-                    Vocês seguem o perfil profissional um do outro.
+                    Vocês aceitaram amizade um do outro.
                   </p>
                 </div>
               </div>
@@ -915,6 +986,58 @@ const ProfessionalProfile = () => {
                     </button>
                   </div>
                 )}
+                {user && friendRel && friendRel.status !== "self" ? (
+                  <div className="space-y-2 pt-1">
+                    {friendRel.status === "none" ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleAddFriend()}
+                        disabled={friendBusy}
+                        className="w-full min-h-[48px] rounded-xl border-2 border-primary/50 bg-primary/10 text-primary font-bold text-sm hover:bg-primary/15 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {friendBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
+                        Adicionar aos amigos
+                      </button>
+                    ) : null}
+                    {friendRel.status === "outgoing_pending" ? (
+                      <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 space-y-2">
+                        <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
+                          <Send className="w-4 h-4 shrink-0" />
+                          <p className="text-xs font-bold leading-snug">Pedido enviado — aguardando resposta</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeclineOrCancelFriend()}
+                          disabled={friendBusy}
+                          className="w-full text-xs font-semibold text-muted-foreground hover:text-foreground py-1 disabled:opacity-50"
+                        >
+                          Cancelar pedido
+                        </button>
+                      </div>
+                    ) : null}
+                    {friendRel.status === "incoming_pending" ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleDeclineOrCancelFriend()}
+                          disabled={friendBusy}
+                          className="min-h-[44px] rounded-xl border border-border bg-card text-foreground font-bold text-xs hover:bg-muted/60 disabled:opacity-50"
+                        >
+                          Recusar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleAcceptFriendInvite()}
+                          disabled={friendBusy}
+                          className="min-h-[44px] rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1"
+                        >
+                          {friendBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserRoundCheck className="w-4 h-4" />}
+                          Aceitar
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {isFollowing && (
                   <button
                     type="button"

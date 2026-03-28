@@ -1,7 +1,7 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Users, Loader2 } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Users, Loader2, Check, X } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,7 +12,13 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 import UserPreviewModal from "@/components/UserPreviewModal";
-import { enrichMutualFriends, getMutualFriendUserIds } from "@/lib/userMutualFriends";
+import { enrichMutualFriends } from "@/lib/userMutualFriends";
+import {
+  acceptFriendRequest,
+  declineOrCancelFriendRequest,
+  fetchAcceptedFriendUserIds,
+  fetchIncomingFriendRequests,
+} from "@/lib/chamoFriends";
 
 const availabilityOptions = [
   { value: "available", label: "Disponível", icon: Circle, color: "text-green-500" },
@@ -31,8 +37,17 @@ const getOptimizedAvatar = (url: string | null | undefined) => {
   return url;
 };
 
+type IncomingFriendRow = {
+  id: string;
+  from_user_id: string;
+  created_at: string;
+  full_name: string;
+  avatar_url: string | null;
+};
+
 const Profile = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { profile, user, signOut, refreshProfile } = useAuth();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
@@ -46,11 +61,13 @@ const Profile = () => {
   const [proData, setProData] = useState<{ id: string; slug: string | null; cover_image_url: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
 
   const [friendsOpen, setFriendsOpen] = useState(false);
-  const [mutualFriends, setMutualFriends] = useState<
+  const [friendList, setFriendList] = useState<
     { user_id: string; full_name: string; avatar_url: string | null; pro_key: string | null }[]
   >([]);
+  const [incomingFriendRows, setIncomingFriendRows] = useState<IncomingFriendRow[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
-  const [mutualCount, setMutualCount] = useState<number | null>(null);
+  const [friendRequestBusyId, setFriendRequestBusyId] = useState<string | null>(null);
+  const [friendCount, setFriendCount] = useState<number | null>(null);
   const [friendPreviewUserId, setFriendPreviewUserId] = useState<string | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
@@ -130,22 +147,30 @@ const Profile = () => {
 
   useEffect(() => {
     if (!user?.id) {
-      setMutualCount(null);
+      setFriendCount(null);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const ids = await getMutualFriendUserIds(supabase, user.id);
-        if (!cancelled) setMutualCount(ids.length);
+        const ids = await fetchAcceptedFriendUserIds(supabase, user.id);
+        if (!cancelled) setFriendCount(ids.length);
       } catch {
-        if (!cancelled) setMutualCount(0);
+        if (!cancelled) setFriendCount(0);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [user?.id]);
+
+  useEffect(() => {
+    if (searchParams.get("friends") !== "1") return;
+    setFriendsOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("friends");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // Sempre que o usuário abrir/atualizar o Perfil, marcamos se o cadastro está incompleto.
   useEffect(() => {
@@ -224,27 +249,81 @@ const Profile = () => {
     }
   };
 
-  const loadMutualFriends = useCallback(async () => {
+  const loadFriendsSheet = useCallback(async () => {
     if (!user?.id) return;
     setFriendsLoading(true);
     try {
-      const uids = await getMutualFriendUserIds(supabase, user.id);
+      const incoming = await fetchIncomingFriendRequests(supabase, user.id);
+      const fromIds = [...new Set(incoming.map((r) => r.from_user_id))];
+      let enrichedIncoming: IncomingFriendRow[] = [];
+      if (fromIds.length) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("user_id, display_name, full_name, avatar_url")
+          .in("user_id", fromIds);
+        const pmap = new Map(
+          (profs as { user_id: string; display_name: string | null; full_name: string | null; avatar_url: string | null }[] | null)?.map(
+            (p) => [p.user_id, p],
+          ) ?? [],
+        );
+        enrichedIncoming = incoming.map((r) => {
+          const p = pmap.get(r.from_user_id);
+          const dn = (p?.display_name ?? "").trim();
+          const fn = (p?.full_name ?? "").trim();
+          return {
+            ...r,
+            full_name: dn || fn || "Usuário",
+            avatar_url: p?.avatar_url ?? null,
+          };
+        });
+      }
+      setIncomingFriendRows(enrichedIncoming);
+
+      const uids = await fetchAcceptedFriendUserIds(supabase, user.id);
       const merged = await enrichMutualFriends(supabase, uids);
       merged.sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR", { sensitivity: "base" }));
-      setMutualFriends(merged);
+      setFriendList(merged);
+      setFriendCount(uids.length);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Erro desconhecido";
-      console.error("loadMutualFriends", e);
+      console.error("loadFriendsSheet", e);
       toast({
         title: "Não foi possível carregar amigos",
         description: msg,
         variant: "destructive",
       });
-      setMutualFriends([]);
+      setFriendList([]);
+      setIncomingFriendRows([]);
     } finally {
       setFriendsLoading(false);
     }
   }, [user?.id]);
+
+  const handleAcceptFriendRequest = async (requestId: string) => {
+    setFriendRequestBusyId(requestId);
+    try {
+      await acceptFriendRequest(supabase, requestId);
+      toast({ title: "Amizade aceita!" });
+      await loadFriendsSheet();
+    } catch {
+      toast({ title: "Não foi possível aceitar", variant: "destructive" });
+    } finally {
+      setFriendRequestBusyId(null);
+    }
+  };
+
+  const handleDeclineFriendRequest = async (requestId: string) => {
+    setFriendRequestBusyId(requestId);
+    try {
+      await declineOrCancelFriendRequest(supabase, requestId);
+      toast({ title: "Pedido recusado" });
+      setIncomingFriendRows((prev) => prev.filter((r) => r.id !== requestId));
+    } catch {
+      toast({ title: "Não foi possível recusar", variant: "destructive" });
+    } finally {
+      setFriendRequestBusyId(null);
+    }
+  };
 
   const handleLogout = async () => {
     await signOut();
@@ -464,8 +543,8 @@ const Profile = () => {
                       >
                         <Users className="w-3.5 h-3.5" />
                         Amigos
-                        {mutualCount !== null && mutualCount > 0 ? (
-                          <span className="min-w-[1.1rem] text-center tabular-nums">{mutualCount}</span>
+                        {friendCount !== null && friendCount > 0 ? (
+                          <span className="min-w-[1.1rem] text-center tabular-nums">{friendCount}</span>
                         ) : null}
                       </button>
                     </div>
@@ -617,7 +696,7 @@ const Profile = () => {
           open={friendsOpen}
           onOpenChange={(o) => {
             setFriendsOpen(o);
-            if (o) void loadMutualFriends();
+            if (o) void loadFriendsSheet();
           }}
         >
           <SheetContent
@@ -627,7 +706,7 @@ const Profile = () => {
             <SheetHeader className="px-5 pt-6 pb-3 border-b border-border/50 text-left space-y-1">
               <SheetTitle className="text-lg font-bold">Amigos no Chamô</SheetTitle>
               <p className="text-[13px] text-muted-foreground font-normal leading-snug pr-2">
-                Pessoas com quem você tem seguimento mútuo (clientes, profissionais ou empresas). Toque para abrir o perfil ou a pré-visualização.
+                Aceite pedidos abaixo ou use &quot;Adicionar aos amigos&quot; no perfil de alguém. Só entram na lista após aceite.
               </p>
             </SheetHeader>
             <div className="flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))] min-h-0">
@@ -635,14 +714,74 @@ const Profile = () => {
                 <div className="flex justify-center py-16">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
                 </div>
-              ) : mutualFriends.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-12 px-4 leading-relaxed">
-                  Ainda não há amigos aqui. Quando alguém o seguir e você seguir de volta (em qualquer tipo de conta),
-                  aparecerá nesta lista.
-                </p>
               ) : (
+                <>
+                  {incomingFriendRows.length > 0 ? (
+                    <div className="py-3 border-b border-border/50 space-y-2">
+                      <p className="text-xs font-bold text-foreground px-1">Pedidos recebidos</p>
+                      <ul className="space-y-2">
+                        {incomingFriendRows.map((row) => {
+                          const ini = row.full_name
+                            .split(/\s+/)
+                            .map((w) => w[0])
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase();
+                          const busy = friendRequestBusyId === row.id;
+                          return (
+                            <li
+                              key={row.id}
+                              className="flex items-center gap-2 rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2.5"
+                            >
+                              {row.avatar_url ? (
+                                <img
+                                  src={getOptimizedAvatar(row.avatar_url)}
+                                  alt=""
+                                  className="w-10 h-10 rounded-full object-cover shrink-0"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
+                                  {ini}
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold truncate">{row.full_name}</p>
+                                <p className="text-[11px] text-muted-foreground">Quer ser seu amigo</p>
+                              </div>
+                              <div className="flex gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void handleDeclineFriendRequest(row.id)}
+                                  className="p-2 rounded-xl border border-border bg-background hover:bg-muted disabled:opacity-50"
+                                  aria-label="Recusar"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void handleAcceptFriendRequest(row.id)}
+                                  className="p-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                  aria-label="Aceitar"
+                                >
+                                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {friendList.length === 0 && incomingFriendRows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-12 px-4 leading-relaxed">
+                      Ainda não há amigos aqui. Envie um convite em &quot;Adicionar aos amigos&quot; no perfil da pessoa; ela precisa aceitar.
+                    </p>
+                  ) : null}
+                  {friendList.length > 0 ? (
                 <ul className="py-2 space-y-1">
-                  {mutualFriends.map((f) => {
+                  {friendList.map((f) => {
                     const initials = f.full_name
                       .split(/\s+/)
                       .map((w) => w[0])
@@ -705,6 +844,8 @@ const Profile = () => {
                     );
                   })}
                 </ul>
+                  ) : null}
+                </>
               )}
             </div>
           </SheetContent>

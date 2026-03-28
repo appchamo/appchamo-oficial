@@ -28,11 +28,20 @@ function randomToken(): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Tudo após …/qr-login/ (ex.: generate, status/TOKEN). Suporta /functions/v1/qr-login/… em produção. */
+function subPathAfterQrLogin(pathname: string): string {
+  const marker = "/qr-login";
+  const i = pathname.indexOf(marker);
+  if (i === -1) return pathname.replace(/^\//, "");
+  const rest = pathname.slice(i + marker.length).replace(/^\//, "");
+  return rest;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
   const url = new URL(req.url);
-  const path = url.pathname.replace(/\/qr-login\/?/, "").replace(/^\//, "");
+  const path = subPathAfterQrLogin(url.pathname);
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,

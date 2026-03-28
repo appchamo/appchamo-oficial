@@ -44,10 +44,19 @@ export default function QrAuthWeb() {
     try {
       const res = await fetch(`${EDGE_URL}/generate`, {
         method: "POST",
-        headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+        headers: {
+          apikey: ANON_KEY!,
+          Authorization: `Bearer ${ANON_KEY}`,
+          "Content-Type": "application/json",
+        },
       });
-      if (!res.ok) throw new Error("Erro ao gerar QR");
-      const { token: t } = await res.json();
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn("[qr-auth] generate failed", res.status, body);
+        throw new Error((body as { error?: string }).error || "Erro ao gerar QR");
+      }
+      const t = (body as { token?: string }).token;
+      if (!t) throw new Error("Resposta inválida do servidor");
       setToken(t);
       setStage("waiting");
       startedAtRef.current = Date.now();
@@ -65,7 +74,7 @@ export default function QrAuthWeb() {
       pollRef.current = setInterval(async () => {
         try {
           const statusRes = await fetch(`${EDGE_URL}/status/${t}`, {
-            headers: { apikey: ANON_KEY },
+            headers: { apikey: ANON_KEY!, Authorization: `Bearer ${ANON_KEY}` },
           });
           if (!statusRes.ok) return;
           const data = await statusRes.json();

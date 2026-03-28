@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
+import { getMutualFriendUserIds, usersAreMutualFriends } from "@/lib/userMutualFriends";
 import { compressImageForChat } from "@/lib/compressChatImage";
 import { LinkedInLikeControl, type LinkedInReactionType } from "@/components/community/LinkedInLikeControl";
 import {
@@ -865,12 +866,8 @@ export default function CommunityFeed({
         }
         const term = `%${raw.split(/\s+/)[0]}%`;
 
-        const [{ data: inRows }, { data: outRows }] = await Promise.all([
-          supabase.from("user_follows" as any).select("follower_user_id").eq("followed_user_id", user.id),
-          supabase.from("user_follows" as any).select("followed_user_id").eq("follower_user_id", user.id),
-        ]);
-        const whoFollowsMe = new Set((inRows || []).map((r: { follower_user_id: string }) => r.follower_user_id));
-        const iFollow = new Set((outRows || []).map((r: { followed_user_id: string }) => r.followed_user_id));
+        const mutualIds = await getMutualFriendUserIds(supabase, user.id);
+        const mutualSet = new Set(mutualIds);
 
         const { data, error } = await supabase
           .from("profiles")
@@ -880,7 +877,7 @@ export default function CommunityFeed({
           .limit(20);
         if (error) throw error;
         const rows = (data || []) as AuthorRow[];
-        const filtered = rows.filter((r) => iFollow.has(r.user_id) && whoFollowsMe.has(r.user_id));
+        const filtered = rows.filter((r) => mutualSet.has(r.user_id));
         setShareResults(filtered);
       } catch {
         setShareResults([]);
@@ -926,38 +923,8 @@ export default function CommunityFeed({
     (async () => {
       setLoadingFollowedShare(true);
       try {
-        const [{ data: outRows }, { data: inRows }] = await Promise.all([
-          supabase.from("user_follows" as any).select("followed_user_id, created_at").eq("follower_user_id", user.id),
-          supabase.from("user_follows" as any).select("follower_user_id, created_at").eq("followed_user_id", user.id),
-        ]);
-
-        const whoFollowsMe = new Set((inRows || []).map((r: { follower_user_id: string }) => r.follower_user_id));
-        const outgoing = (outRows || []) as { followed_user_id: string; created_at: string }[];
-        const incoming = (inRows || []) as { follower_user_id: string; created_at: string }[];
-
-        const mutualUids = new Set<string>();
-        const lastFollowAt = new Map<string, string>();
-        for (const r of outgoing) {
-          const uid = r.followed_user_id;
-          if (!uid || uid === user.id || !whoFollowsMe.has(uid)) continue;
-          mutualUids.add(uid);
-          const cur = lastFollowAt.get(uid);
-          if (!cur || r.created_at > cur) lastFollowAt.set(uid, r.created_at);
-        }
-        for (const r of incoming) {
-          const uid = r.follower_user_id;
-          if (!uid || uid === user.id || !mutualUids.has(uid)) continue;
-          const cur = lastFollowAt.get(uid);
-          if (!cur || r.created_at > cur) lastFollowAt.set(uid, r.created_at);
-        }
-
-        const orderedUids = [...mutualUids].sort((a, b) => {
-          const ta = lastFollowAt.get(a) || "";
-          const tb = lastFollowAt.get(b) || "";
-          return tb.localeCompare(ta);
-        });
-
-        if (orderedUids.length === 0) {
+        const mutualUids = await getMutualFriendUserIds(supabase, user.id);
+        if (mutualUids.length === 0) {
           if (!cancelled) setFollowedForShare([]);
           return;
         }
@@ -965,9 +932,14 @@ export default function CommunityFeed({
         const { data: profs } = await supabase
           .from("profiles")
           .select("user_id, display_name, full_name, avatar_url")
-          .in("user_id", orderedUids);
+          .in("user_id", mutualUids);
         const profMap = new Map((profs || []).map((p: any) => [p.user_id as string, p as AuthorRow]));
-        const ordered: AuthorRow[] = orderedUids.map((uid) => profMap.get(uid)).filter(Boolean) as AuthorRow[];
+        const ordered: AuthorRow[] = mutualUids
+          .map((uid) => profMap.get(uid))
+          .filter(Boolean) as AuthorRow[];
+        ordered.sort((a, b) =>
+          authorLabel(a).localeCompare(authorLabel(b), "pt-BR", { sensitivity: "base" }),
+        );
 
         if (!cancelled) setFollowedForShare(ordered);
       } catch {
@@ -985,21 +957,8 @@ export default function CommunityFeed({
     if (!user || !sharePost) return;
     setShareSending(true);
     try {
-      const [{ data: iFollowRow }, { data: theyFollowRow }] = await Promise.all([
-        supabase
-          .from("user_follows" as any)
-          .select("follower_user_id")
-          .eq("follower_user_id", user.id)
-          .eq("followed_user_id", toUserId)
-          .maybeSingle(),
-        supabase
-          .from("user_follows" as any)
-          .select("follower_user_id")
-          .eq("follower_user_id", toUserId)
-          .eq("followed_user_id", user.id)
-          .maybeSingle(),
-      ]);
-      if (!iFollowRow || !theyFollowRow) {
+      const mutualOk = await usersAreMutualFriends(supabase, user.id, toUserId);
+      if (!mutualOk) {
         toast({
           title: "Seguimento mútuo necessário",
           description: "Só pode partilhar com quem o segue e que também o segue de volta.",

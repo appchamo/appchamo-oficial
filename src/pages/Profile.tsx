@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 import UserPreviewModal from "@/components/UserPreviewModal";
+import { enrichMutualFriends, getMutualFriendUserIds } from "@/lib/userMutualFriends";
 
 const availabilityOptions = [
   { value: "available", label: "Disponível", icon: Circle, color: "text-green-500" },
@@ -134,10 +135,12 @@ const Profile = () => {
     }
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase.rpc("count_user_mutual_friends" as any, {
-        p_user_id: user.id,
-      });
-      if (!cancelled && !error && typeof data === "number") setMutualCount(data);
+      try {
+        const ids = await getMutualFriendUserIds(supabase, user.id);
+        if (!cancelled) setMutualCount(ids.length);
+      } catch {
+        if (!cancelled) setMutualCount(0);
+      }
     })();
     return () => {
       cancelled = true;
@@ -225,121 +228,10 @@ const Profile = () => {
     if (!user?.id) return;
     setFriendsLoading(true);
     try {
-      type FriendRow = {
-        user_id: string;
-        full_name: string;
-        avatar_url: string | null;
-        pro_key: string | null;
-      };
-
-      const parseLegacyTableRpc = (raw: unknown): FriendRow[] => {
-        const asList = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? [raw] : [];
-        return asList
-          .filter((r): r is Record<string, unknown> => r != null && typeof r === "object")
-          .map((r) => {
-            const uid = String(r.friend_user_id ?? r.user_id ?? "").trim();
-            const pkRaw = String(r.friend_pro_key ?? r.pro_key ?? "").trim();
-            const pk = pkRaw.length > 0 ? pkRaw : null;
-            const name =
-              typeof r.friend_full_name === "string"
-                ? r.friend_full_name
-                : typeof r.full_name === "string"
-                  ? r.full_name
-                  : "Profissional";
-            const av =
-              typeof r.friend_avatar_url === "string"
-                ? r.friend_avatar_url
-                : typeof r.avatar_url === "string"
-                  ? r.avatar_url
-                  : null;
-            return {
-              user_id: uid,
-              full_name: name,
-              avatar_url: av as string | null,
-              pro_key: pk,
-            };
-          })
-          .filter((r) => r.user_id.length > 0);
-      };
-
-      let fromRpc: FriendRow[] = [];
-
-      const jsonRpc = await supabase.rpc("get_user_mutual_friends_json" as any, {
-        p_user_id: user.id,
-      });
-      if (!jsonRpc.error && jsonRpc.data != null) {
-        let parsed: unknown = jsonRpc.data;
-        if (typeof parsed === "string") {
-          try {
-            parsed = JSON.parse(parsed);
-          } catch {
-            parsed = [];
-          }
-        }
-        const arr = Array.isArray(parsed) ? parsed : [];
-        fromRpc = arr
-          .filter((x): x is Record<string, unknown> => x != null && typeof x === "object")
-          .map((o) => {
-            const pkRaw = o.pro_key != null ? String(o.pro_key).trim() : "";
-            return {
-              user_id: String(o.user_id ?? "").trim(),
-              pro_key: pkRaw.length > 0 ? pkRaw : null,
-              full_name: "Profissional",
-              avatar_url: null as string | null,
-            };
-          })
-          .filter((r) => r.user_id.length > 0);
-      }
-
-      if (fromRpc.length === 0) {
-        const legacy = await supabase.rpc("list_user_mutual_followers" as any, {
-          p_user_id: user.id,
-        });
-        if (legacy.error) {
-          if (jsonRpc.error) throw jsonRpc.error;
-          throw legacy.error;
-        }
-        fromRpc = parseLegacyTableRpc(legacy.data);
-      }
-
-      const uids = [...new Set(fromRpc.map((r) => r.user_id))];
-      let merged = fromRpc;
-      if (uids.length > 0) {
-        const { data: profRows, error: profErr } = await supabase
-          .from("profiles")
-          .select("user_id, display_name, full_name, avatar_url")
-          .in("user_id", uids);
-        if (!profErr && profRows?.length) {
-          const pmap = new Map(
-            (profRows as { user_id: string; display_name: string | null; full_name: string | null; avatar_url: string | null }[]).map(
-              (p) => [p.user_id, p],
-            ),
-          );
-          merged = fromRpc.map((row) => {
-            const p = pmap.get(row.user_id);
-            if (!p) return row;
-            const dn = (p.display_name || "").trim();
-            const fn = (p.full_name || "").trim();
-            const label = dn || fn || row.full_name;
-            return {
-              ...row,
-              full_name: label,
-              avatar_url: p.avatar_url ?? row.avatar_url,
-            };
-          });
-        }
-      }
-
+      const uids = await getMutualFriendUserIds(supabase, user.id);
+      const merged = await enrichMutualFriends(supabase, uids);
+      merged.sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR", { sensitivity: "base" }));
       setMutualFriends(merged);
-
-      if (merged.length === 0 && mutualCount !== null && mutualCount > 0) {
-        toast({
-          title: "Lista de amigos vazia",
-          description:
-            "Confirme se aplicou a migração user_follows (supabase db push). Se já aplicou, verifique o consola do browser.",
-          variant: "destructive",
-        });
-      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Erro desconhecido";
       console.error("loadMutualFriends", e);
@@ -352,7 +244,7 @@ const Profile = () => {
     } finally {
       setFriendsLoading(false);
     }
-  }, [user?.id, mutualCount]);
+  }, [user?.id]);
 
   const handleLogout = async () => {
     await signOut();

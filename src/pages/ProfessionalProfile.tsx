@@ -42,6 +42,7 @@ import { getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
+import { getMutualFriendUserIds } from "@/lib/userMutualFriends";
 import { cn } from "@/lib/utils";
 
 interface ProData {
@@ -193,10 +194,12 @@ const ProfessionalProfile = () => {
         if (sub && (sub as { plan_id: string }).plan_id) setPlanId((sub as { plan_id: string }).plan_id);
 
         if (user && user.id === data.user_id) {
-          const { data: fc } = await supabase.rpc("count_professional_mutual_followers", {
-            p_professional_id: data.id,
-          });
-          setFriendsCount(typeof fc === "number" ? fc : 0);
+          try {
+            const ids = await getMutualFriendUserIds(supabase, data.user_id);
+            setFriendsCount(ids.length);
+          } catch {
+            setFriendsCount(0);
+          }
         } else {
           setFriendsCount(null);
         }

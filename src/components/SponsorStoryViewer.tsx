@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, ExternalLink, ChevronLeft, ChevronRight, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export interface SponsorStory {
   id: string;
@@ -10,58 +19,117 @@ export interface SponsorStory {
   photo_url: string;
   caption: string | null;
   link_url: string | null;
+  link_button_label?: string | null;
   sponsor_link: string;
 }
+
+/** Espaço acima da zona da barra inferior (h-16) + safe area */
+const CTA_BOTTOM_PAD = "calc(4rem + max(env(safe-area-inset-bottom), 12px) + 10px)";
 
 interface Props {
   stories: SponsorStory[];
   initialIndex?: number;
   onClose: () => void;
+  /** Quando o utilizador autenticado é dono deste patrocinador, mostra menu e edição */
+  ownerSponsorId?: string | null;
+  onStoryUpdated?: (story: SponsorStory) => void;
+  onStoryDeleted?: (storyId: string) => void;
 }
 
 const STORY_DURATION_MS = 6000;
 const TICK_MS = 50;
 
-const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
+function normalizeHref(raw: string): string {
+  const t = raw.trim();
+  if (!t || t === "#") return "";
+  return t.includes("://") ? t : `https://${t}`;
+}
+
+function getEffectiveHref(story: SponsorStory): string {
+  const fromStory = normalizeHref(story.link_url || "");
+  if (fromStory) return fromStory;
+  return normalizeHref(story.sponsor_link || "");
+}
+
+const SponsorStoryViewer = ({
+  stories,
+  initialIndex = 0,
+  onClose,
+  ownerSponsorId = null,
+  onStoryUpdated,
+  onStoryDeleted,
+}: Props) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editLabel, setEditLabel] = useState("");
+  const [editLink, setEditLink] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewRegistered = useRef<Set<string>>(new Set());
   const isPausedRef = useRef(false);
-  // Referência estável para currentIndex para usar dentro do setInterval
   const currentIndexRef = useRef(currentIndex);
 
   const current = stories[currentIndex];
   const [imgLoaded, setImgLoaded] = useState(false);
 
-  // Mantém currentIndexRef atualizado
+  const isOwner = !!(ownerSponsorId && current && current.sponsor_id === ownerSponsorId);
+  const effectiveHref = current ? getEffectiveHref(current) : "";
+  const hasValidLink = !!effectiveHref;
+  const buttonTitle = ((current?.link_button_label || "").trim() || "Saiba mais").trim();
+
+  const blockAutoAdvance = menuOpen || editOpen || deleteOpen;
+
   useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
-  // Reseta o estado de carregamento ao trocar de story
   useEffect(() => {
     setImgLoaded(false);
   }, [currentIndex]);
 
-  // Pré-carrega as próximas 2 imagens em background
   useEffect(() => {
-    const urls = [
-      stories[currentIndex + 1]?.photo_url,
-      stories[currentIndex + 2]?.photo_url,
-    ].filter(Boolean) as string[];
+    isPausedRef.current = isPaused || blockAutoAdvance;
+  }, [isPaused, blockAutoAdvance]);
+
+  useEffect(() => {
+    setCurrentIndex((i) => {
+      if (stories.length === 0) return 0;
+      return Math.min(i, stories.length - 1);
+    });
+  }, [stories.length]);
+
+  useEffect(() => {
+    if (current && editOpen) {
+      setEditLabel((current.link_button_label || "").trim() || "Saiba mais");
+      setEditLink((current.link_url || "").trim());
+    }
+  }, [current?.id, editOpen, current?.link_url, current?.link_button_label]);
+
+  // Pré-carrega as próximas 2 imagens
+  useEffect(() => {
+    const urls = [stories[currentIndex + 1]?.photo_url, stories[currentIndex + 2]?.photo_url].filter(Boolean) as string[];
     urls.forEach((url) => {
       const img = new Image();
       img.src = url;
     });
   }, [currentIndex, stories]);
 
-  // Sincroniza isPausedRef
   useEffect(() => {
-    isPausedRef.current = isPaused;
-  }, [isPaused]);
+    if (!current?.id || viewRegistered.current.has(current.id)) return;
+    viewRegistered.current.add(current.id);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      supabase.from("story_views").insert({
+        story_id: current.id,
+        viewer_id: session?.user?.id ?? null,
+      }).then(() => {});
+    });
+  }, [current?.id]);
 
   const goNext = useCallback(() => {
     setCurrentIndex((i) => {
@@ -80,19 +148,6 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
     setProgress(0);
   }, []);
 
-  // Registra view quando muda de story
-  useEffect(() => {
-    if (!current?.id || viewRegistered.current.has(current.id)) return;
-    viewRegistered.current.add(current.id);
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      supabase.from("story_views").insert({
-        story_id: current.id,
-        viewer_id: session?.user?.id ?? null,
-      }).then(() => {});
-    });
-  }, [current?.id]);
-
-  // Timer de progresso
   useEffect(() => {
     setProgress(0);
     if (progressRef.current) clearInterval(progressRef.current);
@@ -103,7 +158,6 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
       setProgress((p) => {
         if (p + step >= 100) {
           clearInterval(progressRef.current!);
-          // Pequeno delay para a barra chegar a 100% visivelmente
           setTimeout(() => {
             setCurrentIndex((i) => {
               if (i < stories.length - 1) {
@@ -120,27 +174,106 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
       });
     }, TICK_MS);
 
-    return () => { if (progressRef.current) clearInterval(progressRef.current); };
+    return () => {
+      if (progressRef.current) clearInterval(progressRef.current);
+    };
   }, [currentIndex, stories.length, onClose]);
 
   const handleLinkClick = () => {
-    const raw = (current.link_url || current.sponsor_link || "").trim();
-    if (!raw || raw === "#") return;
-    const url = raw.includes("://") ? raw : `https://${raw}`;
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      supabase.from("story_clicks").insert({
-        story_id: current.id,
-        clicker_id: session?.user?.id ?? null,
-      }).then(() => {});
-    });
+    if (!current) return;
+    if (isOwner && !hasValidLink) {
+      setEditOpen(true);
+      return;
+    }
+    const raw = (current.link_url || "").trim();
+    const fallback = raw || (current.sponsor_link || "").trim();
+    if (!fallback || fallback === "#") return;
+    const url = normalizeHref(fallback);
+    if (!url) return;
+    if (!isOwner) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.from("story_clicks").insert({
+          story_id: current.id,
+          clicker_id: session?.user?.id ?? null,
+        }).then(() => {});
+      });
+    }
     window.open(url, "_blank");
   };
 
-  // Calcula quais barras de progresso mostrar (só as do patrocinador atual)
+  const openEditFromMenu = () => {
+    setMenuOpen(false);
+    setEditOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!current) return;
+    const labelTrim = editLabel.trim();
+    const link_button_label = !labelTrim || labelTrim === "Saiba mais" ? null : labelTrim;
+    const linkTrim = editLink.trim();
+    let normalizedLink: string | null = null;
+    if (linkTrim) {
+      const candidate = linkTrim.includes("://") ? linkTrim : `https://${linkTrim}`;
+      try {
+        normalizedLink = new URL(candidate).toString();
+      } catch {
+        toast({ title: "Link inválido", variant: "destructive" });
+        return;
+      }
+    }
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase
+        .from("sponsor_stories")
+        .update({
+          link_url: normalizedLink,
+          link_button_label,
+        })
+        .eq("id", current.id);
+      if (error) throw error;
+      const updated: SponsorStory = {
+        ...current,
+        link_url: normalizedLink,
+        link_button_label,
+      };
+      onStoryUpdated?.(updated);
+      toast({ title: "Salvo!" });
+      setEditOpen(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao guardar";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!current) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from("sponsor_stories").delete().eq("id", current.id);
+      if (error) throw error;
+      const id = current.id;
+      onStoryDeleted?.(id);
+      toast({
+        title: "Novidade removida",
+        description: "O limite semanal já tinha sido contado; excluir não devolve o slot.",
+      });
+      setDeleteOpen(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao excluir";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const currentSponsorId = current?.sponsor_id;
   const sponsorStoriesStart = stories.findIndex((s) => s.sponsor_id === currentSponsorId);
   const sponsorStories = stories.filter((s) => s.sponsor_id === currentSponsorId);
   const localIndex = currentIndex - sponsorStoriesStart;
+
+  const showCta = isOwner || hasValidLink;
 
   if (!current) return null;
 
@@ -149,7 +282,6 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
       className="fixed inset-0 z-[100] bg-black flex flex-col select-none"
       style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none" }}
     >
-      {/* Barras de progresso (apenas do patrocinador atual) */}
       <div
         className="absolute top-0 left-0 right-0 z-20 flex gap-1 px-3"
         style={{ paddingTop: "max(env(safe-area-inset-top), 12px)" }}
@@ -159,20 +291,16 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
             <div
               className="h-full bg-white rounded-full transition-none"
               style={{
-                width:
-                  i < localIndex ? "100%" :
-                  i === localIndex ? `${progress}%` :
-                  "0%",
+                width: i < localIndex ? "100%" : i === localIndex ? `${progress}%` : "0%",
               }}
             />
           </div>
         ))}
       </div>
 
-      {/* Header */}
       <div
-        className="absolute left-0 right-0 z-20 flex items-center gap-2 px-4"
-        style={{ top: "max(env(safe-area-inset-top), 16px)", paddingTop: 20 }}
+        className="absolute left-0 right-0 z-20 flex items-center gap-2 px-3"
+        style={{ top: "max(env(safe-area-inset-top), 16px)", paddingTop: 22 }}
       >
         <div className="w-9 h-9 rounded-full overflow-hidden bg-white/20 flex items-center justify-center shrink-0">
           {current.sponsor_logo ? (
@@ -183,35 +311,63 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
               draggable={false}
             />
           ) : (
-            <span className="text-white text-xs font-bold">
-              {current.sponsor_name.slice(0, 2).toUpperCase()}
-            </span>
+            <span className="text-white text-xs font-bold">{current.sponsor_name.slice(0, 2).toUpperCase()}</span>
           )}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-white text-sm font-semibold leading-tight">{current.sponsor_name}</p>
           <p className="text-white/60 text-[11px]">Patrocinado</p>
         </div>
+        {isOwner && (
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/30 text-white shrink-0"
+                aria-label="Opções da novidade"
+              >
+                <MoreVertical className="w-5 h-5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52 z-[120]">
+              <DropdownMenuItem onSelect={(e) => { e.preventDefault(); openEditFromMenu(); }}>
+                <Pencil className="w-4 h-4 mr-2" />
+                Editar link e texto do botão
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setMenuOpen(false);
+                  setDeleteOpen(true);
+                }}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Excluir novidade
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <button
+          type="button"
           onClick={onClose}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-black/30 text-white"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-black/30 text-white shrink-0"
+          aria-label="Fechar"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Imagem — pressionar e segurar pausa; soltar retoma */}
       <div
-        className="flex-1 relative overflow-hidden"
-        onMouseDown={() => setIsPaused(true)}
+        className="flex-1 relative overflow-hidden min-h-0"
+        onMouseDown={() => !blockAutoAdvance && setIsPaused(true)}
         onMouseUp={() => setIsPaused(false)}
         onMouseLeave={() => setIsPaused(false)}
-        onTouchStart={() => setIsPaused(true)}
+        onTouchStart={() => !blockAutoAdvance && setIsPaused(true)}
         onTouchEnd={() => setIsPaused(false)}
         onTouchCancel={() => setIsPaused(false)}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {/* Skeleton enquanto imagem carrega */}
         {!imgLoaded && (
           <div className="absolute inset-0 flex items-center justify-center bg-black">
             <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
@@ -221,7 +377,7 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
           key={current.photo_url}
           src={current.photo_url}
           alt="Novidade"
-          className="w-full h-full object-contain pointer-events-none"
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
           draggable={false}
           onLoad={() => setImgLoaded(true)}
           style={{
@@ -231,8 +387,7 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
           }}
         />
 
-        {/* Indicador de pausa */}
-        {isPaused && (
+        {isPaused && !blockAutoAdvance && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="bg-black/40 rounded-full p-3 backdrop-blur-sm">
               <div className="flex gap-1.5">
@@ -244,12 +399,14 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
         )}
       </div>
 
-      {/* Botões de navegação laterais */}
       {currentIndex > 0 && (
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); goPrev(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            goPrev();
+          }}
           className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm active:scale-90 transition-transform"
           style={{ marginTop: 30 }}
         >
@@ -260,36 +417,128 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
       <button
         onMouseDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
-        onClick={(e) => { e.stopPropagation(); goNext(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          goNext();
+        }}
         className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm active:scale-90 transition-transform"
         style={{ marginTop: 30 }}
       >
         <ChevronRight className="w-6 h-6" />
       </button>
 
-      {/* Legenda + botão Saiba mais */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-20 px-4"
-        style={{ paddingBottom: "max(env(safe-area-inset-bottom), 24px)" }}
+        className="absolute bottom-0 left-0 right-0 z-20 px-4 flex flex-col items-stretch"
+        style={{ paddingBottom: CTA_BOTTOM_PAD }}
       >
         {current.caption && (
-          <p className="text-white text-sm mb-4 text-center drop-shadow">
-            {current.caption}
-          </p>
+          <p className="text-white text-sm mb-3 text-center drop-shadow-md px-1">{current.caption}</p>
         )}
-        {(() => {
-          const raw = (current.link_url || current.sponsor_link || "").trim();
-          return raw && raw !== "#";
-        })() && (
-          <button
-            onClick={handleLinkClick}
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-white text-gray-900 font-semibold text-sm shadow-lg active:scale-[0.98] transition-transform"
-          >
-            <ExternalLink className="w-4 h-4" />
-            Saiba mais
-          </button>
+        {showCta && (
+          <div className="relative w-full">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleLinkClick();
+              }}
+              className="w-full flex flex-col items-center rounded-2xl bg-white text-gray-900 shadow-lg active:scale-[0.99] transition-transform pt-2.5 pb-3 px-4 pr-12 relative"
+            >
+              <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{buttonTitle}</span>
+              <span className="text-sm font-bold flex items-center gap-2 mt-1">
+                <ExternalLink className="w-4 h-4 shrink-0" />
+                {hasValidLink ? "Abrir link" : isOwner ? "Definir link" : "Saiba mais"}
+              </span>
+            </button>
+            {isOwner && (
+              <button
+                type="button"
+                className="absolute top-1/2 -translate-y-1/2 right-2 w-10 h-10 rounded-full bg-gray-900 text-white flex items-center justify-center shadow-md active:scale-95 z-10"
+                aria-label="Editar texto e link do botão"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditOpen(true);
+                }}
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         )}
       </div>
+
+      {editOpen && (
+        <div
+          className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="story-edit-title"
+          onClick={() => setEditOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-background border border-border p-5 shadow-xl mb-[env(safe-area-inset-bottom)] sm:mb-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="story-edit-title" className="text-lg font-semibold">
+              Texto e link do botão
+            </h2>
+            <div className="space-y-3 pt-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Título do botão</label>
+                <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Saiba mais" className="mt-1 rounded-xl" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">URL</label>
+                <Input
+                  value={editLink}
+                  onChange={(e) => setEditLink(e.target.value)}
+                  placeholder="https://…"
+                  inputMode="url"
+                  className="mt-1 rounded-xl"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Vazio usa o link padrão do patrocinador na app.</p>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" className="flex-1 rounded-xl" onClick={() => setEditOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="button" className="flex-1 rounded-xl" disabled={savingEdit} onClick={() => void saveEdit()}>
+                  {savingEdit ? "Salvando…" : "Salvar"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteOpen && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          role="alertdialog"
+          aria-modal="true"
+          onClick={() => !deleting && setDeleteOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-background border border-border p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold">Excluir novidade?</h2>
+            <p className="text-sm text-muted-foreground mt-2">
+              Esta ação remove a novidade de imediato. O teu limite semanal já foi contado — excluir não devolve uma
+              publicação.
+            </p>
+            <div className="flex flex-col gap-2 mt-4">
+              <Button type="button" variant="outline" className="rounded-xl w-full" disabled={deleting} onClick={() => setDeleteOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="button" variant="destructive" className="rounded-xl w-full" disabled={deleting} onClick={() => void confirmDelete()}>
+                {deleting ? "Excluindo…" : "Excluir"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -24,6 +24,7 @@ interface Story {
   photo_url: string;
   caption: string | null;
   link_url: string | null;
+  link_button_label?: string | null;
   expires_at: string;
   views_count: number;
   clicks_count: number;
@@ -90,7 +91,7 @@ const SponsorDashboard = () => {
 
     const { data: st } = await supabase
       .from("sponsor_stories")
-      .select("id, photo_url, caption, link_url, expires_at, views_count, clicks_count, created_at")
+      .select("id, photo_url, caption, link_url, link_button_label, expires_at, views_count, clicks_count, created_at")
       .eq("sponsor_id", sp.id)
       .order("created_at", { ascending: false });
 
@@ -219,6 +220,7 @@ const SponsorDashboard = () => {
         photo_url,
         caption: newCaption.trim() || null,
         link_url: storyLink,
+        link_button_label: null,
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       });
       if (insertErr) throw new Error(insertErr.message);
@@ -330,6 +332,7 @@ const SponsorDashboard = () => {
       photo_url: story.photo_url,
       caption: story.caption,
       link_url: story.link_url,
+      link_button_label: story.link_button_label ?? null,
       sponsor_link: sponsor.link_url,
     }]);
   };
@@ -570,7 +573,19 @@ const SponsorDashboard = () => {
       </Dialog>
 
       {previewStories && (
-        <SponsorStoryViewer stories={previewStories} onClose={() => setPreviewStories(null)} />
+        <SponsorStoryViewer
+          stories={previewStories}
+          onClose={() => setPreviewStories(null)}
+          ownerSponsorId={sponsor.id}
+          onStoryUpdated={(u) => {
+            setPreviewStories((prev) => prev?.map((s) => (s.id === u.id ? u : s)) ?? null);
+            load();
+          }}
+          onStoryDeleted={(id) => {
+            setPreviewStories(null);
+            load();
+          }}
+        />
       )}
 
       {/* Modal de upgrade de plano */}

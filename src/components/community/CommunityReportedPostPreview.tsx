@@ -120,7 +120,7 @@ const CommunityReportedPostPreview = ({ postId, open, onOpenChange }: CommunityR
             >
               <div className="px-5 pt-5 pb-1">
                 <div className="flex gap-3.5 items-start">
-                  <div className="w-[52px] h-[52px] rounded-2xl bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.06] dark:ring-white/10">
+                  <div className="w-[52px] h-[52px] rounded-full bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.06] dark:ring-white/10">
                     {author?.avatar_url ? (
                       <img src={author.avatar_url} alt="" className="w-full h-full object-cover" />
                     ) : (

@@ -487,6 +487,8 @@ const Home = () => {
     ? `${profile.address_city}, ${profile.address_state}`
     : profile?.address_city || profile?.address_state || "Definir localização";
 
+  const needsLocationSetup = !profile?.address_city || !profile?.address_state;
+
   const welcomeWord = profile?.gender === "female" ? "Bem-vinda" : profile?.gender === "male" ? "Bem-vindo" : "Bem-vindo(a)";
 
   // Novo cliente (Google/Apple sem cadastro): abre o modal de localização para definir cidade/CEP
@@ -692,27 +694,50 @@ const Home = () => {
             </div>
           ) : user ? (
             /* ── Welcome cliente ── */
-            <div className="flex items-center gap-3">
-              {profile?.avatar_url ? (
-                <img src={profile.avatar_url} alt={userName} className="w-11 h-11 rounded-full object-cover border border-border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
-              ) : (
-                <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-primary font-bold text-base">{userName.charAt(0).toUpperCase()}</span>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt={userName} className="w-11 h-11 rounded-full object-cover border border-border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                ) : (
+                  <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="text-primary font-bold text-base">{userName.charAt(0).toUpperCase()}</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-base font-bold text-foreground leading-tight">
+                    {welcomeWord}, <span className="text-primary">{userName}</span> 👋
+                  </p>
                 </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-base font-bold text-foreground leading-tight">
-                  {welcomeWord}, <span className="text-primary">{userName}</span> 👋
-                </p>
+              </div>
+              {needsLocationSetup ? (
                 <button
                   type="button"
                   onClick={handleOpenLocation}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5 hover:text-foreground transition-colors"
+                  className="w-full flex items-start gap-3 bg-amber-50 dark:bg-amber-950/35 border-2 border-amber-400 dark:border-amber-600 rounded-xl p-4 text-left shadow-sm active:scale-[0.99] transition-transform"
                 >
-                  <MapPin className="w-3 h-3" />
-                  <span className="truncate max-w-[200px]">{locationLabel}</span>
+                  <MapPin className="w-6 h-6 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-amber-950 dark:text-amber-50">Definir localização</p>
+                    <p className="text-xs text-amber-900/90 dark:text-amber-100/85 mt-1 leading-snug">
+                      Toque para informar cidade e CEP e ver profissionais e patrocinadores da sua região.
+                    </p>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-amber-700 dark:text-amber-400 shrink-0 self-center" />
                 </button>
-              </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleOpenLocation}
+                  className="w-full flex items-center gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3 text-left hover:bg-muted/70 active:scale-[0.99] transition-colors"
+                >
+                  <MapPin className="w-5 h-5 text-primary shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sua região</p>
+                    <p className="text-sm font-semibold text-foreground truncate">{locationLabel}</p>
+                  </div>
+                  <span className="text-xs font-bold text-primary shrink-0">Alterar</span>
+                </button>
+              )}
             </div>
           ) : null}
 

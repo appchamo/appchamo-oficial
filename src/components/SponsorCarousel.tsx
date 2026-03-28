@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeLocation } from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
@@ -73,6 +75,8 @@ interface SponsorCarouselProps {
 }
 
 const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinnedSponsorId = null }: SponsorCarouselProps) => {
+  const { user } = useAuth();
+  const { sponsor: viewerOwnerSponsor } = useLinkedSponsor(user?.id);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -218,13 +222,12 @@ const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinne
     return () => { cancelledRef.current = true; };
   }, []);
 
-  // Busca stories ativos após sponsors carregarem
-  useEffect(() => {
-    if (!loaded || allSponsors.length === 0) return;
+  const fetchActiveStories = useCallback(() => {
+    if (allSponsors.length === 0) return;
     const ids = allSponsors.map((s) => s.id);
-    supabase
+    void supabase
       .from("sponsor_stories")
-      .select("id, sponsor_id, photo_url, caption, link_url, expires_at")
+      .select("id, sponsor_id, photo_url, caption, link_url, link_button_label, expires_at")
       .in("sponsor_id", ids)
       .gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: true })
@@ -243,12 +246,18 @@ const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinne
             photo_url: story.photo_url,
             caption: story.caption,
             link_url: story.link_url,
+            link_button_label: story.link_button_label ?? null,
             sponsor_link: sp.link_url,
           });
         }
         setActiveStories(byId);
       });
-  }, [loaded, allSponsors]);
+  }, [allSponsors]);
+
+  useEffect(() => {
+    if (!loaded || allSponsors.length === 0) return;
+    fetchActiveStories();
+  }, [loaded, allSponsors, fetchActiveStories]);
 
   // Refresh location in background and update cache
   useEffect(() => {
@@ -456,6 +465,19 @@ const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinne
         stories={viewerStories}
         initialIndex={viewerStartIndex}
         onClose={() => { setViewerStories(null); setViewerStartIndex(0); }}
+        ownerSponsorId={viewerOwnerSponsor?.id ?? null}
+        onStoryUpdated={(updated) => {
+          setViewerStories((prev) => prev?.map((s) => (s.id === updated.id ? updated : s)) ?? null);
+          fetchActiveStories();
+        }}
+        onStoryDeleted={(storyId) => {
+          setViewerStories((prev) => {
+            if (!prev) return null;
+            const next = prev.filter((s) => s.id !== storyId);
+            return next.length ? next : null;
+          });
+          fetchActiveStories();
+        }}
       />
     )}
     </>

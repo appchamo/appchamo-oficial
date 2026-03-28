@@ -29,6 +29,9 @@ import {
 } from "lucide-react";
 
 const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qr-login`;
+const SUPABASE_ANON_OR_PUBLISHABLE = (
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ""
+).trim();
 
 type Stage = "idle" | "scanning" | "processing" | "success" | "error";
 
@@ -103,7 +106,12 @@ export default function QrScannerApp() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          ...(SUPABASE_ANON_OR_PUBLISHABLE
+            ? {
+                apikey: SUPABASE_ANON_OR_PUBLISHABLE,
+                Authorization: `Bearer ${session.access_token}`,
+              }
+            : { Authorization: `Bearer ${session.access_token}` }),
         },
         body: JSON.stringify({
           token,

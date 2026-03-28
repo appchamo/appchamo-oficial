@@ -220,7 +220,7 @@ const Profile = () => {
   };
 
   const loadMutualFriends = useCallback(async () => {
-    if (!proData?.id) return;
+    if (!proData?.id || !user?.id) return;
     setFriendsLoading(true);
     try {
       const { data, error } = await supabase.rpc("list_professional_mutual_followers" as any, {
@@ -229,16 +229,73 @@ const Profile = () => {
       if (error) throw error;
       const raw = data as unknown;
       const asList = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? [raw] : [];
-      const rows = asList
+
+      const fromRpc = asList
         .filter((r): r is Record<string, unknown> => r != null && typeof r === "object")
-        .map((r) => ({
-          user_id: String(r.user_id ?? ""),
-          full_name: typeof r.full_name === "string" ? r.full_name : "Profissional",
-          avatar_url: (typeof r.avatar_url === "string" ? r.avatar_url : null) as string | null,
-          pro_key: String(r.pro_key ?? ""),
-        }))
-        .filter((r) => r.user_id.length > 0 && r.pro_key.length > 0);
-      setMutualFriends(rows);
+        .map((r) => {
+          const uid = String(
+            r.friend_user_id ?? r.user_id ?? r.FriendUserId ?? "",
+          ).trim();
+          const pk = String(r.friend_pro_key ?? r.pro_key ?? r.FriendProKey ?? "").trim();
+          const name =
+            typeof r.friend_full_name === "string"
+              ? r.friend_full_name
+              : typeof r.full_name === "string"
+                ? r.full_name
+                : "Profissional";
+          const av =
+            typeof r.friend_avatar_url === "string"
+              ? r.friend_avatar_url
+              : typeof r.avatar_url === "string"
+                ? r.avatar_url
+                : null;
+          return {
+            user_id: uid,
+            full_name: name,
+            avatar_url: av as string | null,
+            pro_key: pk,
+          };
+        })
+        .filter((r) => r.user_id.length >= 32 && r.pro_key.length > 0);
+
+      const uids = [...new Set(fromRpc.map((r) => r.user_id))];
+      let merged = fromRpc;
+      if (uids.length > 0) {
+        const { data: profRows, error: profErr } = await supabase
+          .from("profiles")
+          .select("user_id, display_name, full_name, avatar_url")
+          .in("user_id", uids);
+        if (!profErr && profRows?.length) {
+          const pmap = new Map(
+            (profRows as { user_id: string; display_name: string | null; full_name: string | null; avatar_url: string | null }[]).map(
+              (p) => [p.user_id, p],
+            ),
+          );
+          merged = fromRpc.map((row) => {
+            const p = pmap.get(row.user_id);
+            if (!p) return row;
+            const dn = (p.display_name || "").trim();
+            const fn = (p.full_name || "").trim();
+            const label = dn || fn || row.full_name;
+            return {
+              ...row,
+              full_name: label,
+              avatar_url: p.avatar_url ?? row.avatar_url,
+            };
+          });
+        }
+      }
+
+      setMutualFriends(merged);
+
+      if (merged.length === 0 && mutualCount !== null && mutualCount > 0) {
+        toast({
+          title: "Lista de amigos desatualizada no servidor",
+          description:
+            "A contagem aparece, mas a lista não. Aplique a migração mais recente do Supabase (list_mutual_followers) ou contacte o suporte.",
+          variant: "destructive",
+        });
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Erro desconhecido";
       console.error("list_professional_mutual_followers", e);
@@ -251,7 +308,7 @@ const Profile = () => {
     } finally {
       setFriendsLoading(false);
     }
-  }, [proData?.id]);
+  }, [proData?.id, user?.id, mutualCount]);
 
   const handleLogout = async () => {
     await signOut();

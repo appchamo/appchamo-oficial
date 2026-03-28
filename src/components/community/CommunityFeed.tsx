@@ -250,6 +250,8 @@ export default function CommunityFeed({
   const [expandedBodies, setExpandedBodies] = useState<Record<string, boolean>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentSubmitting, setCommentSubmitting] = useState<string | null>(null);
+  /** Ordenação dos comentários no painel (raízes). Respostas mantêm ordem cronológica por thread. */
+  const [commentsSortOrder, setCommentsSortOrder] = useState<"relevant" | "recent">("relevant");
 
   const [sharePost, setSharePost] = useState<PostRow | null>(null);
   const [shareQuery, setShareQuery] = useState("");
@@ -490,6 +492,39 @@ export default function CommunityFeed({
     });
     return { roots, repliesByParent };
   }, [commentsSheetPost, commentsByPost, hiddenCommentIds]);
+
+  const sortedSheetRoots = useMemo(() => {
+    const { roots, repliesByParent } = commentsSheetThreads;
+    if (roots.length === 0) return roots;
+
+    const reactionScore = (commentId: string) => {
+      const sum = commentReactionSummary[commentId] || {};
+      return totalReactionCount(sum);
+    };
+
+    const threadScore = (rootId: string) => {
+      let s = reactionScore(rootId);
+      const reps = repliesByParent[rootId] || [];
+      for (const rep of reps) {
+        s += reactionScore(rep.id);
+      }
+      return s;
+    };
+
+    const sorted = [...roots];
+    if (commentsSortOrder === "recent") {
+      sorted.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+    } else {
+      sorted.sort((a, b) => {
+        const diff = threadScore(b.id) - threadScore(a.id);
+        if (diff !== 0) return diff;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    }
+    return sorted;
+  }, [commentsSheetThreads, commentReactionSummary, commentsSortOrder]);
 
   const publishPost = async () => {
     if (!user || !canPost) return;
@@ -907,44 +942,59 @@ export default function CommunityFeed({
           if (!cancelled) setFollowedForShare([]);
           return;
         }
-        const { data: revRows } = await supabase
-          .from("professional_follows" as any)
-          .select("user_id")
-          .eq("professional_id", myPid);
-        const whoFollowsMe = new Set((revRows || []).map((r: { user_id: string }) => r.user_id));
 
-        const { data: follows } = await supabase
-          .from("professional_follows" as any)
-          .select("professional_id, created_at")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(40);
-        const rows = (follows || []) as { professional_id: string }[];
-        const seen = new Set<string>();
-        const orderedPids: string[] = [];
-        for (const r of rows) {
-          if (!seen.has(r.professional_id)) {
-            seen.add(r.professional_id);
-            orderedPids.push(r.professional_id);
-          }
-        }
-        if (!orderedPids.length) {
+        const [{ data: myFollowRows }, { data: revRows }] = await Promise.all([
+          supabase
+            .from("professional_follows" as any)
+            .select("professional_id, created_at")
+            .eq("user_id", user.id),
+          supabase.from("professional_follows" as any).select("user_id").eq("professional_id", myPid),
+        ]);
+
+        const whoFollowsMe = new Set((revRows || []).map((r: { user_id: string }) => r.user_id));
+        const followRows = (myFollowRows || []) as { professional_id: string; created_at: string }[];
+        if (followRows.length === 0) {
           if (!cancelled) setFollowedForShare([]);
           return;
         }
-        const { data: pros } = await supabase.from("professionals").select("id, user_id").in("id", orderedPids);
-        const uidByPid = new Map((pros || []).map((p: any) => [p.id, p.user_id as string]));
-        const uids = orderedPids.map((pid) => uidByPid.get(pid)).filter(Boolean) as string[];
+
+        const uniquePids = [...new Set(followRows.map((r) => r.professional_id))];
+        const { data: pros } = await supabase.from("professionals").select("id, user_id").in("id", uniquePids);
+        const uidByPid = new Map((pros || []).map((p: any) => [p.id as string, p.user_id as string]));
+
+        const lastFollowAt = new Map<string, string>();
+        for (const r of followRows) {
+          const uid = uidByPid.get(r.professional_id);
+          if (!uid || uid === user.id) continue;
+          const cur = lastFollowAt.get(uid);
+          if (!cur || r.created_at > cur) lastFollowAt.set(uid, r.created_at);
+        }
+
+        const mutualUids = new Set<string>();
+        for (const r of followRows) {
+          const uid = uidByPid.get(r.professional_id);
+          if (!uid || uid === user.id) continue;
+          if (whoFollowsMe.has(uid)) mutualUids.add(uid);
+        }
+
+        const orderedUids = [...mutualUids].sort((a, b) => {
+          const ta = lastFollowAt.get(a) || "";
+          const tb = lastFollowAt.get(b) || "";
+          return tb.localeCompare(ta);
+        });
+
+        if (orderedUids.length === 0) {
+          if (!cancelled) setFollowedForShare([]);
+          return;
+        }
+
         const { data: profs } = await supabase
           .from("profiles")
           .select("user_id, display_name, full_name, avatar_url")
-          .in("user_id", uids);
+          .in("user_id", orderedUids);
         const profMap = new Map((profs || []).map((p: any) => [p.user_id as string, p as AuthorRow]));
-        const ordered: AuthorRow[] = [];
-        for (const pid of orderedPids) {
-          const uid = uidByPid.get(pid);
-          if (uid && profMap.has(uid) && whoFollowsMe.has(uid)) ordered.push(profMap.get(uid)!);
-        }
+        const ordered: AuthorRow[] = orderedUids.map((uid) => profMap.get(uid)).filter(Boolean) as AuthorRow[];
+
         if (!cancelled) setFollowedForShare(ordered);
       } catch {
         if (!cancelled) setFollowedForShare([]);
@@ -2096,6 +2146,7 @@ export default function CommunityFeed({
           if (!o) {
             setCommentsSheetPost(null);
             setReplyTarget(null);
+            setCommentsSortOrder("relevant");
           }
         }}
       >
@@ -2107,14 +2158,29 @@ export default function CommunityFeed({
           <SheetHeader className="px-5 pt-1 pb-0 text-left border-b border-border/40 space-y-0">
             <div className="flex items-center justify-between gap-2 pb-3">
               <SheetTitle className="text-lg font-bold tracking-tight">Comentários</SheetTitle>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 text-[13px] font-semibold text-foreground rounded-lg px-2 py-1 hover:bg-muted/80 transition-colors"
-                aria-label="Ordenação dos comentários"
-              >
-                Mais relevantes
-                <ChevronDown className="w-4 h-4 opacity-70" />
-              </button>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-[13px] font-semibold text-foreground rounded-lg px-2 py-1 hover:bg-muted/80 transition-colors"
+                    aria-label="Ordenação dos comentários"
+                  >
+                    {commentsSortOrder === "relevant" ? "Mais relevantes" : "Mais recentes"}
+                    <ChevronDown className="w-4 h-4 opacity-70" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem
+                    className="font-medium"
+                    onClick={() => setCommentsSortOrder("relevant")}
+                  >
+                    Mais relevantes (reações)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="font-medium" onClick={() => setCommentsSortOrder("recent")}>
+                    Mais recentes (data)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0">
@@ -2136,7 +2202,7 @@ export default function CommunityFeed({
               <p className="text-center text-sm text-muted-foreground py-8">Ainda não há comentários.</p>
             ) : null}
             {commentsSheetPost &&
-              commentsSheetThreads.roots.map((root) => {
+              sortedSheetRoots.map((root) => {
                 const replies = commentsSheetThreads.repliesByParent[root.id] || [];
                 const expanded = !!expandedReplyIds[root.id];
                 const visibleReplies = expanded ? replies : replies.slice(0, 1);

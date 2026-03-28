@@ -755,14 +755,51 @@ export default function CommunityFeed({
           return;
         }
         const term = `%${raw.split(/\s+/)[0]}%`;
+
+        const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+        const myPid = (myPro as { id?: string } | null)?.id;
+        if (!myPid) {
+          setShareResults([]);
+          return;
+        }
+        const { data: revRows } = await supabase
+          .from("professional_follows" as any)
+          .select("user_id")
+          .eq("professional_id", myPid);
+        const whoFollowsMe = new Set((revRows || []).map((r: { user_id: string }) => r.user_id));
+
         const { data, error } = await supabase
           .from("profiles")
           .select("user_id, display_name, full_name, avatar_url")
           .neq("user_id", user.id)
           .or(`display_name.ilike.${term},full_name.ilike.${term}`)
-          .limit(15);
+          .limit(20);
         if (error) throw error;
-        setShareResults((data || []) as AuthorRow[]);
+        const rows = (data || []) as AuthorRow[];
+        const uids = rows.map((r) => r.user_id);
+        if (uids.length === 0) {
+          setShareResults([]);
+          return;
+        }
+        const { data: theirPros } = await supabase.from("professionals").select("id, user_id").in("user_id", uids);
+        const uidToPid = new Map((theirPros || []).map((p: { id: string; user_id: string }) => [p.user_id, p.id]));
+        const theirPids = [...new Set(uidToPid.values())];
+        if (theirPids.length === 0) {
+          setShareResults([]);
+          return;
+        }
+        const { data: myFollows } = await supabase
+          .from("professional_follows" as any)
+          .select("professional_id")
+          .eq("user_id", user.id)
+          .in("professional_id", theirPids);
+        const iFollow = new Set((myFollows || []).map((x: { professional_id: string }) => x.professional_id));
+
+        const filtered = rows.filter((r) => {
+          const pid = uidToPid.get(r.user_id);
+          return pid && iFollow.has(pid) && whoFollowsMe.has(r.user_id);
+        });
+        setShareResults(filtered);
       } catch {
         setShareResults([]);
       } finally {
@@ -807,6 +844,18 @@ export default function CommunityFeed({
     (async () => {
       setLoadingFollowedShare(true);
       try {
+        const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+        const myPid = (myPro as { id?: string } | null)?.id;
+        if (!myPid) {
+          if (!cancelled) setFollowedForShare([]);
+          return;
+        }
+        const { data: revRows } = await supabase
+          .from("professional_follows" as any)
+          .select("user_id")
+          .eq("professional_id", myPid);
+        const whoFollowsMe = new Set((revRows || []).map((r: { user_id: string }) => r.user_id));
+
         const { data: follows } = await supabase
           .from("professional_follows" as any)
           .select("professional_id, created_at")
@@ -837,7 +886,7 @@ export default function CommunityFeed({
         const ordered: AuthorRow[] = [];
         for (const pid of orderedPids) {
           const uid = uidByPid.get(pid);
-          if (uid && profMap.has(uid)) ordered.push(profMap.get(uid)!);
+          if (uid && profMap.has(uid) && whoFollowsMe.has(uid)) ordered.push(profMap.get(uid)!);
         }
         if (!cancelled) setFollowedForShare(ordered);
       } catch {
@@ -855,6 +904,32 @@ export default function CommunityFeed({
     if (!user || !sharePost) return;
     setShareSending(true);
     try {
+      const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+      const myPid = (myPro as { id?: string } | null)?.id;
+      const { data: theirPro } = await supabase.from("professionals").select("id").eq("user_id", toUserId).maybeSingle();
+      const theirPid = (theirPro as { id?: string } | null)?.id;
+      if (!myPid || !theirPid) {
+        toast({
+          title: "Não é possível enviar",
+          description:
+            "A partilha na conversa só funciona entre perfis profissionais com seguimento mútuo (vocês seguem o perfil um do outro).",
+          variant: "destructive",
+        });
+        return;
+      }
+      const [{ data: iFollowRow }, { data: theyFollowRow }] = await Promise.all([
+        supabase.from("professional_follows" as any).select("id").eq("user_id", user.id).eq("professional_id", theirPid).maybeSingle(),
+        supabase.from("professional_follows" as any).select("id").eq("user_id", toUserId).eq("professional_id", myPid).maybeSingle(),
+      ]);
+      if (!iFollowRow || !theyFollowRow) {
+        toast({
+          title: "Seguimento mútuo necessário",
+          description: "Só pode partilhar com quem você segue e que também segue o seu perfil profissional.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const { error: sErr } = await supabase.from("community_post_shares" as any).insert({
         post_id: sharePost.id,
         from_user_id: user.id,
@@ -1746,7 +1821,7 @@ export default function CommunityFeed({
           <SheetHeader className="px-5 pt-1 pb-3 text-left space-y-1 border-b border-border/40">
             <SheetTitle className="text-lg font-bold tracking-tight">Compartilhar publicação</SheetTitle>
             <p className="text-[13px] text-muted-foreground font-normal leading-snug pr-6">
-              Envie para alguém no Chamô ou compartilhe o link (WhatsApp, Instagram, Mensagens…).
+              No Chamô, só aparecem contactos com seguimento mútuo (vocês seguem o perfil profissional um do outro). Também pode partilhar o link nas redes.
             </p>
           </SheetHeader>
 
@@ -1763,15 +1838,18 @@ export default function CommunityFeed({
             </div>
           </div>
 
-          {(loadingFollowedShare || followedForShare.length > 0) && (
-            <div className="px-5 pb-3 shrink-0 border-b border-border/30">
+          <div className="px-5 pb-3 shrink-0 border-b border-border/30">
               <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
-                Quem você segue
+                Seguimento mútuo
               </p>
               {loadingFollowedShare ? (
                 <div className="flex justify-center py-4">
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </div>
+              ) : followedForShare.length === 0 ? (
+                <p className="text-[13px] text-muted-foreground py-3 text-center leading-snug">
+                  Ninguém com seguimento mútuo por aqui. Ambos precisam seguir o perfil profissional um do outro — ou use o link para WhatsApp / Instagram.
+                </p>
               ) : (
                 <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none touch-pan-x">
                   {followedForShare.map((r) => (
@@ -1796,8 +1874,7 @@ export default function CommunityFeed({
                   ))}
                 </div>
               )}
-            </div>
-          )}
+          </div>
 
           <div className="flex-1 min-h-[120px] overflow-y-auto px-5 py-2 space-y-1">
             <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide py-1">
@@ -1809,7 +1886,9 @@ export default function CommunityFeed({
               </div>
             )}
             {!shareSearching && shareQuery.trim().length >= 2 && shareResults.length === 0 && (
-              <p className="text-sm text-muted-foreground py-4 text-center">Ninguém encontrado.</p>
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                Ninguém encontrado com seguimento mútuo. Confirme se ambos seguem o perfil profissional um do outro.
+              </p>
             )}
             {!shareSearching &&
               shareResults.map((r) => (

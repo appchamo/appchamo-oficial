@@ -501,24 +501,32 @@ const Messages = () => {
   const handleMarkAllRead = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    setThreads((prev) => prev.map((t) => ({ ...t, unreadCount: 0, manual_unread: false })));
-    const { data: proData } = await supabase.from("professionals").select("id").eq("user_id", user.id);
-    const proIds = proData?.map(p => p.id) || [];
-    let reqIds: string[] = [];
-    if (proIds.length > 0) {
-      const { data: reqs } = await supabase.from("service_requests").select("id").or(`client_id.eq.${user.id},professional_id.in.(${proIds.join(",")})`);
-      reqIds = (reqs || []).map((r: { id: string }) => r.id);
-    } else {
-      const { data: reqs } = await supabase.from("service_requests").select("id").eq("client_id", user.id);
-      reqIds = (reqs || []).map((r: { id: string }) => r.id);
-    }
+
+    const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
+    const isFollowingKind = (t: Thread) => (t.request_kind ?? "service") === "following";
+    const pool = threads.filter((t) => !isCancelledOrRejected(t));
+    const tabThreads =
+      chatTab === "seguindo" ? pool.filter(isFollowingKind) : pool.filter((t) => !isFollowingKind(t));
+    const targetIds = tabThreads.filter((t) => !t.is_archived).map((t) => t.id);
+
+    if (targetIds.length === 0) return;
+
+    const idSet = new Set(targetIds);
+    setThreads((prev) => {
+      const next = prev.map((t) => (idSet.has(t.id) ? { ...t, unreadCount: 0, manual_unread: false } : t));
+      _threadsCache = next;
+      return next;
+    });
+
     const now = new Date().toISOString();
-    await Promise.all(reqIds.map((request_id) =>
-      supabase.from("chat_read_status" as any).upsert(
-        { request_id, user_id: user.id, last_read_at: now, manual_unread: false },
-        { onConflict: "request_id,user_id" }
-      )
-    ));
+    await Promise.all(
+      targetIds.map((request_id) =>
+        supabase.from("chat_read_status" as any).upsert(
+          { request_id, user_id: user.id, last_read_at: now, manual_unread: false },
+          { onConflict: "request_id,user_id" },
+        ),
+      ),
+    );
   };
 
   const handleDeleteConversation = async (chatId: string) => {

@@ -7,6 +7,7 @@ export interface LinkedSponsor {
   logo_url: string | null;
   link_url: string;
   weekly_plan: string;
+  niche?: string | null;
 }
 
 /** Conta de utilizador ligada a um patrocinador (user_id em public.sponsors). */
@@ -25,7 +26,7 @@ export function useLinkedSponsor(userId: string | null | undefined) {
     void (async () => {
       const { data } = await supabase
         .from("sponsors")
-        .select("id, name, logo_url, link_url, weekly_plan")
+        .select("id, name, logo_url, link_url, weekly_plan, niche")
         .eq("user_id", userId)
         .maybeSingle();
       if (cancelled) return;

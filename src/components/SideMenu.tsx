@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import { useSubscription } from "@/hooks/useSubscription";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +38,7 @@ type NavProps = {
 function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
   const location = useLocation();
   const { profile, signOut } = useAuth();
+  const { sponsor: menuLinkedSponsor } = useLinkedSponsor(profile?.user_id);
   const { plan } = useSubscription();
   const isBusiness = plan?.id === "business";
   const canPostJobs = profile?.user_type === "company" || profile?.job_posting_enabled === true;
@@ -82,6 +84,11 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
           : []),
         ...(profile?.user_type === "client" && canPostJobs
           ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }]
+          : []),
+        ...(menuLinkedSponsor &&
+        profile?.user_type !== "professional" &&
+        profile?.user_type !== "company"
+          ? [{ icon: UsersRound, label: "Comunidade", path: "/home?feed=comunidade" }]
           : []),
       ],
     },

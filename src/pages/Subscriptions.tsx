@@ -1,10 +1,11 @@
 import AppLayout from "@/components/AppLayout";
 import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin, Smartphone, CheckCircle } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useAuth } from "@/hooks/useAuth";
+import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import { useIAP } from "@/hooks/useIAP";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
@@ -62,6 +63,7 @@ const Subscriptions = () => {
   const navigate = useNavigate();
   const { plan: currentPlan, plans, loading, changePlan, scheduleCancel, callsUsed, callsRemaining, isFreePlan, refetch, subscription: currentSubscription } = useSubscription();
   const { user, profile } = useAuth();
+  const { sponsor: subLinkedSponsor } = useLinkedSponsor(user?.id);
   const {
     isIAPAvailable,
     isIOS,
@@ -748,6 +750,10 @@ const Subscriptions = () => {
     profile?.user_type === "professional" && !cadastroInternoLiberado
       ? plans.filter((p) => p.id === "free")
       : plans;
+
+  if (profile?.user_type === "sponsor" || subLinkedSponsor) {
+    return <Navigate to="/home" replace />;
+  }
 
   return (
     <AppLayout>

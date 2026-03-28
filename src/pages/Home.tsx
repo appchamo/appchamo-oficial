@@ -31,6 +31,7 @@ import CommunityFeed from "@/components/community/CommunityFeed";
 import HomeLaunchBanner from "@/components/home/HomeLaunchBanner";
 import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
+import SponsorLaunchNovidadeModal from "@/components/sponsor/SponsorLaunchNovidadeModal";
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
@@ -120,6 +121,35 @@ const Home = () => {
       setSearchParams({}, { replace: true });
     }
   }, [user, homeFeedComunidade, setSearchParams]);
+
+  useEffect(() => {
+    if (!user?.id || !linkedSponsor) return;
+    let cancelled = false;
+    void (async () => {
+      const name = linkedSponsor.name?.trim();
+      const avatar = linkedSponsor.logo_url?.trim() || null;
+      const { data: p } = await supabase
+        .from("profiles")
+        .select("full_name, display_name, avatar_url")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (cancelled || !p || !name) return;
+      const dn = (p.display_name || "").trim();
+      if (p.full_name === name && dn === name && p.avatar_url === avatar) return;
+      await supabase
+        .from("profiles")
+        .update({
+          full_name: name,
+          display_name: name,
+          avatar_url: avatar,
+        })
+        .eq("user_id", user.id);
+      await refreshProfile();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, linkedSponsor?.id, linkedSponsor?.name, linkedSponsor?.logo_url, refreshProfile]);
   const { isFreePlan, callsRemaining, loading: subLoading, plan } = useSubscription();
   const isBusiness = plan?.id === "business";
   const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
@@ -136,6 +166,8 @@ const Home = () => {
   const [appointmentBannerDismissed, setAppointmentBannerDismissed] = useState(() =>
     localStorage.getItem("chamo_appointment_banner_dismissed") === "1"
   );
+  const [sponsorNovidadeOpen, setSponsorNovidadeOpen] = useState(false);
+  const [sponsorReportsKey, setSponsorReportsKey] = useState(0);
   
   // ✅ ATIVAÇÃO DO PUSH: Registra o token assim que o perfil carregar
   usePush(profile?.user_id || profile?.id); 
@@ -788,14 +820,18 @@ const Home = () => {
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
                 {section.id === "sponsors" && linkedSponsor && !homeFeedComunidade ? (
                   <div className="mt-3 flex flex-col gap-3">
-                    <Link
-                      to="/sponsor/dashboard?novidade=1"
+                    <button
+                      type="button"
+                      onClick={() => setSponsorNovidadeOpen(true)}
                       className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-primary/35 bg-primary/5 text-primary font-semibold text-sm hover:bg-primary/10 transition-colors"
                     >
                       <Megaphone className="w-5 h-5 shrink-0" />
                       Lançar novidade
-                    </Link>
-                    <SponsorPatrocinadorPanel sponsorId={linkedSponsor.id} />
+                    </button>
+                    <SponsorPatrocinadorPanel
+                      key={sponsorReportsKey}
+                      sponsorId={linkedSponsor.id}
+                    />
                   </div>
                 ) : null}
                 {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
@@ -811,7 +847,9 @@ const Home = () => {
           <HomeBanners position="bottom" />
 
           {/* Mostra para cliente ou quando perfil ainda não carregou (igual Android no iPhone) */}
-          {profile?.user_type !== "professional" && profile?.user_type !== "company" && (
+          {profile?.user_type !== "professional" &&
+            profile?.user_type !== "company" &&
+            !linkedSponsor && (
             <Link
               to="/signup-pro"
               className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-semibold text-sm transition-colors"
@@ -976,6 +1014,13 @@ const Home = () => {
           </button>
         </DialogContent>
       </Dialog>
+
+      <SponsorLaunchNovidadeModal
+        open={sponsorNovidadeOpen}
+        onOpenChange={setSponsorNovidadeOpen}
+        sponsor={linkedSponsor}
+        onPublished={() => setSponsorReportsKey((k) => k + 1)}
+      />
     </AppLayout>
   );
 };

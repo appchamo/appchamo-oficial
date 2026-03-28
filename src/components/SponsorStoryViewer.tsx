@@ -124,8 +124,9 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
   }, [currentIndex, stories.length, onClose]);
 
   const handleLinkClick = () => {
-    const url = current.link_url || current.sponsor_link;
-    if (!url) return;
+    const raw = (current.link_url || current.sponsor_link || "").trim();
+    if (!raw || raw === "#") return;
+    const url = raw.includes("://") ? raw : `https://${raw}`;
     supabase.auth.getSession().then(({ data: { session } }) => {
       supabase.from("story_clicks").insert({
         story_id: current.id,
@@ -276,7 +277,10 @@ const SponsorStoryViewer = ({ stories, initialIndex = 0, onClose }: Props) => {
             {current.caption}
           </p>
         )}
-        {(current.link_url || current.sponsor_link) && (
+        {(() => {
+          const raw = (current.link_url || current.sponsor_link || "").trim();
+          return raw && raw !== "#";
+        })() && (
           <button
             onClick={handleLinkClick}
             className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-white text-gray-900 font-semibold text-sm shadow-lg active:scale-[0.98] transition-transform"

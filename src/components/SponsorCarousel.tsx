@@ -348,7 +348,17 @@ const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinne
       setViewerStories(allFlat);
       setViewerStartIndex(startIndex >= 0 ? startIndex : 0);
     } else {
-      window.open(sponsor.link_url, "_blank");
+      const raw = (sponsor.link_url || "").trim();
+      if (raw && raw !== "#") {
+        const href = raw.includes("://") ? raw : `https://${raw}`;
+        try {
+          // eslint-disable-next-line no-new
+          new URL(href);
+          window.open(href, "_blank");
+        } catch {
+          /* link inválido no painel — ainda contabiliza o toque abaixo */
+        }
+      }
       supabase.auth.getSession().then(({ data: { session } }) => {
         const uid = session?.user?.id || null;
         supabase.from("sponsor_clicks").insert({ sponsor_id: sponsor.id, user_id: uid }).then(() => {});

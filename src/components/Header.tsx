@@ -4,6 +4,7 @@ import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
 import { useAuth } from "@/hooks/useAuth";
+import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import { useMenu } from "@/contexts/MenuContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ function computeMinutesUntil(dateStr: string, timeStr: string): number {
 const Header = () => {
   const { menuOpen, setMenuOpen } = useMenu();
   const { user, profile } = useAuth();
+  const { sponsor: headerLinkedSponsor } = useLinkedSponsor(user?.id);
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -240,6 +242,8 @@ const Header = () => {
   }, [user?.id, fetchNextAppt]);
 
   const isPro = profile && profile.user_type !== "client";
+  const hidePlanos =
+    profile?.user_type === "sponsor" || !!headerLinkedSponsor;
 
   // Regra de Exibição dos Selos
   const showRejectedBadge = !isPro && proStatus === "rejected";
@@ -337,7 +341,7 @@ const Header = () => {
               </button>
             )}
             {/* Profissional: selo no lugar do Planos — texto distinto para cadastro vs assinatura */}
-            {user && isPro && pendingReplacesPlanos && pendingSlotKind && (
+            {user && isPro && !hidePlanos && pendingReplacesPlanos && pendingSlotKind && (
               <div
                 className="flex items-center justify-center gap-1.5 min-w-[6.75rem] max-w-[9.5rem] px-2 py-1.5 rounded-xl border border-amber-500/35 bg-amber-500/10 text-amber-800 flex-shrink-0"
                 role="status"
@@ -357,7 +361,7 @@ const Header = () => {
                 </span>
               </div>
             )}
-            {user && isPro && !pendingReplacesPlanos && (
+            {user && isPro && !hidePlanos && !pendingReplacesPlanos && (
               <button
                 type="button"
                 onClick={handleVipOrPlanosClick}

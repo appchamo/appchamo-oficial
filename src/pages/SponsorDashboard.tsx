@@ -5,37 +5,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, CreditCard, QrCode, Copy, Loader2, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import SponsorStoryViewer, { SponsorStory } from "@/components/SponsorStoryViewer";
+import { compressSponsorStoryImage } from "@/lib/compressSponsorStoryImage";
 
 type UpgradeStep = "package" | "method" | "pix_form" | "pix_qr" | "card_form" | "success";
-
-/** Comprime imagem client-side para WebP leve mantendo boa qualidade visual */
-async function compressStoryImage(file: File, maxDim = 600, quality = 0.62): Promise<File> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d")!;
-      ctx.imageSmoothingEnabled = true;
-      if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(img, 0, 0, w, h);
-      canvas.toBlob((blob) => {
-        if (!blob) { resolve(file); return; }
-        const name = file.name.replace(/\.[^.]+$/, ".webp");
-        resolve(new File([blob], name, { type: "image/webp" }));
-      }, "image/webp", quality);
-    };
-    img.onerror = () => resolve(file);
-    img.src = url;
-  });
-}
 
 interface Sponsor {
   id: string;
@@ -74,6 +48,7 @@ const SponsorDashboard = () => {
   const [weeklyUsed, setWeeklyUsed] = useState(0);
   const [newStoryOpen, setNewStoryOpen] = useState(false);
   const [newCaption, setNewCaption] = useState("");
+  const [newLinkUrl, setNewLinkUrl] = useState("");
   const [newFile, setNewFile] = useState<File | null>(null);
   const [newPreview, setNewPreview] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
@@ -193,7 +168,7 @@ const SponsorDashboard = () => {
     // Comprime antes de armazenar (especialmente para arquivos pesados)
     setCompressingStory(true);
     try {
-      const compressed = await compressStoryImage(file);
+      const compressed = await compressSponsorStoryImage(file);
       const savedKB = Math.round((file.size - compressed.size) / 1024);
       if (savedKB > 50) {
         console.log(`[Story] Comprimida: ${(file.size / 1024).toFixed(0)}KB → ${(compressed.size / 1024).toFixed(0)}KB`);
@@ -226,10 +201,24 @@ const SponsorDashboard = () => {
       const { data: urlData } = supabase.storage.from("sponsor-stories").getPublicUrl(path);
       const photo_url = urlData.publicUrl;
 
+      let storyLink: string | null = null;
+      const tl = newLinkUrl.trim();
+      if (tl) {
+        const candidate = tl.includes("://") ? tl : `https://${tl}`;
+        try {
+          storyLink = new URL(candidate).toString();
+        } catch {
+          toast({ title: "Link inválido", variant: "destructive" });
+          setPosting(false);
+          return;
+        }
+      }
+
       const { error: insertErr } = await supabase.from("sponsor_stories").insert({
         sponsor_id: sponsor.id,
         photo_url,
         caption: newCaption.trim() || null,
+        link_url: storyLink,
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       });
       if (insertErr) throw new Error(insertErr.message);
@@ -239,6 +228,7 @@ const SponsorDashboard = () => {
       setNewFile(null);
       setNewPreview(null);
       setNewCaption("");
+      setNewLinkUrl("");
       load();
     } catch (e: any) {
       toast({ title: "Erro ao publicar", description: e.message, variant: "destructive" });
@@ -535,7 +525,7 @@ const SponsorDashboard = () => {
       </div>
 
       {/* Modal nova novidade */}
-      <Dialog open={newStoryOpen} onOpenChange={(o) => { if (!posting) { setNewStoryOpen(o); if (!o) { setNewFile(null); setNewPreview(null); setNewCaption(""); } } }}>
+      <Dialog open={newStoryOpen} onOpenChange={(o) => { if (!posting) { setNewStoryOpen(o); if (!o) { setNewFile(null); setNewPreview(null); setNewCaption(""); setNewLinkUrl(""); } } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Lançar Novidade</DialogTitle></DialogHeader>
           <div className="space-y-4">
@@ -560,6 +550,10 @@ const SponsorDashboard = () => {
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Legenda (opcional)</label>
               <textarea value={newCaption} onChange={(e) => setNewCaption(e.target.value)} maxLength={150} rows={3} placeholder="Escreva uma mensagem para os usuários..." className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
               <p className="text-[11px] text-muted-foreground text-right mt-1">{newCaption.length}/150</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Link desta novidade (opcional)</label>
+              <Input value={newLinkUrl} onChange={(e) => setNewLinkUrl(e.target.value)} placeholder="https://…" className="rounded-xl" />
             </div>
             <p className="text-xs text-muted-foreground text-center">Esta novidade ficará ativa por 24 horas.</p>
             {compressingStory && (

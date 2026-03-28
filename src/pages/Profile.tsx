@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
+import SponsorLaunchNovidadeModal from "@/components/sponsor/SponsorLaunchNovidadeModal";
 const availabilityOptions = [
   { value: "available", label: "Disponível", icon: Circle, color: "text-green-500" },
   { value: "quotes_only", label: "Somente orçamentos", icon: FileQuestion, color: "text-amber-500" },
@@ -33,6 +34,8 @@ const Profile = () => {
   const navigate = useNavigate();
   const { profile, user, signOut, refreshProfile } = useAuth();
   const { sponsor: linkedSponsor } = useLinkedSponsor(user?.id);
+  const [sponsorNovidadeOpen, setSponsorNovidadeOpen] = useState(false);
+  const [sponsorPanelKey, setSponsorPanelKey] = useState(0);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -89,6 +92,35 @@ const Profile = () => {
     if (payload.phone) setPhone(payload.phone);
     toast({ title: "Cadastro completado!", description: "Suas informações foram salvas com sucesso." });
   };
+
+  useEffect(() => {
+    if (!user?.id || !linkedSponsor) return;
+    let cancelled = false;
+    void (async () => {
+      const name = linkedSponsor.name?.trim();
+      const avatar = linkedSponsor.logo_url?.trim() || null;
+      const { data: p } = await supabase
+        .from("profiles")
+        .select("full_name, display_name, avatar_url")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (cancelled || !p || !name) return;
+      const dn = (p.display_name || "").trim();
+      if (p.full_name === name && dn === name && p.avatar_url === avatar) return;
+      await supabase
+        .from("profiles")
+        .update({
+          full_name: name,
+          display_name: name,
+          avatar_url: avatar,
+        })
+        .eq("user_id", user.id);
+      await refreshProfile();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, linkedSponsor?.id, linkedSponsor?.name, linkedSponsor?.logo_url, refreshProfile]);
 
   useEffect(() => {
     if (!user || !profile) return;
@@ -221,7 +253,13 @@ const Profile = () => {
 
   if (!profile) return <AppLayout><main className="max-w-screen-lg mx-auto px-4 py-10 text-center text-muted-foreground">Carregando...</main></AppLayout>;
 
-  const typeLabel = profile.user_type === "professional" ? "Profissional" : profile.user_type === "company" ? "Empresa" : "Cliente";
+  const typeLabel = linkedSponsor
+    ? "Patrocinador"
+    : profile.user_type === "professional"
+      ? "Profissional"
+      : profile.user_type === "company"
+        ? "Empresa"
+        : "Cliente";
   const initials = (profile.full_name || "U").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
   return (
@@ -241,14 +279,15 @@ const Profile = () => {
 
         {linkedSponsor ? (
           <div className="mb-4 space-y-3">
-            <Link
-              to="/sponsor/dashboard?novidade=1"
+            <button
+              type="button"
+              onClick={() => setSponsorNovidadeOpen(true)}
               className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-primary/35 bg-primary/5 text-primary font-semibold text-sm hover:bg-primary/10 transition-colors"
             >
               <Megaphone className="w-5 h-5 shrink-0" />
               Lançar novidade
-            </Link>
-            <SponsorPatrocinadorPanel sponsorId={linkedSponsor.id} />
+            </button>
+            <SponsorPatrocinadorPanel key={sponsorPanelKey} sponsorId={linkedSponsor.id} />
           </div>
         ) : null}
 
@@ -425,7 +464,10 @@ const Profile = () => {
                   </div>
                   <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5"><Mail className="w-3.5 h-3.5" /> {profile.email}</p>
                   {profile.phone && <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5"><Phone className="w-3.5 h-3.5" /> {profile.phone}</p>}
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1.5 gap-1 ${profile.user_type === "company" ? "bg-primary/10 text-primary" : profile.user_type === "professional" ? "bg-amber-500/10 text-amber-600" : "bg-muted text-muted-foreground"}`}>
+                  {linkedSponsor?.niche?.trim() ? (
+                    <p className="text-sm text-muted-foreground mt-1">{linkedSponsor.niche}</p>
+                  ) : null}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1.5 gap-1 ${linkedSponsor ? "bg-primary/10 text-primary" : profile.user_type === "company" ? "bg-primary/10 text-primary" : profile.user_type === "professional" ? "bg-amber-500/10 text-amber-600" : "bg-muted text-muted-foreground"}`}>
                     <Shield className="w-3 h-3" /> {typeLabel}
                   </span>
                 </>
@@ -582,6 +624,12 @@ const Profile = () => {
           </DialogContent>
         </Dialog>
 
+        <SponsorLaunchNovidadeModal
+          open={sponsorNovidadeOpen}
+          onOpenChange={setSponsorNovidadeOpen}
+          sponsor={linkedSponsor}
+          onPublished={() => setSponsorPanelKey((k) => k + 1)}
+        />
       </main>
     </AppLayout>
   );

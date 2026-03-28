@@ -29,6 +29,7 @@ import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
+import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorCarousel from "@/components/SponsorCarousel";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -306,6 +307,7 @@ export default function CommunityFeed({
 }) {
   const embedded = variant === "embedded";
   const { user, profile } = useAuth();
+  const { sponsor: linkedSponsorForPost } = useLinkedSponsor(user?.id);
   const { getSection } = useHomeLayout();
   const [loading, setLoading] = useState(true);
   const [posts, setPosts] = useState<PostRow[]>([]);
@@ -381,7 +383,9 @@ export default function CommunityFeed({
   const communityLink = "/home?feed=comunidade";
 
   const canPost =
-    profile?.user_type === "professional" || profile?.user_type === "company";
+    profile?.user_type === "professional" ||
+    profile?.user_type === "company" ||
+    !!linkedSponsorForPost;
 
   const applyHydrationForPosts = useCallback(async (mergedList: PostRow[]) => {
     if (!mergedList.length) {

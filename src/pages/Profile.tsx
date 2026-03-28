@@ -1,13 +1,14 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2 } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Users, Loader2 } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 
@@ -41,6 +42,13 @@ const Profile = () => {
   const [deleting, setDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [proData, setProData] = useState<{ id: string; slug: string | null; cover_image_url: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
+
+  const [friendsOpen, setFriendsOpen] = useState(false);
+  const [mutualFriends, setMutualFriends] = useState<
+    { user_id: string; full_name: string; avatar_url: string | null; pro_key: string }[]
+  >([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [mutualCount, setMutualCount] = useState<number | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
   const metaName = ((user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined)?.trim() || "";
@@ -116,6 +124,23 @@ const Profile = () => {
       loadPro();
     }
   }, [user, profile]);
+
+  useEffect(() => {
+    if (!proData?.id) {
+      setMutualCount(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("count_professional_mutual_followers" as any, {
+        p_professional_id: proData.id,
+      });
+      if (!cancelled && !error && typeof data === "number") setMutualCount(data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [proData?.id]);
 
   // Sempre que o usuário abrir/atualizar o Perfil, marcamos se o cadastro está incompleto.
   useEffect(() => {
@@ -193,6 +218,29 @@ const Profile = () => {
       toast({ title: "Seu link:", description: link });
     }
   };
+
+  const loadMutualFriends = useCallback(async () => {
+    if (!proData?.id) return;
+    setFriendsLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("list_professional_mutual_followers" as any, {
+        p_professional_id: proData.id,
+      });
+      if (error) throw error;
+      const rows = (data || []) as {
+        user_id: string;
+        full_name: string;
+        avatar_url: string | null;
+        pro_key: string;
+      }[];
+      setMutualFriends(rows);
+    } catch {
+      toast({ title: "Não foi possível carregar amigos", variant: "destructive" });
+      setMutualFriends([]);
+    } finally {
+      setFriendsLoading(false);
+    }
+  }, [proData?.id]);
 
   const handleLogout = async () => {
     await signOut();
@@ -392,17 +440,33 @@ const Profile = () => {
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                     <h2 className="text-lg font-bold text-foreground">{profile.full_name || "Usuário"}</h2>
-                    {proData?.slug && (
-                      <button
-                        onClick={handleShareProfile}
-                        className="text-muted-foreground hover:text-primary transition-colors"
-                        title="Compartilhar perfil"
-                      >
-                        <Share2 className="w-4 h-4" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {proData?.slug && (
+                        <button
+                          type="button"
+                          onClick={handleShareProfile}
+                          className="text-muted-foreground hover:text-primary transition-colors p-0.5"
+                          title="Compartilhar perfil"
+                        >
+                          <Share2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      {proData && (profile.user_type === "professional" || profile.user_type === "company") && (
+                        <button
+                          type="button"
+                          onClick={() => setFriendsOpen(true)}
+                          className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/8 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/15 transition-colors"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          Amigos
+                          {mutualCount !== null && mutualCount > 0 ? (
+                            <span className="min-w-[1.1rem] text-center tabular-nums">{mutualCount}</span>
+                          ) : null}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5"><Mail className="w-3.5 h-3.5" /> {profile.email}</p>
                   {profile.phone && <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5"><Phone className="w-3.5 h-3.5" /> {profile.phone}</p>}
@@ -546,6 +610,74 @@ const Profile = () => {
             Excluir minha conta
           </button>
         </div>
+
+        <Sheet
+          open={friendsOpen}
+          onOpenChange={(o) => {
+            setFriendsOpen(o);
+            if (o) void loadMutualFriends();
+          }}
+        >
+          <SheetContent
+            side="bottom"
+            className="rounded-t-[24px] max-h-[min(85vh,560px)] flex flex-col p-0 gap-0 overflow-hidden"
+          >
+            <SheetHeader className="px-5 pt-6 pb-3 border-b border-border/50 text-left space-y-1">
+              <SheetTitle className="text-lg font-bold">Amigos no Chamô</SheetTitle>
+              <p className="text-[13px] text-muted-foreground font-normal leading-snug pr-2">
+                Perfis profissionais em que vocês se seguem mutuamente. Toque para abrir o perfil.
+              </p>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))] min-h-0">
+              {friendsLoading ? (
+                <div className="flex justify-center py-16">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              ) : mutualFriends.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-12 px-4 leading-relaxed">
+                  Ainda não há amigos aqui. Quando alguém seguir seu perfil profissional e você seguir o de volta,
+                  aparecerá nesta lista.
+                </p>
+              ) : (
+                <ul className="py-2 space-y-1">
+                  {mutualFriends.map((f) => {
+                    const initials = f.full_name
+                      .split(/\s+/)
+                      .map((w) => w[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase();
+                    return (
+                      <li key={f.user_id}>
+                        <Link
+                          to={`/professional/${encodeURIComponent(f.pro_key)}`}
+                          onClick={() => setFriendsOpen(false)}
+                          className="flex items-center gap-3 rounded-2xl px-3 py-2.5 hover:bg-muted/80 transition-colors"
+                        >
+                          {f.avatar_url ? (
+                            <img
+                              src={getOptimizedAvatar(f.avatar_url)}
+                              alt=""
+                              className="w-11 h-11 rounded-full object-cover ring-2 ring-background shrink-0"
+                            />
+                          ) : (
+                            <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                              {initials}
+                            </div>
+                          )}
+                          <span className="font-semibold text-foreground text-[15px] leading-tight flex-1 min-w-0 truncate">
+                            {f.full_name}
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
 
         <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
           <DialogContent className="max-w-sm">

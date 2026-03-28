@@ -13,6 +13,8 @@ const PICKER: { type: LinkedInReactionType; label: string; Icon: typeof ThumbsUp
 ];
 
 const HOLD_MS = 420;
+/** Evita alternar entre duas reações quando o dedo está no limite entre elas (só muda após cruzar o meio + margem). */
+const REACTION_HYSTERESIS_PX = 12;
 /** Metade da largura aproximada da cápsula (4×44px + gaps + padding), para clamp horizontal */
 const PICKER_HALF_W = 112;
 const PICKER_H = 56;
@@ -38,29 +40,83 @@ type Props = {
   compact?: boolean;
 };
 
-function pickNearestReactionIndex(
+/** Índice da reação mais próxima em X (entre botões existentes). */
+function pickRawNearestReactionIndex(
   clientX: number,
   clientY: number,
   buttons: (HTMLButtonElement | null)[],
 ): number | null {
-  let bestIdx = -1;
-  let bestScore = Infinity;
-  for (let i = 0; i < buttons.length; i++) {
+  const n = PICKER.length;
+  const centers: (number | null)[] = Array(n).fill(null);
+  const cys: (number | null)[] = Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
     const btn = buttons[i];
     if (!btn) continue;
     const r = btn.getBoundingClientRect();
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    const dx = Math.abs(clientX - cx);
-    const dy = Math.abs(clientY - cy);
-    if (dy > PICK_VERTICAL_SLACK) continue;
-    const score = dx + dy * 0.35;
-    if (score < bestScore) {
-      bestScore = score;
-      bestIdx = i;
+    centers[i] = r.left + r.width / 2;
+    cys[i] = r.top + r.height / 2;
+  }
+  const valid = centers.map((c, i) => (c != null && cys[i] != null ? i : -1)).filter((i) => i >= 0);
+  if (!valid.length) return null;
+  const avgCy = valid.reduce((s, i) => s + (cys[i] as number), 0) / valid.length;
+  if (Math.abs(clientY - avgCy) > PICK_VERTICAL_SLACK) return null;
+
+  let raw = valid[0];
+  let bestD = Infinity;
+  for (const i of valid) {
+    const cx = centers[i] as number;
+    const d = Math.abs(clientX - cx);
+    if (d < bestD) {
+      bestD = d;
+      raw = i;
     }
   }
-  return bestIdx >= 0 ? bestIdx : null;
+  return raw;
+}
+
+function pickReactionIndexWithHysteresis(
+  clientX: number,
+  clientY: number,
+  buttons: (HTMLButtonElement | null)[],
+  prevIdx: number | null,
+): number | null {
+  const n = PICKER.length;
+  const centers: (number | null)[] = Array(n).fill(null);
+  const cys: (number | null)[] = Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const btn = buttons[i];
+    if (!btn) continue;
+    const r = btn.getBoundingClientRect();
+    centers[i] = r.left + r.width / 2;
+    cys[i] = r.top + r.height / 2;
+  }
+  const valid = centers.map((c, i) => (c != null && cys[i] != null ? i : -1)).filter((i) => i >= 0);
+  if (!valid.length) return null;
+  const avgCy = valid.reduce((s, i) => s + (cys[i] as number), 0) / valid.length;
+  if (Math.abs(clientY - avgCy) > PICK_VERTICAL_SLACK) return prevIdx;
+
+  let raw = valid[0];
+  let bestD = Infinity;
+  for (const i of valid) {
+    const cx = centers[i] as number;
+    const d = Math.abs(clientX - cx);
+    if (d < bestD) {
+      bestD = d;
+      raw = i;
+    }
+  }
+
+  if (prevIdx === null || prevIdx < 0 || prevIdx >= n || centers[prevIdx] == null) return raw;
+  if (raw === prevIdx) return prevIdx;
+
+  const lo = Math.min(prevIdx, raw);
+  const hi = Math.max(prevIdx, raw);
+  if (hi - lo !== 1) return raw;
+  if (centers[lo] == null || centers[hi] == null) return raw;
+  const boundary = ((centers[lo] as number) + (centers[hi] as number)) / 2;
+  const H = REACTION_HYSTERESIS_PX;
+  if (raw > prevIdx) return clientX >= boundary + H ? raw : prevIdx;
+  return clientX <= boundary - H ? raw : prevIdx;
 }
 
 export function LinkedInLikeControl({
@@ -69,7 +125,7 @@ export function LinkedInLikeControl({
   onQuickLikeToggle,
   className,
   iconClassName,
-  label = "Gostei",
+  label = "Reagir",
   fillRow = true,
   compact = false,
 }: Props) {
@@ -133,8 +189,8 @@ export function LinkedInLikeControl({
   useLayoutEffect(() => {
     if (!pickerOpen || !pickerPos) return;
     const probeY = pickerPos.flipDown ? pickerPos.top + 36 : pickerPos.top - 36;
-    const idx = pickNearestReactionIndex(pickerPos.left, probeY, reactionBtnRefs.current);
-    setHoveredPick(idx ?? 0);
+    const idx = pickRawNearestReactionIndex(pickerPos.left, probeY, reactionBtnRefs.current);
+    setHoveredPick(idx !== null ? idx : 0);
   }, [pickerOpen, pickerPos, setHoveredPick]);
 
   useEffect(() => {
@@ -145,7 +201,12 @@ export function LinkedInLikeControl({
     }
 
     const onMove = (e: PointerEvent) => {
-      const idx = pickNearestReactionIndex(e.clientX, e.clientY, reactionBtnRefs.current);
+      const idx = pickReactionIndexWithHysteresis(
+        e.clientX,
+        e.clientY,
+        reactionBtnRefs.current,
+        hoveredPickRef.current,
+      );
       if (idx !== hoveredPickRef.current) {
         setHoveredPick(idx);
       } else if (idx !== null) {
@@ -220,7 +281,7 @@ export function LinkedInLikeControl({
     ? PICKER.find((p) => p.type === activeType)?.Icon ?? ThumbsUp
     : ThumbsUp;
 
-  const iconSizeMain = compact ? "w-[18px] h-[18px]" : fillRow ? "w-[22px] h-[22px]" : "w-[18px] h-[18px]";
+  const iconSizeMain = compact ? "w-[18px] h-[18px]" : fillRow ? "w-[19px] h-[19px]" : "w-[18px] h-[18px]";
 
   return (
     <>
@@ -235,7 +296,7 @@ export function LinkedInLikeControl({
           }}
           className={cn(
             "select-none flex flex-col items-center justify-center gap-0.5 text-muted-foreground hover:bg-muted/60 active:bg-muted/80 transition-colors rounded-none border-0 bg-transparent",
-            fillRow ? "flex-1 py-3" : compact ? "h-8 w-8 min-h-8 min-w-8 shrink-0 rounded-full p-0 hover:bg-muted/70" : "py-1 px-1 min-w-[52px]",
+            fillRow ? "flex-1 py-2" : compact ? "h-8 w-8 min-h-8 min-w-8 shrink-0 rounded-full p-0 hover:bg-muted/70" : "py-1 px-1 min-w-[52px]",
             activeType && "text-foreground",
           )}
           onContextMenu={(e) => e.preventDefault()}
@@ -277,7 +338,7 @@ export function LinkedInLikeControl({
             <span
               className={cn(
                 "select-none pointer-events-none font-semibold",
-                fillRow ? "text-[11px]" : "text-[10px] max-w-[4.5rem] truncate",
+                fillRow ? "text-[10px]" : "text-[10px] max-w-[4.5rem] truncate",
               )}
             >
               {label}
@@ -338,7 +399,7 @@ export function LinkedInLikeControl({
                         touchAction: "none",
                         transform: `scale(${active ? SCALE_HOVER : SCALE_BASE})`,
                         transformOrigin: pickerPos.flipDown ? "top center" : "bottom center",
-                        transition: "transform 0.1s ease-out",
+                        transition: "transform 0.2s cubic-bezier(0.33, 1, 0.68, 1)",
                         zIndex: active ? 2 : 1,
                       }}
                       className={cn(

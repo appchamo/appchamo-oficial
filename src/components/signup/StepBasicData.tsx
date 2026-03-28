@@ -35,6 +35,46 @@ export interface BasicData {
   referralCode?: string;
 }
 
+/** Campos do passo 1 com erro visual + scroll. */
+export type BasicFieldKey =
+  | "name"
+  | "displayName"
+  | "email"
+  | "phone"
+  | "birthDate"
+  | "document"
+  | "password"
+  | "confirmPassword"
+  | "addressCity"
+  | "addressState"
+  | "addressNumber"
+  | "terms"
+  | "referral";
+
+const BASIC_FIELD_SCROLL_ORDER: BasicFieldKey[] = [
+  "name",
+  "displayName",
+  "email",
+  "phone",
+  "birthDate",
+  "document",
+  "password",
+  "confirmPassword",
+  "addressCity",
+  "addressState",
+  "addressNumber",
+  "referral",
+  "terms",
+];
+
+function scrollToFirstBasicFieldError(errs: Partial<Record<BasicFieldKey, string>>) {
+  const k = BASIC_FIELD_SCROLL_ORDER.find((key) => errs[key]);
+  if (!k) return;
+  requestAnimationFrame(() => {
+    document.getElementById(`signup-field-${k}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 interface Props {
   accountType: AccountType;
   onNext: (data: BasicData) => void;
@@ -54,13 +94,31 @@ const TermsDialogFromAdmin = lazy(() =>
   import("./SignupTermsModals").then((m) => ({ default: m.TermsDialogFromAdmin }))
 );
 
-const InputRow = ({ icon: Icon, label, children }: { icon: any; label: string; children: React.ReactNode }) => (
-  <div>
+const InputRow = ({
+  icon: Icon,
+  label,
+  fieldId,
+  error,
+  children,
+}: {
+  icon: any;
+  label: string;
+  fieldId?: string;
+  error?: string;
+  children: React.ReactNode;
+}) => (
+  <div id={fieldId}>
     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{label}</label>
-    <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+    <div
+      className={cn(
+        "flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30 transition-colors",
+        error && "border-destructive border-2 ring-2 ring-destructive/25",
+      )}
+    >
       <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
       {children}
     </div>
+    {error ? <p className="text-xs text-destructive font-medium mt-1.5 px-0.5">{error}</p> : null}
   </div>
 );
 
@@ -111,6 +169,16 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   const [referralValidating, setReferralValidating] = useState(false);
   const [referralValidated, setReferralValidated] = useState(false);
   const [referralValidatedCode, setReferralValidatedCode] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<BasicFieldKey, string>>>({});
+
+  const clearFieldError = useCallback((key: BasicFieldKey) => {
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
   const citySuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -176,6 +244,8 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
         setAddressNeighborhood(data.bairro || "");
         setAddressCity(data.localidade || "");
         setAddressState(data.uf || "");
+        clearFieldError("addressCity");
+        clearFieldError("addressState");
       } else {
         toast({ title: "CEP não encontrado.", variant: "destructive" });
       }
@@ -183,7 +253,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       toast({ title: "Erro ao buscar CEP. Tente novamente.", variant: "destructive" });
     }
     setLoadingCep(false);
-  }, []);
+  }, [clearFieldError]);
 
   /**
    * Evita travar o app (especialmente iOS): a API do IBGE retorna ~5,5 mil municípios de uma vez.
@@ -226,6 +296,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   };
 
   const handleCityChange = (val: string) => {
+    clearFieldError("addressCity");
     setAddressCity(val);
     if (citySuggestTimer.current) clearTimeout(citySuggestTimer.current);
     citySuggestTimer.current = setTimeout(() => {
@@ -234,6 +305,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   };
 
   const handleReferralCodeChange = (val: string) => {
+    clearFieldError("referral");
     const u = val.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
     setReferralCode(u);
     if (u !== referralValidatedCode) {
@@ -272,6 +344,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       }
       setReferralValidated(true);
       setReferralValidatedCode(raw);
+      clearFieldError("referral");
       toast({ title: "Código aplicado!", description: "Você ganhará os cupons ao concluir o cadastro." });
     } finally {
       setReferralValidating(false);
@@ -282,6 +355,8 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
     const parts = city.split(" - ");
     setAddressCity(parts[0]);
     if (parts[1]) setAddressState(parts[1]);
+    clearFieldError("addressCity");
+    clearFieldError("addressState");
     setShowCitySuggestions(false);
     setCitySuggestions([]);
   };
@@ -308,60 +383,65 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // ✅ Validação ajustada: Senha só é obrigatória se NÃO for social
-    const birthOk = birthDateBr.replace(/\D/g, "").length >= 8;
-    if (!name || !displayName || !email || (!isSocialSignup && !password) || !phone || !birthOk) {
-      toast({ title: "Preencha todos os campos obrigatórios." });
-      return;
+
+    const errs: Partial<Record<BasicFieldKey, string>> = {};
+    const docClean = document.replace(/\D/g, "");
+
+    if (!name.trim()) errs.name = "Campo obrigatório.";
+    if (!displayName.trim()) errs.displayName = "Campo obrigatório.";
+    if (!email.trim()) errs.email = "Campo obrigatório.";
+    if (!phone.replace(/\D/g, "")) errs.phone = "Campo obrigatório.";
+
+    const birthDigits = birthDateBr.replace(/\D/g, "");
+    if (!birthDigits.length) errs.birthDate = "Campo obrigatório.";
+    else if (birthDigits.length < 8)
+      errs.birthDate = "Use 8 números (DD/MM/AAAA). O ano precisa de 4 dígitos (ex.: 1994, não 94).";
+    else {
+      const isoTry = brBirthToIso(birthDateBr);
+      if (!isoTry || !/^\d{4}-\d{2}-\d{2}$/.test(isoTry))
+        errs.birthDate = "Data inválida. Confira dia, mês e ano (DD/MM/AAAA).";
+      else if (new Date(isoTry).toString() === "Invalid Date")
+        errs.birthDate = "Data de nascimento inválida.";
+      else if (isUnderage(isoTry)) errs.birthDate = "É necessário ter 18 anos ou mais para se cadastrar.";
     }
-    const birthIso = brBirthToIso(birthDateBr) || "";
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthIso)) {
-      toast({
-        title: "Data de nascimento",
-        description: "Use dia, mês e ano completos (DD/MM/AAAA).",
-        variant: "destructive",
-      });
-      return;
+
+    if (!isSocialSignup) {
+      if (!password) errs.password = "Campo obrigatório.";
+      else if (password.length < 6) errs.password = "A senha deve ter pelo menos 6 caracteres.";
+      if (!confirmPassword) errs.confirmPassword = "Confirme a senha.";
+      else if (password.length >= 6 && password !== confirmPassword) errs.confirmPassword = "As senhas não conferem.";
     }
-    if (new Date(birthIso).toString() === "Invalid Date") {
-      toast({ title: "Data de nascimento inválida.", variant: "destructive" });
-      return;
-    }
-    
+
     if (accountType === "professional") {
-      if (!addressCity?.trim() || !addressState?.trim()) {
-        toast({ title: "Informe cidade e estado (UF) do seu endereço." });
-        return;
-      }
-      if (!addressNumber?.trim()) {
-        toast({ title: "Informe o número do endereço." });
-        return;
-      }
+      if (!docClean) errs.document = "CPF ou CNPJ é obrigatório para profissionais.";
+      if (!addressCity?.trim()) errs.addressCity = "Informe a cidade.";
+      if (!addressState?.trim()) errs.addressState = "Informe o estado (UF).";
+      if (!addressNumber?.trim()) errs.addressNumber = "Informe o número do endereço.";
     }
-    if (isUnderage(birthIso)) { toast({ title: "Você precisa ter 18 anos ou mais para se cadastrar.", variant: "destructive" }); return; }
-    if (!termsAccepted) { toast({ title: "Aceite os termos de uso para continuar." }); return; }
+
+    if (!termsAccepted) errs.terms = "Leia e aceite os termos para continuar.";
 
     const refTrim = referralCode.trim();
     if (refTrim.length >= 6 && !referralValidated) {
+      errs.referral = 'Toque em "Aplicar código" para validar ou apague o campo.';
+    }
+
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
       toast({
-        title: "Valide o código de convite",
-        description: 'Toque em "Aplicar código" para confirmar ou limpe o campo.',
+        title: "Corrija os campos em destaque",
+        description: "Eles estão com borda vermelha.",
         variant: "destructive",
       });
+      scrollToFirstBasicFieldError(errs);
       return;
     }
+
+    setFieldErrors({});
+    const birthIso = brBirthToIso(birthDateBr) as string;
+
     const referralToSubmit =
       refTrim.length >= 6 && referralValidated && refTrim === referralValidatedCode ? refTrim : undefined;
-
-    // ✅ Validação de senha condicional
-    if (!isSocialSignup) {
-      if (password.length < 6) { toast({ title: "A senha deve ter pelo menos 6 caracteres." }); return; }
-      if (password !== confirmPassword) { toast({ title: "As senhas não conferem." }); return; }
-    }
-    
-    const docClean = document.replace(/\D/g, "");
-    if (accountType === "professional" && !docClean) { toast({ title: "CPF ou CNPJ é obrigatório para profissionais." }); return; }
 
     const addressPayload =
       accountType === "professional"
@@ -393,7 +473,10 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
         const field = documentType === "cpf" ? "cpf" : "cnpj";
         const { data: existing } = await supabase.from("profiles").select("id").eq(field, docClean).limit(1);
         if (existing && existing.length > 0) {
-          toast({ title: `Este ${documentType.toUpperCase()} já está cadastrado.`, variant: "destructive" });
+          const msg = `Este ${documentType.toUpperCase()} já está cadastrado.`;
+          setFieldErrors({ document: msg });
+          toast({ title: msg, variant: "destructive" });
+          scrollToFirstBasicFieldError({ document: msg });
           return;
         }
 
@@ -430,10 +513,10 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
           }
 
           if (validation?.valid !== true) {
-            toast({
-              title: validation?.message || "CPF/CNPJ inválido ou não confere com o nome.",
-              variant: "destructive",
-            });
+            const msg = validation?.message || "CPF/CNPJ inválido ou não confere com o nome.";
+            setFieldErrors({ document: msg });
+            toast({ title: msg, variant: "destructive" });
+            scrollToFirstBasicFieldError({ document: msg });
             return;
           }
 
@@ -496,41 +579,73 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
         </div>
 
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-5 shadow-card space-y-3">
-          <InputRow icon={User} label="Nome *">
+          <InputRow icon={User} label="Nome *" fieldId="signup-field-name" error={fieldErrors.name}>
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                clearFieldError("name");
+                setName(e.target.value);
+              }}
               placeholder="Mesmo nome da identidade"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+            />
           </InputRow>
-          <InputRow icon={UserCircle} label="Nome de exibição *">
+          <InputRow
+            icon={UserCircle}
+            label="Nome de exibição *"
+            fieldId="signup-field-displayName"
+            error={fieldErrors.displayName}
+          >
             <input
               type="text"
               value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
+              onChange={(e) => {
+                clearFieldError("displayName");
+                setDisplayName(e.target.value);
+              }}
               placeholder="Nome que aparecerá para outros usuários"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+            />
           </InputRow>
 
-          <InputRow icon={Mail} label="E-mail *">
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com"
-              disabled={isSocialSignup} // ✅ Bloqueia edição se vier do Google
-              className={`flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground ${isSocialSignup ? 'opacity-60 cursor-not-allowed' : ''}`} />
+          <InputRow icon={Mail} label="E-mail *" fieldId="signup-field-email" error={fieldErrors.email}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => {
+                clearFieldError("email");
+                setEmail(e.target.value);
+              }}
+              placeholder="seu@email.com"
+              disabled={isSocialSignup}
+              className={`flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground ${isSocialSignup ? "opacity-60 cursor-not-allowed" : ""}`}
+            />
           </InputRow>
 
-          <InputRow icon={Phone} label="Telefone *">
-            <input type="tel" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="(00) 00000-0000"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+          <InputRow icon={Phone} label="Telefone *" fieldId="signup-field-phone" error={fieldErrors.phone}>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => {
+                clearFieldError("phone");
+                setPhone(formatPhone(e.target.value));
+              }}
+              placeholder="(00) 00000-0000"
+              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+            />
           </InputRow>
 
-          <InputRow icon={Calendar} label="Data de nascimento *">
+          <InputRow icon={Calendar} label="Data de nascimento *" fieldId="signup-field-birthDate" error={fieldErrors.birthDate}>
             <input
               type="text"
               inputMode="numeric"
               placeholder="DD/MM/AAAA"
               value={birthDateBr}
-              onChange={(e) => setBirthDateBr(formatBirthBrInput(e.target.value))}
+              onChange={(e) => {
+                clearFieldError("birthDate");
+                setBirthDateBr(formatBirthBrInput(e.target.value));
+              }}
               maxLength={10}
               className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
             />
@@ -554,80 +669,112 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
           </div>
 
           {/* Documento */}
-<div>
-  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-    {accountType === "professional"
-      ? documentType === "cpf"
-        ? "CPF *"
-        : "CNPJ *"
-      : "CPF (opcional)"}
-  </label>
+          <div id="signup-field-document">
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+              {accountType === "professional"
+                ? documentType === "cpf"
+                  ? "CPF *"
+                  : "CNPJ *"
+                : "CPF (opcional)"}
+            </label>
 
-  {accountType === "professional" && (
-    <div className="flex gap-2 mb-2">
-      <button
-        type="button"
-        onClick={() => { setDocumentType("cpf"); setDocument(""); }}
-        className={`px-3 py-1 text-xs rounded-lg border ${
-          documentType === "cpf" ? "bg-primary text-white" : ""
-        }`}
-      >
-        CPF
-      </button>
-      <button
-        type="button"
-        onClick={() => { setDocumentType("cnpj"); setDocument(""); }}
-        className={`px-3 py-1 text-xs rounded-lg border ${
-          documentType === "cnpj" ? "bg-primary text-white" : ""
-        }`}
-      >
-        CNPJ
-      </button>
-    </div>
-  )}
+            {accountType === "professional" && (
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearFieldError("document");
+                    setDocumentType("cpf");
+                    setDocument("");
+                  }}
+                  className={`px-3 py-1 text-xs rounded-lg border ${documentType === "cpf" ? "bg-primary text-white" : ""}`}
+                >
+                  CPF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearFieldError("document");
+                    setDocumentType("cnpj");
+                    setDocument("");
+                  }}
+                  className={`px-3 py-1 text-xs rounded-lg border ${documentType === "cnpj" ? "bg-primary text-white" : ""}`}
+                >
+                  CNPJ
+                </button>
+              </div>
+            )}
 
-  <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
-    <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-    <input
-      type="text"
-      value={document}
-      onChange={(e) =>
-        setDocument(
-          accountType === "professional"
-            ? documentType === "cpf"
-              ? formatCpf(e.target.value)
-              : formatCnpj(e.target.value)
-            : formatCpf(e.target.value)
-        )
-      }
-      placeholder={
-        accountType === "professional"
-          ? documentType === "cpf"
-            ? "000.000.000-00"
-            : "00.000.000/0000-00"
-          : "000.000.000-00"
-      }
-      maxLength={
-        accountType === "professional"
-          ? documentType === "cpf"
-            ? 14
-            : 18
-          : 14
-      }
-      className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-    />
-  </div>
-</div>
+            <div
+              className={cn(
+                "flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30 transition-colors",
+                fieldErrors.document && "border-destructive border-2 ring-2 ring-destructive/25",
+              )}
+            >
+              <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <input
+                type="text"
+                value={document}
+                onChange={(e) => {
+                  clearFieldError("document");
+                  setDocument(
+                    accountType === "professional"
+                      ? documentType === "cpf"
+                        ? formatCpf(e.target.value)
+                        : formatCnpj(e.target.value)
+                      : formatCpf(e.target.value),
+                  );
+                }}
+                placeholder={
+                  accountType === "professional"
+                    ? documentType === "cpf"
+                      ? "000.000.000-00"
+                      : "00.000.000/0000-00"
+                    : "000.000.000-00"
+                }
+                maxLength={
+                  accountType === "professional" ? (documentType === "cpf" ? 14 : 18) : 14
+                }
+                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+              />
+            </div>
+            {fieldErrors.document ? (
+              <p className="text-xs text-destructive font-medium mt-1.5 px-0.5">{fieldErrors.document}</p>
+            ) : null}
+          </div>
 
           {/* ✅ CAMPOS DE SENHA ESCONDIDOS SE FOR SOCIAL */}
           {!isSocialSignup && (
             <>
-              <InputRow icon={Lock} label="Senha *">
-                <PasswordInput noIcon value={password} onChange={setPassword} placeholder="Mínimo 6 caracteres" autoComplete="new-password" />
+              <InputRow icon={Lock} label="Senha *" fieldId="signup-field-password" error={fieldErrors.password}>
+                <PasswordInput
+                  noIcon
+                  value={password}
+                  onChange={(v) => {
+                    clearFieldError("password");
+                    setPassword(v);
+                  }}
+                  placeholder="Mínimo 6 caracteres"
+                  autoComplete="new-password"
+                />
               </InputRow>
 
-              <InputRow icon={Lock} label="Confirmar senha *">
-                <PasswordInput noIcon value={confirmPassword} onChange={setConfirmPassword} placeholder="Repita a senha" autoComplete="new-password" />
+              <InputRow
+                icon={Lock}
+                label="Confirmar senha *"
+                fieldId="signup-field-confirmPassword"
+                error={fieldErrors.confirmPassword}
+              >
+                <PasswordInput
+                  noIcon
+                  value={confirmPassword}
+                  onChange={(v) => {
+                    clearFieldError("confirmPassword");
+                    setConfirmPassword(v);
+                  }}
+                  placeholder="Repita a senha"
+                  autoComplete="new-password"
+                />
               </InputRow>
             </>
           )}
@@ -642,13 +789,23 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                 {loadingCep && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full flex-shrink-0" />}
               </InputRow>
               <div className="space-y-2 mt-2">
-                <div className="relative">
+                <div className="relative" id="signup-field-addressCity">
                   <label className="text-xs text-muted-foreground block mb-1">Cidade *</label>
                   <p className="text-[10px] text-muted-foreground mb-1">Preencha o estado (UF) antes para sugestões de cidade.</p>
-                  <input value={addressCity} onChange={(e) => handleCityChange(e.target.value)} placeholder="Sua cidade"
+                  <input
+                    value={addressCity}
+                    onChange={(e) => handleCityChange(e.target.value)}
+                    placeholder="Sua cidade"
                     onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
                     onFocus={() => citySuggestions.length > 0 && setShowCitySuggestions(true)}
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                    className={cn(
+                      "w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-colors",
+                      fieldErrors.addressCity && "border-destructive border-2 ring-2 ring-destructive/25",
+                    )}
+                  />
+                  {fieldErrors.addressCity ? (
+                    <p className="text-xs text-destructive font-medium mt-1">{fieldErrors.addressCity}</p>
+                  ) : null}
                   {showCitySuggestions && (
                     <div className="absolute z-50 top-full left-0 right-0 bg-card border rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
                       {citySuggestions.map((city) => (
@@ -671,10 +828,23 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                     className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
+                  <div id="signup-field-addressNumber">
                     <label className="text-xs text-muted-foreground block mb-1">Número *</label>
-                    <input value={addressNumber} onChange={(e) => setAddressNumber(e.target.value)} placeholder="Ex: 123"
-                      className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                    <input
+                      value={addressNumber}
+                      onChange={(e) => {
+                        clearFieldError("addressNumber");
+                        setAddressNumber(e.target.value);
+                      }}
+                      placeholder="Ex: 123"
+                      className={cn(
+                        "w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-colors",
+                        fieldErrors.addressNumber && "border-destructive border-2 ring-2 ring-destructive/25",
+                      )}
+                    />
+                    {fieldErrors.addressNumber ? (
+                      <p className="text-xs text-destructive font-medium mt-1">{fieldErrors.addressNumber}</p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Complemento</label>
@@ -683,10 +853,24 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
+                  <div id="signup-field-addressState">
                     <label className="text-xs text-muted-foreground block mb-1">Estado *</label>
-                    <input value={addressState} onChange={(e) => setAddressState(e.target.value)} placeholder="UF" maxLength={2}
-                      className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                    <input
+                      value={addressState}
+                      onChange={(e) => {
+                        clearFieldError("addressState");
+                        setAddressState(e.target.value);
+                      }}
+                      placeholder="UF"
+                      maxLength={2}
+                      className={cn(
+                        "w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-colors uppercase",
+                        fieldErrors.addressState && "border-destructive border-2 ring-2 ring-destructive/25",
+                      )}
+                    />
+                    {fieldErrors.addressState ? (
+                      <p className="text-xs text-destructive font-medium mt-1">{fieldErrors.addressState}</p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">País</label>
@@ -698,10 +882,15 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             </div>
           )}
 
-          <div className="border-t pt-3 mt-2 space-y-2">
+          <div id="signup-field-referral" className="border-t pt-3 mt-2 space-y-2">
             <label className="text-xs font-medium text-muted-foreground block">Código de convite (opcional)</label>
             <div className="flex items-stretch gap-2">
-              <div className="flex flex-1 min-w-0 items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+              <div
+                className={cn(
+                  "flex flex-1 min-w-0 items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30 transition-colors",
+                  fieldErrors.referral && "border-destructive border-2 ring-2 ring-destructive/25",
+                )}
+              >
                 <UserCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                 <input
                   type="text"
@@ -734,10 +923,19 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             <p className="text-[10px] text-muted-foreground leading-relaxed px-0.5">
               Se alguém do Chamô te convidou, digite o código e aplique para ganhar 2 cupons especiais para participar do nosso sorteio mensal.
             </p>
+            {fieldErrors.referral ? (
+              <p className="text-xs text-destructive font-medium px-0.5">{fieldErrors.referral}</p>
+            ) : null}
           </div>
 
           {/* Termos: só avança depois de ler e aceitar nos modais */}
-          <div className="border rounded-xl p-4 bg-muted/30 space-y-3">
+          <div
+            id="signup-field-terms"
+            className={cn(
+              "border rounded-xl p-4 bg-muted/30 space-y-3 transition-colors",
+              fieldErrors.terms && "border-destructive border-2 ring-2 ring-destructive/25",
+            )}
+          >
             {termsAccepted ? (
               <div className="flex items-center gap-3 text-foreground">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -752,6 +950,9 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
               <>
                 <p className="text-sm text-foreground font-medium">Termos de Uso e Privacidade</p>
                 <p className="text-xs text-muted-foreground">Para continuar, é necessário ler e aceitar os termos na íntegra.</p>
+                {fieldErrors.terms ? (
+                  <p className="text-xs text-destructive font-medium">{fieldErrors.terms}</p>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setTermsOpen(true)}
@@ -796,6 +997,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             onAccept={() => {
               setTermsAccepted(true);
               setTermsOpen(false);
+              clearFieldError("terms");
             }}
             variant={accountType}
           />

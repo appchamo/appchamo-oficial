@@ -34,6 +34,9 @@ function getSponsorLogoUrl(logoUrl: string | null): string | null {
 
 const DEFAULT_ITEMS_PER_PAGE = 4;
 const AUTO_ADVANCE_MS = 6000;
+/** Degradê nas bordas do scroll horizontal (evita “corte seco” do logo). */
+const EDGE_MASK =
+  "linear-gradient(to right, transparent 0%, black 28px, black calc(100% - 28px), transparent 100%)";
 
 interface Sponsor {
   id: string;
@@ -68,13 +71,20 @@ function sponsorMatchesLocation(
 
 interface SponsorCarouselProps {
   section?: { title?: string; subtitle?: string };
-  /** Por página no carrossel (Home usa 4; Comunidade pode usar 6). */
+  /** Por página no carrossel (ex.: 4 itens por “página” ao deslizar). */
   itemsPerPage?: number;
   /** Este patrocinador aparece sempre primeiro (ex.: conta patrocinador na Home). */
   pinnedSponsorId?: string | null;
+  /** Máscara em degradê nas bordas esquerda/direita. */
+  edgeFade?: boolean;
 }
 
-const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinnedSponsorId = null }: SponsorCarouselProps) => {
+const SponsorCarousel = ({
+  section,
+  itemsPerPage = DEFAULT_ITEMS_PER_PAGE,
+  pinnedSponsorId = null,
+  edgeFade = true,
+}: SponsorCarouselProps) => {
   const { user } = useAuth();
   const { sponsor: viewerOwnerSponsor } = useLinkedSponsor(user?.id);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -402,7 +412,19 @@ const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinne
         ref={scrollRef}
         data-tab-swipe-ignore
         className="flex overflow-x-auto overflow-y-hidden pb-2 scrollbar-hide border-0 shadow-none snap-x snap-mandatory scroll-smooth"
-        style={{ scrollBehavior: "smooth" }}
+        style={{
+          scrollBehavior: "smooth",
+          ...(edgeFade
+            ? {
+                WebkitMaskImage: EDGE_MASK,
+                maskImage: EDGE_MASK,
+                WebkitMaskSize: "100% 100%",
+                maskSize: "100% 100%",
+                WebkitMaskRepeat: "no-repeat",
+                maskRepeat: "no-repeat",
+              }
+            : {}),
+        }}
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
         onTouchStart={() => setIsPaused(true)}
@@ -411,7 +433,7 @@ const SponsorCarousel = ({ section, itemsPerPage = DEFAULT_ITEMS_PER_PAGE, pinne
         {displayPages.map((pageSponsors, pageIndex) => (
           <div
             key={pageIndex}
-            className="flex gap-[14px] flex-[0_0_100%] min-w-0 shrink-0 snap-start justify-evenly items-stretch px-0.5"
+            className="flex gap-6 flex-[0_0_100%] min-w-0 shrink-0 snap-start justify-evenly items-stretch px-2"
             style={{ scrollSnapStop: "always" }}
           >
             {pageSponsors.map((sponsor) => {

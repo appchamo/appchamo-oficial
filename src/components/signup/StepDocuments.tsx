@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Camera, FileText, X, CheckCircle2, ImageIcon } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import DocumentCamera from "./DocumentCamera";
 
 interface UploadedDoc {
@@ -24,6 +25,8 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
   const [cameraOpen, setCameraOpen] = useState(false);
   const [currentSlot, setCurrentSlot] = useState("");
   const [pickForSlot, setPickForSlot] = useState<string | null>(null);
+  /** Destaca slots obrigatórios em falta após tentar avançar. */
+  const [missingSlotKeys, setMissingSlotKeys] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
@@ -58,7 +61,14 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
     fileInputRef.current?.click();
   };
 
+  const clearSlotHighlight = (label: string) => {
+    const sk = slots.find((s) => s.label === label)?.key;
+    if (!sk) return;
+    setMissingSlotKeys((prev) => prev.filter((k) => k !== sk));
+  };
+
   const handleCapture = (file: File, preview: string) => {
+    clearSlotHighlight(currentSlot);
     setDocs((prev) => {
       const old = prev.find((d) => d.label === currentSlot);
       if (old?.preview.startsWith("blob:")) URL.revokeObjectURL(old.preview);
@@ -85,6 +95,7 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
       return;
     }
 
+    clearSlotHighlight(slot);
     setDocs((prev) => {
       const old = prev.find((d) => d.label === slot);
       if (old?.preview.startsWith("blob:")) URL.revokeObjectURL(old.preview);
@@ -109,9 +120,22 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
     const uploaded = docs.map((d) => d.label);
     const missing = required.filter((r) => !uploaded.includes(r));
     if (missing.length > 0) {
-      toast({ title: "Documentos pendentes", description: missing.join(", "), variant: "destructive" });
+      const keys = slots.filter((s) => missing.includes(s.label)).map((s) => s.key);
+      setMissingSlotKeys(keys);
+      toast({
+        title: "Documentos pendentes",
+        description: "Os blocos em destaque precisam de um arquivo.",
+        variant: "destructive",
+      });
+      const first = slots.find((s) => keys.includes(s.key));
+      if (first) {
+        requestAnimationFrame(() => {
+          document.getElementById(`signup-doc-${first.key}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
       return;
     }
+    setMissingSlotKeys([]);
     onNext(docs.map((d) => d.file));
   };
 
@@ -147,7 +171,12 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
               return (
                 <div
                   key={slot.key}
-                  className="rounded-2xl border border-border/80 bg-gradient-to-b from-primary/[0.06] to-transparent p-4 space-y-3"
+                  id={`signup-doc-${slot.key}`}
+                  className={cn(
+                    "rounded-2xl border border-border/80 bg-gradient-to-b from-primary/[0.06] to-transparent p-4 space-y-3 transition-colors",
+                    missingSlotKeys.includes(slot.key) &&
+                      "border-destructive border-2 ring-2 ring-destructive/25 shadow-sm shadow-destructive/10",
+                  )}
                 >
                   <p className="text-sm font-semibold text-foreground tracking-tight">{slot.label}</p>
 

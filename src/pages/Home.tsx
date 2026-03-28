@@ -857,6 +857,13 @@ const Home = () => {
                       key={sponsorReportsKey}
                       sponsorId={linkedSponsor.id}
                     />
+                    <Link
+                      to="/jobs"
+                      className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-primary/35 bg-primary/5 text-primary font-semibold text-sm hover:bg-primary/10 transition-colors"
+                    >
+                      <Briefcase className="w-5 h-5 shrink-0" />
+                      VAGAS DE EMPREGO
+                    </Link>
                   </div>
                 ) : null}
                 {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}

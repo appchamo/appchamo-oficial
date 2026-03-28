@@ -103,6 +103,8 @@
   /* Capacitor / iOS: sem menu de “Abrir link”, “Salvar imagem”, etc. no long-press */
   html {
     -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   img,
@@ -126,6 +128,8 @@
     font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
     background: linear-gradient(to bottom, #e6e6e6, #fafaf9);
     min-height: 100vh;
+    -webkit-user-select: none;
+    user-select: none;
   }
 }
 

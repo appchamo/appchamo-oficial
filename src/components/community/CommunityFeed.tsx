@@ -23,6 +23,7 @@ import {
   EyeOff,
   Award,
   Sparkles,
+  Megaphone,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -195,7 +196,7 @@ function postTimeLabel(iso: string) {
   }
 }
 
-/** Metadados do profissional no feed (badges + profissão). */
+/** Metadados do profissional no feed (badges + profissão) ou patrocinador (nicho). */
 type AuthorProMetaEntry = {
   proId: string;
   professionTitle: string;
@@ -205,6 +206,7 @@ type AuthorProMetaEntry = {
   totalReviews: number;
   totalServices: number;
   createdAt: string;
+  kind?: "professional" | "sponsor";
 };
 
 function buildAuthorProMetaEntry(row: Record<string, unknown>): AuthorProMetaEntry {
@@ -223,12 +225,28 @@ function buildAuthorProMetaEntry(row: Record<string, unknown>): AuthorProMetaEnt
     totalReviews: Number(row.total_reviews) || 0,
     totalServices: Number(row.total_services) || 0,
     createdAt: String(row.created_at ?? ""),
+    kind: "professional",
+  };
+}
+
+function buildSponsorAuthorMeta(row: { id: string; niche: string | null }): AuthorProMetaEntry {
+  return {
+    proId: String(row.id),
+    professionTitle: (row.niche ?? "").trim(),
+    verified: false,
+    profileStatus: "",
+    rating: 0,
+    totalReviews: 0,
+    totalServices: 0,
+    createdAt: "",
+    kind: "sponsor",
   };
 }
 
 /** Selos discretos (prestador de serviço — não meme). */
 function authorServiceBadges(m: AuthorProMetaEntry | undefined): { key: string; label: string; className: string; Icon?: typeof Award }[] {
   if (!m) return [];
+  if (m.kind === "sponsor") return [];
   const status = (m.profileStatus || "").toLowerCase();
   if (status === "pending") {
     return [
@@ -469,6 +487,11 @@ export default function CommunityFeed({
         if (key) paths[row.user_id] = `/professional/${encodeURIComponent(key)}`;
         pmeta[row.user_id] = buildAuthorProMetaEntry(row);
       });
+      const { data: sponsorRows } = await supabase.from("sponsors").select("id, user_id, niche").in("user_id", allUids);
+      (sponsorRows || []).forEach((row: { id: string; user_id: string; niche: string | null }) => {
+        if (pmeta[row.user_id]) return;
+        pmeta[row.user_id] = buildSponsorAuthorMeta(row);
+      });
       setProPathByUserId(paths);
       setAuthorProMeta(pmeta);
     } else {
@@ -695,6 +718,18 @@ export default function CommunityFeed({
             ...prev,
             [pr.author_id]: buildAuthorProMetaEntry(r),
           }));
+        } else if (!cancelled) {
+          const { data: spRow } = await supabase
+            .from("sponsors")
+            .select("id, user_id, niche")
+            .eq("user_id", pr.author_id)
+            .maybeSingle();
+          if (!cancelled && spRow) {
+            setAuthorProMeta((prev) => ({
+              ...prev,
+              [pr.author_id]: buildSponsorAuthorMeta(spRow as { id: string; niche: string | null }),
+            }));
+          }
         }
       } catch (e) {
         console.error(e);
@@ -1494,7 +1529,17 @@ export default function CommunityFeed({
                     {authorLabel(ca)}
                   </span>
                 )}
-                {cMeta?.verified ? (
+                {cMeta?.kind === "sponsor" ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-0.5 rounded-full bg-amber-500/12 text-amber-800 dark:text-amber-200 px-1.5 py-0.5 text-[7px] sm:text-[8px] font-bold uppercase tracking-wide border border-amber-500/25 whitespace-nowrap",
+                      ctx.isReply && "scale-95",
+                    )}
+                  >
+                    <Megaphone className={cn("shrink-0", ctx.isReply ? "w-2.5 h-2.5" : "w-3 h-3")} aria-hidden />
+                    Patrocinador
+                  </span>
+                ) : cMeta?.verified ? (
                   <BadgeCheck
                     className={cn(
                       "shrink-0 text-sky-500",
@@ -1693,7 +1738,7 @@ export default function CommunityFeed({
           <SponsorCarousel
             key="community-sponsors"
             section={getSection("sponsors")}
-            itemsPerPage={6}
+            itemsPerPage={4}
           />
         </div>
       )}
@@ -1995,7 +2040,7 @@ export default function CommunityFeed({
               <article
                 key={post.id}
                 id={`community-post-${post.id}`}
-                className="rounded-[24px] bg-white/98 dark:bg-zinc-900/90 overflow-hidden border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_-4px_rgba(0,0,0,0.08),0_2px_8px_-2px_rgba(0,0,0,0.04)] scroll-mt-24 transition-shadow duration-300 hover:shadow-[0_8px_32px_-6px_rgba(0,0,0,0.12)]"
+                className="select-none rounded-[24px] bg-white/98 dark:bg-zinc-900/90 overflow-hidden border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_-4px_rgba(0,0,0,0.08),0_2px_8px_-2px_rgba(0,0,0,0.04)] scroll-mt-24 transition-shadow duration-300 hover:shadow-[0_8px_32px_-6px_rgba(0,0,0,0.12)]"
               >
                 <div className="px-5 pt-5 pb-1">
                   <div className="flex gap-3.5 items-start">
@@ -2035,7 +2080,12 @@ export default function CommunityFeed({
                               {authorLabel(author)}
                             </span>
                           )}
-                          {proMeta?.verified ? (
+                          {proMeta?.kind === "sponsor" ? (
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/12 text-amber-800 dark:text-amber-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border border-amber-500/25">
+                              <Megaphone className="w-3 h-3 shrink-0" aria-hidden />
+                              Patrocinador
+                            </span>
+                          ) : proMeta?.verified ? (
                             <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border border-sky-500/20">
                               <BadgeCheck className="w-3 h-3 shrink-0" aria-hidden />
                               Verificado
@@ -2192,40 +2242,41 @@ export default function CommunityFeed({
 
                 <div className="mt-2 grid grid-cols-3 border-t border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/80 dark:bg-zinc-950/40 select-none [&_button]:touch-manipulation [&_svg]:stroke-[1.75]">
                   <LinkedInLikeControl
+                    label="REAGIR"
                     activeType={myR}
                     onPickReaction={(t) => void setReaction(post.id, t as ReactionType)}
                     onQuickLikeToggle={() => void setReaction(post.id, "like")}
-                    className="[&_button]:py-4"
+                    className="[&_button]:py-2.5"
                   />
                   <button
                     type="button"
                     style={{ WebkitUserSelect: "none", userSelect: "none" }}
                     className={cn(
-                      "select-none flex flex-col items-center justify-center gap-1 py-3.5 text-zinc-500 dark:text-zinc-400 hover:bg-white/90 dark:hover:bg-zinc-900/80 active:scale-[0.98] transition-all border-x border-zinc-100 dark:border-zinc-800/80",
+                      "select-none flex flex-col items-center justify-center gap-0.5 py-2.5 text-zinc-500 dark:text-zinc-400 hover:bg-white/90 dark:hover:bg-zinc-900/80 active:scale-[0.98] transition-all border-x border-zinc-100 dark:border-zinc-800/80",
                       sheetOpen && "text-primary bg-white dark:bg-zinc-900",
                     )}
                     onClick={() => setCommentsSheetPost(sheetOpen ? null : post)}
                   >
-                    <MessageCircle className="w-[22px] h-[22px]" />
-                    <span className="text-[11px] font-semibold tracking-wide">Comentar</span>
+                    <MessageCircle className="w-[18px] h-[18px]" />
+                    <span className="text-[10px] font-semibold tracking-wide">COMENTÁRIOS</span>
                     {commentCount > 0 ? (
-                      <span className="text-[10px] font-bold text-zinc-400 tabular-nums">{commentCount}</span>
+                      <span className="text-[9px] font-bold text-zinc-400 tabular-nums">{commentCount}</span>
                     ) : null}
                   </button>
                   <button
                     type="button"
                     style={{ WebkitUserSelect: "none", userSelect: "none" }}
-                    className="select-none flex flex-col items-center justify-center gap-1 py-3.5 text-zinc-500 dark:text-zinc-400 hover:bg-white/90 dark:hover:bg-zinc-900/80 active:scale-[0.98] transition-all"
+                    className="select-none flex flex-col items-center justify-center gap-0.5 py-2.5 text-zinc-500 dark:text-zinc-400 hover:bg-white/90 dark:hover:bg-zinc-900/80 active:scale-[0.98] transition-all"
                     onClick={() => setSharePost(post)}
                   >
-                    <Send className="w-[22px] h-[22px] -rotate-12" />
-                    <span className="text-[11px] font-semibold tracking-wide">Partilhar</span>
+                    <Send className="w-[18px] h-[18px] -rotate-12" />
+                    <span className="text-[10px] font-semibold tracking-wide">COMPARTILHAR</span>
                   </button>
                 </div>
 
                 {user ? (
                   <div className="flex items-center gap-3 px-4 py-3 border-t border-zinc-100 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-950/30">
-                    <div className="w-9 h-9 rounded-xl bg-zinc-100 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.05]">
+                    <div className="w-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.05]">
                       {profile?.avatar_url ? (
                         <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
                       ) : (
@@ -2766,7 +2817,7 @@ export default function CommunityFeed({
                     <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border border-white/15">
                       <MessageCircle className="h-5 w-5" />
                     </span>
-                    <span className="text-[9px] font-bold">Comentários</span>
+                    <span className="text-[9px] font-bold">COMENTÁRIOS</span>
                   </button>
                   <button
                     type="button"
@@ -2780,7 +2831,7 @@ export default function CommunityFeed({
                     <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-md border border-white/15">
                       <Send className="h-5 w-5 -rotate-12" />
                     </span>
-                    <span className="text-[9px] font-bold">Partilhar</span>
+                    <span className="text-[9px] font-bold">COMPARTILHAR</span>
                   </button>
                 </div>
               </div>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { fetchViaCep } from "@/lib/viacep";
@@ -33,9 +34,11 @@ interface Application {
 
 const MyJobPostings = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [jobs, setJobs] = useState<JobPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [proId, setProId] = useState<string | null>(null);
+  const [sponsorId, setSponsorId] = useState<string | null>(null);
   const [isBusinessPlan, setIsBusinessPlan] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState<string | null>(null);
@@ -54,26 +57,38 @@ const MyJobPostings = () => {
   const [searchingCep, setSearchingCep] = useState(false);
 
   const fetchJobs = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) return;
 
-    const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
-    if (!pro) {
+    const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", authUser.id).maybeSingle();
+    const { data: spRow } = await supabase.from("sponsors").select("id").eq("user_id", authUser.id).maybeSingle();
+    const sid = spRow?.id ?? null;
+    setProId(pro?.id ?? null);
+    setSponsorId(sid);
+
+    if (!pro?.id && !sid) {
       setLoading(false);
       return;
     }
-    setProId(pro.id);
 
-    const { data: profile } = await supabase.from("profiles").select("user_type, job_posting_enabled").eq("user_id", user.id).maybeSingle();
-    const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", user.id).maybeSingle();
+    const { data: profile } = await supabase.from("profiles").select("user_type, job_posting_enabled").eq("user_id", authUser.id).maybeSingle();
+    const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", authUser.id).maybeSingle();
     const businessCanPost = sub?.plan_id === "business" && profile?.user_type === "company";
     const adminAllowedPost = profile?.job_posting_enabled === true;
-    setIsBusinessPlan(businessCanPost || adminAllowedPost);
+    const sponsorCanPost = !!sid;
+    setIsBusinessPlan(sponsorCanPost || businessCanPost || adminAllowedPost);
+
+    const orFilter = [
+      pro?.id ? `professional_id.eq.${pro.id}` : null,
+      sid ? `sponsor_id.eq.${sid}` : null,
+    ]
+      .filter(Boolean)
+      .join(",");
 
     const { data } = await supabase
       .from("job_postings")
       .select("*")
-      .eq("professional_id", pro.id)
+      .or(orFilter)
       .order("created_at", { ascending: false });
 
     if (data) {
@@ -91,7 +106,9 @@ const MyJobPostings = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchJobs(); }, []);
+  useEffect(() => {
+    void fetchJobs();
+  }, [user?.id]);
 
   const formatCepInput = (val: string) => {
     const clean = val.replace(/\D/g, "").slice(0, 8);
@@ -134,8 +151,12 @@ const MyJobPostings = () => {
   };
 
   const handleCreate = async () => {
-    if (!proId || !form.title) {
+    if (!form.title) {
       toast({ title: "Informe o título da vaga.", variant: "destructive" });
+      return;
+    }
+    if (!proId && !sponsorId) {
+      toast({ title: "Não foi possível identificar a sua conta.", variant: "destructive" });
       return;
     }
     if (!form.location || !form.city || !form.state) {
@@ -143,18 +164,21 @@ const MyJobPostings = () => {
       return;
     }
     setSaving(true);
+    const row: Record<string, unknown> = {
+      title: form.title,
+      description: form.description || null,
+      location: form.location || null,
+      city: form.city || null,
+      state: form.state || null,
+      salary_range: form.salary_range || null,
+      requirements: form.requirements || null,
+    };
+    if (proId) row.professional_id = proId;
+    if (sponsorId && !proId) row.sponsor_id = sponsorId;
+
     const { data: createdJob, error } = await supabase
       .from("job_postings")
-      .insert({
-        professional_id: proId,
-        title: form.title,
-        description: form.description || null,
-        location: form.location || null,
-        city: form.city || null,
-        state: form.state || null,
-        salary_range: form.salary_range || null,
-        requirements: form.requirements || null,
-      } as any)
+      .insert(row as any)
       .select("id")
       .maybeSingle();
     if (error || !createdJob?.id) {
@@ -234,8 +258,11 @@ const MyJobPostings = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <Link to="/pro" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-4 transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Painel Profissional
+        <Link
+          to={proId ? "/pro" : "/"}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-xl mb-4 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> {proId ? "Painel Profissional" : "Início"}
         </Link>
 
         <div className="flex items-center justify-between mb-5">
@@ -258,7 +285,7 @@ const MyJobPostings = () => {
           </button>
         </div>
 
-        {!loading && proId && !isBusinessPlan && (
+        {!loading && !!proId && !isBusinessPlan && (
           <Link to="/subscriptions" className="flex items-center gap-3 p-4 rounded-2xl border border-primary/20 bg-primary/5 mb-5 hover:border-primary/40 transition-all">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <Crown className="w-5 h-5 text-primary" />
@@ -275,12 +302,15 @@ const MyJobPostings = () => {
           <div className="flex justify-center py-12">
             <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
           </div>
-        ) : !proId ? (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+        ) : !proId && !sponsorId ? (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3 text-center px-4">
             <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
               <Briefcase className="w-8 h-8 text-muted-foreground/40" />
             </div>
-            <p className="text-sm font-medium">Recurso para contas Business</p>
+            <p className="text-sm font-medium">Minhas vagas</p>
+            <p className="text-xs max-w-xs">
+              Disponível para empresas no plano Business ou para contas de patrocinador.
+            </p>
           </div>
         ) : jobs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">

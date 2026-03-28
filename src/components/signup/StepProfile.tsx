@@ -56,6 +56,7 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
   const filteredProfessions = professions.filter(p => p.category_id === categoryId);
 
   const [avatarError, setAvatarError] = useState(false);
+  const [categoryFieldError, setCategoryFieldError] = useState(false);
 
   const handleNext = () => {
     if (!avatarUrl) {
@@ -65,13 +66,21 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
         description: "Toque em Adicionar foto (galeria ou câmera) e confirme o recorte.",
         variant: "destructive",
       });
+      requestAnimationFrame(() => {
+        document.getElementById("signup-field-profile-avatar")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
       return;
     }
     setAvatarError(false);
     if (accountType === "professional" && !categoryId) {
+      setCategoryFieldError(true);
       toast({ title: "Selecione sua categoria / área.", variant: "destructive" });
+      requestAnimationFrame(() => {
+        document.getElementById("signup-field-profile-category")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
       return;
     }
+    setCategoryFieldError(false);
     const servicesFiltered = accountType === "professional" ? services.filter(s => s.trim()) : undefined;
     onNext({
       avatarUrl,
@@ -96,12 +105,14 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
 
         <div className="bg-card border rounded-2xl p-5 shadow-card space-y-4">
           {/* Avatar */}
-          <div className="flex flex-col items-center gap-3">
+          <div id="signup-field-profile-avatar" className="flex flex-col items-center gap-3">
             <div className="relative flex flex-col items-center pt-1">
               <div
                 className={cn(
                   "w-28 h-28 rounded-full flex items-center justify-center overflow-hidden border-2 transition-colors",
-                  avatarUrl ? "border-primary/25 ring-2 ring-primary/10" : "border-border bg-gradient-to-b from-muted/80 to-muted/40",
+                  avatarError && "border-destructive ring-2 ring-destructive/30",
+                  !avatarError && avatarUrl && "border-primary/25 ring-2 ring-primary/10",
+                  !avatarError && !avatarUrl && "border-border bg-gradient-to-b from-muted/80 to-muted/40",
                 )}
               >
                 {avatarUrl ? (
@@ -112,7 +123,10 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
               </div>
               <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 z-10">
                 <ImageCropUpload
-                  onUpload={(url) => setAvatarUrl(url)}
+                  onUpload={(url) => {
+                    setAvatarUrl(url);
+                    setAvatarError(false);
+                  }}
                   aspect={1}
                   shape="round"
                   bucketPath="avatars"
@@ -130,11 +144,21 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
 
           {accountType === "professional" && (
             <>
-              <div>
+              <div id="signup-field-profile-category">
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Categoria / Área *</label>
                 <div className="relative">
-                  <select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setProfessionId(""); }}
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 appearance-none">
+                  <select
+                    value={categoryId}
+                    onChange={(e) => {
+                      setCategoryFieldError(false);
+                      setCategoryId(e.target.value);
+                      setProfessionId("");
+                    }}
+                    className={cn(
+                      "w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 appearance-none transition-colors",
+                      categoryFieldError && "border-destructive border-2 ring-2 ring-destructive/25",
+                    )}
+                  >
                     <option value="">Selecione sua área</option>
                     {categories.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
@@ -142,6 +166,9 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
                   </select>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                 </div>
+                {categoryFieldError ? (
+                  <p className="text-xs text-destructive font-medium mt-1.5">Selecione sua categoria ou área de atuação.</p>
+                ) : null}
               </div>
 
               {categoryId && filteredProfessions.length > 0 && (

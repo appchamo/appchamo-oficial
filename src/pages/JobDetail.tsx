@@ -14,10 +14,11 @@ interface JobData {
   salary_range: string | null;
   requirements: string | null;
   created_at: string;
-  professional_id: string;
+  professional_id: string | null;
+  sponsor_id: string | null;
   company_name: string;
   company_avatar: string | null;
-  company_user_id: string;
+  company_user_id: string | null;
 }
 
 const JobDetail = () => {
@@ -46,24 +47,45 @@ const JobDetail = () => {
     const load = async () => {
       const { data } = await supabase
         .from("job_postings")
-        .select("id, title, description, location, salary_range, requirements, created_at, professional_id, professionals(user_id)")
+        .select(
+          "id, title, description, location, salary_range, requirements, created_at, professional_id, sponsor_id, professionals(user_id), sponsors(name, logo_url, user_id)",
+        )
         .eq("id", id!)
         .maybeSingle();
 
       if (data) {
-        const proUserId = (data as any).professionals?.user_id;
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("full_name, avatar_url")
-          .eq("user_id", proUserId)
-          .maybeSingle();
+        const row = data as any;
+        const sp = row.sponsors as { name?: string; logo_url?: string | null; user_id?: string } | null;
+        const proUserId = row.professionals?.user_id as string | undefined;
 
-        setJob({
-          ...data,
-          company_name: profile?.full_name || "Empresa",
-          company_avatar: profile?.avatar_url || null,
-          company_user_id: proUserId,
-        });
+        if (sp?.name != null || sp?.user_id) {
+          setJob({
+            ...row,
+            company_name: (sp?.name || "").trim() || "Patrocinador",
+            company_avatar: sp?.logo_url || null,
+            company_user_id: sp?.user_id ?? null,
+          });
+        } else if (proUserId) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, avatar_url")
+            .eq("user_id", proUserId)
+            .maybeSingle();
+
+          setJob({
+            ...row,
+            company_name: profile?.full_name || "Empresa",
+            company_avatar: profile?.avatar_url || null,
+            company_user_id: proUserId,
+          });
+        } else {
+          setJob({
+            ...row,
+            company_name: "Empresa",
+            company_avatar: null,
+            company_user_id: null,
+          });
+        }
 
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {

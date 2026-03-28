@@ -58,7 +58,9 @@ const Jobs = () => {
       // 2. Busca vagas: filtra por cidade/estado do usuário se disponível
       let query = supabase
         .from("job_postings")
-        .select("id, title, description, location, salary_range, created_at, professionals(user_id)")
+        .select(
+          "id, title, description, location, salary_range, created_at, professional_id, sponsor_id, professionals(user_id), sponsors(name, logo_url, user_id)",
+        )
         .eq("active", true)
         .order("created_at", { ascending: false });
 
@@ -69,13 +71,30 @@ const Jobs = () => {
       const { data } = await query;
 
       if (data) {
-        const userIds = data.map((j: any) => j.professionals?.user_id).filter(Boolean);
-        const { data: profiles } = await supabase
-          .from("profiles_public" as any)
-          .select("user_id, full_name, avatar_url")
-          .in("user_id", userIds) as { data: { user_id: string; full_name: string; avatar_url: string | null }[] | null };
+        const userIds = [...new Set(data.map((j: any) => j.professionals?.user_id).filter(Boolean))];
+        const { data: profiles } = userIds.length
+          ? ((await supabase
+              .from("profiles_public" as any)
+              .select("user_id, full_name, avatar_url")
+              .in("user_id", userIds)) as {
+              data: { user_id: string; full_name: string; avatar_url: string | null }[] | null;
+            })
+          : { data: null };
 
         const mapped = data.map((j: any) => {
+          const sp = j.sponsors as { name?: string; logo_url?: string | null; user_id?: string } | null;
+          if (sp?.name || sp?.user_id) {
+            return {
+              id: j.id,
+              title: j.title,
+              description: j.description,
+              location: j.location,
+              salary_range: j.salary_range,
+              created_at: j.created_at,
+              company_name: sp.name?.trim() || "Patrocinador",
+              company_avatar: sp.logo_url || null,
+            };
+          }
           const prof = profiles?.find((p) => p.user_id === j.professionals?.user_id);
           return {
             id: j.id,
@@ -133,7 +152,7 @@ const Jobs = () => {
     const jobIds = [...new Set((apps as { job_id: string }[]).map((a) => a.job_id))];
     const { data: jobRows } = await supabase
       .from("job_postings")
-      .select("id, title, location, salary_range, professional_id")
+      .select("id, title, location, salary_range, professional_id, sponsor_id, sponsors(name)")
       .in("id", jobIds);
     const proIds = [...new Set((jobRows || []).map((j: any) => j.professional_id).filter(Boolean))];
     let companyMap: Record<string, string> = {};
@@ -149,7 +168,10 @@ const Jobs = () => {
     }
     const jobMap = Object.fromEntries((jobRows || []).map((j: any) => [j.id, j]));
     const result: MyApplication[] = (apps as { id: string; job_id: string; created_at: string; description: string | null }[]).map((a) => {
-      const job = jobMap[a.job_id];
+      const job = jobMap[a.job_id] as any;
+      let companyName = "Empresa";
+      if (job?.sponsor_id && job?.sponsors?.name) companyName = job.sponsors.name;
+      else if (job?.professional_id) companyName = companyMap[job.professional_id] ?? "Empresa";
       return {
         id: a.id,
         job_id: a.job_id,
@@ -158,7 +180,7 @@ const Jobs = () => {
         job_title: job?.title ?? "Vaga",
         job_location: job?.location ?? null,
         job_salary_range: job?.salary_range ?? null,
-        company_name: job ? companyMap[job.professional_id] ?? "Empresa" : "Empresa",
+        company_name: companyName,
       };
     });
     setMyApplications(result);
@@ -168,6 +190,14 @@ const Jobs = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
+        <Link
+          to="/my-jobs"
+          className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl border-2 border-primary/35 bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors shadow-sm mb-5"
+        >
+          <Briefcase className="w-5 h-5 shrink-0" />
+          MINHAS VAGAS
+        </Link>
+
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
             <h1 className="text-xl font-bold text-foreground">Vagas</h1>

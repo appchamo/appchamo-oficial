@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, ExternalLink, ChevronLeft, ChevronRight, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -23,8 +24,10 @@ export interface SponsorStory {
   sponsor_link: string;
 }
 
-/** Espaço acima da zona da barra inferior (h-16) + safe area */
-const CTA_BOTTOM_PAD = "calc(4rem + max(env(safe-area-inset-bottom), 12px) + 10px)";
+/** Só safe area — o viewer cobre a tab bar (portal no body) */
+const CTA_BOTTOM_PAD = "calc(max(env(safe-area-inset-bottom), 14px) + 10px)";
+
+const VIEWER_Z = 215;
 
 interface Props {
   stories: SponsorStory[];
@@ -110,6 +113,14 @@ const SponsorStoryViewer = ({
       setEditLink((current.link_url || "").trim());
     }
   }, [current?.id, editOpen, current?.link_url, current?.link_button_label]);
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   // Pré-carrega as próximas 2 imagens
   useEffect(() => {
@@ -277,89 +288,91 @@ const SponsorStoryViewer = ({
 
   if (!current) return null;
 
-  return (
+  const shell = (
     <div
-      className="fixed inset-0 z-[100] bg-black flex flex-col select-none"
-      style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none" }}
+      className="fixed inset-0 flex flex-col select-none bg-black"
+      style={{
+        zIndex: VIEWER_Z,
+        touchAction: "none",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+      }}
     >
-      <div
-        className="absolute top-0 left-0 right-0 z-20 flex gap-1 px-3"
-        style={{ paddingTop: "max(env(safe-area-inset-top), 12px)" }}
-      >
-        {sponsorStories.map((_, i) => (
-          <div key={i} className="flex-1 h-[3px] bg-white/30 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-white rounded-full transition-none"
-              style={{
-                width: i < localIndex ? "100%" : i === localIndex ? `${progress}%` : "0%",
-              }}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div
-        className="absolute left-0 right-0 z-20 flex items-center gap-2 px-3"
-        style={{ top: "max(env(safe-area-inset-top), 16px)", paddingTop: 22 }}
-      >
-        <div className="w-9 h-9 rounded-full overflow-hidden bg-white/20 flex items-center justify-center shrink-0">
-          {current.sponsor_logo ? (
-            <img
-              src={current.sponsor_logo}
-              alt={current.sponsor_name}
-              className="w-full h-full object-cover"
-              draggable={false}
-            />
-          ) : (
-            <span className="text-white text-xs font-bold">{current.sponsor_name.slice(0, 2).toUpperCase()}</span>
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-white text-sm font-semibold leading-tight">{current.sponsor_name}</p>
-          <p className="text-white/60 text-[11px]">Patrocinado</p>
-        </div>
-        {isOwner && (
-          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/30 text-white shrink-0"
-                aria-label="Opções da novidade"
-              >
-                <MoreVertical className="w-5 h-5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52 z-[120]">
-              <DropdownMenuItem onSelect={(e) => { e.preventDefault(); openEditFromMenu(); }}>
-                <Pencil className="w-4 h-4 mr-2" />
-                Editar link e texto do botão
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setMenuOpen(false);
-                  setDeleteOpen(true);
+      {/* Topo: safe area + barras + menu (sempre acima da imagem) */}
+      <div className="shrink-0 z-40 px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2 bg-gradient-to-b from-black/90 via-black/50 to-transparent pointer-events-auto">
+        <div className="flex gap-1.5 mb-2">
+          {sponsorStories.map((_, i) => (
+            <div key={i} className="flex-1 h-[3px] bg-white/30 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-white rounded-full transition-none"
+                style={{
+                  width: i < localIndex ? "100%" : i === localIndex ? `${progress}%` : "0%",
                 }}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Excluir novidade
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-black/30 text-white shrink-0"
-          aria-label="Fechar"
-        >
-          <X className="w-5 h-5" />
-        </button>
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 min-h-11">
+          <div className="w-10 h-10 rounded-full overflow-hidden bg-white/20 flex items-center justify-center shrink-0 ring-1 ring-white/25">
+            {current.sponsor_logo ? (
+              <img
+                src={current.sponsor_logo}
+                alt={current.sponsor_name}
+                className="w-full h-full object-cover"
+                draggable={false}
+              />
+            ) : (
+              <span className="text-white text-xs font-bold">{current.sponsor_name.slice(0, 2).toUpperCase()}</span>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-white text-sm font-semibold leading-tight drop-shadow-md">{current.sponsor_name}</p>
+            <p className="text-white/75 text-[11px] drop-shadow-md">Patrocinado</p>
+          </div>
+          {isOwner && (
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="w-11 h-11 flex items-center justify-center rounded-full bg-black/55 text-white shrink-0 ring-1 ring-white/25"
+                  aria-label="Opções da novidade"
+                >
+                  <MoreVertical className="w-5 h-5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52 z-[320]">
+                <DropdownMenuItem onSelect={(e) => { e.preventDefault(); openEditFromMenu(); }}>
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Editar link e texto do botão
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setMenuOpen(false);
+                    setDeleteOpen(true);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Excluir novidade
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-11 px-3 flex items-center justify-center gap-1.5 rounded-full bg-white text-gray-900 shrink-0 font-bold text-xs shadow-lg ring-1 ring-black/10"
+            aria-label="Fechar novidade"
+          >
+            <X className="w-5 h-5 shrink-0" />
+            <span>Fechar</span>
+          </button>
+        </div>
       </div>
 
       <div
-        className="flex-1 relative overflow-hidden min-h-0"
+        className="flex-1 min-h-0 relative z-10"
         onMouseDown={() => !blockAutoAdvance && setIsPaused(true)}
         onMouseUp={() => setIsPaused(false)}
         onMouseLeave={() => setIsPaused(false)}
@@ -397,93 +410,93 @@ const SponsorStoryViewer = ({
             </div>
           </div>
         )}
-      </div>
 
-      {currentIndex > 0 && (
+        {currentIndex > 0 && (
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              goPrev();
+            }}
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 flex items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm active:scale-90 transition-transform"
+          >
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+        )}
+
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
-            goPrev();
+            goNext();
           }}
-          className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm active:scale-90 transition-transform"
-          style={{ marginTop: 30 }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 flex items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm active:scale-90 transition-transform"
         >
-          <ChevronLeft className="w-6 h-6" />
+          <ChevronRight className="w-6 h-6" />
         </button>
-      )}
 
-      <button
-        onMouseDown={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation();
-          goNext();
-        }}
-        className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm active:scale-90 transition-transform"
-        style={{ marginTop: 30 }}
-      >
-        <ChevronRight className="w-6 h-6" />
-      </button>
-
-      <div
-        className="absolute bottom-0 left-0 right-0 z-20 px-4 flex flex-col items-stretch"
-        style={{ paddingBottom: CTA_BOTTOM_PAD }}
-      >
-        {current.caption && (
-          <p className="text-white text-sm mb-3 text-center drop-shadow-md px-1">{current.caption}</p>
-        )}
-        {showCta && (
-          <div className="relative w-full">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleLinkClick();
-              }}
-              className="w-full flex flex-col items-center rounded-2xl bg-white text-gray-900 shadow-lg active:scale-[0.99] transition-transform pt-2.5 pb-3 px-4 pr-12 relative"
-            >
-              <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{buttonTitle}</span>
-              <span className="text-sm font-bold flex items-center gap-2 mt-1">
-                <ExternalLink className="w-4 h-4 shrink-0" />
-                {hasValidLink ? "Abrir link" : isOwner ? "Definir link" : "Saiba mais"}
-              </span>
-            </button>
-            {isOwner && (
+        <div
+          className="absolute bottom-0 left-0 right-0 z-20 px-4 flex flex-col items-stretch bg-gradient-to-t from-black/85 via-black/35 to-transparent pt-10"
+          style={{ paddingBottom: CTA_BOTTOM_PAD }}
+        >
+          {current.caption && (
+            <p className="text-white text-sm mb-3 text-center drop-shadow-md px-1">{current.caption}</p>
+          )}
+          {showCta && (
+            <div className="relative w-full">
               <button
                 type="button"
-                className="absolute top-1/2 -translate-y-1/2 right-2 w-10 h-10 rounded-full bg-gray-900 text-white flex items-center justify-center shadow-md active:scale-95 z-10"
-                aria-label="Editar texto e link do botão"
-                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setEditOpen(true);
+                  handleLinkClick();
                 }}
+                className="w-full flex flex-col items-center rounded-2xl bg-white text-gray-900 shadow-lg active:scale-[0.99] transition-transform pt-2.5 pb-3 px-4 pr-12 relative"
               >
-                <Pencil className="w-4 h-4" />
+                <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{buttonTitle}</span>
+                <span className="text-sm font-bold flex items-center gap-2 mt-1">
+                  <ExternalLink className="w-4 h-4 shrink-0" />
+                  {hasValidLink ? "Abrir link" : isOwner ? "Definir link" : "Saiba mais"}
+                </span>
               </button>
-            )}
-          </div>
-        )}
+              {isOwner && (
+                <button
+                  type="button"
+                  className="absolute top-1/2 -translate-y-1/2 right-2 w-10 h-10 rounded-full bg-gray-900 text-white flex items-center justify-center shadow-md active:scale-95 z-10"
+                  aria-label="Editar texto e link do botão"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditOpen(true);
+                  }}
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {editOpen && (
         <div
-          className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          className="absolute inset-0 z-[60] flex flex-col justify-end sm:justify-center sm:p-4 bg-black/70 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="story-edit-title"
           onClick={() => setEditOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-background border border-border p-5 shadow-xl mb-[env(safe-area-inset-bottom)] sm:mb-0"
+            className="w-full max-w-sm mx-auto sm:rounded-2xl rounded-t-2xl bg-background border border-border shadow-2xl flex flex-col max-h-[min(92dvh,100svh)] min-h-0"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="story-edit-title" className="text-lg font-semibold">
-              Texto e link do botão
-            </h2>
-            <div className="space-y-3 pt-3">
+            <div className="shrink-0 p-4 pb-2 border-b border-border/60">
+              <h2 id="story-edit-title" className="text-lg font-semibold">
+                Texto e link do botão
+              </h2>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Título do botão</label>
                 <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Saiba mais" className="mt-1 rounded-xl" />
@@ -495,18 +508,20 @@ const SponsorStoryViewer = ({
                   onChange={(e) => setEditLink(e.target.value)}
                   placeholder="https://…"
                   inputMode="url"
+                  autoCapitalize="off"
+                  autoCorrect="off"
                   className="mt-1 rounded-xl"
                 />
                 <p className="text-[11px] text-muted-foreground mt-1">Vazio usa o link padrão do patrocinador na app.</p>
               </div>
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" className="flex-1 rounded-xl" onClick={() => setEditOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button type="button" className="flex-1 rounded-xl" disabled={savingEdit} onClick={() => void saveEdit()}>
-                  {savingEdit ? "Salvando…" : "Salvar"}
-                </Button>
-              </div>
+            </div>
+            <div className="shrink-0 flex gap-2 p-4 pt-2 border-t border-border/60 bg-background pb-[max(16px,env(safe-area-inset-bottom))]">
+              <Button type="button" variant="outline" className="flex-1 rounded-xl h-11" onClick={() => setEditOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="button" className="flex-1 rounded-xl h-11 font-bold" disabled={savingEdit} onClick={() => void saveEdit()}>
+                {savingEdit ? "Salvando…" : "Salvar"}
+              </Button>
             </div>
           </div>
         </div>
@@ -514,13 +529,13 @@ const SponsorStoryViewer = ({
 
       {deleteOpen && (
         <div
-          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          className="absolute inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
           role="alertdialog"
           aria-modal="true"
           onClick={() => !deleting && setDeleteOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-background border border-border p-5 shadow-xl"
+            className="w-full max-w-sm rounded-2xl bg-background border border-border p-5 shadow-2xl max-h-[85dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-semibold">Excluir novidade?</h2>
@@ -529,10 +544,10 @@ const SponsorStoryViewer = ({
               publicação.
             </p>
             <div className="flex flex-col gap-2 mt-4">
-              <Button type="button" variant="outline" className="rounded-xl w-full" disabled={deleting} onClick={() => setDeleteOpen(false)}>
+              <Button type="button" variant="outline" className="rounded-xl w-full h-11" disabled={deleting} onClick={() => setDeleteOpen(false)}>
                 Cancelar
               </Button>
-              <Button type="button" variant="destructive" className="rounded-xl w-full" disabled={deleting} onClick={() => void confirmDelete()}>
+              <Button type="button" variant="destructive" className="rounded-xl w-full h-11" disabled={deleting} onClick={() => void confirmDelete()}>
                 {deleting ? "Excluindo…" : "Excluir"}
               </Button>
             </div>
@@ -541,6 +556,9 @@ const SponsorStoryViewer = ({
       )}
     </div>
   );
+
+  if (typeof document === "undefined") return null;
+  return createPortal(shell, document.body);
 };
 
 export default SponsorStoryViewer;

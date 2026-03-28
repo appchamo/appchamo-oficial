@@ -486,37 +486,46 @@ export type Database = {
       job_postings: {
         Row: {
           active: boolean
+          city: string | null
           created_at: string
           description: string | null
           id: string
           location: string | null
-          professional_id: string
+          professional_id: string | null
           requirements: string | null
           salary_range: string | null
+          sponsor_id: string | null
+          state: string | null
           title: string
           updated_at: string
         }
         Insert: {
           active?: boolean
+          city?: string | null
           created_at?: string
           description?: string | null
           id?: string
           location?: string | null
-          professional_id: string
+          professional_id?: string | null
           requirements?: string | null
           salary_range?: string | null
+          sponsor_id?: string | null
+          state?: string | null
           title: string
           updated_at?: string
         }
         Update: {
           active?: boolean
+          city?: string | null
           created_at?: string
           description?: string | null
           id?: string
           location?: string | null
-          professional_id?: string
+          professional_id?: string | null
           requirements?: string | null
           salary_range?: string | null
+          sponsor_id?: string | null
+          state?: string | null
           title?: string
           updated_at?: string
         }
@@ -526,6 +535,13 @@ export type Database = {
             columns: ["professional_id"]
             isOneToOne: false
             referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_postings_sponsor_id_fkey"
+            columns: ["sponsor_id"]
+            isOneToOne: false
+            referencedRelation: "sponsors"
             referencedColumns: ["id"]
           },
         ]

@@ -111,6 +111,36 @@ export async function fetchFavoritedProfessionalOwnerUserIds(
   return [...new Set((pros || []).map((r: { user_id: string }) => r.user_id))];
 }
 
+/**
+ * Profissionais (donos de linha em `professionals`) com quem há seguimento mútuo em `user_follows`.
+ */
+export async function fetchMutualProfessionalPeerUserIds(
+  client: SupabaseClient,
+  viewerUserId: string,
+): Promise<string[]> {
+  const { data: following } = await client
+    .from("user_follows")
+    .select("followed_user_id")
+    .eq("follower_user_id", viewerUserId);
+  const { data: followers } = await client
+    .from("user_follows")
+    .select("follower_user_id")
+    .eq("followed_user_id", viewerUserId);
+  if (!following?.length || !followers?.length) return [];
+  const fset = new Set(following.map((r: { followed_user_id: string }) => r.followed_user_id));
+  const mutualUids = [
+    ...new Set(
+      followers
+        .map((r: { follower_user_id: string }) => r.follower_user_id)
+        .filter((uid: string) => fset.has(uid)),
+    ),
+  ];
+  if (!mutualUids.length) return [];
+  const { data: pros } = await client.from("professionals").select("user_id").in("user_id", mutualUids);
+  const proSet = new Set((pros || []).map((r: { user_id: string }) => r.user_id));
+  return mutualUids.filter((uid) => uid !== viewerUserId && proSet.has(uid));
+}
+
 /** Remove amizade aceite (ex.: ao deixar de seguir). */
 export async function removeFriendshipPair(client: SupabaseClient, a: string, b: string): Promise<void> {
   if (!a || !b || a === b) return;

@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Heart, Sparkles } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Sparkles, UserPlus, UserCheck } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
@@ -87,7 +87,7 @@ const getChatImageLightboxSrc = (url: string | null | undefined) => {
   return url;
 };
 
-/** Galeria do chat: só formatos de imagem estáticos (sem vídeo, PDF, etc.). */
+/** Galeria do chat: só imagens (sem vídeo, PDF ou outros). */
 const CHAT_GALLERY_ACCEPT =
   "image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif";
 
@@ -154,8 +154,10 @@ const MessageThread = () => {
   const [peerProfileNavKey, setPeerProfileNavKey] = useState<string | null>(null);
   const [peerClientPreviewOpen, setPeerClientPreviewOpen] = useState(false);
   const [peerClientProId, setPeerClientProId] = useState<string | null>(null);
-  const [clientPreviewFavorite, setClientPreviewFavorite] = useState(false);
+  const [clientPreviewFollowing, setClientPreviewFollowing] = useState(false);
   const [clientPreviewSocialBusy, setClientPreviewSocialBusy] = useState(false);
+  type CommunityPostEmbed = { body: string; image_url: string | null; author_name: string };
+  const [communityPostEmbeds, setCommunityPostEmbeds] = useState<Record<string, CommunityPostEmbed>>({});
   /** user_id do destinatário (quem recebe a mensagem) — usado para push de nova mensagem */
   const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
   /** Cliente segue o profissional desta conversa — anel verde no avatar do cabeçalho. */
@@ -380,10 +382,10 @@ const MessageThread = () => {
       const theirPid = (theirPro as { id?: string } | null)?.id;
       if (myPid && theirPid) {
         const [{ data: rowA }, { data: rowB }] = await Promise.all([
-          supabase.from("professional_favorites" as any).select("id").eq("user_id", userId).eq("professional_id", theirPid).maybeSingle(),
-          supabase.from("professional_favorites" as any).select("id").eq("user_id", recipientId).eq("professional_id", myPid).maybeSingle(),
+          supabase.from("user_follows").select("follower_user_id").eq("follower_user_id", userId).eq("followed_user_id", recipientId).maybeSingle(),
+          supabase.from("user_follows").select("follower_user_id").eq("follower_user_id", recipientId).eq("followed_user_id", userId).maybeSingle(),
         ]);
-        if (rowA && rowB) friendHint = " · Favoritos no Chamô";
+        if (rowA && rowB) friendHint = " · Seguem um ao outro";
       }
     } catch {
       /* ignore */
@@ -543,21 +545,21 @@ const MessageThread = () => {
           .eq("request_id", threadId)
           .eq("user_id", user.id)
           .maybeSingle();
-        const favQ = supabase
-          .from("professional_favorites" as any)
+        const followQ = supabase
+          .from("professional_follows" as any)
           .select("id")
           .eq("user_id", user.id)
           .eq("professional_id", req.professional_id)
           .maybeSingle();
-        const [proRes, clientProRes, reviewRes, appRes, crsRes, favRes] = await Promise.all([
+        const [proRes, clientProRes, reviewRes, appRes, crsRes, followRes] = await Promise.all([
           proQuery,
           clientProQuery,
           reviewCountQuery,
           appointmentQuery,
           crsQuery,
-          favQ,
+          followQ,
         ]);
-        setThreadPeerFavorite(!!favRes.data);
+        setThreadPeerFavorite(!!followRes.data);
         const pro = proRes.data;
         const allowedLabelColors = new Set(["blue", "green", "orange", "red"]);
         const crsRow = crsRes.data as { label_color?: string | null; label_text?: string | null } | null;
@@ -584,7 +586,7 @@ const MessageThread = () => {
             const pid = (pro as { id: string }).id;
             setPeerProfileNavKey((slug && String(slug).trim()) || pid || null);
             setPeerClientProId(null);
-            setClientPreviewFavorite(false);
+            setClientPreviewFollowing(false);
           }
           if (!isClient && pro.user_id === user.id) {
             setIsProfessional(true);
@@ -608,14 +610,14 @@ const MessageThread = () => {
             setPeerClientProId(cproId);
             if (cproId) {
               const { data: fa } = await supabase
-                .from("professional_favorites" as any)
+                .from("professional_follows" as any)
                 .select("id")
                 .eq("user_id", user.id)
                 .eq("professional_id", cproId)
                 .maybeSingle();
-              setClientPreviewFavorite(!!fa);
+              setClientPreviewFollowing(!!fa);
             } else {
-              setClientPreviewFavorite(false);
+              setClientPreviewFollowing(false);
             }
             const { data: profile } = (await supabase
               .from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle()) as { data: { full_name: string; avatar_url: string | null } | null };
@@ -647,6 +649,58 @@ const MessageThread = () => {
     setPeerClientPreviewOpen(false);
     void load(gen);
   }, [threadId, load]);
+
+  useEffect(() => {
+    if (!messages.length) return;
+    const ids = [
+      ...new Set(
+        messages
+          .map((m) => m.content?.trim().match(/^\[COMMUNITY_POST:([a-f0-9-]{36})\]\s*$/i)?.[1])
+          .filter((x): x is string => !!x),
+      ),
+    ];
+    if (!ids.length) return;
+    let cancelled = false;
+    void (async () => {
+      const { data: rows } = await supabase
+        .from("community_posts" as any)
+        .select("id, body, image_url, author_id")
+        .in("id", ids);
+      if (cancelled || !rows?.length) return;
+      const rlist = rows as {
+        id: string;
+        body?: string;
+        image_url?: string | null;
+        author_id: string;
+      }[];
+      const authorIds = [...new Set(rlist.map((r) => r.author_id))];
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("user_id, display_name, full_name")
+        .in("user_id", authorIds);
+      const nameMap = new Map(
+        (profs || []).map((p: any) => [
+          p.user_id,
+          String((p.display_name || p.full_name || "Profissional").trim() || "Profissional"),
+        ]),
+      );
+      if (cancelled) return;
+      setCommunityPostEmbeds((prev) => {
+        const n = { ...prev };
+        for (const r of rlist) {
+          n[r.id] = {
+            body: String(r.body || "").trim(),
+            image_url: r.image_url || null,
+            author_name: nameMap.get(r.author_id) || "Profissional",
+          };
+        }
+        return n;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
 
   useEffect(() => {
     if (!threadId || !userId) return;
@@ -963,25 +1017,25 @@ const MessageThread = () => {
     }
   };
 
-  const toggleClientPreviewFavorite = async () => {
+  const toggleClientPreviewFollow = async () => {
     if (!userId || !peerClientProId) return;
     setClientPreviewSocialBusy(true);
     try {
-      if (clientPreviewFavorite) {
+      if (clientPreviewFollowing) {
         const { error } = await supabase
-          .from("professional_favorites" as any)
+          .from("professional_follows" as any)
           .delete()
           .eq("user_id", userId)
           .eq("professional_id", peerClientProId);
         if (error) throw error;
-        setClientPreviewFavorite(false);
+        setClientPreviewFollowing(false);
       } else {
-        const { error } = await supabase.from("professional_favorites" as any).insert({
+        const { error } = await supabase.from("professional_follows" as any).insert({
           user_id: userId,
           professional_id: peerClientProId,
         });
         if (error) throw error;
-        setClientPreviewFavorite(true);
+        setClientPreviewFollowing(true);
       }
     } catch {
       toast({ title: "Não foi possível atualizar", variant: "destructive" });
@@ -2394,22 +2448,51 @@ const MessageThread = () => {
     }
 
     if (communityPostId) {
+      const emb = communityPostEmbeds[communityPostId];
+      const snippet = emb?.body ? emb.body.replace(/\s+/g, " ").trim() : "";
+      const short =
+        snippet.length > 110 ? `${snippet.slice(0, 110).trim()}…` : snippet;
       return (
         <Link
           to={getCommunityPostInAppPath(communityPostId)}
-          className={`block min-w-[200px] max-w-[260px] rounded-xl border px-3 py-2.5 text-left transition-opacity hover:opacity-95 active:scale-[0.99] ${
+          className={`block w-[min(100%,260px)] max-w-[260px] overflow-hidden rounded-2xl border text-left shadow-sm transition-opacity hover:opacity-95 active:scale-[0.99] ${
             isMine
-              ? "border-primary-foreground/35 bg-primary-foreground/10"
-              : "border-violet-500/35 bg-violet-500/10 dark:bg-violet-500/15"
+              ? "border-primary-foreground/30 bg-primary-foreground/10"
+              : "border-violet-500/40 bg-gradient-to-b from-violet-500/12 to-background dark:from-violet-500/18"
           }`}
         >
-          <span className="flex items-center gap-2 text-xs font-bold">
-            <Sparkles className="w-3.5 h-3.5 shrink-0 text-violet-600 dark:text-violet-300" />
-            Publicação na Comunidade
-          </span>
-          <span className={`text-[11px] mt-1 block ${isMine ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-            Toque para abrir
-          </span>
+          <div className="relative aspect-[16/10] w-full bg-muted/50">
+            {emb?.image_url ? (
+              <img
+                src={getOptimizedChatImage(emb.image_url)}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-violet-500/20 to-primary/10">
+                <Sparkles className="h-10 w-10 text-violet-600/50 dark:text-violet-300/50" />
+              </div>
+            )}
+            <span className="absolute left-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white backdrop-blur-sm">
+              Comunidade
+            </span>
+          </div>
+          <div className="px-3 py-2.5">
+            <p className={`text-[13px] font-bold leading-snug line-clamp-2 ${isMine ? "text-primary-foreground" : "text-foreground"}`}>
+              {emb?.author_name || "Publicação"}
+            </p>
+            {short ? (
+              <p
+                className={`text-[11px] mt-1 leading-snug line-clamp-2 ${isMine ? "text-primary-foreground/85" : "text-muted-foreground"}`}
+              >
+                {short}
+              </p>
+            ) : null}
+            <span className={`text-[10px] mt-2 block font-semibold ${isMine ? "text-primary-foreground/70" : "text-primary"}`}>
+              Abrir na Comunidade →
+            </span>
+          </div>
         </Link>
       );
     }
@@ -2679,8 +2762,11 @@ const MessageThread = () => {
                 {otherInitials}
               </div>
               {threadPeerFavorite && !isProfessional && (
-                <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-400 text-white flex items-center justify-center shadow border border-white">
-                  <Heart className="w-2.5 h-2.5 fill-white" />
+                <span
+                  className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow border border-white"
+                  title="A seguir este profissional"
+                >
+                  <UserCheck className="w-2.5 h-2.5" strokeWidth={2.5} />
                 </span>
               )}
             </div>
@@ -3250,13 +3336,17 @@ const MessageThread = () => {
               <DialogFooter className="flex-col sm:flex-col gap-2 w-full">
                 <Button
                   type="button"
-                  variant={clientPreviewFavorite ? "secondary" : "outline"}
+                  variant={clientPreviewFollowing ? "secondary" : "outline"}
                   className="rounded-xl font-semibold gap-2 w-full"
                   disabled={clientPreviewSocialBusy}
-                  onClick={() => void toggleClientPreviewFavorite()}
+                  onClick={() => void toggleClientPreviewFollow()}
                 >
-                  <Heart className={`w-4 h-4 ${clientPreviewFavorite ? "fill-rose-500 text-rose-500" : ""}`} />
-                  {clientPreviewFavorite ? "Favorito" : "Favoritar"}
+                  {clientPreviewFollowing ? (
+                    <UserCheck className="w-4 h-4 text-primary" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
+                  )}
+                  {clientPreviewFollowing ? "A seguir" : "Seguir"}
                 </Button>
                 <Button
                   type="button"

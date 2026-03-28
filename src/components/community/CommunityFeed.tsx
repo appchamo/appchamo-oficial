@@ -17,7 +17,6 @@ import {
   Upload,
   Search,
   BadgeCheck,
-  Video,
   Maximize2,
   MoreHorizontal,
   ChevronDown,
@@ -48,7 +47,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
-import { fetchFavoritedProfessionalOwnerUserIds } from "@/lib/chamoFriends";
+import {
+  fetchFavoritedProfessionalOwnerUserIds,
+  fetchMutualProfessionalPeerUserIds,
+} from "@/lib/chamoFriends";
 import { compressImageForChat } from "@/lib/compressChatImage";
 import { LinkedInLikeControl, type LinkedInReactionType } from "@/components/community/LinkedInLikeControl";
 import {
@@ -220,9 +222,7 @@ export default function CommunityFeed({
   const [commentAuthors, setCommentAuthors] = useState<Record<string, AuthorRow>>({});
 
   const [composerText, setComposerText] = useState("");
-  const [composerMedia, setComposerMedia] = useState<{ kind: "image" | "video"; file: File } | null>(
-    null,
-  );
+  const [composerImageFile, setComposerImageFile] = useState<File | null>(null);
   const [composerPreview, setComposerPreview] = useState<string | null>(null);
   const [composerModalOpen, setComposerModalOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -540,14 +540,14 @@ export default function CommunityFeed({
   }, [user, highlightPostId, loading, posts]);
 
   useEffect(() => {
-    if (!composerMedia) {
+    if (!composerImageFile) {
       setComposerPreview(null);
       return;
     }
-    const url = URL.createObjectURL(composerMedia.file);
+    const url = URL.createObjectURL(composerImageFile);
     setComposerPreview(url);
     return () => URL.revokeObjectURL(url);
-  }, [composerMedia]);
+  }, [composerImageFile]);
 
   const hasPostsFromFavorites = useMemo(
     () => posts.some((p) => favoritedAuthorUserIds.has(p.author_id)),
@@ -698,16 +698,15 @@ export default function CommunityFeed({
   const publishPost = async () => {
     if (!user || !canPost) return;
     const text = composerText.trim();
-    if (!text && !composerMedia) {
-      toast({ title: "Escreva algo ou adicione uma foto ou vídeo", variant: "destructive" });
+    if (!text && !composerImageFile) {
+      toast({ title: "Escreva algo ou adicione uma foto", variant: "destructive" });
       return;
     }
     setPublishing(true);
     try {
       let imageUrl: string | null = null;
-      let videoUrl: string | null = null;
-      if (composerMedia?.kind === "image") {
-        const blob = await compressImageForChat(composerMedia.file, {
+      if (composerImageFile) {
+        const blob = await compressImageForChat(composerImageFile, {
           maxEdge: 1600,
           webpQuality: 0.82,
           jpegQuality: 0.85,
@@ -721,37 +720,17 @@ export default function CommunityFeed({
         if (upErr) throw upErr;
         const { data: pub } = supabase.storage.from("community-feed").getPublicUrl(path);
         imageUrl = pub.publicUrl;
-      } else if (composerMedia?.kind === "video") {
-        const f = composerMedia.file;
-        if (f.size > 45 * 1024 * 1024) {
-          toast({
-            title: "Vídeo muito grande",
-            description: "Use um arquivo de até 45 MB.",
-            variant: "destructive",
-          });
-          return;
-        }
-        const rawExt = (f.name.split(".").pop() || "mp4").toLowerCase();
-        const ext = /^[a-z0-9]{1,8}$/.test(rawExt) ? rawExt : "mp4";
-        const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-        const ct = f.type?.startsWith("video/") ? f.type : "video/mp4";
-        const { error: upErr } = await supabase.storage
-          .from("community-feed")
-          .upload(path, f, { upsert: false, contentType: ct });
-        if (upErr) throw upErr;
-        const { data: pub } = supabase.storage.from("community-feed").getPublicUrl(path);
-        videoUrl = pub.publicUrl;
       }
       const { error: insErr } = await supabase.from("community_posts" as any).insert({
         author_id: user.id,
         body: text,
         image_url: imageUrl,
-        video_url: videoUrl,
+        video_url: null,
         audience: "public",
       });
       if (insErr) throw insErr;
       setComposerText("");
-      setComposerMedia(null);
+      setComposerImageFile(null);
       setComposerModalOpen(false);
       toast({ title: "Publicado na Comunidade" });
       await loadFeed({ silent: true });
@@ -765,14 +744,16 @@ export default function CommunityFeed({
   const setReaction = async (postId: string, type: ReactionType) => {
     if (!user) return;
     const uid = user.id;
-    const current = myReactionByPost[postId];
+    let prevType: ReactionType | undefined;
     setReactions((prev) => {
+      const row = prev.find((x) => x.post_id === postId && x.user_id === uid);
+      prevType = row?.reaction_type as ReactionType | undefined;
       const rest = prev.filter((x) => !(x.post_id === postId && x.user_id === uid));
-      if (current === type) return rest;
+      if (prevType === type) return rest;
       return [...rest, { post_id: postId, user_id: uid, reaction_type: type }];
     });
     try {
-      if (current === type) {
+      if (prevType === type) {
         const { error } = await supabase
           .from("community_post_reactions" as any)
           .delete()
@@ -835,14 +816,16 @@ export default function CommunityFeed({
   const setCommentReaction = async (commentId: string, type: ReactionType) => {
     if (!user) return;
     const uid = user.id;
-    const current = myReactionByComment[commentId];
+    let prevType: ReactionType | undefined;
     setCommentReactions((prev) => {
+      const row = prev.find((x) => x.comment_id === commentId && x.user_id === uid);
+      prevType = row?.reaction_type as ReactionType | undefined;
       const rest = prev.filter((x) => !(x.comment_id === commentId && x.user_id === uid));
-      if (current === type) return rest;
+      if (prevType === type) return rest;
       return [...rest, { comment_id: commentId, user_id: uid, reaction_type: type }];
     });
     try {
-      if (current === type) {
+      if (prevType === type) {
         const { error } = await supabase
           .from("community_comment_reactions" as any)
           .delete()
@@ -1017,8 +1000,8 @@ export default function CommunityFeed({
         }
         const term = `%${raw.split(/\s+/)[0]}%`;
 
-        const favIds = await fetchFavoritedProfessionalOwnerUserIds(supabase, user.id);
-        const favSet = new Set(favIds);
+        const mutualIds = await fetchMutualProfessionalPeerUserIds(supabase, user.id);
+        const mutualSet = new Set(mutualIds);
 
         const { data, error } = await supabase
           .from("profiles")
@@ -1028,7 +1011,7 @@ export default function CommunityFeed({
           .limit(20);
         if (error) throw error;
         const rows = (data || []) as AuthorRow[];
-        const filtered = rows.filter((r) => favSet.has(r.user_id));
+        const filtered = rows.filter((r) => mutualSet.has(r.user_id));
         setShareResults(filtered);
       } catch {
         setShareResults([]);
@@ -1074,8 +1057,8 @@ export default function CommunityFeed({
     (async () => {
       setLoadingFavoritesShare(true);
       try {
-        const favUids = await fetchFavoritedProfessionalOwnerUserIds(supabase, user.id);
-        if (favUids.length === 0) {
+        const peerUids = await fetchMutualProfessionalPeerUserIds(supabase, user.id);
+        if (peerUids.length === 0) {
           if (!cancelled) setFavoritesForShare([]);
           return;
         }
@@ -1083,9 +1066,9 @@ export default function CommunityFeed({
         const { data: profs } = await supabase
           .from("profiles")
           .select("user_id, display_name, full_name, avatar_url")
-          .in("user_id", favUids);
+          .in("user_id", peerUids);
         const profMap = new Map((profs || []).map((p: any) => [p.user_id as string, p as AuthorRow]));
-        const ordered: AuthorRow[] = favUids
+        const ordered: AuthorRow[] = peerUids
           .map((uid) => profMap.get(uid))
           .filter(Boolean) as AuthorRow[];
         ordered.sort((a, b) =>
@@ -1115,22 +1098,20 @@ export default function CommunityFeed({
         .maybeSingle();
       if (proLookupErr || !proRow?.id) {
         toast({
-          title: "Só com profissionais favoritos",
-          description: "Só é possível enviar pelo Chamô para perfis profissionais que estão nos seus favoritos.",
+          title: "Perfil inválido",
+          description: "Só é possível enviar para contas profissionais no Chamô.",
           variant: "destructive",
         });
         return;
       }
-      const { data: favRow } = await supabase
-        .from("professional_favorites" as any)
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("professional_id", proRow.id)
-        .maybeSingle();
-      if (!favRow) {
+
+      const { data: mutualOk, error: mutualErr } = await supabase.rpc("professional_is_mutual_with_viewer" as any, {
+        p_professional_id: proRow.id,
+      });
+      if (mutualErr || !mutualOk) {
         toast({
-          title: "Adicione aos favoritos",
-          description: "Favorite o perfil profissional desta pessoa para partilhar a publicação na conversa.",
+          title: "Seguimento mútuo necessário",
+          description: "Vocês dois precisam seguir um ao outro para enviar a publicação no chat direto.",
           variant: "destructive",
         });
         return;
@@ -1146,21 +1127,34 @@ export default function CommunityFeed({
       const { data: threadId, error: rpcErr } = await supabase.rpc("ensure_following_direct_thread", {
         p_professional_id: proRow.id,
       });
-      if (!rpcErr && threadId) {
-        await supabase.from("chat_messages").insert({
-          request_id: threadId,
-          sender_id: user.id,
-          content: `[COMMUNITY_POST:${sharePost.id}]`,
-        });
+      if (rpcErr || !threadId) {
+        throw new Error(
+          rpcErr?.message?.includes("mutual")
+            ? "É preciso seguimento mútuo para abrir o chat."
+            : rpcErr?.message || "Não foi possível criar a conversa.",
+        );
       }
+      await supabase.from("chat_messages").insert({
+        request_id: threadId,
+        sender_id: user.id,
+        content: `[COMMUNITY_POST:${sharePost.id}]`,
+      });
 
       const me = (profile?.full_name || "Alguém").trim();
+      const author = authors[sharePost.author_id];
+      const notifImage =
+        (sharePost.image_url && String(sharePost.image_url).trim()) ||
+        (author?.avatar_url && String(author.avatar_url).trim()) ||
+        (profile?.avatar_url && String(profile.avatar_url).trim()) ||
+        null;
       await supabase.from("notifications").insert({
         user_id: toUserId,
-        title: "Comunidade Chamô",
-        message: `${me} encaminhou uma publicação para você.`,
-        type: "info",
-        link: `${communityLink}&post=${encodeURIComponent(sharePost.id)}`,
+        title: me,
+        message: "enviou uma publicação da Comunidade para você",
+        type: "community",
+        read: false,
+        link: `/messages/${threadId}`,
+        image_url: notifImage,
       });
       toast({ title: "Enviado" });
       setSharePost(null);
@@ -1595,7 +1589,7 @@ export default function CommunityFeed({
                 onClick={() => setComposerModalOpen(true)}
                 className="flex-1 min-h-[72px] rounded-xl bg-muted/40 px-3 py-3 text-left text-[15px] text-muted-foreground hover:bg-muted/55 active:bg-muted/65 transition-colors"
               >
-                {!composerText.trim() && !composerMedia ? (
+                {!composerText.trim() && !composerImageFile ? (
                   "No que você está pensando?"
                 ) : (
                   <span className="text-foreground line-clamp-4 block whitespace-pre-wrap break-words">
@@ -1603,8 +1597,7 @@ export default function CommunityFeed({
                       composerText.trim() &&
                         composerText.trim().slice(0, 280) +
                           (composerText.trim().length > 280 ? "…" : ""),
-                      composerMedia &&
-                        (composerMedia.kind === "video" ? "Vídeo anexado" : "Foto anexada"),
+                      composerImageFile && "Foto anexada",
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -1649,60 +1642,34 @@ export default function CommunityFeed({
                 </p>
                 <div>
                   <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
-                    Mídia
+                    Foto
                   </p>
-                  <div className="flex flex-wrap gap-3">
-                    <label className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-4 py-2.5 text-sm font-semibold text-foreground cursor-pointer hover:bg-muted/50">
-                      <ImagePlus className="w-5 h-5 text-primary" />
-                      Foto
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) setComposerMedia({ kind: "image", file: f });
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                    <label className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-4 py-2.5 text-sm font-semibold text-foreground cursor-pointer hover:bg-muted/50">
-                      <Video className="w-5 h-5 text-primary" />
-                      Vídeo
-                      <input
-                        type="file"
-                        accept="video/mp4,video/webm,video/quicktime,video/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) setComposerMedia({ kind: "video", file: f });
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                  </div>
+                  <label className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-4 py-2.5 text-sm font-semibold text-foreground cursor-pointer hover:bg-muted/50">
+                    <ImagePlus className="w-5 h-5 text-primary" />
+                    Escolher imagem
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setComposerImageFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
                   <p className="text-[11px] text-muted-foreground mt-2">
-                    Fotos são comprimidas automaticamente. Vídeos: até 45 MB.
+                    A imagem é comprimida automaticamente antes de enviar.
                   </p>
                 </div>
-                {composerPreview && composerMedia ? (
+                {composerPreview && composerImageFile ? (
                   <div className="relative rounded-xl overflow-hidden border border-border/60 bg-black">
-                    {composerMedia.kind === "video" ? (
-                      <video
-                        src={composerPreview}
-                        controls
-                        playsInline
-                        preload="metadata"
-                        className="w-full max-h-64 object-contain"
-                      />
-                    ) : (
-                      <img src={composerPreview} alt="" className="w-full max-h-64 object-cover" />
-                    )}
+                    <img src={composerPreview} alt="" className="w-full max-h-64 object-cover" />
                     <button
                       type="button"
                       className="absolute top-2 right-2 w-9 h-9 rounded-full bg-black/65 text-white flex items-center justify-center"
-                      onClick={() => setComposerMedia(null)}
-                      aria-label="Remover mídia"
+                      onClick={() => setComposerImageFile(null)}
+                      aria-label="Remover foto"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -1713,7 +1680,7 @@ export default function CommunityFeed({
                 <Button
                   type="button"
                   className="w-full rounded-xl h-12 text-base font-bold"
-                  disabled={publishing || (!composerText.trim() && !composerMedia)}
+                  disabled={publishing || (!composerText.trim() && !composerImageFile)}
                   onClick={publishPost}
                 >
                   {publishing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publicar"}
@@ -1777,9 +1744,9 @@ export default function CommunityFeed({
               <article
                 key={post.id}
                 id={`community-post-${post.id}`}
-                className="rounded-[20px] bg-white shadow-md shadow-black/[0.05] overflow-hidden border border-border/45 ring-1 ring-black/[0.02] scroll-mt-24"
+                className="rounded-[22px] bg-card overflow-hidden border border-border/60 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.18)] ring-1 ring-primary/[0.04] scroll-mt-24 transition-shadow hover:shadow-[0_12px_36px_-12px_rgba(0,0,0,0.22)]"
               >
-                <div className="p-4 pb-2">
+                <div className="p-4 pb-2 bg-gradient-to-b from-white/90 to-transparent dark:from-card dark:to-transparent">
                   <div className="flex gap-3 items-start">
                     {authorProfileTo ? (
                       <Link
@@ -1887,26 +1854,7 @@ export default function CommunityFeed({
                       )}
                     </div>
                   ) : null}
-                  {post.video_url ? (
-                    <div className="relative mt-3 rounded-xl overflow-hidden bg-black">
-                      <video
-                        key={post.video_url}
-                        src={post.video_url}
-                        controls
-                        playsInline
-                        preload="metadata"
-                        className="w-full max-h-[min(420px,70vh)] object-contain bg-black"
-                      />
-                      <button
-                        type="button"
-                        className="absolute top-2 right-2 rounded-full bg-black/55 p-2 text-white backdrop-blur-sm"
-                        onClick={() => setFullscreenPost(post)}
-                        aria-label="Ver em tela cheia"
-                      >
-                        <Maximize2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : post.image_url ? (
+                  {post.image_url ? (
                     <button
                       type="button"
                       className="mt-3 w-full p-0 border-0 bg-transparent rounded-xl overflow-hidden block text-left cursor-zoom-in active:opacity-95"
@@ -2030,7 +1978,8 @@ export default function CommunityFeed({
           <SheetHeader className="px-5 pt-1 pb-3 text-left space-y-1 border-b border-border/40">
             <SheetTitle className="text-lg font-bold tracking-tight">Compartilhar publicação</SheetTitle>
             <p className="text-[13px] text-muted-foreground font-normal leading-snug pr-6">
-              Envie no chat para profissionais que estão nos seus <strong>favoritos</strong>. Também pode partilhar o link nas redes.
+              Envie no chat para profissionais com quem tens <strong>seguimento mútuo</strong> (ambos seguem um ao outro). Também
+              podes partilhar o link nas redes.
             </p>
           </SheetHeader>
 
@@ -2049,7 +1998,7 @@ export default function CommunityFeed({
 
           <div className="px-5 pb-3 shrink-0 border-b border-border/30">
               <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
-                Favoritos
+                Seguimento mútuo
               </p>
               {loadingFavoritesShare ? (
                 <div className="flex justify-center py-4">
@@ -2057,7 +2006,8 @@ export default function CommunityFeed({
                 </div>
               ) : favoritesForShare.length === 0 ? (
                 <p className="text-[13px] text-muted-foreground py-3 text-center leading-snug">
-                  Nenhum favorito ainda. Favorite perfis profissionais para enviar publicações pelo chat — ou use o link para WhatsApp / Instagram.
+                  Ainda não tens profissionais com seguimento mútuo. Segue e peça que te sigam de volta — ou partilha o link nas
+                  redes.
                 </p>
               ) : (
                 <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none touch-pan-x">
@@ -2096,7 +2046,7 @@ export default function CommunityFeed({
             )}
             {!shareSearching && shareQuery.trim().length >= 2 && shareResults.length === 0 && (
               <p className="text-sm text-muted-foreground py-4 text-center">
-                Ninguém encontrado entre os seus favoritos com esse nome.
+                Ninguém encontrado entre os teus contactos mútuos com esse nome.
               </p>
             )}
             {!shareSearching &&
@@ -2207,7 +2157,7 @@ export default function CommunityFeed({
       >
         <SheetContent
           side="bottom"
-          className="rounded-t-[28px] p-0 gap-0 max-h-[min(88vh,720px)] flex flex-col overflow-hidden border-t border-border/60 shadow-[0_-8px_40px_rgba(0,0,0,0.12)]"
+          className="rounded-t-[28px] p-0 gap-0 max-h-[min(88vh,720px)] flex flex-col overflow-hidden border-t border-primary/15 bg-gradient-to-b from-muted/30 via-background to-background shadow-[0_-12px_48px_-10px_rgba(0,0,0,0.18)]"
         >
           <div className="mx-auto mt-2.5 mb-1 h-1 w-11 rounded-full bg-muted-foreground/20 shrink-0" aria-hidden />
           <SheetHeader className="px-5 pt-1 pb-0 text-left border-b border-border/40 space-y-0">
@@ -2471,16 +2421,7 @@ export default function CommunityFeed({
                 >
                   <ArrowLeft className="w-6 h-6" />
                 </button>
-                {fullscreenPost.video_url ? (
-                  <video
-                    key={fullscreenPost.video_url}
-                    src={fullscreenPost.video_url}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    className="max-h-full max-w-full object-contain"
-                  />
-                ) : fullscreenPost.image_url ? (
+                {fullscreenPost.image_url ? (
                   <img
                     src={fullscreenPost.image_url}
                     alt=""

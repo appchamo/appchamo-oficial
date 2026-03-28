@@ -3,8 +3,11 @@ export const SUPPORT_ATTACH_SEP = "|||SPT|||";
 
 export type SupportAttachKind = "IMAGE" | "VIDEO" | "FILE";
 
+/** Anexos que ainda podem ser enviados (sem vídeo). */
+export type SupportOutgoingAttachKind = "IMAGE" | "FILE";
+
 export function buildSupportAttachmentTag(
-  kind: SupportAttachKind,
+  kind: SupportOutgoingAttachKind,
   url: string,
   fileName: string,
 ): string {

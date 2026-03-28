@@ -108,7 +108,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const [closeOpen, setCloseOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [mediaViewer, setMediaViewer] = useState<{
-    kind: "image" | "video" | "pdf";
+    kind: "image" | "pdf";
     url: string;
     name: string;
   } | null>(null);
@@ -480,7 +480,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
     return null;
   };
 
-  const openViewer = (kind: "image" | "video" | "pdf", url: string, name: string) => {
+  const openViewer = (kind: "image" | "pdf", url: string, name: string) => {
     setMediaViewerFullscreen(false);
     setMediaViewer({ kind, url, name });
   };
@@ -542,18 +542,18 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
       }
       if (attachment.kind === "VIDEO") {
         return (
-          <div className="relative max-w-[min(260px,85vw)] rounded-xl overflow-hidden border border-white/10 bg-black/20">
-            <video src={attachment.url} controls className="w-full max-h-56 object-contain" playsInline />
-            <button
-              type="button"
-              className="absolute top-2 right-2 rounded-full bg-black/55 p-1.5 text-white"
-              onClick={() => openViewer("video", attachment.url, attachment.name)}
-              aria-label="Tela cheia"
-            >
-              <Maximize2 className="w-4 h-4" />
-            </button>
-            <p className="text-[10px] px-2 py-1 opacity-70 truncate">{attachment.name}</p>
-          </div>
+          <a
+            href={attachment.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-full max-w-[260px] flex-col gap-1 rounded-xl border border-white/15 bg-muted/30 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-xs font-semibold">
+              <FileText className="w-4 h-4 shrink-0" />
+              <span className="truncate">{attachment.name}</span>
+            </span>
+            <span className="text-[10px] text-muted-foreground">Anexo antigo (vídeo) — abrir no navegador</span>
+          </a>
         );
       }
       return (
@@ -1125,7 +1125,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
           {mediaViewer ? (
             <>
               <DialogTitle className="sr-only">
-                {mediaViewer.kind === "pdf" ? "Documento" : mediaViewer.kind === "video" ? "Vídeo" : "Imagem"}
+                {mediaViewer.kind === "pdf" ? "Documento" : "Imagem"}
               </DialogTitle>
               <div
                 className={
@@ -1175,17 +1175,6 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                       mediaViewerFullscreen
                         ? "max-h-full max-w-full object-contain"
                         : "mx-auto max-h-[min(60vh,480px)] w-auto max-w-full rounded-lg object-contain"
-                    }
-                  />
-                ) : mediaViewer.kind === "video" ? (
-                  <video
-                    src={mediaViewer.url}
-                    controls
-                    playsInline
-                    className={
-                      mediaViewerFullscreen
-                        ? "max-h-full max-w-full object-contain"
-                        : "mx-auto max-h-[min(60vh,480px)] w-full rounded-lg object-contain"
                     }
                   />
                 ) : (

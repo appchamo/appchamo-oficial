@@ -20,8 +20,9 @@ import {
   Timer,
   Award,
   MapPin,
-  Heart,
   MessageSquare,
+  UserPlus,
+  UserCheck,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -112,10 +113,11 @@ const ProfessionalProfile = () => {
   const [reviewsVisible, setReviewsVisible] = useState(5);
   const [publicSeals, setPublicSeals] = useState<{ seal_id: string; title: string; icon_variant: string }[]>([]);
   const [sealsModalOpen, setSealsModalOpen] = useState(false);
-  const [isFavorite, setIsFavorite] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isMutual, setIsMutual] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
   const [dmOpening, setDmOpening] = useState(false);
-  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -268,24 +270,30 @@ const ProfessionalProfile = () => {
     let cancelled = false;
     (async () => {
       if (!pro || isOwner) {
-        setIsFavorite(false);
+        setIsFollowing(false);
+        setIsMutual(false);
         setSocialLoading(false);
         return;
       }
       if (!user?.id) {
-        setIsFavorite(false);
+        setIsFollowing(false);
+        setIsMutual(false);
         setSocialLoading(false);
         return;
       }
       setSocialLoading(true);
-      const { data: fav } = await supabase
-        .from("professional_favorites")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("professional_id", pro.id)
-        .maybeSingle();
+      const [{ data: fl }, { data: mut }] = await Promise.all([
+        supabase
+          .from("professional_follows" as any)
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("professional_id", pro.id)
+          .maybeSingle(),
+        supabase.rpc("professional_is_mutual_with_viewer" as any, { p_professional_id: pro.id }),
+      ]);
       if (cancelled) return;
-      setIsFavorite(!!fav);
+      setIsFollowing(!!fl);
+      setIsMutual(!!mut);
       setSocialLoading(false);
     })();
     return () => {
@@ -306,27 +314,38 @@ const ProfessionalProfile = () => {
     return u;
   };
 
-  const toggleFavorite = async () => {
-    if (!pro || favoriteBusy) return;
+  const toggleFollow = async () => {
+    if (!pro || followBusy) return;
     const u = await requireUserForSocial();
     if (!u) return;
-    setFavoriteBusy(true);
+    setFollowBusy(true);
     try {
-      if (isFavorite) {
-        const { error } = await supabase.from("professional_favorites").delete().eq("user_id", u.id).eq("professional_id", pro.id);
+      if (isFollowing) {
+        const { error } = await supabase
+          .from("professional_follows" as any)
+          .delete()
+          .eq("user_id", u.id)
+          .eq("professional_id", pro.id);
         if (error) throw error;
-        setIsFavorite(false);
-        toast({ title: "Removido dos favoritos" });
+        setIsFollowing(false);
+        setIsMutual(false);
+        toast({ title: "Deixaste de seguir" });
       } else {
-        const { error } = await supabase.from("professional_favorites").insert({ user_id: u.id, professional_id: pro.id });
+        const { error } = await supabase
+          .from("professional_follows" as any)
+          .insert({ user_id: u.id, professional_id: pro.id });
         if (error) throw error;
-        setIsFavorite(true);
-        toast({ title: "Salvo nos favoritos" });
+        setIsFollowing(true);
+        const { data: mut } = await supabase.rpc("professional_is_mutual_with_viewer" as any, {
+          p_professional_id: pro.id,
+        });
+        setIsMutual(!!mut);
+        toast({ title: "A seguir" });
       }
     } catch {
       toast({ title: "Não foi possível atualizar", variant: "destructive" });
     } finally {
-      setFavoriteBusy(false);
+      setFollowBusy(false);
     }
   };
 
@@ -444,10 +463,10 @@ const ProfessionalProfile = () => {
       navigate("/login", { state: { from: location.pathname } });
       return;
     }
-    if (!isFavorite) {
+    if (!isMutual) {
       toast({
-        title: "Favorite o perfil",
-        description: "Para enviar mensagem direta, adicione este profissional aos favoritos.",
+        title: "Chat direto indisponível",
+        description: "Quando ambos seguirem um ao outro, o botão Mensagem fica disponível.",
       });
       return;
     }
@@ -460,10 +479,13 @@ const ProfessionalProfile = () => {
       if (!threadId) throw new Error("Thread não retornada");
       navigate(`/messages/${threadId}`);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const raw = e instanceof Error ? e.message : String(e);
+      const msg = /mutual/i.test(raw)
+        ? "É preciso seguimento mútuo para abrir o chat direto."
+        : raw || "Tente novamente em instantes.";
       toast({
         title: "Não foi possível abrir o chat",
-        description: msg || "Tente novamente em instantes.",
+        description: msg,
         variant: "destructive",
       });
     } finally {
@@ -785,21 +807,23 @@ const ProfessionalProfile = () => {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={toggleFavorite}
-                      disabled={favoriteBusy || (!!user && socialLoading)}
+                      onClick={toggleFollow}
+                      disabled={followBusy || (!!user && socialLoading)}
                       className={cn(
                         "flex flex-col items-center justify-center gap-0.5 min-h-[52px] rounded-xl border text-[10px] font-bold transition-colors active:scale-[0.98] disabled:opacity-50 py-2",
-                        isFavorite
-                          ? "border-rose-400 bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300"
+                        isFollowing
+                          ? "border-primary/50 bg-primary/10 text-primary"
                           : "border-border/80 bg-card text-foreground hover:bg-muted/60",
                       )}
                     >
-                      {favoriteBusy ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
+                      {followBusy ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      ) : isFollowing ? (
+                        <UserCheck className="w-4 h-4" />
                       ) : (
-                        <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
+                        <UserPlus className="w-4 h-4" />
                       )}
-                      <span>{isFavorite ? "Favorito" : "Favoritar"}</span>
+                      <span>{isFollowing ? "A seguir" : "Seguir"}</span>
                     </button>
                     <button
                       type="button"
@@ -811,7 +835,7 @@ const ProfessionalProfile = () => {
                     </button>
                   </div>
                 )}
-                {isFavorite && (
+                {isMutual ? (
                   <button
                     type="button"
                     onClick={() => void openFollowingDirectMessage()}
@@ -821,7 +845,11 @@ const ProfessionalProfile = () => {
                     {dmOpening ? <Loader2 className="w-5 h-5 animate-spin" /> : <MessageSquare className="w-5 h-5" />}
                     Mensagem
                   </button>
-                )}
+                ) : isFollowing ? (
+                  <p className="text-center text-[11px] text-muted-foreground leading-snug px-1">
+                    Quando este profissional também te seguir, o chat direto fica disponível aqui.
+                  </p>
+                ) : null}
                 {pro.availability_status !== "unavailable" ? (
                   <>
                     <button

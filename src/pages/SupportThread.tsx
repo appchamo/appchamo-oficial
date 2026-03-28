@@ -19,11 +19,7 @@ import {
 import BottomNav from "@/components/BottomNav";
 import AudioPlayer from "@/components/AudioPlayer";
 import { isSupportBotMessage, SUPPORT_BOT_SENDER_ID } from "@/lib/supportBot";
-import {
-  buildSupportAttachmentTag,
-  parseAnySupportAttachment,
-  type SupportAttachKind,
-} from "@/lib/supportMessageAttachments";
+import { buildSupportAttachmentTag, parseAnySupportAttachment } from "@/lib/supportMessageAttachments";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface Message {
@@ -56,7 +52,7 @@ const SupportThread = () => {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [mediaViewer, setMediaViewer] = useState<{
-    kind: "image" | "video" | "pdf";
+    kind: "image" | "pdf";
     url: string;
     name: string;
   } | null>(null);
@@ -239,13 +235,21 @@ const SupportThread = () => {
     const originalFile = e.target.files?.[0];
     if (!originalFile || !user) return;
 
+    if (originalFile.type.startsWith("video/")) {
+      toast({
+        title: "Vídeo não suportado",
+        description: "Envie apenas imagem ou PDF.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const isImage = originalFile.type.startsWith("image/");
-    const isVideo = originalFile.type.startsWith("video/");
-    const maxBytes = isVideo ? 50 * 1024 * 1024 : isImage ? 20 * 1024 * 1024 : 25 * 1024 * 1024;
+    const maxBytes = isImage ? 20 * 1024 * 1024 : 25 * 1024 * 1024;
     if (originalFile.size > maxBytes) {
       toast({
         title: "Arquivo muito grande",
-        description: isVideo ? "Vídeo: máximo 50 MB" : "Máximo 25 MB (imagens: 20 MB)",
+        description: "Máximo 25 MB (imagens: 20 MB).",
         variant: "destructive",
       });
       return;
@@ -315,8 +319,7 @@ const SupportThread = () => {
           image_urls: [urlData.publicUrl],
         });
       } else {
-        const kind: SupportAttachKind = isVideo ? "VIDEO" : "FILE";
-        const tag = buildSupportAttachmentTag(kind, urlData.publicUrl, originalFile.name);
+        const tag = buildSupportAttachmentTag("FILE", urlData.publicUrl, originalFile.name);
         await supabase.from("support_messages").insert({
           user_id: user.id,
           sender_id: user.id,
@@ -441,7 +444,7 @@ const SupportThread = () => {
     }
   };
 
-  const openViewer = (kind: "image" | "video" | "pdf", url: string, name: string) => {
+  const openViewer = (kind: "image" | "pdf", url: string, name: string) => {
     setMediaViewerFullscreen(false);
     setMediaViewer({ kind, url, name });
   };
@@ -502,18 +505,18 @@ const SupportThread = () => {
       }
       if (att.kind === "VIDEO") {
         return (
-          <div className="relative max-w-[min(260px,85vw)] rounded-xl overflow-hidden border border-white/15 bg-black/30">
-            <video src={att.url} controls className="w-full max-h-56 object-contain" playsInline />
-            <button
-              type="button"
-              className="absolute top-2 right-2 rounded-full bg-black/55 p-1.5 text-white"
-              onClick={() => openViewer("video", att.url, att.name)}
-              aria-label="Tela cheia"
-            >
-              <Maximize2 className="w-4 h-4" />
-            </button>
-            <p className="text-[10px] px-2 py-1 opacity-80 truncate">{att.name}</p>
-          </div>
+          <a
+            href={att.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-full max-w-[260px] flex-col gap-1 rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-left hover:bg-white/10 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-xs font-semibold">
+              <FileText className="w-4 h-4 shrink-0" />
+              <span className="truncate">{att.name}</span>
+            </span>
+            <span className="text-[10px] opacity-70">Anexo antigo (vídeo) — abrir no navegador</span>
+          </a>
         );
       }
       return (
@@ -702,7 +705,13 @@ const SupportThread = () => {
               </div>
             ) : (
               <>
-                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*,.pdf" />
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  accept="image/*,.pdf,application/pdf"
+                />
                 <button onClick={() => fileInputRef.current?.click()} className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors">
                   <Paperclip className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -737,7 +746,7 @@ const SupportThread = () => {
           {mediaViewer ? (
             <>
               <DialogTitle className="sr-only">
-                {mediaViewer.kind === "pdf" ? "Documento" : mediaViewer.kind === "video" ? "Vídeo" : "Imagem"}
+                {mediaViewer.kind === "pdf" ? "Documento" : "Imagem"}
               </DialogTitle>
               <div
                 className={
@@ -795,17 +804,6 @@ const SupportThread = () => {
                       mediaViewerFullscreen
                         ? "max-h-full max-w-full object-contain"
                         : "mx-auto max-h-[min(60vh,480px)] w-auto max-w-full rounded-lg object-contain"
-                    }
-                  />
-                ) : mediaViewer.kind === "video" ? (
-                  <video
-                    src={mediaViewer.url}
-                    controls
-                    playsInline
-                    className={
-                      mediaViewerFullscreen
-                        ? "max-h-full max-w-full object-contain"
-                        : "mx-auto max-h-[min(60vh,480px)] w-full rounded-lg object-contain"
                     }
                   />
                 ) : (

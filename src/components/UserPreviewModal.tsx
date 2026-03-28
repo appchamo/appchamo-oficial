@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Heart, Loader2 } from "lucide-react";
+import { Loader2, UserPlus, UserCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -29,7 +29,7 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
   const [proId, setProId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [socialBusy, setSocialBusy] = useState(false);
-  const [favorite, setFavorite] = useState(false);
+  const [following, setFollowing] = useState(false);
   const [me, setMe] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,15 +50,15 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
         setProId(pid);
         if (pid && user?.id) {
           const { data: fa } = await supabase
-            .from("professional_favorites" as any)
+            .from("professional_follows" as any)
             .select("id")
             .eq("user_id", user.id)
             .eq("professional_id", pid)
             .maybeSingle();
           if (cancelled) return;
-          setFavorite(!!fa);
+          setFollowing(!!fa);
         } else {
-          setFavorite(false);
+          setFollowing(false);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -71,20 +71,26 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
 
   const initials = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 
-  const toggleFavorite = async () => {
+  const toggleFollow = async () => {
     if (!me || !proId) return;
     setSocialBusy(true);
     try {
-      if (favorite) {
-        const { error } = await supabase.from("professional_favorites" as any).delete().eq("user_id", me).eq("professional_id", proId);
+      if (following) {
+        const { error } = await supabase
+          .from("professional_follows" as any)
+          .delete()
+          .eq("user_id", me)
+          .eq("professional_id", proId);
         if (error) throw error;
-        setFavorite(false);
-        toast({ title: "Removido dos favoritos" });
+        setFollowing(false);
+        toast({ title: "Deixaste de seguir" });
       } else {
-        const { error } = await supabase.from("professional_favorites" as any).insert({ user_id: me, professional_id: proId });
+        const { error } = await supabase
+          .from("professional_follows" as any)
+          .insert({ user_id: me, professional_id: proId });
         if (error) throw error;
-        setFavorite(true);
-        toast({ title: "Salvo nos favoritos" });
+        setFollowing(true);
+        toast({ title: "A seguir" });
       }
     } catch {
       toast({ title: "Não foi possível atualizar", variant: "destructive" });
@@ -121,13 +127,13 @@ const UserPreviewModal = ({ userId, open, onOpenChange }: UserPreviewModalProps)
               <DialogFooter className="flex-col sm:flex-col gap-2 w-full">
                 <Button
                   type="button"
-                  variant={favorite ? "secondary" : "outline"}
+                  variant={following ? "secondary" : "outline"}
                   className="rounded-xl font-semibold gap-2 w-full"
                   disabled={socialBusy}
-                  onClick={() => void toggleFavorite()}
+                  onClick={() => void toggleFollow()}
                 >
-                  <Heart className={`w-4 h-4 ${favorite ? "fill-rose-500 text-rose-500" : ""}`} />
-                  {favorite ? "Favorito" : "Favoritar"}
+                  {following ? <UserCheck className="w-4 h-4 text-primary" /> : <UserPlus className="w-4 h-4" />}
+                  {following ? "A seguir" : "Seguir"}
                 </Button>
                 <Button
                   type="button"

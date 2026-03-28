@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Mail, Lock, ArrowRight, RefreshCw, Home } from "lucide-react";
+import { Mail, Lock, ArrowRight, RefreshCw, Home, X } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, OAUTH_FAILED_KEY } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { resolveAuthReturnPath, setPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
+import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
@@ -66,6 +67,8 @@ const Login = () => {
   const [resending, setResending] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
+  /** Banner após cadastro por e-mail (substitui toast pouco visível). */
+  const [verifyEmailBanner, setVerifyEmailBanner] = useState<{ email?: string } | null>(null);
   
   const [processingOAuth, setProcessingOAuth] = useState(hasOAuthCodeInUrl());
   const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,15 +94,11 @@ const Login = () => {
     }
   }, [location.state]);
 
-  /** Cadastro por e-mail: após "Finalizar" redireciona aqui com mensagem clara (confirmação antes da sessão). */
-  const shownCheckEmailToastRef = useRef(false);
   useEffect(() => {
-    if (shownCheckEmailToastRef.current) return;
     const params = new URLSearchParams(location.search);
     if (params.get("signup") !== "check-email") return;
-    shownCheckEmailToastRef.current = true;
     const rawEmail = params.get("email");
-    let displayEmail = "";
+    let displayEmail: string | undefined;
     if (rawEmail) {
       try {
         displayEmail = decodeURIComponent(rawEmail);
@@ -107,13 +106,7 @@ const Login = () => {
         displayEmail = rawEmail;
       }
     }
-    toast({
-      title: "Verifique seu e-mail",
-      description: displayEmail
-        ? `Abra a caixa de entrada em ${displayEmail}, confirme o cadastro pelo link e depois entre com seu e-mail e senha. No telefone, o link pode abrir o app; no computador, abre o site.`
-        : "Abra a caixa de entrada, confirme o cadastro pelo link que enviamos e depois entre com seu e-mail e senha.",
-      duration: 16_000,
-    });
+    setVerifyEmailBanner(displayEmail ? { email: displayEmail } : {});
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     window.history.replaceState({}, "", `/login${hash}`);
   }, [location.search]);
@@ -367,6 +360,9 @@ const Login = () => {
         return;
       }
 
+      const { data: { session: sessAfterLogin } } = await supabase.auth.getSession();
+      await flushPendingEmailSignupWithRetries(sessAfterLogin);
+
       // 1) Verifica se já existe cadastro com esse e-mail na tabela de perfis
       if (authEmail) {
         const { data: existingByEmail } = await supabase
@@ -546,7 +542,11 @@ const Login = () => {
     }
     
     localStorage.removeItem("manual_login_intent");
-    await proceedToRedirect(data.user.id, data.user.email ?? undefined);
+    try {
+      await proceedToRedirect(data.user.id, data.user.email ?? undefined);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
@@ -626,9 +626,56 @@ const Login = () => {
 
   return (
     <div
-      className={`min-h-[100dvh] w-full flex flex-col items-center justify-center px-4 relative ${!bgUrl ? "bg-background" : ""}`}
-      style={bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
+      className={`min-h-[100dvh] w-full flex flex-col relative ${!bgUrl ? "bg-background" : ""}`}
+      style={bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+    >
+      {verifyEmailBanner !== null ? (
+        <div
+          role="status"
+          className="w-full shrink-0 z-30 border-b border-amber-400/45 bg-gradient-to-r from-amber-100 via-orange-50 to-amber-100 dark:from-amber-950/90 dark:via-orange-950/70 dark:to-amber-950/90 px-4 py-3.5 shadow-md shadow-amber-900/10"
+        >
+          <div className="max-w-lg mx-auto flex gap-3 items-start">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md ring-2 ring-white/50 dark:ring-amber-400/20">
+              <Mail className="h-5 w-5" strokeWidth={2.25} />
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-[15px] font-bold tracking-tight text-amber-950 dark:text-amber-50">
+                Quase lá — confirme o e-mail
+              </p>
+              <p className="text-[13px] leading-snug text-amber-900 dark:text-amber-100/95 mt-1">
+                {verifyEmailBanner.email ? (
+                  <>
+                    Enviamos um link para{" "}
+                    <span className="font-semibold text-foreground break-all">{verifyEmailBanner.email}</span>. Abra a
+                    caixa de entrada (e o spam), toque no link para confirmar e depois entre abaixo com o mesmo e-mail e
+                    senha.
+                  </>
+                ) : (
+                  <>
+                    Enviamos um link de confirmação. Abra a caixa de entrada, confirme o cadastro e depois entre abaixo com
+                    e-mail e senha.
+                  </>
+                )}
+              </p>
+              <p className="text-[11px] font-medium text-amber-800/85 dark:text-amber-200/80 mt-2 rounded-md bg-amber-200/35 dark:bg-black/20 px-2 py-1 inline-block">
+                No celular o link pode abrir o app diretamente; no computador, abre o site no navegador.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-full p-1.5 text-amber-800/70 hover:bg-amber-900/10 hover:text-amber-950 dark:text-amber-200/80 dark:hover:bg-white/10 dark:hover:text-amber-50 transition-colors"
+              aria-label="Fechar aviso"
+              onClick={() => setVerifyEmailBanner(null)}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      ) : null}
 
+      <div
+        className={`flex-1 flex flex-col items-center justify-center px-4 relative min-h-0 ${verifyEmailBanner !== null ? "pt-2" : ""}`}
+      >
       {bgUrl && <div className="absolute inset-0 backdrop-blur-sm bg-[#454545]/[0.12]" />}
       {/* Botão Início: volta para a tela inicial (Home) quando usuário foi redirecionado de Contratar/Chat */}
       <div className="absolute top-4 left-0 right-0 z-20 flex justify-between items-center px-4 max-w-sm mx-auto">
@@ -728,6 +775,7 @@ const Login = () => {
         <button type="button" onClick={() => setForgotMode(!forgotMode)} className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
           {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}
         </button>
+      </div>
       </div>
     </div>
   );

@@ -21,6 +21,8 @@ import {
   MoreHorizontal,
   ChevronDown,
   EyeOff,
+  Award,
+  Sparkles,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -188,7 +190,93 @@ function postTimeLabel(iso: string) {
   }
 }
 
-const BODY_COLLAPSE_LEN = 320;
+/** Metadados do profissional no feed (badges + profissão). */
+type AuthorProMetaEntry = {
+  proId: string;
+  professionTitle: string;
+  verified: boolean;
+  profileStatus: string;
+  rating: number;
+  totalReviews: number;
+  totalServices: number;
+  createdAt: string;
+};
+
+function buildAuthorProMetaEntry(row: Record<string, unknown>): AuthorProMetaEntry {
+  const prof = row.professions as { name?: string } | null | undefined;
+  const cat = row.categories as { name?: string } | null | undefined;
+  const pn = prof?.name;
+  const cn = cat?.name;
+  const professionTitle =
+    (pn && String(pn).trim()) || (cn && String(cn).trim()) || "";
+  return {
+    proId: String(row.id),
+    professionTitle,
+    verified: !!row.verified,
+    profileStatus: String(row.profile_status ?? ""),
+    rating: Number(row.rating) || 0,
+    totalReviews: Number(row.total_reviews) || 0,
+    totalServices: Number(row.total_services) || 0,
+    createdAt: String(row.created_at ?? ""),
+  };
+}
+
+/** Selos discretos (prestador de serviço — não meme). */
+function authorServiceBadges(m: AuthorProMetaEntry | undefined): { key: string; label: string; className: string; Icon?: typeof Award }[] {
+  if (!m) return [];
+  const status = (m.profileStatus || "").toLowerCase();
+  if (status === "pending") {
+    return [
+      {
+        key: "analise",
+        label: "Em análise",
+        className:
+          "bg-amber-100/90 text-amber-950 border-amber-200/90 dark:bg-amber-950/40 dark:text-amber-100 dark:border-amber-800/60",
+      },
+    ];
+  }
+  let daysSince = 999;
+  if (m.createdAt) {
+    try {
+      daysSince = (Date.now() - new Date(m.createdAt).getTime()) / 864e5;
+    } catch {
+      void 0;
+    }
+  }
+  if (m.rating >= 4.5 && m.totalReviews >= 6) {
+    return [
+      {
+        key: "destaque",
+        label: "Destaque",
+        Icon: Award,
+        className:
+          "bg-zinc-900 text-amber-100 border-zinc-800 dark:bg-zinc-950 dark:text-amber-200/95 dark:border-zinc-700",
+      },
+    ];
+  }
+  if (m.totalReviews < 5 && m.totalServices < 6 && daysSince < 120) {
+    return [
+      {
+        key: "novo",
+        label: "Novo no Chamô",
+        Icon: Sparkles,
+        className:
+          "bg-slate-100 text-slate-700 border-slate-200/90 dark:bg-slate-800/80 dark:text-slate-200 dark:border-slate-600/60",
+      },
+    ];
+  }
+  return [];
+}
+
+/** Texto longo ou várias linhas → oferecer “ver mais” (alinha a ~3 linhas no UI com line-clamp). */
+function postBodyShouldOfferExpand(body: string): boolean {
+  const t = body.trim();
+  if (t.length < 120) return false;
+  const lines = t.split(/\r?\n/).filter((l) => l.trim().length > 0).length;
+  if (lines > 3) return true;
+  return t.length > 220;
+}
+
 const COMMENT_BODY_COLLAPSE = 220;
 
 function filterVisibleComments(list: CommentRow[], hidden: Set<string>): CommentRow[] {
@@ -230,9 +318,7 @@ export default function CommunityFeed({
 
   const [commentsSheetPost, setCommentsSheetPost] = useState<PostRow | null>(null);
   const [fullscreenPost, setFullscreenPost] = useState<PostRow | null>(null);
-  const [authorProMeta, setAuthorProMeta] = useState<
-    Record<string, { proId: string; headline: string; verified: boolean }>
-  >({});
+  const [authorProMeta, setAuthorProMeta] = useState<Record<string, AuthorProMetaEntry>>({});
   const [commentReactions, setCommentReactions] = useState<CommentReactionRow[]>([]);
   const [replyTarget, setReplyTarget] = useState<{
     postId: string;
@@ -398,16 +484,16 @@ export default function CommunityFeed({
       if (allUids.length) {
         const { data: proRows } = await supabase
           .from("professionals")
-          .select("user_id, id, slug, verified, professions(name), categories(name)")
+          .select(
+            "user_id, id, slug, verified, profile_status, rating, total_reviews, total_services, created_at, professions(name), categories(name)",
+          )
           .in("user_id", allUids);
         const paths: Record<string, string> = {};
-        const pmeta: Record<string, { proId: string; headline: string; verified: boolean }> = {};
+        const pmeta: Record<string, AuthorProMetaEntry> = {};
         (proRows || []).forEach((row: any) => {
           const key = String(row.slug || row.id || "").trim();
           if (key) paths[row.user_id] = `/professional/${encodeURIComponent(key)}`;
-          const pn = row.professions?.name;
-          const headline = pn && String(pn).trim() ? String(pn).trim() : "";
-          pmeta[row.user_id] = { proId: row.id, headline, verified: !!row.verified };
+          pmeta[row.user_id] = buildAuthorProMetaEntry(row);
         });
         setProPathByUserId(paths);
         setAuthorProMeta(pmeta);
@@ -510,7 +596,9 @@ export default function CommunityFeed({
 
         const { data: proRow } = await supabase
           .from("professionals")
-          .select("user_id, id, slug, verified, professions(name), categories(name)")
+          .select(
+            "user_id, id, slug, verified, profile_status, rating, total_reviews, total_services, created_at, professions(name), categories(name)",
+          )
           .eq("user_id", pr.author_id)
           .maybeSingle();
         if (!cancelled && proRow) {
@@ -522,11 +610,9 @@ export default function CommunityFeed({
               [pr.author_id]: `/professional/${encodeURIComponent(key)}`,
             }));
           }
-          const pn = r.professions?.name;
-          const headline = pn && String(pn).trim() ? String(pn).trim() : "";
           setAuthorProMeta((prev) => ({
             ...prev,
-            [pr.author_id]: { proId: r.id, headline, verified: !!r.verified },
+            [pr.author_id]: buildAuthorProMetaEntry(r),
           }));
         }
       } catch (e) {
@@ -1322,14 +1408,14 @@ export default function CommunityFeed({
                   />
                 ) : null}
               </div>
-              {cMeta?.headline ? (
+              {cMeta?.professionTitle ? (
                 <p
                   className={cn(
                     "text-muted-foreground leading-tight mt-0.5",
                     ctx.isReply ? "text-[10px]" : "text-[11px]",
                   )}
                 >
-                  {cMeta.headline}
+                  {cMeta.professionTitle}
                 </p>
               ) : null}
             </div>
@@ -1472,48 +1558,50 @@ export default function CommunityFeed({
   return (
     <main
       className={cn(
-        "mx-auto w-full max-w-lg lg:max-w-3xl xl:max-w-4xl px-4 py-3 pb-24 lg:pb-8",
-        embedded &&
-          "min-h-[60vh] bg-gradient-to-b from-[#faf9f7] via-[#f4f3f0] to-[#ebe8e3]",
+        "mx-auto w-full max-w-lg lg:max-w-3xl xl:max-w-4xl px-4 sm:px-5 py-4 pb-28 lg:pb-10",
+        "bg-[#EFEFF4] dark:bg-zinc-950/95",
+        embedded && "min-h-[60vh] rounded-2xl",
       )}
     >
       {!embedded && (
-        <div className="flex items-center gap-3 mb-5">
+        <div className="flex items-center gap-3 mb-6">
           <Link
             to="/pro"
-            className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-border/70 bg-card shadow-sm hover:bg-muted/60 transition-colors"
+            className="inline-flex items-center justify-center w-11 h-11 rounded-2xl border border-black/[0.06] bg-white/90 shadow-sm shadow-black/[0.04] hover:bg-white active:scale-[0.98] transition-all dark:bg-zinc-900/90 dark:border-white/10"
             aria-label="Voltar"
           >
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground">Comunidade</h1>
-            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">Rede de profissionais Chamô</p>
+            <h1 className="text-[1.35rem] font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Comunidade</h1>
+            <p className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-medium">
+              Prestadores de serviço · networking profissional
+            </p>
           </div>
         </div>
       )}
 
       {embedded && (
-        <div className="mb-4 px-0.5">
-          <p className="text-[13px] text-foreground/85 leading-snug font-medium">
+        <div className="mb-5 px-0.5">
+          <p className="text-[14px] text-zinc-800 dark:text-zinc-100 leading-snug font-semibold tracking-tight">
             Comunidade Chamô
           </p>
-          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-            Feed profissional: conquistas, dicas e networking — com a cara do Chamô.
+          <p className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+            Feed para profissionais: conteúdo de valor, reputação e conexões.
           </p>
         </div>
       )}
 
       {user && (
-        <div className="flex flex-wrap gap-2 mb-3 items-center">
+        <div className="flex flex-wrap gap-2.5 mb-5 items-center">
           <button
             type="button"
             onClick={() => setFeedScope("all")}
             className={cn(
-              "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm uppercase tracking-wide",
+              "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
               feedScope === "all"
-                ? "bg-primary text-primary-foreground border-primary shadow-primary/25"
-                : "bg-white/95 text-foreground border-border/60 hover:bg-muted/60",
+                ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
+                : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",
             )}
           >
             Ver todos
@@ -1522,10 +1610,10 @@ export default function CommunityFeed({
             type="button"
             onClick={() => setFeedScope("following")}
             className={cn(
-              "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm uppercase tracking-wide",
+              "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
               feedScope === "following"
-                ? "bg-primary text-primary-foreground border-primary shadow-primary/25"
-                : "bg-white/95 text-foreground border-border/60 hover:bg-muted/60",
+                ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
+                : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",
             )}
           >
             Seguindo
@@ -1534,7 +1622,7 @@ export default function CommunityFeed({
             <button
               type="button"
               onClick={() => setHiddenPostsSheetOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border border-border/70 bg-muted/40 text-muted-foreground hover:bg-muted/70 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-[12px] font-semibold border border-black/[0.06] bg-white/80 text-zinc-600 hover:bg-white dark:bg-zinc-900/60 dark:text-zinc-300 dark:border-white/10 transition-colors"
             >
               <EyeOff className="w-3.5 h-3.5" />
               Ocultas ({hiddenPostIds.size})
@@ -1544,7 +1632,7 @@ export default function CommunityFeed({
       )}
 
       {user && undoHidePostId ? (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/35 px-3 py-2.5 mb-3 text-[13px]">
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/[0.06] bg-white/90 dark:bg-zinc-900/70 px-4 py-3 mb-4 text-[13px] shadow-sm shadow-black/[0.04]">
           <p className="text-muted-foreground leading-snug min-w-0">
             Publicação oculta na tua conta. Podes desfazer agora ou gerir em <strong className="text-foreground">Ocultas</strong>.
           </p>
@@ -1564,16 +1652,16 @@ export default function CommunityFeed({
         <>
           <div
             className={cn(
-              "rounded-[20px] bg-white p-3.5 mb-4 border border-border/50 shadow-md shadow-black/[0.04]",
-              embedded && "ring-1 ring-primary/[0.12]",
+              "rounded-[22px] bg-white/95 dark:bg-zinc-900/85 p-4 mb-5 border border-black/[0.06] dark:border-white/10 shadow-lg shadow-black/[0.06]",
+              embedded && "ring-1 ring-primary/[0.08]",
             )}
           >
-            <div className="flex gap-3 items-start">
-              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-primary/15 to-primary/5 overflow-hidden shrink-0 flex items-center justify-center ring-2 ring-primary/20">
+            <div className="flex gap-3.5 items-start">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/12 to-primary/5 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.06] dark:ring-white/10">
                 {profile?.avatar_url ? (
                   <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  <span className="text-sm font-bold text-primary">
+                  <span className="text-base font-bold text-primary">
                     {(profile?.full_name || "V").slice(0, 1).toUpperCase()}
                   </span>
                 )}
@@ -1581,7 +1669,7 @@ export default function CommunityFeed({
               <button
                 type="button"
                 onClick={() => setComposerModalOpen(true)}
-                className="flex-1 min-h-[72px] rounded-xl bg-muted/40 px-3 py-3 text-left text-[15px] text-muted-foreground hover:bg-muted/55 active:bg-muted/65 transition-colors"
+                className="flex-1 min-h-[76px] rounded-2xl bg-zinc-100/90 dark:bg-zinc-800/60 px-4 py-3.5 text-left text-[15px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/90 active:scale-[0.99] transition-all border border-transparent hover:border-black/[0.04]"
               >
                 {!composerText.trim() && !composerImageFile ? (
                   "No que você está pensando?"
@@ -1686,38 +1774,40 @@ export default function CommunityFeed({
       )}
 
       {!canPost && (
-        <p className="text-sm text-muted-foreground mb-4 rounded-2xl border border-dashed bg-white/80 px-3 py-2.5 shadow-sm">
-          <strong>Profissionais e empresas</strong> publicam aqui. Você pode reagir, comentar e receber
-          compartilhamentos.
+        <p className="text-[13px] text-zinc-600 dark:text-zinc-400 mb-5 rounded-2xl border border-zinc-200/80 bg-white/70 px-4 py-3 shadow-sm shadow-black/[0.03] dark:bg-zinc-900/50 dark:border-white/10 leading-relaxed">
+          <strong className="text-zinc-900 dark:text-zinc-100">Profissionais e empresas</strong> publicam aqui. Podes
+          reagir, comentar e receber partilhamentos.
         </p>
       )}
 
       {loading ? (
-        <div className="flex justify-center py-20">
+        <div className="flex justify-center py-24">
           <Loader2 className="w-9 h-9 animate-spin text-primary" />
         </div>
       ) : posts.length === 0 ? (
-        <div className="rounded-[20px] bg-white border border-border/50 py-14 px-4 text-center shadow-md shadow-black/[0.04]">
-          <p className="text-muted-foreground text-sm">Nenhuma publicação ainda.</p>
-          {canPost && <p className="text-xs text-muted-foreground mt-2">Seja o primeiro a compartilhar.</p>}
+        <div className="rounded-[22px] bg-white/95 dark:bg-zinc-900/80 border border-black/[0.05] dark:border-white/10 py-16 px-5 text-center shadow-lg shadow-black/[0.06]">
+          <p className="text-zinc-600 dark:text-zinc-300 text-[15px] font-medium">Ainda não há publicações.</p>
+          {canPost && (
+            <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-2">Sê o primeiro a partilhar algo de valor.</p>
+          )}
         </div>
       ) : displayPosts.length === 0 && feedScope === "following" && !hasPostsFromSeguindo ? (
-        <div className="rounded-[20px] bg-white border border-border/50 py-14 px-4 text-center shadow-md shadow-black/[0.04]">
-          <p className="text-muted-foreground text-sm">Nenhuma publicação de contas que segues.</p>
-          <p className="text-xs text-muted-foreground mt-2">
-            Segue profissionais no perfil deles (ou usa <strong>Favoritar</strong>) para ver só essas publicações aqui.
+        <div className="rounded-[22px] bg-white/95 dark:bg-zinc-900/80 border border-black/[0.05] dark:border-white/10 py-16 px-5 text-center shadow-lg shadow-black/[0.06]">
+          <p className="text-zinc-600 dark:text-zinc-300 text-[15px] font-medium">Sem publicações de contas que segues.</p>
+          <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
+            Segue profissionais no perfil (ou usa <strong className="text-zinc-700 dark:text-zinc-200">Favoritar</strong>)
+            para filtrar o feed.
           </p>
         </div>
       ) : displayPosts.length === 0 && posts.length > 0 ? (
-        <div className="rounded-[20px] bg-white border border-border/50 py-14 px-4 text-center shadow-md shadow-black/[0.04]">
-          <p className="text-muted-foreground text-sm">Nenhuma publicação para mostrar aqui.</p>
-          <p className="text-xs text-muted-foreground mt-2">
-            Você pode ter ocultado os posts com <strong>Não quero ver isto</strong> ou pode mudar o filtro
-            acima.
+        <div className="rounded-[22px] bg-white/95 dark:bg-zinc-900/80 border border-black/[0.05] dark:border-white/10 py-16 px-5 text-center shadow-lg shadow-black/[0.06]">
+          <p className="text-zinc-600 dark:text-zinc-300 text-[15px] font-medium">Nada para mostrar com este filtro.</p>
+          <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
+            Podes ter ocultado posts ou mudar o filtro acima.
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-5">
           {displayPosts.map((post) => {
             const author = authors[post.author_id];
             const sum = reactionSummary[post.id] || {};
@@ -1729,80 +1819,98 @@ export default function CommunityFeed({
             const proMeta = authorProMeta[post.author_id];
             const totalRx = REACTIONS.reduce((s, r) => s + (sum[r.type] || 0), 0);
             const bodyExpanded = expandedBodies[post.id];
-            const longBody = post.body.length > BODY_COLLAPSE_LEN;
-            const bodyShown =
-              !longBody || bodyExpanded ? post.body : `${post.body.slice(0, BODY_COLLAPSE_LEN).trim()}…`;
+            const showExpandToggle = post.body ? postBodyShouldOfferExpand(post.body) : false;
+            const serviceBadges = authorServiceBadges(proMeta);
 
             const authorProfileTo = proPathByUserId[post.author_id];
+            const avatarShell =
+              "w-[52px] h-[52px] rounded-2xl bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.06] dark:ring-white/10 shadow-sm shadow-black/[0.04]";
             return (
               <article
                 key={post.id}
                 id={`community-post-${post.id}`}
-                className="rounded-[22px] bg-card overflow-hidden border border-border/60 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.18)] ring-1 ring-primary/[0.04] scroll-mt-24 transition-shadow hover:shadow-[0_12px_36px_-12px_rgba(0,0,0,0.22)]"
+                className="rounded-[24px] bg-white/98 dark:bg-zinc-900/90 overflow-hidden border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_-4px_rgba(0,0,0,0.08),0_2px_8px_-2px_rgba(0,0,0,0.04)] scroll-mt-24 transition-shadow duration-300 hover:shadow-[0_8px_32px_-6px_rgba(0,0,0,0.12)]"
               >
-                <div className="p-4 pb-2 bg-gradient-to-b from-white/90 to-transparent dark:from-card dark:to-transparent">
-                  <div className="flex gap-3 items-start">
+                <div className="px-5 pt-5 pb-1">
+                  <div className="flex gap-3.5 items-start">
                     {authorProfileTo ? (
-                      <Link
-                        to={authorProfileTo}
-                        className="w-11 h-11 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-2 ring-background active:scale-[0.98] transition-transform"
-                      >
+                      <Link to={authorProfileTo} className={cn(avatarShell, "active:scale-[0.97] transition-transform")}>
                         {author?.avatar_url ? (
                           <img src={author.avatar_url} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-sm font-bold text-primary">
+                          <span className="text-[15px] font-bold text-primary tracking-tight">
                             {authorLabel(author).slice(0, 2).toUpperCase()}
                           </span>
                         )}
                       </Link>
                     ) : (
-                      <div className="w-11 h-11 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-2 ring-background">
+                      <div className={avatarShell}>
                         {author?.avatar_url ? (
                           <img src={author.avatar_url} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-sm font-bold text-primary">
+                          <span className="text-[15px] font-bold text-primary tracking-tight">
                             {authorLabel(author).slice(0, 2).toUpperCase()}
                           </span>
                         )}
                       </div>
                     )}
-                    <div className="min-w-0 flex-1 flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        {authorProfileTo ? (
-                          <Link
-                            to={authorProfileTo}
-                            className="inline-flex items-center gap-1 max-w-full font-semibold text-[15px] leading-tight text-foreground hover:text-primary transition-colors"
-                          >
-                            <span className="truncate">{authorLabel(author)}</span>
-                            {proMeta?.verified ? (
-                              <BadgeCheck className="w-4 h-4 shrink-0 text-sky-500" aria-label="Verificado" />
-                            ) : null}
-                          </Link>
-                        ) : (
-                          <p className="inline-flex items-center gap-1 max-w-full font-semibold text-[15px] leading-tight text-foreground">
-                            <span className="truncate">{authorLabel(author)}</span>
-                            {proMeta?.verified ? (
-                              <BadgeCheck className="w-4 h-4 shrink-0 text-sky-500" aria-label="Verificado" />
-                            ) : null}
-                          </p>
-                        )}
-                        {proMeta?.headline ? (
-                          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
-                            {proMeta.headline}
+                    <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          {authorProfileTo ? (
+                            <Link
+                              to={authorProfileTo}
+                              className="text-[17px] font-bold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50 hover:text-primary transition-colors truncate max-w-full"
+                            >
+                              {authorLabel(author)}
+                            </Link>
+                          ) : (
+                            <span className="text-[17px] font-bold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50 truncate">
+                              {authorLabel(author)}
+                            </span>
+                          )}
+                          {proMeta?.verified ? (
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border border-sky-500/20">
+                              <BadgeCheck className="w-3 h-3 shrink-0" aria-hidden />
+                              Verificado
+                            </span>
+                          ) : null}
+                        </div>
+                        {proMeta?.professionTitle ? (
+                          <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 leading-snug">
+                            {proMeta.professionTitle}
                           </p>
                         ) : null}
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{postTimeLabel(post.created_at)}</p>
+                        {serviceBadges.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            {serviceBadges.map((b) => (
+                              <span
+                                key={b.key}
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                                  b.className,
+                                )}
+                              >
+                                {b.Icon ? <b.Icon className="w-3 h-3 opacity-90" strokeWidth={2.25} /> : null}
+                                {b.label}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
-                      <div className="flex items-start gap-1 shrink-0">
+                      <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
+                        <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500 tabular-nums">
+                          {postTimeLabel(post.created_at)}
+                        </p>
                         {user ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
                                 type="button"
-                                className="p-1 rounded-full text-muted-foreground hover:bg-muted transition-colors"
+                                className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                                 aria-label="Opções da publicação"
                               >
-                                <MoreHorizontal className="w-4 h-4" />
+                                <MoreHorizontal className="w-[18px] h-[18px]" />
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-52">
@@ -1834,62 +1942,80 @@ export default function CommunityFeed({
                       </div>
                     </div>
                   </div>
+
                   {post.body ? (
-                    <div className="mt-3 text-[15px] text-foreground leading-snug whitespace-pre-wrap">
-                      {bodyShown}
-                      {longBody && !bodyExpanded && (
+                    <div className="mt-4 space-y-1.5">
+                      <div
+                        className={cn(
+                          "text-[15px] text-zinc-800 dark:text-zinc-100 leading-[1.55] whitespace-pre-line",
+                          showExpandToggle && !bodyExpanded && "line-clamp-3",
+                        )}
+                      >
+                        {post.body}
+                      </div>
+                      {showExpandToggle && !bodyExpanded ? (
                         <button
                           type="button"
-                          className="text-primary font-semibold ml-1 text-sm"
+                          className="text-[13px] font-semibold text-primary hover:underline"
                           onClick={() => setExpandedBodies((b) => ({ ...b, [post.id]: true }))}
                         >
-                          mais
+                          Ver mais
                         </button>
-                      )}
+                      ) : null}
+                      {showExpandToggle && bodyExpanded ? (
+                        <button
+                          type="button"
+                          className="text-[13px] font-semibold text-zinc-500 hover:text-foreground"
+                          onClick={() => setExpandedBodies((b) => ({ ...b, [post.id]: false }))}
+                        >
+                          Ver menos
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
+
                   {post.image_url ? (
                     <button
                       type="button"
-                      className="mt-3 w-full p-0 border-0 bg-transparent rounded-xl overflow-hidden block text-left cursor-zoom-in active:opacity-95"
+                      className="mt-4 w-full p-0 border-0 bg-transparent rounded-[18px] overflow-hidden block text-left cursor-zoom-in ring-1 ring-black/[0.07] dark:ring-white/10 shadow-md shadow-black/[0.08] active:scale-[0.995] transition-transform"
                       onClick={() => setFullscreenPost(post)}
                     >
                       <img
                         src={post.image_url}
                         alt=""
-                        className="rounded-xl w-full max-h-[min(420px,70vh)] object-cover bg-muted pointer-events-none"
+                        className="w-full max-h-[min(440px,72vh)] object-cover bg-zinc-100 dark:bg-zinc-800 pointer-events-none"
                       />
                     </button>
                   ) : null}
                 </div>
 
                 {(totalRx > 0 || commentCount > 0) && (
-                  <div className="px-4 py-2 flex items-center justify-between text-[12px] text-muted-foreground border-t border-border/40 bg-muted/20">
-                    <div className="flex items-center gap-1 min-h-[20px]">
+                  <div className="mx-5 mt-3 flex items-center justify-between gap-3 border-t border-zinc-100 dark:border-zinc-800/80 pt-3 text-[12px] text-zinc-500 dark:text-zinc-400">
+                    <div className="flex items-center gap-2 min-h-[22px] min-w-0">
                       {totalRx > 0 ? (
                         <>
-                          <span className="flex -space-x-1">
+                          <span className="flex -space-x-1.5">
                             {REACTIONS.filter((r) => (sum[r.type] || 0) > 0)
                               .slice(0, 3)
                               .map((r) => (
                                 <span
                                   key={r.type}
-                                  className="w-5 h-5 rounded-full bg-white border border-border flex items-center justify-center text-[10px]"
+                                  className="w-6 h-6 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200/90 dark:border-zinc-600 flex items-center justify-center shadow-sm"
                                 >
-                                  <r.Icon className={cn("w-3 h-3", reactionSummaryIconClass(r.type))} />
+                                  <r.Icon className={cn("w-3.5 h-3.5", reactionSummaryIconClass(r.type))} />
                                 </span>
                               ))}
                           </span>
-                          <span className="ml-1">{totalRx}</span>
+                          <span className="font-semibold text-zinc-600 dark:text-zinc-300 tabular-nums">{totalRx}</span>
                         </>
                       ) : (
-                        <span />
+                        <span className="tabular-nums"> </span>
                       )}
                     </div>
                     {commentCount > 0 ? (
                       <button
                         type="button"
-                        className="font-medium text-muted-foreground hover:text-foreground hover:underline"
+                        className="font-semibold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 shrink-0 transition-colors"
                         onClick={() => setCommentsSheetPost(post)}
                       >
                         {commentCount} comentário{commentCount !== 1 ? "s" : ""}
@@ -1898,38 +2024,42 @@ export default function CommunityFeed({
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 border-t border-border/40 bg-muted/25 select-none [&_button]:touch-manipulation">
+                <div className="mt-2 grid grid-cols-3 border-t border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/80 dark:bg-zinc-950/40 select-none [&_button]:touch-manipulation [&_svg]:stroke-[1.75]">
                   <LinkedInLikeControl
                     activeType={myR}
                     onPickReaction={(t) => void setReaction(post.id, t as ReactionType)}
                     onQuickLikeToggle={() => void setReaction(post.id, "like")}
+                    className="[&_button]:py-4"
                   />
                   <button
                     type="button"
                     style={{ WebkitUserSelect: "none", userSelect: "none" }}
                     className={cn(
-                      "select-none flex flex-col items-center justify-center gap-0.5 py-3.5 text-muted-foreground hover:bg-background/80 active:bg-background active:scale-[0.98] transition-all border-x border-border/35",
-                      sheetOpen && "text-primary bg-background/90",
+                      "select-none flex flex-col items-center justify-center gap-1 py-3.5 text-zinc-500 dark:text-zinc-400 hover:bg-white/90 dark:hover:bg-zinc-900/80 active:scale-[0.98] transition-all border-x border-zinc-100 dark:border-zinc-800/80",
+                      sheetOpen && "text-primary bg-white dark:bg-zinc-900",
                     )}
                     onClick={() => setCommentsSheetPost(sheetOpen ? null : post)}
                   >
-                    <MessageCircle className="w-[21px] h-[21px]" />
-                    <span className="text-[11px] font-semibold tracking-tight">Comentar</span>
+                    <MessageCircle className="w-[22px] h-[22px]" />
+                    <span className="text-[11px] font-semibold tracking-wide">Comentar</span>
+                    {commentCount > 0 ? (
+                      <span className="text-[10px] font-bold text-zinc-400 tabular-nums">{commentCount}</span>
+                    ) : null}
                   </button>
                   <button
                     type="button"
                     style={{ WebkitUserSelect: "none", userSelect: "none" }}
-                    className="select-none flex flex-col items-center justify-center gap-0.5 py-3.5 text-muted-foreground hover:bg-background/80 active:bg-background active:scale-[0.98] transition-all"
+                    className="select-none flex flex-col items-center justify-center gap-1 py-3.5 text-zinc-500 dark:text-zinc-400 hover:bg-white/90 dark:hover:bg-zinc-900/80 active:scale-[0.98] transition-all"
                     onClick={() => setSharePost(post)}
                   >
-                    <Send className="w-[21px] h-[21px] -rotate-12" />
-                    <span className="text-[11px] font-semibold tracking-tight">Compartilhar</span>
+                    <Send className="w-[22px] h-[22px] -rotate-12" />
+                    <span className="text-[11px] font-semibold tracking-wide">Partilhar</span>
                   </button>
                 </div>
 
-                {myR ? (
-                  <div className="flex items-center gap-2.5 px-3 py-2.5 border-t border-border/35 bg-gradient-to-b from-muted/15 to-muted/5">
-                    <div className="w-9 h-9 rounded-full bg-background overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/45 shadow-sm">
+                {user ? (
+                  <div className="flex items-center gap-3 px-4 py-3 border-t border-zinc-100 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-950/30">
+                    <div className="w-9 h-9 rounded-xl bg-zinc-100 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.05]">
                       {profile?.avatar_url ? (
                         <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
                       ) : (
@@ -1941,9 +2071,9 @@ export default function CommunityFeed({
                     <button
                       type="button"
                       onClick={() => setCommentsSheetPost(post)}
-                      className="flex-1 text-left rounded-full border border-border/45 bg-background px-4 py-2.5 text-[13px] text-muted-foreground shadow-sm hover:border-border hover:bg-muted/30 transition-colors"
+                      className="flex-1 text-left rounded-full border border-zinc-200/90 dark:border-zinc-700 bg-zinc-50/90 dark:bg-zinc-900/50 px-4 py-2.5 text-[13px] text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-white dark:hover:bg-zinc-900 transition-colors"
                     >
-                      Adicionar comentário…
+                      Comentar como {profile?.full_name?.split(/\s+/)[0] || "você"}…
                     </button>
                   </div>
                 ) : null}

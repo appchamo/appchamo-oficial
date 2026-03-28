@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, ReactNode } from "react";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
-import { flushPendingEmailSignup } from "@/lib/pendingEmailSignup";
+import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
 import type { User, Session } from "@supabase/supabase-js";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -157,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userId = sess.user.id;
 
         try {
-          await flushPendingEmailSignup(sess);
+          await flushPendingEmailSignupWithRetries(sess);
         } catch (e) {
           console.error("[auth] flush pending email signup:", e);
         }
@@ -173,12 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (rolesResult.status === "fulfilled") r = rolesResult.value ?? [];
 
         if (p?.user_type === "pending_signup") {
-          await new Promise((res) => setTimeout(res, 450));
-          try {
-            await flushPendingEmailSignup(sess);
-          } catch {
-            /* ignore */
-          }
+          await new Promise((res) => setTimeout(res, 400));
           const p2 = await fetchProfile(userId).catch(() => null);
           if (p2) p = p2;
         }

@@ -20,6 +20,42 @@ export type PendingEmailSignupV1 = {
   referralCode: string | null;
 };
 
+export function peekPendingEmailSignup(userId: string): PendingEmailSignupV1 | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_EMAIL_SIGNUP_KEY);
+    if (!raw) return null;
+    const pending = JSON.parse(raw) as PendingEmailSignupV1;
+    if (pending.v !== 1 || pending.userId !== userId) return null;
+    return pending;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Após login, o JWT pode demorar um instante; várias tentativas evitam ficar com perfil "cliente" até dar F5.
+ */
+export async function flushPendingEmailSignupWithRetries(session: Session | null, maxAttempts = 8): Promise<void> {
+  if (!session?.user?.id) return;
+  const uid = session.user.id;
+  if (!peekPendingEmailSignup(uid)) return;
+
+  let sess: Session | null = session;
+  for (let i = 0; i < maxAttempts; i++) {
+    if (!peekPendingEmailSignup(uid)) return;
+
+    const ok = await flushPendingEmailSignup(sess);
+    if (ok) return;
+
+    await supabase.auth.refreshSession().catch(() => {});
+    const {
+      data: { session: next },
+    } = await supabase.auth.getSession();
+    if (next) sess = next;
+    await new Promise((r) => setTimeout(r, 180 + i * 100));
+  }
+}
+
 /**
  * Após o utilizador confirmar o e-mail e obter sessão, envia o payload guardado em sessionStorage
  * para complete-signup (o fluxo sem sessão imediata após signUp não consegue chamar a Edge Function antes).
@@ -27,22 +63,8 @@ export type PendingEmailSignupV1 = {
 export async function flushPendingEmailSignup(session: Session | null): Promise<boolean> {
   if (!session?.user?.id) return false;
 
-  let raw: string | null = null;
-  try {
-    raw = sessionStorage.getItem(PENDING_EMAIL_SIGNUP_KEY);
-  } catch {
-    return false;
-  }
-  if (!raw) return false;
-
-  let pending: PendingEmailSignupV1;
-  try {
-    pending = JSON.parse(raw) as PendingEmailSignupV1;
-  } catch {
-    return false;
-  }
-
-  if (pending.v !== 1 || pending.userId !== session.user.id) return false;
+  const pending = peekPendingEmailSignup(session.user.id);
+  if (!pending) return false;
 
   const token = await getAccessTokenForEdgeFunctions();
   if (!token) return false;

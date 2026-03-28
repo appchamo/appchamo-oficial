@@ -45,9 +45,7 @@ interface Thread {
   label_text: string | null;
   /** Profissional desta conversa está nos favoritos do utilizador. */
   isFavoritePro?: boolean;
-  /** Cliente a ver conversa com profissional que segue — anel verde no avatar. */
-  peerIsFollowedPro?: boolean;
-  /** `following` = chat directo (Seguindo); omitido ou `service` = chamados normais. */
+  /** `following` = DM antiga por “seguir”; `service` = chamado normal. A aba Favoritos usa `isFavoritePro`. */
   request_kind?: string | null;
 }
 
@@ -98,7 +96,7 @@ const Messages = () => {
   const [hasSupportMessages, setHasSupportMessages] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [showCancelados, setShowCancelados] = useState(false);
-  const [chatTab, setChatTab] = useState<"geral" | "seguindo">("geral");
+  const [chatTab, setChatTab] = useState<"geral" | "favoritos">("geral");
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [searchChat, setSearchChat] = useState("");
@@ -126,16 +124,28 @@ const Messages = () => {
   const [peerActivityByThread, setPeerActivityByThread] = useState<Record<string, "typing" | "recording">>({});
   const navigate = useNavigate();
 
+  /** Mensagens pendentes (não lidas) só nas conversas com profissionais favoritos — entrada ativa. */
+  const favoritosPendingTotal = useMemo(() => {
+    const dead = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
+    return threads
+      .filter((t) => !dead(t) && !t.is_archived && t.isFavoritePro)
+      .reduce((sum, t) => {
+        if (t.unreadCount > 0) return sum + t.unreadCount;
+        if (t.manual_unread) return sum + 1;
+        return sum;
+      }, 0);
+  }, [threads]);
+
   const listSlices = useMemo(() => {
     const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
-    const isFollowingKind = (t: Thread) => (t.request_kind ?? "service") === "following";
 
     const threadsCancelados = sortThreadsByPinAndTime(threads.filter(isCancelledOrRejected));
     const threadsNonCancelled = sortThreadsByPinAndTime(threads.filter((t) => !isCancelledOrRejected(t)));
-    const threadsServiceTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => !isFollowingKind(t)));
-    const threadsSeguindoTab = sortThreadsByPinAndTime(threadsNonCancelled.filter(isFollowingKind));
+    /** Profissional do pedido está nos favoritos do cliente (chamadas + chats com esse pro). */
+    const threadsFavoritosTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => t.isFavoritePro));
+    const threadsGeralTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => !t.isFavoritePro));
 
-    const tabPool = chatTab === "seguindo" ? threadsSeguindoTab : threadsServiceTab;
+    const tabPool = chatTab === "favoritos" ? threadsFavoritosTab : threadsGeralTab;
     const activeThreads = tabPool.filter((t) => !t.is_archived);
     const archivedThreads = tabPool.filter((t) => t.is_archived);
 
@@ -161,7 +171,7 @@ const Messages = () => {
 
     return {
       threadsCancelados,
-      threadsSeguindoTab,
+      threadsFavoritosTab,
       activeThreads,
       archivedThreads,
       currentList,
@@ -184,12 +194,11 @@ const Messages = () => {
     userIdRef.current = user.id;
     setCurrentUserId(user.id);
 
-    const [{ data: favRows }, { data: followRows }] = await Promise.all([
-      supabase.from("professional_favorites" as any).select("professional_id").eq("user_id", user.id),
-      supabase.from("professional_follows" as any).select("professional_id").eq("user_id", user.id),
-    ]);
+    const { data: favRows } = await supabase
+      .from("professional_favorites" as any)
+      .select("professional_id")
+      .eq("user_id", user.id);
     const favoriteProIds = new Set<string>((favRows || []).map((r: any) => String(r.professional_id)));
-    const followedProIds = new Set<string>((followRows || []).map((r: any) => String(r.professional_id)));
 
     const PAGE_SIZE = 7;
     const baseLimit = (page + 1) * PAGE_SIZE;
@@ -308,7 +317,6 @@ const Messages = () => {
         label_color: label_text ? label_color : null,
         label_text,
         isFavoritePro: favoriteProIds.has(String(req.professional_id)),
-        peerIsFollowedPro: isClient && followedProIds.has(String(req.professional_id)),
       };
     }).filter((t) => t !== null) as Thread[];
 
@@ -506,7 +514,7 @@ const Messages = () => {
     const isFollowingKind = (t: Thread) => (t.request_kind ?? "service") === "following";
     const pool = threads.filter((t) => !isCancelledOrRejected(t));
     const tabThreads =
-      chatTab === "seguindo" ? pool.filter(isFollowingKind) : pool.filter((t) => !isFollowingKind(t));
+      chatTab === "favoritos" ? pool.filter((t) => t.isFavoritePro) : pool.filter((t) => !t.isFavoritePro);
     const targetIds = tabThreads.filter((t) => !t.is_archived).map((t) => t.id);
 
     if (targetIds.length === 0) return;
@@ -762,7 +770,7 @@ const Messages = () => {
     archivedThreads,
     currentList,
     canceladosListToShow,
-    threadsSeguindoTab,
+    threadsFavoritosTab,
   } = listSlices;
 
   const toggleCanceladoSelection = (id: string) => {
@@ -813,30 +821,8 @@ const Messages = () => {
           }}
           className="flex flex-1 items-center gap-3 cursor-pointer min-w-0"
         >
-          {/* Avatar — anel verde (Instagram “close friends”) quando o cliente segue o profissional */}
           <div className="relative flex-shrink-0">
-            {t.peerIsFollowedPro ? (
-              <div className="rounded-full p-[3px] bg-gradient-to-br from-emerald-400 via-green-500 to-teal-600 shadow-sm">
-                <div className="rounded-full bg-card p-[2px]">
-                  {t.otherAvatar ? (
-                    <img
-                      src={getOptimizedAvatar(t.otherAvatar)}
-                      alt={t.otherName}
-                      loading="lazy"
-                      className="w-[46px] h-[46px] rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      className={`w-[46px] h-[46px] rounded-full flex items-center justify-center text-sm font-bold ${
-                        isCancelled ? "bg-muted text-muted-foreground" : "bg-primary/15 text-primary"
-                      }`}
-                    >
-                      {initials}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : t.otherAvatar ? (
+            {t.otherAvatar ? (
               <img
                 src={getOptimizedAvatar(t.otherAvatar)}
                 alt={t.otherName}
@@ -975,7 +961,7 @@ const Messages = () => {
         <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border/60 gap-2">
           <h1 className="text-xl font-bold text-foreground shrink-0">Conversas</h1>
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            {!showCancelados && !showArchived && (chatTab === "geral" || chatTab === "seguindo") && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
+            {!showCancelados && !showArchived && (chatTab === "geral" || chatTab === "favoritos") && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
               <button
                 type="button"
                 onClick={handleMarkAllRead}
@@ -1027,33 +1013,48 @@ const Messages = () => {
         <Tabs
           value={chatTab}
           onValueChange={(v) => {
-            setChatTab(v as "geral" | "seguindo");
+            setChatTab(v as "geral" | "favoritos");
             setShowCancelados(false);
           }}
           className="px-4 pt-3"
         >
-          <TabsList className={`w-full grid grid-cols-2 rounded-xl h-10 p-1 ${showCancelados ? "opacity-40 pointer-events-none" : "bg-muted/50"}`}>
-            <TabsTrigger value="geral" className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm">
+          <TabsList
+            className={`w-full grid grid-cols-2 rounded-xl p-1 gap-1 min-h-11 items-stretch ${showCancelados ? "opacity-40 pointer-events-none" : "bg-muted/50"}`}
+          >
+            <TabsTrigger value="geral" className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm py-2">
               Geral
             </TabsTrigger>
             <TabsTrigger
-              value="seguindo"
-              className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-violet-600 data-[state=active]:to-fuchsia-600 data-[state=active]:text-white gap-1.5"
+              value="favoritos"
+              className="rounded-lg text-xs font-bold data-[state=active]:shadow-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-rose-600 data-[state=active]:to-amber-600 data-[state=active]:text-white flex flex-col gap-0.5 h-auto py-2 px-1 leading-tight"
             >
-              <Sparkles className="w-3.5 h-3.5 opacity-80 hidden sm:inline" />
-              Seguindo
-              {threadsSeguindoTab.length > 0 && (
-                <span className="min-w-[18px] h-[18px] rounded-full bg-background/25 data-[state=active]:bg-white/25 text-[9px] font-bold flex items-center justify-center px-1">
-                  {threadsSeguindoTab.length}
+              <span className="flex items-center justify-center gap-1 w-full">
+                <Heart className="w-3.5 h-3.5 shrink-0 data-[state=active]:fill-white" />
+                <span className="tracking-wide">FAVORITOS</span>
+                {favoritosPendingTotal > 0 ? (
+                  <span className="min-w-[22px] h-[22px] rounded-full bg-rose-500 text-white text-[11px] font-black flex items-center justify-center px-1 shadow-sm data-[state=active]:bg-white data-[state=active]:text-rose-600">
+                    {favoritosPendingTotal > 99 ? "99+" : favoritosPendingTotal}
+                  </span>
+                ) : null}
+              </span>
+              {favoritosPendingTotal > 0 ? (
+                <span className="text-[9px] font-semibold opacity-90 data-[state=inactive]:text-muted-foreground data-[state=active]:text-white/90">
+                  {favoritosPendingTotal}{" "}
+                  {favoritosPendingTotal === 1 ? "mensagem nova" : "mensagens novas"}
                 </span>
-              )}
+              ) : threadsFavoritosTab.length > 0 ? (
+                <span className="text-[9px] font-medium opacity-70 data-[state=inactive]:text-muted-foreground data-[state=active]:text-white/80">
+                  {threadsFavoritosTab.length}{" "}
+                  {threadsFavoritosTab.length === 1 ? "conversa" : "conversas"}
+                </span>
+              ) : null}
             </TabsTrigger>
           </TabsList>
 
           {/* ── Search ── */}
           {((!showCancelados &&
             ((chatTab === "geral" && (activeThreads.length > 0 || archivedThreads.length > 0 || hasSupportMessages)) ||
-              (chatTab === "seguindo" && (activeThreads.length > 0 || archivedThreads.length > 0)))) ||
+              (chatTab === "favoritos" && (activeThreads.length > 0 || archivedThreads.length > 0)))) ||
             (showCancelados && threadsCancelados.length > 0)) && (
             <div className="relative mt-3">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />

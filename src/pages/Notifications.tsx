@@ -50,7 +50,6 @@ const resolveAction = (n: Notification): "navigate" | "modal" => {
   if (n.type === "appointment" || t.includes("agendamento")) return "navigate";
   if (n.type === "reminder" && n.link) return "navigate";
   if (n.type === "follow" && n.link) return "navigate";
-  if (n.type === "friend_request" && n.link) return "navigate";
   if (n.link?.includes("/messages/")) return "navigate";
   if (n.type === "admin" && n.link) return "navigate";
   if (n.type === "support" && n.link) return "navigate";
@@ -65,7 +64,6 @@ const resolveDestination = (n: Notification): string => {
   if (n.type === "coupon" || t.includes("cupom")) return "/coupons";
   if (n.type === "appointment" || t.includes("agendamento")) return n.link || "/meus-agendamentos";
   if (n.type === "seal_award") return "/pro";
-  if (n.type === "friend_request") return n.link || "/profile?friends=1";
   return n.link || "/home";
 };
 
@@ -179,6 +177,12 @@ const Notifications = () => {
         setFollowPreviewUserId(uid);
         return;
       }
+    }
+    if (n.type === "friend_request") {
+      const m = n.metadata && typeof n.metadata === "object" ? (n.metadata as Record<string, unknown>) : null;
+      const uid = typeof m?.from_user_id === "string" ? m.from_user_id : null;
+      if (uid) setFollowPreviewUserId(uid);
+      return;
     }
     const action = resolveAction(n);
     if (action === "navigate") {

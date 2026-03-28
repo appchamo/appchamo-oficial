@@ -47,8 +47,23 @@ export interface ProfessionalAnalyticsPayload {
   name_searches: number;
 }
 
-export async function fetchMyProfessionalAnalytics(): Promise<ProfessionalAnalyticsPayload | null> {
-  const { data, error } = await supabase.rpc("get_my_professional_analytics");
+/** Intervalo half-open: [from, to) em UTC (envie datas já no fuso desejado via ISO). */
+export type ProfessionalAnalyticsRange = { from: Date; to: Date };
+
+/**
+ * Sem intervalo: totais acumulados (tabela de contadores).
+ * Com intervalo: contagens só dentro do período (tabela de eventos; exige migração aplicada).
+ */
+export async function fetchMyProfessionalAnalytics(
+  range?: ProfessionalAnalyticsRange | null,
+): Promise<ProfessionalAnalyticsPayload | null> {
+  const useLifetime = range == null;
+  const { data, error } = await supabase.rpc(
+    "get_my_professional_analytics",
+    useLifetime
+      ? { p_from: null, p_to: null }
+      : { p_from: range.from.toISOString(), p_to: range.to.toISOString() },
+  );
   if (error || data == null || typeof data !== "object") return null;
   const o = data as Record<string, unknown>;
   return {

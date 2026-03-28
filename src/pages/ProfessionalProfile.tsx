@@ -20,12 +20,8 @@ import {
   Timer,
   Award,
   MapPin,
-  UserPlus,
   Heart,
   MessageSquare,
-  Users,
-  UserRoundCheck,
-  Send,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -44,14 +40,6 @@ import { getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
-import {
-  acceptFriendRequest,
-  declineOrCancelFriendRequest,
-  fetchAcceptedFriendUserIds,
-  getFriendRelationshipState,
-  sendFriendRequest,
-  type FriendRelationshipState,
-} from "@/lib/chamoFriends";
 import { cn } from "@/lib/utils";
 
 interface ProData {
@@ -124,15 +112,10 @@ const ProfessionalProfile = () => {
   const [reviewsVisible, setReviewsVisible] = useState(5);
   const [publicSeals, setPublicSeals] = useState<{ seal_id: string; title: string; icon_variant: string }[]>([]);
   const [sealsModalOpen, setSealsModalOpen] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
-  const [followBusy, setFollowBusy] = useState(false);
   const [dmOpening, setDmOpening] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
-  const [friendsCount, setFriendsCount] = useState<number | null>(null);
-  const [friendRel, setFriendRel] = useState<FriendRelationshipState | null>(null);
-  const [friendBusy, setFriendBusy] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
@@ -203,28 +186,6 @@ const ProfessionalProfile = () => {
         if (sub && (sub as { plan_id: string }).plan_id) setPlanId((sub as { plan_id: string }).plan_id);
 
         if (user && user.id === data.user_id) {
-          try {
-            const ids = await fetchAcceptedFriendUserIds(supabase, data.user_id);
-            setFriendsCount(ids.length);
-          } catch {
-            setFriendsCount(0);
-          }
-        } else {
-          setFriendsCount(null);
-        }
-
-        if (user && user.id !== data.user_id) {
-          try {
-            const rel = await getFriendRelationshipState(supabase, user.id, data.user_id);
-            setFriendRel(rel);
-          } catch {
-            setFriendRel({ status: "none" });
-          }
-        } else {
-          setFriendRel(null);
-        }
-
-        if (user && user.id === data.user_id) {
           const [catRes, profRes] = await Promise.all([
             supabase.from("categories").select("id, name").eq("active", true).order("sort_order"),
             supabase.from("professions").select("id, name, category_id").eq("active", true).order("name"),
@@ -274,8 +235,6 @@ const ProfessionalProfile = () => {
         );
       } else {
         setPublicSeals([]);
-        setFriendsCount(null);
-        setFriendRel(null);
       }
     setLoading(false);
   }, [id]);
@@ -309,31 +268,24 @@ const ProfessionalProfile = () => {
     let cancelled = false;
     (async () => {
       if (!pro || isOwner) {
-        setIsFollowing(false);
         setIsFavorite(false);
         setSocialLoading(false);
         return;
       }
       if (!user?.id) {
-        setIsFollowing(false);
         setIsFavorite(false);
         setSocialLoading(false);
         return;
       }
       setSocialLoading(true);
-      const [fr, uf, fav] = await Promise.all([
-        supabase.from("professional_follows").select("id").eq("user_id", user.id).eq("professional_id", pro.id).maybeSingle(),
-        supabase
-          .from("user_follows" as any)
-          .select("follower_user_id")
-          .eq("follower_user_id", user.id)
-          .eq("followed_user_id", pro.user_id)
-          .maybeSingle(),
-        supabase.from("professional_favorites").select("id").eq("user_id", user.id).eq("professional_id", pro.id).maybeSingle(),
-      ]);
+      const { data: fav } = await supabase
+        .from("professional_favorites")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("professional_id", pro.id)
+        .maybeSingle();
       if (cancelled) return;
-      setIsFollowing(!!fr.data || !!uf.data);
-      setIsFavorite(!!fav.data);
+      setIsFavorite(!!fav);
       setSocialLoading(false);
     })();
     return () => {
@@ -352,106 +304,6 @@ const ProfessionalProfile = () => {
       return null;
     }
     return u;
-  };
-
-  const toggleFollow = async () => {
-    if (!pro || followBusy) return;
-    const u = await requireUserForSocial();
-    if (!u) return;
-    setFollowBusy(true);
-    try {
-      if (isFollowing) {
-        const { error: ePro } = await supabase.from("professional_follows").delete().eq("user_id", u.id).eq("professional_id", pro.id);
-        if (ePro) throw ePro;
-        const { error: eUf } = await supabase
-          .from("user_follows" as any)
-          .delete()
-          .eq("follower_user_id", u.id)
-          .eq("followed_user_id", pro.user_id);
-        if (eUf) throw eUf;
-        setIsFollowing(false);
-        toast({ title: "Você deixou de seguir" });
-      } else {
-        const { error } = await supabase.from("professional_follows").insert({ user_id: u.id, professional_id: pro.id });
-        if (error) throw error;
-        setIsFollowing(true);
-        toast({ title: "Seguindo!" });
-      }
-    } catch {
-      toast({ title: "Não foi possível atualizar", variant: "destructive" });
-    } finally {
-      setFollowBusy(false);
-    }
-  };
-
-  const friendActionToast = (r: string) => {
-    switch (r) {
-      case "request_sent":
-        toast({ title: "Pedido enviado", description: "A pessoa precisa aceitar para virarem amigos." });
-        break;
-      case "became_friends":
-        toast({ title: "Vocês são amigos!" });
-        break;
-      case "already_friends":
-        toast({ title: "Já são amigos" });
-        break;
-      case "request_already_pending":
-        toast({ title: "Pedido já enviado" });
-        break;
-      default:
-        toast({ title: "Concluído" });
-    }
-  };
-
-  const handleAddFriend = async () => {
-    if (!pro || friendBusy || !friendRel || friendRel.status !== "none") return;
-    const u = await requireUserForSocial();
-    if (!u) return;
-    setFriendBusy(true);
-    try {
-      const r = await sendFriendRequest(supabase, pro.user_id);
-      friendActionToast(r);
-      await loadProfile();
-    } catch {
-      toast({ title: "Não foi possível enviar o pedido", variant: "destructive" });
-    } finally {
-      setFriendBusy(false);
-    }
-  };
-
-  const handleAcceptFriendInvite = async () => {
-    if (!pro || friendBusy || friendRel?.status !== "incoming_pending") return;
-    const u = await requireUserForSocial();
-    if (!u) return;
-    setFriendBusy(true);
-    try {
-      await acceptFriendRequest(supabase, friendRel.requestId);
-      toast({ title: "Amizade aceita!" });
-      await loadProfile();
-    } catch {
-      toast({ title: "Não foi possível aceitar", variant: "destructive" });
-    } finally {
-      setFriendBusy(false);
-    }
-  };
-
-  const handleDeclineOrCancelFriend = async () => {
-    if (!pro || friendBusy || !friendRel) return;
-    if (friendRel.status !== "incoming_pending" && friendRel.status !== "outgoing_pending") return;
-    const u = await requireUserForSocial();
-    if (!u) return;
-    setFriendBusy(true);
-    try {
-      await declineOrCancelFriendRequest(supabase, friendRel.requestId);
-      toast({
-        title: friendRel.status === "incoming_pending" ? "Pedido recusado" : "Pedido cancelado",
-      });
-      await loadProfile();
-    } catch {
-      toast({ title: "Não foi possível atualizar", variant: "destructive" });
-    } finally {
-      setFriendBusy(false);
-    }
   };
 
   const toggleFavorite = async () => {
@@ -592,8 +444,11 @@ const ProfessionalProfile = () => {
       navigate("/login", { state: { from: location.pathname } });
       return;
     }
-    if (!isFollowing) {
-      toast({ title: "Siga o perfil", description: "Para enviar mensagem direta, siga este profissional primeiro." });
+    if (!isFavorite) {
+      toast({
+        title: "Favorite o perfil",
+        description: "Para enviar mensagem direta, adicione este profissional aos favoritos.",
+      });
       return;
     }
     setDmOpening(true);
@@ -763,18 +618,6 @@ const ProfessionalProfile = () => {
               </div>
             </div>
 
-            {friendRel?.status === "friends" && (
-              <div className="mb-3 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2.5 flex items-start gap-2.5">
-                <Users className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-foreground">Amigos no Chamô</p>
-                  <p className="text-[11px] text-muted-foreground leading-snug">
-                    Vocês aceitaram amizade um do outro.
-                  </p>
-                </div>
-              </div>
-            )}
-
             {/* Nome + edição */}
             {editingName ? (
               <div className="flex items-center gap-2 mb-2">
@@ -935,114 +778,44 @@ const ProfessionalProfile = () => {
               </div>
             )}
 
-            {/* Visitante: seguir, favoritar, compartilhar + chamar / indisponível */}
+            {/* Visitante: favoritar, compartilhar + chamar / indisponível */}
             {!isOwner && (
               <div className="mt-5 rounded-2xl border border-border/70 bg-gradient-to-b from-muted/30 to-background p-4 space-y-3 shadow-sm">
                 {profileLink && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={toggleFollow}
-                      disabled={followBusy || (!!user && socialLoading)}
-                      className={cn(
-                        "flex flex-col items-center justify-center gap-1 min-h-[72px] rounded-xl border text-[11px] font-bold transition-colors active:scale-[0.98] disabled:opacity-50",
-                        isFollowing
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border/80 bg-card text-foreground hover:bg-muted/60",
-                      )}
-                    >
-                      {followBusy ? (
-                        <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                      ) : (
-                        <UserPlus className={cn("w-5 h-5", isFollowing && "text-primary")} />
-                      )}
-                      <span>{isFollowing ? "Seguindo" : "Seguir"}</span>
-                    </button>
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={toggleFavorite}
                       disabled={favoriteBusy || (!!user && socialLoading)}
                       className={cn(
-                        "flex flex-col items-center justify-center gap-1 min-h-[72px] rounded-xl border text-[11px] font-bold transition-colors active:scale-[0.98] disabled:opacity-50",
+                        "flex flex-col items-center justify-center gap-0.5 min-h-[52px] rounded-xl border text-[10px] font-bold transition-colors active:scale-[0.98] disabled:opacity-50 py-2",
                         isFavorite
                           ? "border-rose-400 bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300"
                           : "border-border/80 bg-card text-foreground hover:bg-muted/60",
                       )}
                     >
                       {favoriteBusy ? (
-                        <Loader2 className="w-5 h-5 animate-spin text-rose-500" />
+                        <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
                       ) : (
-                        <Heart className={cn("w-5 h-5", isFavorite && "fill-current")} />
+                        <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
                       )}
                       <span>{isFavorite ? "Favorito" : "Favoritar"}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleShareLink}
-                      className="flex flex-col items-center justify-center gap-1 min-h-[72px] rounded-xl border border-border/80 bg-card text-foreground hover:bg-muted/60 text-[11px] font-bold transition-colors active:scale-[0.98]"
+                      className="flex flex-col items-center justify-center gap-0.5 min-h-[52px] rounded-xl border border-border/80 bg-card text-foreground hover:bg-muted/60 text-[10px] font-bold transition-colors active:scale-[0.98] py-2"
                     >
-                      <Share2 className="w-5 h-5" />
+                      <Share2 className="w-4 h-4" />
                       <span>Compartilhar</span>
                     </button>
                   </div>
                 )}
-                {user && friendRel && friendRel.status !== "self" ? (
-                  <div className="space-y-2 pt-1">
-                    {friendRel.status === "none" ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleAddFriend()}
-                        disabled={friendBusy}
-                        className="w-full min-h-[48px] rounded-xl border-2 border-primary/50 bg-primary/10 text-primary font-bold text-sm hover:bg-primary/15 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                      >
-                        {friendBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
-                        Adicionar aos amigos
-                      </button>
-                    ) : null}
-                    {friendRel.status === "outgoing_pending" ? (
-                      <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 space-y-2">
-                        <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
-                          <Send className="w-4 h-4 shrink-0" />
-                          <p className="text-xs font-bold leading-snug">Pedido enviado — aguardando resposta</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeclineOrCancelFriend()}
-                          disabled={friendBusy}
-                          className="w-full text-xs font-semibold text-muted-foreground hover:text-foreground py-1 disabled:opacity-50"
-                        >
-                          Cancelar pedido
-                        </button>
-                      </div>
-                    ) : null}
-                    {friendRel.status === "incoming_pending" ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void handleDeclineOrCancelFriend()}
-                          disabled={friendBusy}
-                          className="min-h-[44px] rounded-xl border border-border bg-card text-foreground font-bold text-xs hover:bg-muted/60 disabled:opacity-50"
-                        >
-                          Recusar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleAcceptFriendInvite()}
-                          disabled={friendBusy}
-                          className="min-h-[44px] rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1"
-                        >
-                          {friendBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserRoundCheck className="w-4 h-4" />}
-                          Aceitar
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                {isFollowing && (
+                {isFavorite && (
                   <button
                     type="button"
                     onClick={() => void openFollowingDirectMessage()}
-                    disabled={dmOpening || followBusy || (!!user && socialLoading)}
+                    disabled={dmOpening || (!!user && socialLoading)}
                     className="w-full min-h-[44px] py-3 rounded-xl border-2 border-violet-500/40 bg-violet-500/5 text-violet-700 dark:text-violet-200 font-bold text-sm hover:bg-violet-500/10 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {dmOpening ? <Loader2 className="w-5 h-5 animate-spin" /> : <MessageSquare className="w-5 h-5" />}
@@ -1221,20 +994,6 @@ const ProfessionalProfile = () => {
               <p className="text-xs text-muted-foreground mt-0.5">Baseado em avaliações de clientes</p>
             </div>
           </div>
-
-          {isOwner && friendsCount !== null && (
-            <div className="flex items-center gap-2 mb-4 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
-              <Users className="w-4 h-4 text-primary shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-foreground">
-                  {friendsCount} {friendsCount === 1 ? "amigo" : "amigos"}
-                </p>
-                <p className="text-[11px] text-muted-foreground leading-tight">
-                  Perfis profissionais com seguimento mútuo com você (rede no Chamô).
-                </p>
-              </div>
-            </div>
-          )}
 
           {reviews.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">Nenhuma avaliação ainda.</p>

@@ -76,6 +76,7 @@ export function LinkedInLikeControl({
 
   useEffect(() => {
     if (!pickerOpen) return;
+
     const finish = (e: PointerEvent) => {
       if (e.cancelable) e.preventDefault();
       const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -85,11 +86,39 @@ export function LinkedInLikeControl({
       setPickerOpen(false);
       setPickerPos(null);
     };
+
+    /** Impede scroll do feed / sheet enquanto o dedo desliza até uma reação (iOS/Android). */
+    const blockTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+    };
+
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevHtmlOverscroll = html.style.overscrollBehavior;
+    const prevBodyOverscroll = body.style.overscrollBehavior;
+    const prevBodyTouchAction = body.style.touchAction;
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    html.style.overscrollBehavior = "none";
+    body.style.overscrollBehavior = "none";
+    body.style.touchAction = "none";
+
     window.addEventListener("pointerup", finish, { capture: true });
     window.addEventListener("pointercancel", finish, { capture: true });
+    window.addEventListener("touchmove", blockTouchMove, { capture: true, passive: false });
+
     return () => {
       window.removeEventListener("pointerup", finish, { capture: true });
       window.removeEventListener("pointercancel", finish, { capture: true });
+      window.removeEventListener("touchmove", blockTouchMove, { capture: true });
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      html.style.overscrollBehavior = prevHtmlOverscroll;
+      body.style.overscrollBehavior = prevBodyOverscroll;
+      body.style.touchAction = prevBodyTouchAction;
     };
   }, [pickerOpen, onPickReaction]);
 
@@ -161,32 +190,42 @@ export function LinkedInLikeControl({
       {pickerOpen &&
         pickerPos &&
         createPortal(
-          <div
-            className="fixed z-[200] pointer-events-none"
-            style={{
-              top: pickerPos.top,
-              left: pickerPos.left,
-              transform: pickerPos.flipDown ? "translate(-50%, 0)" : "translate(-50%, -100%)",
-            }}
-          >
-            <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border/60 bg-white px-2 py-1.5 shadow-xl shadow-black/15">
-              {PICKER.map(({ type, label: lb, Icon, bg }) => (
-                <button
-                  key={type}
-                  type="button"
-                  data-ln-reaction={type}
-                  title={lb}
-                  style={{ WebkitUserSelect: "none", userSelect: "none", touchAction: "manipulation" }}
-                  className="select-none flex h-11 w-11 items-center justify-center rounded-full text-white transition-transform hover:scale-110 active:scale-95"
-                  onContextMenu={(e) => e.preventDefault()}
-                >
-                  <span className={cn("flex h-9 w-9 items-center justify-center rounded-full", bg)}>
-                    <Icon className={cn("h-5 w-5 pointer-events-none", type === "love" && "fill-white")} />
-                  </span>
-                </button>
-              ))}
+          <>
+            <div
+              aria-hidden
+              className="fixed inset-0 z-[199] bg-transparent"
+              style={{
+                touchAction: "none",
+                overscrollBehavior: "none",
+              }}
+            />
+            <div
+              className="fixed z-[200] pointer-events-none"
+              style={{
+                top: pickerPos.top,
+                left: pickerPos.left,
+                transform: pickerPos.flipDown ? "translate(-50%, 0)" : "translate(-50%, -100%)",
+              }}
+            >
+              <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border/60 bg-white px-2 py-1.5 shadow-xl shadow-black/15">
+                {PICKER.map(({ type, label: lb, Icon, bg }) => (
+                  <button
+                    key={type}
+                    type="button"
+                    data-ln-reaction={type}
+                    title={lb}
+                    style={{ WebkitUserSelect: "none", userSelect: "none", touchAction: "none" }}
+                    className="select-none flex h-11 w-11 items-center justify-center rounded-full text-white transition-transform hover:scale-110 active:scale-95"
+                    onContextMenu={(e) => e.preventDefault()}
+                  >
+                    <span className={cn("flex h-9 w-9 items-center justify-center rounded-full", bg)}>
+                      <Icon className={cn("h-5 w-5 pointer-events-none", type === "love" && "fill-white")} />
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>,
+          </>,
           document.body,
         )}
     </>

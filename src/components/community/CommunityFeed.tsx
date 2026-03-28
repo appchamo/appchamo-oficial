@@ -17,11 +17,7 @@ import {
   Upload,
   Search,
   BadgeCheck,
-  UserPlus,
-  Check,
   Video,
-  Globe,
-  Users,
   Maximize2,
   MoreHorizontal,
   ChevronDown,
@@ -45,7 +41,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
-import { areFriends, fetchAcceptedFriendUserIds } from "@/lib/chamoFriends";
+import { fetchFavoritedProfessionalOwnerUserIds } from "@/lib/chamoFriends";
 import { compressImageForChat } from "@/lib/compressChatImage";
 import { LinkedInLikeControl, type LinkedInReactionType } from "@/components/community/LinkedInLikeControl";
 import {
@@ -222,7 +218,6 @@ export default function CommunityFeed({
   );
   const [composerPreview, setComposerPreview] = useState<string | null>(null);
   const [composerModalOpen, setComposerModalOpen] = useState(false);
-  const [postAudience, setPostAudience] = useState<"public" | "followers">("public");
   const [publishing, setPublishing] = useState(false);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -260,10 +255,10 @@ export default function CommunityFeed({
   const [shareSearching, setShareSearching] = useState(false);
   const [shareSending, setShareSending] = useState(false);
   const [proPathByUserId, setProPathByUserId] = useState<Record<string, string>>({});
-  const [followedForShare, setFollowedForShare] = useState<AuthorRow[]>([]);
-  const [loadingFollowedShare, setLoadingFollowedShare] = useState(false);
-  const [feedScope, setFeedScope] = useState<"all" | "following">("all");
-  const [followingAuthorIds, setFollowingAuthorIds] = useState<Set<string>>(() => new Set());
+  const [favoritesForShare, setFavoritesForShare] = useState<AuthorRow[]>([]);
+  const [loadingFavoritesShare, setLoadingFavoritesShare] = useState(false);
+  const [feedScope, setFeedScope] = useState<"all" | "favorites">("all");
+  const [favoritedAuthorUserIds, setFavoritedAuthorUserIds] = useState<Set<string>>(() => new Set());
 
   const communityLink = "/home?feed=comunidade";
 
@@ -272,28 +267,15 @@ export default function CommunityFeed({
 
   const loadFeed = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user) {
-      setFollowingAuthorIds(new Set());
+      setFavoritedAuthorUserIds(new Set());
       setHiddenPostIds(new Set());
       if (!opts?.silent) setLoading(false);
       return;
     }
     if (!opts?.silent) setLoading(true);
     try {
-      const [{ data: myFollows }, { data: userFollowRows }] = await Promise.all([
-        supabase.from("professional_follows" as any).select("professional_id").eq("user_id", user.id),
-        supabase.from("user_follows" as any).select("followed_user_id").eq("follower_user_id", user.id),
-      ]);
-      const uidSet = new Set<string>();
-      (userFollowRows || []).forEach((r: any) => {
-        const uid = r.followed_user_id as string | undefined;
-        if (uid) uidSet.add(uid);
-      });
-      const followedProIds = [...new Set((myFollows || []).map((r: any) => r.professional_id as string))];
-      if (followedProIds.length) {
-        const { data: proUs } = await supabase.from("professionals").select("user_id").in("id", followedProIds);
-        (proUs || []).forEach((r: any) => uidSet.add(r.user_id as string));
-      }
-      setFollowingAuthorIds(uidSet);
+      const favUids = await fetchFavoritedProfessionalOwnerUserIds(supabase, user.id);
+      setFavoritedAuthorUserIds(new Set(favUids));
 
       const { data: hideRows } = await supabase
         .from("community_comment_user_hides" as any)
@@ -427,16 +409,16 @@ export default function CommunityFeed({
     return () => URL.revokeObjectURL(url);
   }, [composerMedia]);
 
-  const hasPostsFromFollowing = useMemo(
-    () => posts.some((p) => followingAuthorIds.has(p.author_id)),
-    [posts, followingAuthorIds],
+  const hasPostsFromFavorites = useMemo(
+    () => posts.some((p) => favoritedAuthorUserIds.has(p.author_id)),
+    [posts, favoritedAuthorUserIds],
   );
 
   const displayPosts = useMemo(() => {
     const scope =
-      feedScope === "all" ? posts : posts.filter((p) => followingAuthorIds.has(p.author_id));
+      feedScope === "all" ? posts : posts.filter((p) => favoritedAuthorUserIds.has(p.author_id));
     return scope.filter((p) => !hiddenPostIds.has(p.id));
-  }, [posts, feedScope, followingAuthorIds, hiddenPostIds]);
+  }, [posts, feedScope, favoritedAuthorUserIds, hiddenPostIds]);
 
   const reactionSummary = useMemo(() => {
     const m: Record<string, Partial<Record<ReactionType, number>>> = {};
@@ -583,12 +565,11 @@ export default function CommunityFeed({
         body: text,
         image_url: imageUrl,
         video_url: videoUrl,
-        audience: postAudience,
+        audience: "public",
       });
       if (insErr) throw insErr;
       setComposerText("");
       setComposerMedia(null);
-      setPostAudience("public");
       setComposerModalOpen(false);
       toast({ title: "Publicado na Comunidade" });
       await loadFeed({ silent: true });
@@ -666,44 +647,6 @@ export default function CommunityFeed({
       await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro ao apagar", description: e.message, variant: "destructive" });
-    }
-  };
-
-  const toggleFollowAuthor = async (authorUserId: string) => {
-    if (!user || authorUserId === user.id) return;
-    const meta = authorProMeta[authorUserId];
-    try {
-      if (followingAuthorIds.has(authorUserId)) {
-        if (meta?.proId) {
-          const { error } = await supabase
-            .from("professional_follows" as any)
-            .delete()
-            .eq("user_id", user.id)
-            .eq("professional_id", meta.proId);
-          if (error) throw error;
-        }
-        const { error: uErr } = await supabase
-          .from("user_follows" as any)
-          .delete()
-          .eq("follower_user_id", user.id)
-          .eq("followed_user_id", authorUserId);
-        if (uErr) throw uErr;
-      } else if (meta?.proId) {
-        const { error } = await supabase.from("professional_follows" as any).insert({
-          user_id: user.id,
-          professional_id: meta.proId,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("user_follows" as any).insert({
-          follower_user_id: user.id,
-          followed_user_id: authorUserId,
-        });
-        if (error) throw error;
-      }
-      await loadFeed({ silent: true });
-    } catch (e: any) {
-      toast({ title: "Erro ao seguir", description: e.message, variant: "destructive" });
     }
   };
 
@@ -866,8 +809,8 @@ export default function CommunityFeed({
         }
         const term = `%${raw.split(/\s+/)[0]}%`;
 
-        const mutualIds = await fetchAcceptedFriendUserIds(supabase, user.id);
-        const mutualSet = new Set(mutualIds);
+        const favIds = await fetchFavoritedProfessionalOwnerUserIds(supabase, user.id);
+        const favSet = new Set(favIds);
 
         const { data, error } = await supabase
           .from("profiles")
@@ -877,7 +820,7 @@ export default function CommunityFeed({
           .limit(20);
         if (error) throw error;
         const rows = (data || []) as AuthorRow[];
-        const filtered = rows.filter((r) => mutualSet.has(r.user_id));
+        const filtered = rows.filter((r) => favSet.has(r.user_id));
         setShareResults(filtered);
       } catch {
         setShareResults([]);
@@ -915,37 +858,37 @@ export default function CommunityFeed({
 
   useEffect(() => {
     if (!sharePost || !user) {
-      setFollowedForShare([]);
-      setLoadingFollowedShare(false);
+      setFavoritesForShare([]);
+      setLoadingFavoritesShare(false);
       return;
     }
     let cancelled = false;
     (async () => {
-      setLoadingFollowedShare(true);
+      setLoadingFavoritesShare(true);
       try {
-        const mutualUids = await fetchAcceptedFriendUserIds(supabase, user.id);
-        if (mutualUids.length === 0) {
-          if (!cancelled) setFollowedForShare([]);
+        const favUids = await fetchFavoritedProfessionalOwnerUserIds(supabase, user.id);
+        if (favUids.length === 0) {
+          if (!cancelled) setFavoritesForShare([]);
           return;
         }
 
         const { data: profs } = await supabase
           .from("profiles")
           .select("user_id, display_name, full_name, avatar_url")
-          .in("user_id", mutualUids);
+          .in("user_id", favUids);
         const profMap = new Map((profs || []).map((p: any) => [p.user_id as string, p as AuthorRow]));
-        const ordered: AuthorRow[] = mutualUids
+        const ordered: AuthorRow[] = favUids
           .map((uid) => profMap.get(uid))
           .filter(Boolean) as AuthorRow[];
         ordered.sort((a, b) =>
           authorLabel(a).localeCompare(authorLabel(b), "pt-BR", { sensitivity: "base" }),
         );
 
-        if (!cancelled) setFollowedForShare(ordered);
+        if (!cancelled) setFavoritesForShare(ordered);
       } catch {
-        if (!cancelled) setFollowedForShare([]);
+        if (!cancelled) setFavoritesForShare([]);
       } finally {
-        if (!cancelled) setLoadingFollowedShare(false);
+        if (!cancelled) setLoadingFavoritesShare(false);
       }
     })();
     return () => {
@@ -957,11 +900,29 @@ export default function CommunityFeed({
     if (!user || !sharePost) return;
     setShareSending(true);
     try {
-      const mutualOk = await areFriends(supabase, user.id, toUserId);
-      if (!mutualOk) {
+      const { data: proRow, error: proLookupErr } = await supabase
+        .from("professionals")
+        .select("id")
+        .eq("user_id", toUserId)
+        .maybeSingle();
+      if (proLookupErr || !proRow?.id) {
         toast({
-          title: "Só com amigos",
-          description: "Partilhe na conversa apenas com quem aceitou amizade consigo no Chamô.",
+          title: "Só com profissionais favoritos",
+          description: "Só é possível enviar pelo Chamô para perfis profissionais que estão nos seus favoritos.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const { data: favRow } = await supabase
+        .from("professional_favorites" as any)
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("professional_id", proRow.id)
+        .maybeSingle();
+      if (!favRow) {
+        toast({
+          title: "Adicione aos favoritos",
+          description: "Favorite o perfil profissional desta pessoa para partilhar a publicação na conversa.",
           variant: "destructive",
         });
         return;
@@ -974,22 +935,15 @@ export default function CommunityFeed({
       });
       if (sErr) throw sErr;
 
-      const { data: proRow, error: proErr } = await supabase
-        .from("professionals")
-        .select("id")
-        .eq("user_id", toUserId)
-        .maybeSingle();
-      if (!proErr && proRow?.id) {
-        const { data: threadId, error: rpcErr } = await supabase.rpc("ensure_following_direct_thread", {
-          p_professional_id: proRow.id,
+      const { data: threadId, error: rpcErr } = await supabase.rpc("ensure_following_direct_thread", {
+        p_professional_id: proRow.id,
+      });
+      if (!rpcErr && threadId) {
+        await supabase.from("chat_messages").insert({
+          request_id: threadId,
+          sender_id: user.id,
+          content: `[COMMUNITY_POST:${sharePost.id}]`,
         });
-        if (!rpcErr && threadId) {
-          await supabase.from("chat_messages").insert({
-            request_id: threadId,
-            sender_id: user.id,
-            content: `[COMMUNITY_POST:${sharePost.id}]`,
-          });
-        }
       }
 
       const me = (profile?.full_name || "Alguém").trim();
@@ -1092,8 +1046,7 @@ export default function CommunityFeed({
     const sum = commentReactionSummary[c.id] || {};
     const rxTotal = totalReactionCount(sum);
     const myRx = myReactionByComment[c.id];
-    const isFollowing = followingAuthorIds.has(c.user_id);
-    const canFollowMenu = !!(user && c.user_id !== user.id);
+    const canCommentMenu = !!(user && c.user_id !== user.id);
     const avatarInner = ca?.avatar_url ? (
       <img src={ca.avatar_url} alt="" className="w-full h-full object-cover" />
     ) : (
@@ -1198,18 +1151,8 @@ export default function CommunityFeed({
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
-                  {canFollowMenu ? (
-                    <DropdownMenuItem
-                      onClick={() => void toggleFollowAuthor(c.user_id)}
-                      className="gap-2"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      {isFollowing ? "Deixar de seguir" : "Seguir"}
-                    </DropdownMenuItem>
-                  ) : null}
-                  {user && c.user_id !== user.id ? (
+                  {canCommentMenu ? (
                     <>
-                      {canFollowMenu ? <DropdownMenuSeparator /> : null}
                       <DropdownMenuItem
                         onClick={() => {
                           setReportDialog({ kind: "comment", commentId: c.id });
@@ -1370,25 +1313,25 @@ export default function CommunityFeed({
             type="button"
             onClick={() => setFeedScope("all")}
             className={cn(
-              "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm",
+              "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm uppercase tracking-wide",
               feedScope === "all"
                 ? "bg-primary text-primary-foreground border-primary shadow-primary/25"
                 : "bg-white/95 text-foreground border-border/60 hover:bg-muted/60",
             )}
           >
-            Para você
+            Ver todos
           </button>
           <button
             type="button"
-            onClick={() => setFeedScope("following")}
+            onClick={() => setFeedScope("favorites")}
             className={cn(
-              "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm",
-              feedScope === "following"
+              "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm uppercase tracking-wide",
+              feedScope === "favorites"
                 ? "bg-primary text-primary-foreground border-primary shadow-primary/25"
                 : "bg-white/95 text-foreground border-border/60 hover:bg-muted/60",
             )}
           >
-            Seguindo
+            Ver favoritos
           </button>
         </div>
       )}
@@ -1464,39 +1407,10 @@ export default function CommunityFeed({
                   className="min-h-[140px] rounded-xl resize-none text-[16px] border-border/60"
                   data-tab-swipe-ignore
                 />
-                <div>
-                  <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
-                    Quem pode ver
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPostAudience("public")}
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold border transition-colors",
-                        postAudience === "public"
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-muted/50 border-border text-muted-foreground",
-                      )}
-                    >
-                      <Globe className="w-4 h-4" />
-                      Todos no Chamô
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPostAudience("followers")}
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold border transition-colors",
-                        postAudience === "followers"
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-muted/50 border-border text-muted-foreground",
-                      )}
-                    >
-                      <Users className="w-4 h-4" />
-                      Só meus seguidores
-                    </button>
-                  </div>
-                </div>
+                <p className="text-[12px] text-muted-foreground leading-snug">
+                  Sua publicação fica visível para <span className="font-semibold text-foreground">todos</span> na
+                  Comunidade.
+                </p>
                 <div>
                   <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
                     Mídia
@@ -1589,11 +1503,11 @@ export default function CommunityFeed({
           <p className="text-muted-foreground text-sm">Nenhuma publicação ainda.</p>
           {canPost && <p className="text-xs text-muted-foreground mt-2">Seja o primeiro a compartilhar.</p>}
         </div>
-      ) : displayPosts.length === 0 && feedScope === "following" && !hasPostsFromFollowing ? (
+      ) : displayPosts.length === 0 && feedScope === "favorites" && !hasPostsFromFavorites ? (
         <div className="rounded-[20px] bg-white border border-border/50 py-14 px-4 text-center shadow-md shadow-black/[0.04]">
-          <p className="text-muted-foreground text-sm">Nenhuma publicação de quem você segue.</p>
+          <p className="text-muted-foreground text-sm">Nenhuma publicação dos seus favoritos.</p>
           <p className="text-xs text-muted-foreground mt-2">
-            Explore perfis e toque em <strong>Seguir</strong> para ver os posts aqui.
+            Toque em <strong>Favoritar</strong> no perfil de um profissional para filtrar o feed aqui.
           </p>
         </div>
       ) : displayPosts.length === 0 && posts.length > 0 ? (
@@ -1622,9 +1536,6 @@ export default function CommunityFeed({
               !longBody || bodyExpanded ? post.body : `${post.body.slice(0, BODY_COLLAPSE_LEN).trim()}…`;
 
             const authorProfileTo = proPathByUserId[post.author_id];
-            const showFollowUI = !!(user && post.author_id !== user.id);
-            const isFollowingAuthor = followingAuthorIds.has(post.author_id);
-
             return (
               <article
                 key={post.id}
@@ -1682,34 +1593,9 @@ export default function CommunityFeed({
                             {proMeta.headline}
                           </p>
                         ) : null}
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {postTimeLabel(post.created_at)} ·{" "}
-                          <span className="text-primary/80 font-medium">
-                            {post.audience === "followers" ? "Seguidores" : "Público"}
-                          </span>
-                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{postTimeLabel(post.created_at)}</p>
                       </div>
                       <div className="flex items-start gap-1 shrink-0">
-                        {showFollowUI &&
-                          (isFollowingAuthor ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleFollowAuthor(post.author_id)}
-                              className="shrink-0 inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:bg-muted/70 transition-colors"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              Seguindo
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => toggleFollowAuthor(post.author_id)}
-                              className="shrink-0 inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow-sm hover:opacity-95 transition-opacity"
-                            >
-                              <UserPlus className="w-3.5 h-3.5" />
-                              Seguir
-                            </button>
-                          ))}
                         {user ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -1905,7 +1791,7 @@ export default function CommunityFeed({
           <SheetHeader className="px-5 pt-1 pb-3 text-left space-y-1 border-b border-border/40">
             <SheetTitle className="text-lg font-bold tracking-tight">Compartilhar publicação</SheetTitle>
             <p className="text-[13px] text-muted-foreground font-normal leading-snug pr-6">
-              No Chamô, só aparecem contactos com seguimento mútuo (vocês seguem o perfil profissional um do outro). Também pode partilhar o link nas redes.
+              Envie no chat para profissionais que estão nos seus <strong>favoritos</strong>. Também pode partilhar o link nas redes.
             </p>
           </SheetHeader>
 
@@ -1924,19 +1810,19 @@ export default function CommunityFeed({
 
           <div className="px-5 pb-3 shrink-0 border-b border-border/30">
               <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
-                Seguimento mútuo
+                Favoritos
               </p>
-              {loadingFollowedShare ? (
+              {loadingFavoritesShare ? (
                 <div className="flex justify-center py-4">
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : followedForShare.length === 0 ? (
+              ) : favoritesForShare.length === 0 ? (
                 <p className="text-[13px] text-muted-foreground py-3 text-center leading-snug">
-                  Ninguém com seguimento mútuo por aqui. Ambos precisam seguir o perfil profissional um do outro — ou use o link para WhatsApp / Instagram.
+                  Nenhum favorito ainda. Favorite perfis profissionais para enviar publicações pelo chat — ou use o link para WhatsApp / Instagram.
                 </p>
               ) : (
                 <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none touch-pan-x">
-                  {followedForShare.map((r) => (
+                  {favoritesForShare.map((r) => (
                     <button
                       key={r.user_id}
                       type="button"
@@ -1971,7 +1857,7 @@ export default function CommunityFeed({
             )}
             {!shareSearching && shareQuery.trim().length >= 2 && shareResults.length === 0 && (
               <p className="text-sm text-muted-foreground py-4 text-center">
-                Ninguém encontrado com seguimento mútuo. Confirme se ambos seguem o perfil profissional um do outro.
+                Ninguém encontrado entre os seus favoritos com esse nome.
               </p>
             )}
             {!shareSearching &&

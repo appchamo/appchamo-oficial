@@ -94,3 +94,28 @@ export async function declineOrCancelFriendRequest(client: SupabaseClient, reque
   const { error } = await client.rpc("decline_or_cancel_friend_request" as any, { p_request_id: requestId });
   if (error) throw error;
 }
+
+/** `user_id` dos donos de perfis profissionais que o utilizador favoritou. */
+export async function fetchFavoritedProfessionalOwnerUserIds(
+  client: SupabaseClient,
+  userId: string,
+): Promise<string[]> {
+  const { data: favs, error } = await client
+    .from("professional_favorites")
+    .select("professional_id")
+    .eq("user_id", userId);
+  if (error || !favs?.length) return [];
+  const pids = [...new Set(favs.map((r: { professional_id: string }) => r.professional_id).filter(Boolean))];
+  if (!pids.length) return [];
+  const { data: pros } = await client.from("professionals").select("user_id").in("id", pids);
+  return [...new Set((pros || []).map((r: { user_id: string }) => r.user_id))];
+}
+
+/** Remove amizade aceite (ex.: ao deixar de seguir). */
+export async function removeFriendshipPair(client: SupabaseClient, a: string, b: string): Promise<void> {
+  if (!a || !b || a === b) return;
+  const user_a = a < b ? a : b;
+  const user_b = a < b ? b : a;
+  const { error } = await client.from("user_friendships").delete().eq("user_a", user_a).eq("user_b", user_b);
+  if (error) throw error;
+}

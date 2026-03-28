@@ -858,6 +858,35 @@ export type Database = {
           },
         ]
       }
+      professional_analytics_events: {
+        Row: {
+          created_at: string
+          event_kind: string
+          id: number
+          target_user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_kind: string
+          id?: never
+          target_user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_kind?: string
+          id?: never
+          target_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "professional_analytics_events_target_user_id_fkey"
+            columns: ["target_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       professional_fiscal_data: {
         Row: {
           anticipation_enabled: boolean
@@ -1788,7 +1817,7 @@ export type Database = {
         Returns: boolean
       }
       get_my_professional_analytics: {
-        Args: never
+        Args: { p_from?: string | null; p_to?: string | null }
         Returns: Json
       }
       increment_professional_analytics: {

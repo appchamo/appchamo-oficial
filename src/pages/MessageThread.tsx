@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Heart, Sparkles, UserPlus } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Heart, Sparkles } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
@@ -154,13 +154,11 @@ const MessageThread = () => {
   const [peerProfileNavKey, setPeerProfileNavKey] = useState<string | null>(null);
   const [peerClientPreviewOpen, setPeerClientPreviewOpen] = useState(false);
   const [peerClientProId, setPeerClientProId] = useState<string | null>(null);
-  const [clientPreviewFollowing, setClientPreviewFollowing] = useState(false);
   const [clientPreviewFavorite, setClientPreviewFavorite] = useState(false);
   const [clientPreviewSocialBusy, setClientPreviewSocialBusy] = useState(false);
   /** user_id do destinatário (quem recebe a mensagem) — usado para push de nova mensagem */
   const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
   /** Cliente segue o profissional desta conversa — anel verde no avatar do cabeçalho. */
-  const [peerFollowRing, setPeerFollowRing] = useState(false);
   const [threadPeerFavorite, setThreadPeerFavorite] = useState(false);
 
   // Billing state
@@ -382,10 +380,10 @@ const MessageThread = () => {
       const theirPid = (theirPro as { id?: string } | null)?.id;
       if (myPid && theirPid) {
         const [{ data: rowA }, { data: rowB }] = await Promise.all([
-          supabase.from("professional_follows" as any).select("id").eq("user_id", userId).eq("professional_id", theirPid).maybeSingle(),
-          supabase.from("professional_follows" as any).select("id").eq("user_id", recipientId).eq("professional_id", myPid).maybeSingle(),
+          supabase.from("professional_favorites" as any).select("id").eq("user_id", userId).eq("professional_id", theirPid).maybeSingle(),
+          supabase.from("professional_favorites" as any).select("id").eq("user_id", recipientId).eq("professional_id", myPid).maybeSingle(),
         ]);
-        if (rowA && rowB) friendHint = " · Amigo no Chamô";
+        if (rowA && rowB) friendHint = " · Favoritos no Chamô";
       }
     } catch {
       /* ignore */
@@ -551,24 +549,15 @@ const MessageThread = () => {
           .eq("user_id", user.id)
           .eq("professional_id", req.professional_id)
           .maybeSingle();
-        const followQ = supabase
-          .from("professional_follows" as any)
-          .select("id")
-          .eq("user_id", user.id)
-          .eq("professional_id", req.professional_id)
-          .maybeSingle();
-
-        const [proRes, clientProRes, reviewRes, appRes, crsRes, favRes, followRes] = await Promise.all([
+        const [proRes, clientProRes, reviewRes, appRes, crsRes, favRes] = await Promise.all([
           proQuery,
           clientProQuery,
           reviewCountQuery,
           appointmentQuery,
           crsQuery,
           favQ,
-          followQ,
         ]);
         setThreadPeerFavorite(!!favRes.data);
-        setPeerFollowRing(isClient && !!followRes.data);
         const pro = proRes.data;
         const allowedLabelColors = new Set(["blue", "green", "orange", "red"]);
         const crsRow = crsRes.data as { label_color?: string | null; label_text?: string | null } | null;
@@ -595,7 +584,6 @@ const MessageThread = () => {
             const pid = (pro as { id: string }).id;
             setPeerProfileNavKey((slug && String(slug).trim()) || pid || null);
             setPeerClientProId(null);
-            setClientPreviewFollowing(false);
             setClientPreviewFavorite(false);
           }
           if (!isClient && pro.user_id === user.id) {
@@ -619,14 +607,14 @@ const MessageThread = () => {
             const cproId = cpro?.id ?? null;
             setPeerClientProId(cproId);
             if (cproId) {
-              const [fo, fa] = await Promise.all([
-                supabase.from("professional_follows" as any).select("id").eq("user_id", user.id).eq("professional_id", cproId).maybeSingle(),
-                supabase.from("professional_favorites" as any).select("id").eq("user_id", user.id).eq("professional_id", cproId).maybeSingle(),
-              ]);
-              setClientPreviewFollowing(!!fo.data);
-              setClientPreviewFavorite(!!fa.data);
+              const { data: fa } = await supabase
+                .from("professional_favorites" as any)
+                .select("id")
+                .eq("user_id", user.id)
+                .eq("professional_id", cproId)
+                .maybeSingle();
+              setClientPreviewFavorite(!!fa);
             } else {
-              setClientPreviewFollowing(false);
               setClientPreviewFavorite(false);
             }
             const { data: profile } = (await supabase
@@ -639,7 +627,6 @@ const MessageThread = () => {
         setPeerProfileNavKey(null);
         setPeerClientProId(null);
         setThreadPeerFavorite(false);
-        setPeerFollowRing(false);
       }
     } catch (err) {
       console.error("Erro ao carregar chat:", err);
@@ -973,33 +960,6 @@ const MessageThread = () => {
     }
     if (isProfessional && recipientUserId) {
       setPeerClientPreviewOpen(true);
-    }
-  };
-
-  const toggleClientPreviewFollow = async () => {
-    if (!userId || !peerClientProId) return;
-    setClientPreviewSocialBusy(true);
-    try {
-      if (clientPreviewFollowing) {
-        const { error } = await supabase
-          .from("professional_follows" as any)
-          .delete()
-          .eq("user_id", userId)
-          .eq("professional_id", peerClientProId);
-        if (error) throw error;
-        setClientPreviewFollowing(false);
-      } else {
-        const { error } = await supabase.from("professional_follows" as any).insert({
-          user_id: userId,
-          professional_id: peerClientProId,
-        });
-        if (error) throw error;
-        setClientPreviewFollowing(true);
-      }
-    } catch {
-      toast({ title: "Não foi possível atualizar", variant: "destructive" });
-    } finally {
-      setClientPreviewSocialBusy(false);
     }
   };
 
@@ -2697,57 +2657,27 @@ const MessageThread = () => {
             aria-label={!isProfessional ? "Abrir perfil do profissional" : "Ver dados do cliente"}
           >
             <div className="relative flex-shrink-0">
-              {peerFollowRing && !isProfessional ? (
-                <div className="rounded-full p-[2.5px] bg-gradient-to-br from-emerald-400 via-green-500 to-teal-600">
-                  <div className="rounded-full bg-card p-[1.5px]">
-                    {otherParty.avatar_url ? (
-                      <img
-                        src={otherParty.avatar_url}
-                        alt={otherParty.name}
-                        loading="eager"
-                        className="w-8 h-8 rounded-full object-cover"
-                        onError={(e) => {
-                          const t = e.currentTarget;
-                          t.onerror = null;
-                          t.style.display = "none";
-                          const fb = t.nextElementSibling as HTMLElement | null;
-                          if (fb) fb.style.display = "flex";
-                        }}
-                      />
-                    ) : null}
-                    <div
-                      className="w-8 h-8 rounded-full bg-primary/10 items-center justify-center text-[10px] font-bold text-primary"
-                      style={{ display: otherParty.avatar_url ? "none" : "flex" }}
-                    >
-                      {otherInitials}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {otherParty.avatar_url ? (
-                    <img
-                      src={otherParty.avatar_url}
-                      alt={otherParty.name}
-                      loading="eager"
-                      className="w-9 h-9 rounded-full object-cover flex-shrink-0"
-                      onError={(e) => {
-                        const t = e.currentTarget;
-                        t.onerror = null;
-                        t.style.display = "none";
-                        const fb = t.nextElementSibling as HTMLElement | null;
-                        if (fb) fb.style.display = "flex";
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className="w-9 h-9 rounded-full bg-primary/10 items-center justify-center text-xs font-bold text-primary flex-shrink-0"
-                    style={{ display: otherParty.avatar_url ? "none" : "flex" }}
-                  >
-                    {otherInitials}
-                  </div>
-                </>
-              )}
+              {otherParty.avatar_url ? (
+                <img
+                  src={otherParty.avatar_url}
+                  alt={otherParty.name}
+                  loading="eager"
+                  className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                  onError={(e) => {
+                    const t = e.currentTarget;
+                    t.onerror = null;
+                    t.style.display = "none";
+                    const fb = t.nextElementSibling as HTMLElement | null;
+                    if (fb) fb.style.display = "flex";
+                  }}
+                />
+              ) : null}
+              <div
+                className="w-9 h-9 rounded-full bg-primary/10 items-center justify-center text-xs font-bold text-primary flex-shrink-0"
+                style={{ display: otherParty.avatar_url ? "none" : "flex" }}
+              >
+                {otherInitials}
+              </div>
               {threadPeerFavorite && !isProfessional && (
                 <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-400 text-white flex items-center justify-center shadow border border-white">
                   <Heart className="w-2.5 h-2.5 fill-white" />
@@ -3318,28 +3248,16 @@ const MessageThread = () => {
             </div>
             {peerClientProId ? (
               <DialogFooter className="flex-col sm:flex-col gap-2 w-full">
-                <div className="grid grid-cols-2 gap-2 w-full">
-                  <Button
-                    type="button"
-                    variant={clientPreviewFollowing ? "secondary" : "outline"}
-                    className="rounded-xl font-semibold gap-2"
-                    disabled={clientPreviewSocialBusy}
-                    onClick={() => void toggleClientPreviewFollow()}
-                  >
-                    <UserPlus className={`w-4 h-4 ${clientPreviewFollowing ? "text-primary" : ""}`} />
-                    {clientPreviewFollowing ? "Seguindo" : "Seguir"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={clientPreviewFavorite ? "secondary" : "outline"}
-                    className="rounded-xl font-semibold gap-2"
-                    disabled={clientPreviewSocialBusy}
-                    onClick={() => void toggleClientPreviewFavorite()}
-                  >
-                    <Heart className={`w-4 h-4 ${clientPreviewFavorite ? "fill-rose-500 text-rose-500" : ""}`} />
-                    {clientPreviewFavorite ? "Favorito" : "Favoritar"}
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  variant={clientPreviewFavorite ? "secondary" : "outline"}
+                  className="rounded-xl font-semibold gap-2 w-full"
+                  disabled={clientPreviewSocialBusy}
+                  onClick={() => void toggleClientPreviewFavorite()}
+                >
+                  <Heart className={`w-4 h-4 ${clientPreviewFavorite ? "fill-rose-500 text-rose-500" : ""}`} />
+                  {clientPreviewFavorite ? "Favorito" : "Favoritar"}
+                </Button>
                 <Button
                   type="button"
                   variant="ghost"

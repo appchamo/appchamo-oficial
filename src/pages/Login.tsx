@@ -7,6 +7,7 @@ import { useAuth, OAUTH_FAILED_KEY } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { resolveAuthReturnPath, setPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
+import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
 import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -512,14 +513,39 @@ const Login = () => {
     };
   }, []);
 
-  const handleResendEmail = async () => {
-    if (!email) { toast({ title: "Digite seu e-mail acima." }); return; }
+  /** Reenvia e-mail de confirmação de cadastro (banner pós-signup ou campo “e-mail não confirmado”). */
+  const handleResendSignupEmail = async (targetEmail?: string) => {
+    const em = (targetEmail ?? email).trim();
+    if (!em) {
+      toast({
+        title: "Informe o e-mail",
+        description: "Use o mesmo e-mail do cadastro no campo abaixo.",
+        variant: "destructive",
+      });
+      return;
+    }
     setResending(true);
-    const { error } = await supabase.auth.resend({ type: "signup", email });
-    if (error) toast({ title: "Erro ao reenviar", description: translateError(error.message), variant: "destructive" });
-    else toast({ title: "E-mail de verificação reenviado!", description: "Verifique sua caixa de entrada." });
-    setResending(false);
+    try {
+      const emailRedirectTo = `${getPublicAppBaseUrl().replace(/\/$/, "")}/login`;
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: em,
+        options: { emailRedirectTo },
+      });
+      if (error) {
+        toast({ title: "Erro ao reenviar", description: translateError(error.message), variant: "destructive" });
+      } else {
+        toast({
+          title: "E-mail reenviado",
+          description: "Confira a caixa de entrada e o spam.",
+        });
+      }
+    } finally {
+      setResending(false);
+    }
   };
+
+  const handleResendEmail = () => void handleResendSignupEmail(email);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -657,6 +683,18 @@ const Login = () => {
                   </>
                 )}
               </p>
+              <button
+                type="button"
+                disabled={
+                  resending ||
+                  !((verifyEmailBanner.email ?? "").trim() || email.trim())
+                }
+                onClick={() => void handleResendSignupEmail(verifyEmailBanner.email)}
+                className="mt-3 flex w-full max-w-full items-center justify-center gap-2 rounded-xl border-2 border-amber-600/55 bg-white/90 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-amber-950 shadow-sm transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-400/50 dark:bg-amber-950/40 dark:text-amber-50 dark:hover:bg-amber-900/50"
+              >
+                <RefreshCw className={`h-4 w-4 shrink-0 ${resending ? "animate-spin" : ""}`} />
+                {resending ? "Reenviando…" : "Reenviar e-mail"}
+              </button>
               <p className="text-[11px] font-medium text-amber-800/85 dark:text-amber-200/80 mt-2 rounded-md bg-amber-200/35 dark:bg-black/20 px-2 py-1 inline-block">
                 No celular o link pode abrir o app diretamente; no computador, abre o site no navegador.
               </p>

@@ -172,6 +172,10 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
   const didAdvanceFromOAuth = useRef(false);
+  /** Evita avançar no formulário antes de resolver getSession + perfil (corrida com sessão antiga → /login). */
+  const [signupBootstrapReady, setSignupBootstrapReady] = useState(false);
+  /** Evita um frame do wizard antes do router ir para /login (perfil já completo). */
+  const [authKickPending, setAuthKickPending] = useState(false);
 
   // Se voltou do OAuth com erro na URL (ex.: Apple config errada), mostrar toast e limpar URL
   useEffect(() => {
@@ -215,100 +219,128 @@ const Signup = () => {
 
   // Ao montar: checa se já existe sessão (ex.: refresh) e avança ou redireciona
   useEffect(() => {
-    if (localStorage.getItem("manual_login_intent") === "true") return;
+    let cancelled = false;
+    const markReady = () => {
+      if (!cancelled) setSignupBootstrapReady(true);
+    };
+
+    if (localStorage.getItem("manual_login_intent") === "true") {
+      markReady();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const checkSocialUser = async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-
-      if (!currentSession?.user) {
-        const ed = readEmailDraft();
-        if (ed && ed.step !== "method-choice" && ed.step !== "type") {
-          setAccountType(ed.accountType);
-          setBasicData(ed.basicData);
-          const next = resolveRestoredStep(ed.accountType, ed.step, ed.hadDocuments);
-          setStep(next);
-          if (ed.step === "profile" && ed.hadDocuments && next === "documents") {
-            toast({
-              title: "Envie os documentos novamente",
-              description: "Os arquivos não ficam salvos após recarregar. Anexe de novo para finalizar.",
-            });
-          }
-        }
-        return;
-      }
-
-      setLoading(true);
       try {
-        const { data: profileRow, error: profileError } = await supabase
-          .from("profiles")
-          .select("cpf, phone")
-          .eq("user_id", currentSession.user.id)
-          .maybeSingle();
-        // Sessão inválida (ex.: usuário excluído no Supabase) → limpa e manda pro login
-        const errMsg = (profileError?.message || "").toLowerCase();
-        if (profileError && (errMsg.includes("jwt") || errMsg.includes("refresh") || errMsg.includes("session") || profileError.code === "PGRST301")) {
-          await forceExitToLogin();
-          return;
-        }
-        const isComplete = profileRow?.cpf || profileRow?.phone;
-        if (isComplete) {
-          localStorage.removeItem("signup_in_progress");
-          await supabase.auth.signOut();
-          toast({
-            title: "Já tem cadastro",
-            description: "Faça login com sua conta.",
-            variant: "destructive",
-          });
-          navigate("/login");
-          return;
-        }
+        const {
+          data: { session: currentSession },
+        } = await supabase.auth.getSession();
 
-        const u = currentSession.user;
-        const oauthDefaults: BasicData = {
-          name: u.user_metadata?.full_name || "",
-          displayName: u.user_metadata?.full_name || "",
-          email: u.email || "",
-          password: "",
-          phone: "",
-          document: "",
-          documentType: "cpf",
-          birthDate: "",
-          gender: "prefer_not_say",
-          addressZip: "",
-          addressStreet: "",
-          addressNumber: "",
-          addressComplement: "",
-          addressNeighborhood: "",
-          addressCity: "",
-          addressState: "",
-          addressCountry: "Brasil",
-        };
-
-        const draft = readOAuthDraft(u.id);
-        if (draft && draft.step !== "method-choice" && draft.step !== "type") {
-          const nextStep = resolveRestoredStep(draft.accountType, draft.step, draft.hadDocuments);
-          setCreatedUserId(u.id);
-          setAccountType(draft.accountType);
-          setBasicData(draft.basicData ?? oauthDefaults);
-          setStep(nextStep);
-          if (draft.step === "profile" && draft.hadDocuments && nextStep === "documents") {
-            toast({
-              title: "Envie os documentos novamente",
-              description: "Os arquivos não ficam salvos após recarregar. Anexe de novo para finalizar.",
-            });
+        if (!currentSession?.user) {
+          const ed = readEmailDraft();
+          if (ed && ed.step !== "method-choice" && ed.step !== "type") {
+            setAccountType(ed.accountType);
+            setBasicData(ed.basicData);
+            const next = resolveRestoredStep(ed.accountType, ed.step, ed.hadDocuments);
+            setStep(next);
+            if (ed.step === "profile" && ed.hadDocuments && next === "documents") {
+              toast({
+                title: "Envie os documentos novamente",
+                description: "Os arquivos não ficam salvos após recarregar. Anexe de novo para finalizar.",
+              });
+            }
           }
           return;
         }
 
-        setCreatedUserId(u.id);
-        setBasicData(oauthDefaults);
-        setStep("type");
-      } catch (err) {
-        console.error("Erro na Blitz Social:", err);
+        setLoading(true);
+        try {
+          const { data: profileRow, error: profileError } = await supabase
+            .from("profiles")
+            .select("cpf, phone")
+            .eq("user_id", currentSession.user.id)
+            .maybeSingle();
+          // Sessão inválida (ex.: usuário excluído no Supabase) → limpa e manda pro login
+          const errMsg = (profileError?.message || "").toLowerCase();
+          if (
+            profileError &&
+            (errMsg.includes("jwt") ||
+              errMsg.includes("refresh") ||
+              errMsg.includes("session") ||
+              profileError.code === "PGRST301")
+          ) {
+            await forceExitToLogin();
+            return;
+          }
+          const isComplete = profileRow?.cpf || profileRow?.phone;
+          if (isComplete) {
+            setAuthKickPending(true);
+            localStorage.removeItem("signup_in_progress");
+            await supabase.auth.signOut();
+            toast({
+              title: "Já tem cadastro",
+              description: "Faça login com sua conta.",
+              variant: "destructive",
+            });
+            navigate("/login", { replace: true });
+            return;
+          }
+
+          const u = currentSession.user;
+          const oauthDefaults: BasicData = {
+            name: u.user_metadata?.full_name || "",
+            displayName: u.user_metadata?.full_name || "",
+            email: u.email || "",
+            password: "",
+            phone: "",
+            document: "",
+            documentType: "cpf",
+            birthDate: "",
+            gender: "prefer_not_say",
+            addressZip: "",
+            addressStreet: "",
+            addressNumber: "",
+            addressComplement: "",
+            addressNeighborhood: "",
+            addressCity: "",
+            addressState: "",
+            addressCountry: "Brasil",
+          };
+
+          const draft = readOAuthDraft(u.id);
+          if (draft && draft.step !== "method-choice" && draft.step !== "type") {
+            const nextStep = resolveRestoredStep(draft.accountType, draft.step, draft.hadDocuments);
+            setCreatedUserId(u.id);
+            setAccountType(draft.accountType);
+            setBasicData(draft.basicData ?? oauthDefaults);
+            setStep(nextStep);
+            if (draft.step === "profile" && draft.hadDocuments && nextStep === "documents") {
+              toast({
+                title: "Envie os documentos novamente",
+                description: "Os arquivos não ficam salvos após recarregar. Anexe de novo para finalizar.",
+              });
+            }
+            return;
+          }
+
+          setCreatedUserId(u.id);
+          setBasicData(oauthDefaults);
+          setStep("type");
+        } catch (err) {
+          console.error("Erro na Blitz Social:", err);
+        } finally {
+          setLoading(false);
+        }
       } finally {
-        setLoading(false);
+        markReady();
       }
     };
-    checkSocialUser();
+
+    void checkSocialUser();
+    return () => {
+      cancelled = true;
+    };
   }, [navigate]);
 
   // Quando volta do OAuth no mobile: sessão chega depois; avança para "Escolha o tipo" (type)
@@ -473,24 +505,37 @@ const Signup = () => {
 
   const handleBasicNext = useCallback(
     async (data: BasicData) => {
+      const emailNorm = data.email.trim().toLowerCase();
+      const payload: BasicData = { ...data, email: emailNorm };
+
       setLoading(true);
       try {
-        if (data.email && !createdUserId) {
-          const { data: emailExists } = await supabase.rpc("check_email_exists", {
-            user_email: data.email,
+        if (emailNorm && !createdUserId) {
+          const { data: existsRaw, error: rpcError } = await supabase.rpc("check_email_exists", {
+            user_email: emailNorm,
           });
 
-          if (emailExists) {
+          if (rpcError) {
+            toast({
+              title: "Não foi possível verificar o e-mail",
+              description: "Confira a conexão e tente novamente.",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          // Só trata como cadastrado com boolean explícito (evita truthy acidental do cliente).
+          if (existsRaw === true) {
             toast({
               title: "E-mail já cadastrado",
               description: "Por favor, entre com sua conta.",
               variant: "destructive",
             });
-            await forceExitToLogin();
+            navigate("/login", { replace: true });
             return;
           }
         }
-        setBasicData(data);
+        setBasicData(payload);
         if (accountType === "professional") setStep("document-notice");
         else setStep("profile");
       } catch {
@@ -499,7 +544,7 @@ const Signup = () => {
         setLoading(false);
       }
     },
-    [accountType, createdUserId],
+    [accountType, createdUserId, navigate],
   );
 
   /** Sempre volta para Cliente / Profissional (não para Google/Apple/e-mail após OAuth). */
@@ -728,9 +773,21 @@ const Signup = () => {
     }
   };
 
+  if (!signupBootstrapReady || authKickPending) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
+        <div className="text-center">
+          <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">Carregando…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
-      {loading && step !== "basic" && step !== "document-notice" && (
+      {loading && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
           <div className="text-center">
             <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>

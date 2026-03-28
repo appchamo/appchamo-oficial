@@ -1,4 +1,4 @@
-import { User, Briefcase } from "lucide-react";
+import { IdCard, ScanSearch } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 type AccountType = "client" | "professional";
@@ -41,17 +41,30 @@ const StepAccountType = ({ onSelect }: Props) => {
         </div>
         <div className="flex flex-col gap-3">
           {[
-            { type: "client" as const, icon: User, label: "Cliente", desc: "Contrate profissionais" },
-            { type: "professional" as const, icon: Briefcase, label: "Profissional", desc: "Ofereça seus serviços" },
+            {
+              type: "client" as const,
+              icon: ScanSearch,
+              label: "Cliente",
+              desc: "Contrate profissionais",
+            },
+            {
+              type: "professional" as const,
+              icon: IdCard,
+              label: "Profissional",
+              desc: "Ofereça seus serviços",
+            },
           ].map((opt) => (
             <button
               key={opt.type}
               type="button"
               onClick={() => onSelect(opt.type)}
-              className="flex items-center gap-4 bg-card border rounded-2xl p-5 hover:border-primary/40 hover:shadow-card transition-all text-left"
+              className="group flex items-center gap-4 bg-card border border-border/80 rounded-2xl p-5 hover:border-primary/35 hover:shadow-md transition-all text-left"
             >
-              <div className="w-12 h-12 rounded-xl bg-accent flex items-center justify-center">
-                <opt.icon className="w-6 w-6 text-primary" />
+              <div
+                className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/[0.14] via-primary/[0.07] to-transparent ring-1 ring-primary/15 shadow-sm transition-transform duration-200 group-hover:scale-[1.02] group-hover:ring-primary/25"
+                aria-hidden
+              >
+                <opt.icon className="h-7 w-7 text-primary" strokeWidth={1.5} />
               </div>
               <div>
                 <p className="font-semibold text-foreground">{opt.label}</p>

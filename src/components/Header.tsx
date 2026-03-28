@@ -270,8 +270,8 @@ const Header = () => {
 
   return (
     <>
-      <header className="relative z-30 flex-shrink-0 bg-card/90 backdrop-blur-md border-b border-secondary">
-        <div className="flex items-center justify-between gap-2 px-4 py-3 max-w-screen-lg mx-auto min-w-0">
+      <header className="relative z-30 flex-shrink-0 bg-card/90 backdrop-blur-md border-b border-secondary lg:border-border/60">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 max-w-screen-lg lg:max-w-none mx-auto lg:mx-0 min-w-0 lg:px-6">
           <div className="truncate min-w-0 flex-1 flex items-center">
             {user && isHomePath ? (
               <div
@@ -412,8 +412,9 @@ const Header = () => {
               </button>
             )}
             <button
+              type="button"
               onClick={() => setMenuOpen(true)}
-              className="p-2 rounded-lg hover:bg-muted transition-colors"
+              className="lg:hidden p-2 rounded-lg hover:bg-muted transition-colors"
               aria-label="Abrir menu"
               data-onboarding="menu-button"
             >

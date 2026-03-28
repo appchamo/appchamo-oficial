@@ -545,25 +545,31 @@ export default function CommunityFeed({
 
   const setReaction = async (postId: string, type: ReactionType) => {
     if (!user) return;
+    const uid = user.id;
     const current = myReactionByPost[postId];
+    setReactions((prev) => {
+      const rest = prev.filter((x) => !(x.post_id === postId && x.user_id === uid));
+      if (current === type) return rest;
+      return [...rest, { post_id: postId, user_id: uid, reaction_type: type }];
+    });
     try {
       if (current === type) {
         const { error } = await supabase
           .from("community_post_reactions" as any)
           .delete()
           .eq("post_id", postId)
-          .eq("user_id", user.id);
+          .eq("user_id", uid);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("community_post_reactions" as any).upsert(
-          { post_id: postId, user_id: user.id, reaction_type: type },
+          { post_id: postId, user_id: uid, reaction_type: type },
           { onConflict: "post_id,user_id" },
         );
         if (error) throw error;
       }
-      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro na reação", description: e.message, variant: "destructive" });
+      await loadFeed({ silent: true });
     }
   };
 
@@ -634,25 +640,31 @@ export default function CommunityFeed({
 
   const setCommentReaction = async (commentId: string, type: ReactionType) => {
     if (!user) return;
+    const uid = user.id;
     const current = myReactionByComment[commentId];
+    setCommentReactions((prev) => {
+      const rest = prev.filter((x) => !(x.comment_id === commentId && x.user_id === uid));
+      if (current === type) return rest;
+      return [...rest, { comment_id: commentId, user_id: uid, reaction_type: type }];
+    });
     try {
       if (current === type) {
         const { error } = await supabase
           .from("community_comment_reactions" as any)
           .delete()
           .eq("comment_id", commentId)
-          .eq("user_id", user.id);
+          .eq("user_id", uid);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("community_comment_reactions" as any).upsert(
-          { comment_id: commentId, user_id: user.id, reaction_type: type },
+          { comment_id: commentId, user_id: uid, reaction_type: type },
           { onConflict: "comment_id,user_id" },
         );
         if (error) throw error;
       }
-      await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro na reação", description: e.message, variant: "destructive" });
+      await loadFeed({ silent: true });
     }
   };
 
@@ -965,21 +977,35 @@ export default function CommunityFeed({
         ? commentsSheetThreads.repliesByParent[c.id].length
         : 0;
 
+    const avSize = ctx.isReply ? "w-7 h-7 min-w-7 min-h-7" : "w-9 h-9 min-w-9 min-h-9";
     const avatarEl = cTo ? (
       <Link
         to={cTo}
-        className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50 active:scale-[0.98] transition-transform"
+        className={cn(
+          "rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50 active:scale-[0.98] transition-transform",
+          avSize,
+        )}
       >
         {avatarInner}
       </Link>
     ) : (
-      <div className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50">
+      <div
+        className={cn(
+          "rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50",
+          avSize,
+        )}
+      >
         {avatarInner}
       </div>
     );
 
     return (
-      <div className={cn("flex gap-2", ctx.isReply && "mt-2 ml-1 pl-3 border-l-2 border-border/55")}>
+      <div
+        className={cn(
+          "flex gap-2.5",
+          ctx.isReply && "mt-2 ml-6 pl-4 border-l border-border/50",
+        )}
+      >
         {avatarEl}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -988,23 +1014,46 @@ export default function CommunityFeed({
                 {cTo ? (
                   <Link
                     to={cTo}
-                    className="font-bold text-[14px] text-foreground hover:text-primary transition-colors"
+                    className={cn(
+                      "font-bold text-foreground hover:text-primary transition-colors",
+                      ctx.isReply ? "text-[13px]" : "text-[14px]",
+                    )}
                   >
                     {authorLabel(ca)}
                   </Link>
                 ) : (
-                  <span className="font-bold text-[14px]">{authorLabel(ca)}</span>
+                  <span className={cn("font-bold", ctx.isReply ? "text-[13px]" : "text-[14px]")}>
+                    {authorLabel(ca)}
+                  </span>
                 )}
                 {cMeta?.verified ? (
-                  <BadgeCheck className="w-3.5 h-3.5 shrink-0 text-sky-500" aria-label="Verificado" />
+                  <BadgeCheck
+                    className={cn(
+                      "shrink-0 text-sky-500",
+                      ctx.isReply ? "w-3 h-3" : "w-3.5 h-3.5",
+                    )}
+                    aria-label="Verificado"
+                  />
                 ) : null}
               </div>
               {cMeta?.headline ? (
-                <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">{cMeta.headline}</p>
+                <p
+                  className={cn(
+                    "text-muted-foreground leading-tight mt-0.5",
+                    ctx.isReply ? "text-[10px]" : "text-[11px]",
+                  )}
+                >
+                  {cMeta.headline}
+                </p>
               ) : null}
             </div>
             <div className="flex items-center gap-0.5 shrink-0">
-              <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+              <span
+                className={cn(
+                  "text-muted-foreground whitespace-nowrap",
+                  ctx.isReply ? "text-[10px]" : "text-[11px]",
+                )}
+              >
                 {postTimeLabel(c.created_at)}
               </span>
               <DropdownMenu>
@@ -1062,14 +1111,22 @@ export default function CommunityFeed({
             </div>
           </div>
 
-          <div className="text-[14px] text-foreground mt-1 leading-snug">
+          <div
+            className={cn(
+              "text-foreground mt-1 leading-snug",
+              ctx.isReply ? "text-[13px]" : "text-[14px]",
+            )}
+          >
             {collapseBody && !bodyOpen ? (
               <>
                 <span className="whitespace-pre-wrap">{c.body.slice(0, COMMENT_BODY_COLLAPSE)}</span>
                 <span>… </span>
                 <button
                   type="button"
-                  className="text-primary font-semibold text-[14px] inline p-0 h-auto align-baseline bg-transparent border-0 cursor-pointer"
+                  className={cn(
+                    "text-primary font-semibold inline p-0 h-auto align-baseline bg-transparent border-0 cursor-pointer",
+                    ctx.isReply ? "text-[13px]" : "text-[14px]",
+                  )}
                   onClick={() => setExpandedBodies((e) => ({ ...e, [c.id]: true }))}
                 >
                   mais
@@ -1080,7 +1137,7 @@ export default function CommunityFeed({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-1 mt-2">
+          <div className={cn("flex flex-wrap items-center gap-1", ctx.isReply ? "mt-1.5" : "mt-2")}>
             <div className="flex items-center gap-0.5">
               <LinkedInLikeControl
                 fillRow={false}
@@ -1145,7 +1202,7 @@ export default function CommunityFeed({
   return (
     <main
       className={cn(
-        "mx-auto w-full max-w-lg px-4 py-3 pb-24",
+        "mx-auto w-full max-w-lg lg:max-w-3xl xl:max-w-4xl px-4 py-3 pb-24 lg:pb-8",
         embedded &&
           "min-h-[60vh] bg-gradient-to-b from-[#faf9f7] via-[#f4f3f0] to-[#ebe8e3]",
       )}
@@ -1562,7 +1619,7 @@ export default function CommunityFeed({
                 </div>
 
                 {(totalRx > 0 || commentCount > 0) && (
-                  <div className="px-4 py-1.5 flex items-center justify-between text-[12px] text-muted-foreground border-t border-border/50">
+                  <div className="px-4 py-2 flex items-center justify-between text-[12px] text-muted-foreground border-t border-border/40 bg-muted/20">
                     <div className="flex items-center gap-1 min-h-[20px]">
                       {totalRx > 0 ? (
                         <>
@@ -1596,7 +1653,7 @@ export default function CommunityFeed({
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 border-t border-border/55 bg-white/95 backdrop-blur-[2px]">
+                <div className="grid grid-cols-3 border-t border-border/40 bg-muted/25 select-none [&_button]:touch-manipulation">
                   <LinkedInLikeControl
                     activeType={myR}
                     onPickReaction={(t) => void setReaction(post.id, t as ReactionType)}
@@ -1604,28 +1661,30 @@ export default function CommunityFeed({
                   />
                   <button
                     type="button"
+                    style={{ WebkitUserSelect: "none", userSelect: "none" }}
                     className={cn(
-                      "flex flex-col items-center justify-center gap-0.5 py-3 text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors border-x border-border/40",
-                      sheetOpen && "text-primary bg-primary/[0.06]",
+                      "select-none flex flex-col items-center justify-center gap-0.5 py-3.5 text-muted-foreground hover:bg-background/80 active:bg-background active:scale-[0.98] transition-all border-x border-border/35",
+                      sheetOpen && "text-primary bg-background/90",
                     )}
                     onClick={() => setCommentsSheetPost(sheetOpen ? null : post)}
                   >
-                    <MessageCircle className="w-[22px] h-[22px]" />
-                    <span className="text-[11px] font-semibold">Comentar</span>
+                    <MessageCircle className="w-[21px] h-[21px]" />
+                    <span className="text-[11px] font-semibold tracking-tight">Comentar</span>
                   </button>
                   <button
                     type="button"
-                    className="flex flex-col items-center justify-center gap-0.5 py-3 text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors"
+                    style={{ WebkitUserSelect: "none", userSelect: "none" }}
+                    className="select-none flex flex-col items-center justify-center gap-0.5 py-3.5 text-muted-foreground hover:bg-background/80 active:bg-background active:scale-[0.98] transition-all"
                     onClick={() => setSharePost(post)}
                   >
-                    <Send className="w-[22px] h-[22px] -rotate-12" />
-                    <span className="text-[11px] font-semibold">Compartilhar</span>
+                    <Send className="w-[21px] h-[21px] -rotate-12" />
+                    <span className="text-[11px] font-semibold tracking-tight">Compartilhar</span>
                   </button>
                 </div>
 
                 {myR ? (
-                  <div className="flex items-center gap-2 px-3 py-2.5 border-t border-border/40 bg-muted/20">
-                    <div className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/40">
+                  <div className="flex items-center gap-2.5 px-3 py-2.5 border-t border-border/35 bg-gradient-to-b from-muted/15 to-muted/5">
+                    <div className="w-9 h-9 rounded-full bg-background overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/45 shadow-sm">
                       {profile?.avatar_url ? (
                         <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
                       ) : (
@@ -1637,7 +1696,7 @@ export default function CommunityFeed({
                     <button
                       type="button"
                       onClick={() => setCommentsSheetPost(post)}
-                      className="flex-1 text-left rounded-full border border-border/50 bg-background px-4 py-2.5 text-[14px] text-muted-foreground hover:bg-muted/40 transition-colors"
+                      className="flex-1 text-left rounded-full border border-border/45 bg-background px-4 py-2.5 text-[13px] text-muted-foreground shadow-sm hover:border-border hover:bg-muted/30 transition-colors"
                     >
                       Adicionar comentário…
                     </button>
@@ -1899,10 +1958,19 @@ export default function CommunityFeed({
                     {moreReplies > 0 ? (
                       <button
                         type="button"
-                        className="mt-1 ml-11 text-[13px] font-semibold text-muted-foreground hover:text-primary text-left"
+                        className="mt-2 ml-14 text-[13px] font-semibold text-primary hover:underline text-left"
                         onClick={() => setExpandedReplyIds((x) => ({ ...x, [root.id]: true }))}
                       >
                         Ver mais {moreReplies} {moreReplies === 1 ? "resposta" : "respostas"}
+                      </button>
+                    ) : null}
+                    {expanded && replies.length > 1 ? (
+                      <button
+                        type="button"
+                        className="mt-2 ml-14 text-[13px] font-semibold text-muted-foreground hover:text-foreground text-left"
+                        onClick={() => setExpandedReplyIds((x) => ({ ...x, [root.id]: false }))}
+                      >
+                        Ocultar respostas
                       </button>
                     ) : null}
                   </div>

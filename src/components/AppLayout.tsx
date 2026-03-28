@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import Header from "./Header";
 import BottomNav from "./BottomNav";
+import { DesktopSidebar } from "./SideMenu";
 import PullToRefresh from "./PullToRefresh";
 import { MenuProvider } from "@/contexts/MenuContext";
 import OnboardingTutorial from "./OnboardingTutorial";
@@ -63,39 +64,46 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
 
   return (
     <MenuProvider>
-      <div className={`flex min-h-0 flex-1 flex-col pb-20 ${isHome ? "bg-secondary" : "bg-background"}`}>
-        {showHeader && <MemoizedHeader />}
-        {usePullToRefresh ? (
-          <PullToRefresh scrollContainerRef={mainScrollRef}>{mainContent}</PullToRefresh>
-        ) : (
-          mainContent
-        )}
-        <MemoizedBottomNav />
-        <OnboardingTutorial />
-        <DiagPanel />
+      <div
+        className={`flex min-h-0 flex-1 flex-col lg:flex-row pb-20 lg:pb-0 ${isHome ? "bg-secondary lg:bg-neutral-200/60 dark:lg:bg-background" : "bg-background lg:bg-muted/30"}`}
+      >
+        <DesktopSidebar />
+        <div
+          className={`flex min-h-0 flex-1 flex-col min-w-0 ${isHome ? "lg:bg-secondary" : "lg:bg-background"}`}
+        >
+          {showHeader && <MemoizedHeader />}
+          {usePullToRefresh ? (
+            <PullToRefresh scrollContainerRef={mainScrollRef}>{mainContent}</PullToRefresh>
+          ) : (
+            mainContent
+          )}
+          <MemoizedBottomNav />
+          <OnboardingTutorial />
+          <DiagPanel />
 
-        {/* Modal global pós-OAuth (Apple/Google): deve ficar acima da Home */}
-        <Dialog open={oauthWelcomeOpen} onOpenChange={() => {}}>
-          <DialogContent
-            className="max-w-sm text-center"
-            onPointerDownOutside={(e) => e.preventDefault()}
-            onEscapeKeyDown={(e) => e.preventDefault()}
-          >
-            <DialogHeader>
-              <DialogTitle className="text-center">Seja bem-vindo</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground py-2">
-              Toque em Fechar para carregar seu app com tudo certinho.
-            </p>
-            <button
-              type="button"
-              onClick={closeOauthWelcome}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+          {/* Modal global pós-OAuth (Apple/Google): deve ficar acima da Home */}
+          <Dialog open={oauthWelcomeOpen} onOpenChange={() => {}}>
+            <DialogContent
+              className="max-w-sm text-center"
+              onPointerDownOutside={(e) => e.preventDefault()}
+              onEscapeKeyDown={(e) => e.preventDefault()}
             >
-              Fechar
-            </button>
-          </DialogContent>
-        </Dialog>
+              <DialogHeader>
+                <DialogTitle className="text-center">Seja bem-vindo</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground py-2">
+                Toque em Fechar para carregar seu app com tudo certinho.
+              </p>
+              <button
+                type="button"
+                onClick={closeOauthWelcome}
+                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                Fechar
+              </button>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
     </MenuProvider>
   );

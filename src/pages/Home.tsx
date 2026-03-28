@@ -596,7 +596,7 @@ const Home = () => {
         <CommunityFeed variant="embedded" highlightPostId={communityHighlightPostId} />
       ) : (
         <div
-          className="max-w-screen-lg mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary transition-opacity duration-300"
+          className="max-w-screen-lg lg:max-w-4xl xl:max-w-6xl mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
           {user && isPro && proId ? (

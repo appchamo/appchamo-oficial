@@ -23,6 +23,8 @@ import {
   Globe,
   Users,
   Maximize2,
+  MoreHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -33,10 +35,25 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
 import { compressImageForChat } from "@/lib/compressChatImage";
+import { LinkedInLikeControl, type LinkedInReactionType } from "@/components/community/LinkedInLikeControl";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export type CommunityFeedVariant = "embedded" | "standalone";
 
@@ -143,6 +160,13 @@ interface CommentRow {
   user_id: string;
   body: string;
   created_at: string;
+  parent_id?: string | null;
+}
+
+interface CommentReactionRow {
+  comment_id: string;
+  user_id: string;
+  reaction_type: ReactionType;
 }
 
 function authorLabel(a: AuthorRow | undefined) {
@@ -159,6 +183,20 @@ function postTimeLabel(iso: string) {
 }
 
 const BODY_COLLAPSE_LEN = 320;
+const COMMENT_BODY_COLLAPSE = 220;
+
+function filterVisibleComments(list: CommentRow[], hidden: Set<string>): CommentRow[] {
+  return list.filter((c) => {
+    if (hidden.has(c.id)) return false;
+    if (c.parent_id && hidden.has(c.parent_id)) return false;
+    return true;
+  });
+}
+
+function totalReactionCount(sum: Partial<Record<ReactionType, number>> | undefined): number {
+  if (!sum) return 0;
+  return (sum.like || 0) + (sum.love || 0) + (sum.congrats || 0) + (sum.genius || 0);
+}
 
 export default function CommunityFeed({
   variant,
@@ -192,8 +230,18 @@ export default function CommunityFeed({
   const [authorProMeta, setAuthorProMeta] = useState<
     Record<string, { proId: string; headline: string; verified: boolean }>
   >({});
-  const [commentReactions, setCommentReactions] = useState<{ comment_id: string; user_id: string }[]>([]);
-  const [replyTarget, setReplyTarget] = useState<{ postId: string; name: string } | null>(null);
+  const [commentReactions, setCommentReactions] = useState<CommentReactionRow[]>([]);
+  const [replyTarget, setReplyTarget] = useState<{
+    postId: string;
+    parentCommentId: string | null;
+    name: string;
+  } | null>(null);
+  const [hiddenCommentIds, setHiddenCommentIds] = useState<Set<string>>(() => new Set());
+  const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
+  const [reportDialog, setReportDialog] = useState<{ commentId: string } | null>(null);
+  const [reportReason, setReportReason] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [undoHideId, setUndoHideId] = useState<string | null>(null);
   const [expandedBodies, setExpandedBodies] = useState<Record<string, boolean>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentSubmitting, setCommentSubmitting] = useState<string | null>(null);
@@ -250,8 +298,15 @@ export default function CommunityFeed({
         setProPathByUserId({});
         setAuthorProMeta({});
         setCommentReactions([]);
+        setHiddenCommentIds(new Set());
         return;
       }
+
+      const { data: hideRows } = await supabase
+        .from("community_comment_user_hides" as any)
+        .select("comment_id")
+        .eq("user_id", user.id);
+      setHiddenCommentIds(new Set((hideRows || []).map((h: any) => h.comment_id as string)));
       const authorIds = [...new Set(plist.map((p) => p.author_id))];
       const { data: profs } = await supabase
         .from("profiles")
@@ -272,7 +327,7 @@ export default function CommunityFeed({
 
       const { data: cmts } = await supabase
         .from("community_post_comments" as any)
-        .select("id, post_id, user_id, body, created_at")
+        .select("id, post_id, user_id, body, created_at, parent_id")
         .in("post_id", pids)
         .order("created_at", { ascending: true });
       const cList = (cmts || []) as CommentRow[];
@@ -286,9 +341,9 @@ export default function CommunityFeed({
       if (cids.length) {
         const { data: crxData } = await supabase
           .from("community_comment_reactions" as any)
-          .select("comment_id, user_id")
+          .select("comment_id, user_id, reaction_type")
           .in("comment_id", cids);
-        setCommentReactions((crxData || []) as { comment_id: string; user_id: string }[]);
+        setCommentReactions((crxData || []) as CommentReactionRow[]);
       } else {
         setCommentReactions([]);
       }
@@ -379,15 +434,46 @@ export default function CommunityFeed({
     return m;
   }, [reactions, user]);
 
-  const commentLikeStats = useMemo(() => {
-    const counts = new Map<string, number>();
-    const my = new Set<string>();
+  const commentReactionSummary = useMemo(() => {
+    const m: Record<string, Partial<Record<ReactionType, number>>> = {};
     commentReactions.forEach((r) => {
-      counts.set(r.comment_id, (counts.get(r.comment_id) || 0) + 1);
-      if (user && r.user_id === user.id) my.add(r.comment_id);
+      if (!m[r.comment_id]) m[r.comment_id] = {};
+      const row = m[r.comment_id]!;
+      const t = (r.reaction_type || "like") as ReactionType;
+      row[t] = (row[t] || 0) + 1;
     });
-    return { counts, my };
+    return m;
+  }, [commentReactions]);
+
+  const myReactionByComment = useMemo(() => {
+    if (!user) return {};
+    const map: Record<string, ReactionType> = {};
+    commentReactions.forEach((r) => {
+      if (r.user_id === user.id) map[r.comment_id] = (r.reaction_type || "like") as ReactionType;
+    });
+    return map;
   }, [commentReactions, user]);
+
+  const commentsSheetThreads = useMemo(() => {
+    if (!commentsSheetPost) {
+      return { roots: [] as CommentRow[], repliesByParent: {} as Record<string, CommentRow[]> };
+    }
+    const sheetComments = filterVisibleComments(
+      commentsByPost[commentsSheetPost.id] || [],
+      hiddenCommentIds,
+    );
+    const roots: CommentRow[] = [];
+    const repliesByParent: Record<string, CommentRow[]> = {};
+    sheetComments.forEach((c) => {
+      if (c.parent_id) {
+        if (!repliesByParent[c.parent_id]) repliesByParent[c.parent_id] = [];
+        repliesByParent[c.parent_id].push(c);
+      } else {
+        roots.push(c);
+      }
+    });
+    return { roots, repliesByParent };
+  }, [commentsSheetPost, commentsByPost, hiddenCommentIds]);
 
   const publishPost = async () => {
     if (!user || !canPost) return;
@@ -485,17 +571,21 @@ export default function CommunityFeed({
     if (!user) return;
     let body = (commentDrafts[postId] || "").trim();
     if (!body) return;
-    if (replyTarget?.postId === postId && replyTarget.name) {
+    if (replyTarget?.postId === postId && replyTarget.name && replyTarget.parentCommentId) {
       const tag = `@${replyTarget.name.split(/\s+/)[0]} `;
       if (!body.startsWith("@")) body = `${tag}${body}`;
     }
     setCommentSubmitting(postId);
     try {
-      const { error } = await supabase.from("community_post_comments" as any).insert({
+      const row: Record<string, unknown> = {
         post_id: postId,
         user_id: user.id,
         body,
-      });
+      };
+      if (replyTarget?.postId === postId && replyTarget.parentCommentId) {
+        row.parent_id = replyTarget.parentCommentId;
+      }
+      const { error } = await supabase.from("community_post_comments" as any).insert(row);
       if (error) throw error;
       setCommentDrafts((d) => ({ ...d, [postId]: "" }));
       setReplyTarget(null);
@@ -542,11 +632,11 @@ export default function CommunityFeed({
     }
   };
 
-  const toggleCommentLike = async (commentId: string) => {
+  const setCommentReaction = async (commentId: string, type: ReactionType) => {
     if (!user) return;
-    const liked = commentLikeStats.my.has(commentId);
+    const current = myReactionByComment[commentId];
     try {
-      if (liked) {
+      if (current === type) {
         const { error } = await supabase
           .from("community_comment_reactions" as any)
           .delete()
@@ -554,15 +644,88 @@ export default function CommunityFeed({
           .eq("user_id", user.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("community_comment_reactions" as any).insert({
-          comment_id: commentId,
-          user_id: user.id,
-        });
+        const { error } = await supabase.from("community_comment_reactions" as any).upsert(
+          { comment_id: commentId, user_id: user.id, reaction_type: type },
+          { onConflict: "comment_id,user_id" },
+        );
         if (error) throw error;
       }
       await loadFeed({ silent: true });
     } catch (e: any) {
-      toast({ title: "Erro na curtida", description: e.message, variant: "destructive" });
+      toast({ title: "Erro na reação", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const hideCommentForMe = async (commentId: string) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase.from("community_comment_user_hides" as any).insert({
+        user_id: user.id,
+        comment_id: commentId,
+      });
+      if (error) throw error;
+      setHiddenCommentIds((prev) => new Set([...prev, commentId]));
+      setUndoHideId(commentId);
+      toast({ title: "Comentário oculto para você" });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const undoHideComment = async () => {
+    if (!user || !undoHideId) return;
+    try {
+      const { error } = await supabase
+        .from("community_comment_user_hides" as any)
+        .delete()
+        .eq("user_id", user.id)
+        .eq("comment_id", undoHideId);
+      if (error) throw error;
+      setHiddenCommentIds((prev) => {
+        const n = new Set(prev);
+        n.delete(undoHideId);
+        return n;
+      });
+      setUndoHideId(null);
+    } catch (e: any) {
+      toast({ title: "Erro ao desfazer", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const submitCommentReport = async () => {
+    if (!user || !reportDialog || reportReason.trim().length < 10) {
+      toast({ title: "Descreva o motivo (mín. 10 caracteres)", variant: "destructive" });
+      return;
+    }
+    setReportSubmitting(true);
+    try {
+      const { error } = await supabase.from("community_comment_reports" as any).insert({
+        comment_id: reportDialog.commentId,
+        reporter_id: user.id,
+        reason: reportReason.trim(),
+      });
+      if (error) throw error;
+      const { data: sp } = await supabase
+        .from("profiles")
+        .select("user_id")
+        .eq("email", "suporte@appchamo.com")
+        .maybeSingle();
+      if (sp?.user_id) {
+        await supabase.from("notifications").insert({
+          user_id: sp.user_id,
+          title: "Denúncia de comentário na Comunidade",
+          message: "Um comentário foi denunciado. Revise na Central de Suporte.",
+          type: "support",
+          link: "/suporte-desk",
+        });
+      }
+      setReportDialog(null);
+      setReportReason("");
+      toast({ title: "Denúncia enviada" });
+    } catch (e: any) {
+      toast({ title: "Erro ao denunciar", description: e.message, variant: "destructive" });
+    } finally {
+      setReportSubmitting(false);
     }
   };
 
@@ -774,6 +937,197 @@ export default function CommunityFeed({
   };
 
   const commentAuthor = (uid: string) => commentAuthors[uid] || authors[uid];
+
+  const renderSheetComment = (
+    c: CommentRow,
+    ctx: { post: PostRow; isReply: boolean; threadRootId: string },
+  ) => {
+    const ca = commentAuthor(c.user_id);
+    const cMeta = authorProMeta[c.user_id];
+    const canDel = !!(user && (c.user_id === user.id || ctx.post.author_id === user.id));
+    const cTo = proPathByUserId[c.user_id];
+    const sum = commentReactionSummary[c.id] || {};
+    const rxTotal = totalReactionCount(sum);
+    const myRx = myReactionByComment[c.id];
+    const isFollowing = followingAuthorIds.has(c.user_id);
+    const canFollowMenu = !!(user && c.user_id !== user.id && cMeta?.proId);
+    const avatarInner = ca?.avatar_url ? (
+      <img src={ca.avatar_url} alt="" className="w-full h-full object-cover" />
+    ) : (
+      <span className="text-[10px] font-bold text-primary">
+        {authorLabel(ca).slice(0, 2).toUpperCase()}
+      </span>
+    );
+    const collapseBody = c.body.length > COMMENT_BODY_COLLAPSE;
+    const bodyOpen = expandedBodies[c.id];
+    const threadReplyCount =
+      !ctx.isReply && commentsSheetThreads.repliesByParent[c.id]?.length
+        ? commentsSheetThreads.repliesByParent[c.id].length
+        : 0;
+
+    const avatarEl = cTo ? (
+      <Link
+        to={cTo}
+        className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50 active:scale-[0.98] transition-transform"
+      >
+        {avatarInner}
+      </Link>
+    ) : (
+      <div className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50">
+        {avatarInner}
+      </div>
+    );
+
+    return (
+      <div className={cn("flex gap-2", ctx.isReply && "mt-2 ml-1 pl-3 border-l-2 border-border/55")}>
+        {avatarEl}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0">
+                {cTo ? (
+                  <Link
+                    to={cTo}
+                    className="font-bold text-[14px] text-foreground hover:text-primary transition-colors"
+                  >
+                    {authorLabel(ca)}
+                  </Link>
+                ) : (
+                  <span className="font-bold text-[14px]">{authorLabel(ca)}</span>
+                )}
+                {cMeta?.verified ? (
+                  <BadgeCheck className="w-3.5 h-3.5 shrink-0 text-sky-500" aria-label="Verificado" />
+                ) : null}
+              </div>
+              {cMeta?.headline ? (
+                <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">{cMeta.headline}</p>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                {postTimeLabel(c.created_at)}
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="p-1 rounded-full text-muted-foreground hover:bg-muted transition-colors"
+                    aria-label="Opções do comentário"
+                  >
+                    <MoreHorizontal className="w-4 h-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  {canFollowMenu ? (
+                    <DropdownMenuItem
+                      onClick={() => void toggleFollowAuthor(c.user_id)}
+                      className="gap-2"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      {isFollowing ? "Deixar de seguir" : "Seguir"}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {user && c.user_id !== user.id ? (
+                    <>
+                      {canFollowMenu ? <DropdownMenuSeparator /> : null}
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setReportDialog({ commentId: c.id });
+                        }}
+                      >
+                        Denunciar comentário
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void hideCommentForMe(c.id)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        Não quero ver isto
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                  {canDel ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive gap-2"
+                        onClick={() => void deleteComment(c.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Apagar
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
+          <div className="text-[14px] text-foreground mt-1 leading-snug">
+            {collapseBody && !bodyOpen ? (
+              <>
+                <span className="whitespace-pre-wrap">{c.body.slice(0, COMMENT_BODY_COLLAPSE)}</span>
+                <span>… </span>
+                <button
+                  type="button"
+                  className="text-primary font-semibold text-[14px] inline p-0 h-auto align-baseline bg-transparent border-0 cursor-pointer"
+                  onClick={() => setExpandedBodies((e) => ({ ...e, [c.id]: true }))}
+                >
+                  mais
+                </button>
+              </>
+            ) : (
+              <span className="whitespace-pre-wrap">{c.body}</span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1 mt-2">
+            <div className="flex items-center gap-0.5">
+              <LinkedInLikeControl
+                fillRow={false}
+                label="Curtir"
+                activeType={myRx}
+                onPickReaction={(t) => void setCommentReaction(c.id, t as ReactionType)}
+                onQuickLikeToggle={() => void setCommentReaction(c.id, "like")}
+              />
+              {rxTotal > 0 ? (
+                <span className="text-[11px] font-semibold text-muted-foreground tabular-nums">{rxTotal}</span>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="flex items-center gap-1 text-[12px] font-semibold text-muted-foreground hover:text-primary transition-colors ml-1"
+              onClick={() =>
+                setReplyTarget({
+                  postId: ctx.post.id,
+                  parentCommentId: ctx.threadRootId,
+                  name: authorLabel(ca),
+                })
+              }
+            >
+              <MessageCircle className="w-[15px] h-[15px]" />
+              {threadReplyCount > 0 ? (
+                <span className="tabular-nums">· {threadReplyCount}</span>
+              ) : null}
+            </button>
+            {rxTotal > 0 ? (
+              <span className="flex -space-x-1 ml-auto pl-2">
+                {REACTIONS.filter((r) => (sum[r.type] || 0) > 0)
+                  .slice(0, 3)
+                  .map((r) => (
+                    <span
+                      key={r.type}
+                      className="w-5 h-5 rounded-full bg-white border border-border flex items-center justify-center text-[10px]"
+                    >
+                      <r.Icon className={cn("w-3 h-3", reactionSummaryIconClass(r.type))} />
+                    </span>
+                  ))}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (!user) {
     return (
@@ -1061,6 +1415,8 @@ export default function CommunityFeed({
             const sum = reactionSummary[post.id] || {};
             const myR = myReactionByPost[post.id];
             const comments = commentsByPost[post.id] || [];
+            const visibleComments = filterVisibleComments(comments, hiddenCommentIds);
+            const commentCount = visibleComments.length;
             const sheetOpen = commentsSheetPost?.id === post.id;
             const proMeta = authorProMeta[post.author_id];
             const totalRx = REACTIONS.reduce((s, r) => s + (sum[r.type] || 0), 0);
@@ -1205,7 +1561,7 @@ export default function CommunityFeed({
                   ) : null}
                 </div>
 
-                {(totalRx > 0 || comments.length > 0) && (
+                {(totalRx > 0 || commentCount > 0) && (
                   <div className="px-4 py-1.5 flex items-center justify-between text-[12px] text-muted-foreground border-t border-border/50">
                     <div className="flex items-center gap-1 min-h-[20px]">
                       {totalRx > 0 ? (
@@ -1228,63 +1584,65 @@ export default function CommunityFeed({
                         <span />
                       )}
                     </div>
-                    {comments.length > 0 ? (
+                    {commentCount > 0 ? (
                       <button
                         type="button"
                         className="font-medium text-muted-foreground hover:text-foreground hover:underline"
                         onClick={() => setCommentsSheetPost(post)}
                       >
-                        {comments.length} comentário{comments.length !== 1 ? "s" : ""}
+                        {commentCount} comentário{commentCount !== 1 ? "s" : ""}
                       </button>
                     ) : null}
                   </div>
                 )}
 
-                <div className="px-3 py-2.5 flex flex-wrap gap-1.5 border-t border-border/40 bg-gradient-to-b from-muted/25 to-transparent">
-                  {REACTIONS.map(({ type, label, Icon }) => {
-                    const n = sum[type] || 0;
-                    const active = myR === type;
-                    return (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => setReaction(post.id, type)}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-colors",
-                          reactionRowLabelClass(type, active),
-                        )}
-                      >
-                        <Icon
-                          className={cn("w-3.5 h-3.5 shrink-0", reactionRowIconClass(type, active))}
-                        />
-                        {label}
-                        {n > 0 && <span className="opacity-70">({n})</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="grid grid-cols-2 border-t border-border/55 bg-white/90 backdrop-blur-[2px]">
+                <div className="grid grid-cols-3 border-t border-border/55 bg-white/95 backdrop-blur-[2px]">
+                  <LinkedInLikeControl
+                    activeType={myR}
+                    onPickReaction={(t) => void setReaction(post.id, t as ReactionType)}
+                    onQuickLikeToggle={() => void setReaction(post.id, "like")}
+                  />
                   <button
                     type="button"
                     className={cn(
-                      "flex items-center justify-center gap-2 py-3.5 text-[13px] font-bold text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors border-r border-border/45",
-                      sheetOpen && "text-primary bg-primary/[0.07]",
+                      "flex flex-col items-center justify-center gap-0.5 py-3 text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors border-x border-border/40",
+                      sheetOpen && "text-primary bg-primary/[0.06]",
                     )}
                     onClick={() => setCommentsSheetPost(sheetOpen ? null : post)}
                   >
-                    <MessageCircle className="w-[18px] h-[18px]" />
-                    Comentar
+                    <MessageCircle className="w-[22px] h-[22px]" />
+                    <span className="text-[11px] font-semibold">Comentar</span>
                   </button>
                   <button
                     type="button"
-                    className="flex items-center justify-center gap-2 py-3.5 text-[13px] font-bold text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors"
+                    className="flex flex-col items-center justify-center gap-0.5 py-3 text-muted-foreground hover:bg-muted/50 active:bg-muted/70 transition-colors"
                     onClick={() => setSharePost(post)}
                   >
-                    <Send className="w-[18px] h-[18px] -rotate-12" />
-                    Compartilhar
+                    <Send className="w-[22px] h-[22px] -rotate-12" />
+                    <span className="text-[11px] font-semibold">Compartilhar</span>
                   </button>
                 </div>
+
+                {myR ? (
+                  <div className="flex items-center gap-2 px-3 py-2.5 border-t border-border/40 bg-muted/20">
+                    <div className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/40">
+                      {profile?.avatar_url ? (
+                        <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-xs font-bold text-primary">
+                          {(profile?.full_name || "U").slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCommentsSheetPost(post)}
+                      className="flex-1 text-left rounded-full border border-border/50 bg-background px-4 py-2.5 text-[14px] text-muted-foreground hover:bg-muted/40 transition-colors"
+                    >
+                      Adicionar comentário…
+                    </button>
+                  </div>
+                ) : null}
               </article>
             );
           })}
@@ -1485,102 +1843,68 @@ export default function CommunityFeed({
           className="rounded-t-[28px] p-0 gap-0 max-h-[min(88vh,720px)] flex flex-col overflow-hidden border-t border-border/60 shadow-[0_-8px_40px_rgba(0,0,0,0.12)]"
         >
           <div className="mx-auto mt-2.5 mb-1 h-1 w-11 rounded-full bg-muted-foreground/20 shrink-0" aria-hidden />
-          <SheetHeader className="px-5 pt-1 pb-3 text-left border-b border-border/40">
-            <SheetTitle className="text-lg font-bold tracking-tight">Comentários</SheetTitle>
+          <SheetHeader className="px-5 pt-1 pb-0 text-left border-b border-border/40 space-y-0">
+            <div className="flex items-center justify-between gap-2 pb-3">
+              <SheetTitle className="text-lg font-bold tracking-tight">Comentários</SheetTitle>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-[13px] font-semibold text-foreground rounded-lg px-2 py-1 hover:bg-muted/80 transition-colors"
+                aria-label="Ordenação dos comentários"
+              >
+                Mais relevantes
+                <ChevronDown className="w-4 h-4 opacity-70" />
+              </button>
+            </div>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0">
+            {commentsSheetPost && undoHideId ? (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-muted/40 px-3 py-2.5 text-[13px]">
+                <span className="text-muted-foreground">Comentário oculto para você.</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 h-8 font-bold text-primary hover:text-primary"
+                  onClick={() => void undoHideComment()}
+                >
+                  Desfazer
+                </Button>
+              </div>
+            ) : null}
+            {commentsSheetPost && commentsSheetThreads.roots.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">Ainda não há comentários.</p>
+            ) : null}
             {commentsSheetPost &&
-              (commentsByPost[commentsSheetPost.id] || []).map((c) => {
-                const ca = commentAuthor(c.user_id);
-                const cMeta = authorProMeta[c.user_id];
-                const canDel =
-                  user && (c.user_id === user.id || commentsSheetPost.author_id === user.id);
-                const cTo = proPathByUserId[c.user_id];
-                const liked = commentLikeStats.my.has(c.id);
-                const likeCount = commentLikeStats.counts.get(c.id) || 0;
-                const avatarInner = ca?.avatar_url ? (
-                  <img src={ca.avatar_url} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-[10px] font-bold text-primary">
-                    {authorLabel(ca).slice(0, 2).toUpperCase()}
-                  </span>
-                );
+              commentsSheetThreads.roots.map((root) => {
+                const replies = commentsSheetThreads.repliesByParent[root.id] || [];
+                const expanded = !!expandedReplyIds[root.id];
+                const visibleReplies = expanded ? replies : replies.slice(0, 1);
+                const moreReplies = !expanded && replies.length > 1 ? replies.length - 1 : 0;
                 return (
-                  <div key={c.id} className="flex gap-3">
-                    {cTo ? (
-                      <Link
-                        to={cTo}
-                        className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50 active:scale-[0.98] transition-transform"
+                  <div key={root.id} className="pb-2 border-b border-border/30 last:border-0">
+                    {renderSheetComment(root, {
+                      post: commentsSheetPost,
+                      isReply: false,
+                      threadRootId: root.id,
+                    })}
+                    {visibleReplies.map((rep) => (
+                      <div key={rep.id}>
+                        {renderSheetComment(rep, {
+                          post: commentsSheetPost,
+                          isReply: true,
+                          threadRootId: root.id,
+                        })}
+                      </div>
+                    ))}
+                    {moreReplies > 0 ? (
+                      <button
+                        type="button"
+                        className="mt-1 ml-11 text-[13px] font-semibold text-muted-foreground hover:text-primary text-left"
+                        onClick={() => setExpandedReplyIds((x) => ({ ...x, [root.id]: true }))}
                       >
-                        {avatarInner}
-                      </Link>
-                    ) : (
-                      <div className="w-9 h-9 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-border/50">
-                        {avatarInner}
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0">
-                        {cTo ? (
-                          <Link
-                            to={cTo}
-                            className="font-bold text-[14px] text-foreground hover:text-primary transition-colors"
-                          >
-                            {authorLabel(ca)}
-                          </Link>
-                        ) : (
-                          <span className="font-bold text-[14px]">{authorLabel(ca)}</span>
-                        )}
-                        {cMeta?.verified ? (
-                          <BadgeCheck className="w-3.5 h-3.5 shrink-0 text-sky-500" aria-label="Verificado" />
-                        ) : null}
-                        <span className="text-[11px] text-muted-foreground">
-                          {postTimeLabel(c.created_at)}
-                        </span>
-                      </div>
-                      {cMeta?.headline ? (
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{cMeta.headline}</p>
-                      ) : null}
-                      <p className="text-[14px] text-foreground mt-1 whitespace-pre-wrap leading-snug">
-                        {c.body}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-3 mt-2 text-[12px] font-semibold">
-                        <button
-                          type="button"
-                          className={cn(
-                            "transition-colors",
-                            liked
-                              ? "text-red-500 font-semibold"
-                              : "text-muted-foreground hover:text-red-500/90",
-                          )}
-                          onClick={() => toggleCommentLike(c.id)}
-                        >
-                          Curtir{likeCount > 0 ? ` · ${likeCount}` : ""}
-                        </button>
-                        <button
-                          type="button"
-                          className="text-muted-foreground hover:text-primary transition-colors"
-                          onClick={() =>
-                            setReplyTarget({
-                              postId: commentsSheetPost.id,
-                              name: authorLabel(ca),
-                            })
-                          }
-                        >
-                          Responder
-                        </button>
-                        {canDel ? (
-                          <button
-                            type="button"
-                            className="p-1 text-muted-foreground hover:text-destructive shrink-0 ml-auto"
-                            aria-label="Apagar comentário"
-                            onClick={() => deleteComment(c.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
+                        Ver mais {moreReplies} {moreReplies === 1 ? "resposta" : "respostas"}
+                      </button>
+                    ) : null}
                   </div>
                 );
               })}
@@ -1605,7 +1929,7 @@ export default function CommunityFeed({
               ) : null}
               <div className="flex gap-2">
                 <Textarea
-                  placeholder="Adicione um comentário…"
+                  placeholder="Adicionar comentário…"
                   value={commentDrafts[commentsSheetPost.id] || ""}
                   onChange={(e) =>
                     setCommentDrafts((d) => ({ ...d, [commentsSheetPost.id]: e.target.value }))
@@ -1634,6 +1958,53 @@ export default function CommunityFeed({
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={!!reportDialog}
+        onOpenChange={(o) => {
+          if (!o) {
+            setReportDialog(null);
+            setReportReason("");
+          }
+        }}
+      >
+        <DialogContent className="rounded-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Denunciar comentário</DialogTitle>
+            <DialogDescription>
+              A denúncia será analisada pela equipa de suporte. Descreva o motivo (mínimo de 10
+              caracteres).
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={reportReason}
+            onChange={(e) => setReportReason(e.target.value)}
+            placeholder="Ex.: conteúdo ofensivo, spam…"
+            className="min-h-[100px] rounded-xl text-sm"
+          />
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => {
+                setReportDialog(null);
+                setReportReason("");
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              className="rounded-xl"
+              disabled={reportSubmitting || reportReason.trim().length < 10}
+              onClick={() => void submitCommentReport()}
+            >
+              {reportSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Enviar denúncia"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!fullscreenPost} onOpenChange={(o) => !o && setFullscreenPost(null)}>
         <DialogContent className="!fixed !inset-0 !left-0 !top-0 z-50 flex h-[100dvh] max-h-none w-full max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 rounded-none border-0 bg-black p-0 overflow-hidden shadow-none data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 [&>button]:hidden">

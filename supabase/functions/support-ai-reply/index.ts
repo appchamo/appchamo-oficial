@@ -243,7 +243,8 @@ Assunto do ticket: ${ticket.subject || "Suporte geral"}`;
         continue;
       }
 
-      if (content.startsWith("[IMAGE:") || content.startsWith("[FILE:")) continue;
+      // Anexos (imagem/vídeo/PDF): não enviar URL bruta ao modelo
+      if (/^\[(IMAGE|VIDEO|FILE)(\|\|\|SPT\|\|\||:)/.test(content)) continue;
       chatMessages.push({ role: isBot(m.sender_id) ? "assistant" : "user", content });
     }
 

@@ -1,10 +1,26 @@
-import { HelpCircle, Send, ArrowLeft, Clock, XCircle, FileText, AlertTriangle, MessageSquare, CheckCircle2, Eye, Search, Bot } from "lucide-react";
+import {
+  HelpCircle,
+  Send,
+  ArrowLeft,
+  Clock,
+  XCircle,
+  FileText,
+  AlertTriangle,
+  MessageSquare,
+  CheckCircle2,
+  Eye,
+  Search,
+  Bot,
+  Maximize2,
+  X,
+} from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import AudioPlayer from "@/components/AudioPlayer";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { isSupportBotMessage } from "@/lib/supportBot";
+import { parseAnySupportAttachment } from "@/lib/supportMessageAttachments";
 
 export interface TicketThread {
   id: string;
@@ -40,6 +56,19 @@ interface ChatReport {
   reporter_avatar: string | null;
 }
 
+interface CommentCommunityReport {
+  id: string;
+  comment_id: string;
+  reporter_id: string;
+  reason: string;
+  status: string;
+  created_at: string;
+  reporter_name: string;
+  reporter_avatar: string | null;
+  comment_preview: string;
+  comment_author_id: string | null;
+}
+
 interface ReportedChatMessage {
   id: string;
   sender_id: string;
@@ -63,10 +92,19 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const [adminId, setAdminId] = useState<string | null>(null);
   const [closeOpen, setCloseOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [mediaViewer, setMediaViewer] = useState<{
+    kind: "image" | "video" | "pdf";
+    url: string;
+    name: string;
+  } | null>(null);
+  const [mediaViewerFullscreen, setMediaViewerFullscreen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<"support" | "reports">("support");
   const [searchSupport, setSearchSupport] = useState("");
   const [reports, setReports] = useState<ChatReport[]>([]);
+  const [commentCommunityReports, setCommentCommunityReports] = useState<CommentCommunityReport[]>(
+    [],
+  );
   const [loadingReports, setLoadingReports] = useState(false);
   const [viewingReportChat, setViewingReportChat] = useState<string | null>(null);
   const [reportedMessages, setReportedMessages] = useState<ReportedChatMessage[]>([]);
@@ -117,7 +155,14 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         full_name: p?.full_name || "Usuário",
         avatar_url: p?.avatar_url || null,
         unreadCount: 0,
-        lastMessage: lastMsg?.[0]?.content || (lastMsg?.[0]?.image_urls ? "📷 Imagem" : t.subject || ""),
+        lastMessage: (() => {
+          const c = lastMsg?.[0]?.content?.trim() || "";
+          if (lastMsg?.[0]?.image_urls?.length) return "📷 Imagem";
+          const a = parseAnySupportAttachment(c);
+          if (a?.kind === "VIDEO") return "🎬 Vídeo";
+          if (a?.kind === "FILE") return "📄 Documento";
+          return c || t.subject || "";
+        })(),
         lastTime: lastMsg?.[0]?.created_at || t.created_at,
       });
     }
@@ -128,32 +173,70 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
 
   const fetchReports = async () => {
     setLoadingReports(true);
-    const { data: reportRows } = await supabase
-      .from("chat_reports" as any)
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      const { data: reportRows } = await supabase
+        .from("chat_reports" as any)
+        .select("*")
+        .order("created_at", { ascending: false });
 
-    if (!reportRows || reportRows.length === 0) {
-      setReports([]);
+      let enrichedReports: ChatReport[] = [];
+      if (reportRows && reportRows.length > 0) {
+        const userIds = [...new Set((reportRows as any[]).map((r) => r.reporter_id))];
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, avatar_url")
+          .in("user_id", userIds);
+        const profileMap = new Map((profiles || []).map((p) => [p.user_id, p]));
+        enrichedReports = (reportRows as any[]).map((r) => ({
+          ...r,
+          reporter_name: profileMap.get(r.reporter_id)?.full_name || "Usuário",
+          reporter_avatar: profileMap.get(r.reporter_id)?.avatar_url || null,
+        }));
+      }
+      setReports(enrichedReports);
+
+      const { data: cRepRows, error: cRepErr } = await supabase
+        .from("community_comment_reports" as any)
+        .select("id, comment_id, reporter_id, reason, status, created_at")
+        .order("created_at", { ascending: false });
+
+      if (cRepErr || !cRepRows?.length) {
+        if (cRepErr) console.error(cRepErr);
+        setCommentCommunityReports([]);
+      } else {
+        const rows = cRepRows as any[];
+        const cids = [...new Set(rows.map((r) => r.comment_id))];
+        const { data: cmtData } = await supabase
+          .from("community_post_comments" as any)
+          .select("id, body, user_id")
+          .in("id", cids);
+        const cMap = new Map((cmtData || []).map((c: any) => [c.id, c]));
+        const ruids = [...new Set(rows.map((r) => r.reporter_id))];
+        const { data: rProfs } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, avatar_url")
+          .in("user_id", ruids);
+        const rMap = new Map((rProfs || []).map((p: any) => [p.user_id, p]));
+        const enriched: CommentCommunityReport[] = rows.map((r) => {
+          const c = cMap.get(r.comment_id) as { body?: string; user_id?: string } | undefined;
+          return {
+            id: r.id,
+            comment_id: r.comment_id,
+            reporter_id: r.reporter_id,
+            reason: r.reason,
+            status: r.status,
+            created_at: r.created_at,
+            reporter_name: rMap.get(r.reporter_id)?.full_name || "Usuário",
+            reporter_avatar: rMap.get(r.reporter_id)?.avatar_url || null,
+            comment_preview: c?.body != null ? String(c.body).slice(0, 400) : "(comentário removido ou indisponível)",
+            comment_author_id: c?.user_id ?? null,
+          };
+        });
+        setCommentCommunityReports(enriched);
+      }
+    } finally {
       setLoadingReports(false);
-      return;
     }
-
-    const userIds = [...new Set(reportRows.map((r: any) => r.reporter_id))];
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("user_id, full_name, avatar_url")
-      .in("user_id", userIds);
-    const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
-
-    const enrichedReports: ChatReport[] = reportRows.map((r: any) => ({
-      ...r,
-      reporter_name: profileMap.get(r.reporter_id)?.full_name || "Usuário",
-      reporter_avatar: profileMap.get(r.reporter_id)?.avatar_url || null,
-    }));
-
-    setReports(enrichedReports);
-    setLoadingReports(false);
   };
 
   useEffect(() => {
@@ -204,6 +287,19 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
   const handleResolveReport = async (reportId: string) => {
     await supabase.from("chat_reports" as any).update({ status: 'resolvido' }).eq("id", reportId);
     toast({ title: "Denúncia resolvida com sucesso!" });
+    fetchReports();
+  };
+
+  const handleResolveCommentReport = async (reportId: string) => {
+    const { error } = await supabase
+      .from("community_comment_reports" as any)
+      .update({ status: "resolvido" })
+      .eq("id", reportId);
+    if (error) {
+      toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Denúncia de comentário marcada como resolvida" });
     fetchReports();
   };
 
@@ -271,10 +367,9 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
     return null;
   };
 
-  const parseAttachment = (content: string) => {
-    const match = content.match(/\[(IMAGE|VIDEO|FILE):(.+):(.+)\]$/);
-    if (match) return { type: match[1], url: match[2], name: match[3] };
-    return null;
+  const openViewer = (kind: "image" | "video" | "pdf", url: string, name: string) => {
+    setMediaViewerFullscreen(false);
+    setMediaViewer({ kind, url, name });
   };
 
   const renderContent = (msg: Message, isAdmin: boolean) => {
@@ -291,13 +386,21 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         <div className="space-y-2">
           <div className="grid grid-cols-1 gap-1.5">
             {msg.image_urls.map((url, i) => (
-              <img
+              <button
                 key={i}
-                src={url}
-                alt=""
-                className="max-w-[220px] rounded-lg border border-white/10 cursor-pointer hover:opacity-90 transition-opacity"
-                onClick={() => window.open(url, '_blank')}
-              />
+                type="button"
+                className="relative block max-w-[220px] rounded-lg overflow-hidden border border-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                onClick={() => openViewer("image", url, "Imagem")}
+              >
+                <img
+                  src={url}
+                  alt=""
+                  className="w-full object-cover max-h-52 hover:opacity-95 transition-opacity"
+                />
+                <span className="absolute bottom-1 right-1 rounded-md bg-black/55 p-1 text-white">
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </span>
+              </button>
             ))}
           </div>
           {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
@@ -307,29 +410,51 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
 
     const audioData = parseAudio(msg.content);
     if (audioData) return <AudioPlayer src={audioData.url} duration={audioData.duration} isMine={isAdmin} />;
-    const attachment = parseAttachment(msg.content);
+    const attachment = parseAnySupportAttachment(msg.content.trim());
     if (attachment) {
-      if (attachment.type === "IMAGE") {
+      if (attachment.kind === "IMAGE") {
         return (
-          <a href={attachment.url} target="_blank" rel="noopener noreferrer">
-            <img src={attachment.url} alt={attachment.name} className="max-w-[200px] rounded-lg" />
-            <p className="text-[10px] mt-1 opacity-70">{attachment.name}</p>
-          </a>
+          <button
+            type="button"
+            className="relative block max-w-[220px] rounded-lg overflow-hidden border border-white/10"
+            onClick={() => openViewer("image", attachment.url, attachment.name)}
+          >
+            <img src={attachment.url} alt="" className="w-full object-cover max-h-52" />
+            <span className="absolute bottom-1 right-1 rounded-md bg-black/55 p-1 text-white">
+              <Maximize2 className="w-3.5 h-3.5" />
+            </span>
+            <p className="text-[10px] mt-1 opacity-70 truncate px-1">{attachment.name}</p>
+          </button>
         );
       }
-      if (attachment.type === "VIDEO") {
+      if (attachment.kind === "VIDEO") {
         return (
-          <div>
-            <video src={attachment.url} controls className="max-w-[200px] rounded-lg" />
-            <p className="text-[10px] mt-1 opacity-70">{attachment.name}</p>
+          <div className="relative max-w-[min(260px,85vw)] rounded-xl overflow-hidden border border-white/10 bg-black/20">
+            <video src={attachment.url} controls className="w-full max-h-56 object-contain" playsInline />
+            <button
+              type="button"
+              className="absolute top-2 right-2 rounded-full bg-black/55 p-1.5 text-white"
+              onClick={() => openViewer("video", attachment.url, attachment.name)}
+              aria-label="Tela cheia"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </button>
+            <p className="text-[10px] px-2 py-1 opacity-70 truncate">{attachment.name}</p>
           </div>
         );
       }
       return (
-        <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline">
-          <FileText className="w-4 h-4" />
-          <span className="text-xs">{attachment.name}</span>
-        </a>
+        <button
+          type="button"
+          onClick={() => openViewer("pdf", attachment.url, attachment.name)}
+          className="flex w-full max-w-[260px] flex-col gap-1 rounded-xl border border-white/15 bg-muted/30 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+        >
+          <span className="flex items-center gap-2 text-xs font-semibold">
+            <FileText className="w-4 h-4 shrink-0" />
+            <span className="truncate">{attachment.name}</span>
+          </span>
+          <span className="text-[10px] text-muted-foreground">Toque para ver o PDF</span>
+        </button>
       );
     }
     return <p className="whitespace-pre-wrap">{msg.content}</p>;
@@ -337,7 +462,9 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
 
   const threadIsClosed = selected ? (selected.status === "closed" || messages.some(m => m.content === "[CLOSED]")) : false;
   const openTickets = tickets.filter(t => t.status !== "closed");
-  const pendingReports = reports.filter(r => r.status !== "resolvido");
+  const pendingReports = reports.filter((r) => r.status !== "resolvido");
+  const pendingCommentReports = commentCommunityReports.filter((r) => r.status !== "resolvido");
+  const pendingReportsTotal = pendingReports.length + pendingCommentReports.length;
 
   const normalizeSearch = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/\u0300-\u036f/g, "");
   const filteredTickets = !searchSupport.trim()
@@ -490,7 +617,12 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
           }`}
         >
           <AlertTriangle className="w-4 h-4" />
-          Denúncias {pendingReports.length > 0 && <span className="bg-destructive text-white text-[10px] px-1.5 py-0.5 rounded-full">{pendingReports.length}</span>}
+          Denúncias{" "}
+          {pendingReportsTotal > 0 && (
+            <span className="bg-destructive text-white text-[10px] px-1.5 py-0.5 rounded-full">
+              {pendingReportsTotal}
+            </span>
+          )}
         </button>
       </div>
 
@@ -578,13 +710,18 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         <>
           {loadingReports ? (
             <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-destructive border-t-transparent rounded-full" /></div>
-          ) : reports.length === 0 ? (
+          ) : reports.length === 0 && commentCommunityReports.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
               <CheckCircle2 className="w-10 h-10 text-green-500/50" />
               <p className="text-sm font-medium">Nenhuma denúncia registrada.</p>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
+              {reports.length > 0 ? (
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide px-1">
+                  Chats
+                </p>
+              ) : null}
               {reports.map((r) => {
                 const initials = r.reporter_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
                 return (
@@ -633,6 +770,87 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                   </div>
                 );
               })}
+
+              {commentCommunityReports.length > 0 ? (
+                <>
+                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide px-1 mt-4">
+                    Comunidade (comentários)
+                  </p>
+                  {commentCommunityReports.map((r) => {
+                    const initials = r.reporter_name
+                      .split(" ")
+                      .map((w) => w[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase();
+                    return (
+                      <div
+                        key={r.id}
+                        className={`flex flex-col gap-3 p-4 border rounded-xl ${
+                          r.status === "resolvido" ? "bg-muted/30 opacity-70" : "bg-card"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {r.reporter_avatar ? (
+                              <img
+                                src={r.reporter_avatar}
+                                alt=""
+                                className="w-10 h-10 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center text-xs font-bold text-destructive">
+                                {initials}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-sm font-bold text-foreground">{r.reporter_name}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {new Date(r.created_at).toLocaleString("pt-BR")}
+                              </p>
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] px-2 py-1 rounded-full font-bold ${
+                              r.status === "resolvido"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {r.status === "resolvido" ? "Resolvido" : "Pendente"}
+                          </span>
+                        </div>
+
+                        <div className="bg-muted/40 border border-border/60 p-3 rounded-lg">
+                          <p className="text-[10px] font-semibold text-muted-foreground mb-1">
+                            Texto denunciado
+                          </p>
+                          <p className="text-sm text-foreground whitespace-pre-wrap line-clamp-6">
+                            {r.comment_preview}
+                          </p>
+                        </div>
+
+                        <div className="bg-destructive/5 border border-destructive/10 p-3 rounded-lg">
+                          <p className="text-xs font-semibold text-destructive mb-1 flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Motivo da denúncia
+                          </p>
+                          <p className="text-sm text-foreground">{r.reason}</p>
+                        </div>
+
+                        {r.status !== "resolvido" ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleResolveCommentReport(r.id)}
+                            className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
+                          >
+                            <CheckCircle2 className="w-4 h-4" /> Marcar resolvido
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </>
+              ) : null}
             </div>
           )}
         </>
@@ -672,6 +890,128 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
             )}
             <div ref={bottomRef} />
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!mediaViewer}
+        onOpenChange={(o) => {
+          if (!o) {
+            setMediaViewer(null);
+            setMediaViewerFullscreen(false);
+          }
+        }}
+      >
+        <DialogContent
+          className={
+            mediaViewerFullscreen
+              ? "!fixed !inset-0 !left-0 !top-0 z-[80] flex h-[100dvh] max-h-none w-full max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 rounded-none border-0 bg-black p-0 overflow-hidden shadow-none [&>button]:hidden"
+              : "max-w-[min(100vw-1rem,28rem)] p-0 gap-0 overflow-hidden rounded-2xl [&>button]:right-2 [&>button]:top-2"
+          }
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          {mediaViewer ? (
+            <>
+              <DialogTitle className="sr-only">
+                {mediaViewer.kind === "pdf" ? "Documento" : mediaViewer.kind === "video" ? "Vídeo" : "Imagem"}
+              </DialogTitle>
+              <div
+                className={
+                  mediaViewerFullscreen
+                    ? "flex items-center justify-between gap-2 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] bg-black/80 text-white shrink-0"
+                    : "flex items-center justify-between gap-2 border-b px-3 py-2 shrink-0 bg-background"
+                }
+              >
+                <button
+                  type="button"
+                  className={mediaViewerFullscreen ? "rounded-full p-2 hover:bg-white/10" : "rounded-full p-2 hover:bg-muted"}
+                  onClick={() => setMediaViewer(null)}
+                  aria-label="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <p
+                  className={
+                    mediaViewerFullscreen
+                      ? "flex-1 truncate text-center text-xs font-medium"
+                      : "flex-1 truncate text-center text-xs font-medium text-foreground"
+                  }
+                >
+                  {mediaViewer.name}
+                </p>
+                <button
+                  type="button"
+                  className={mediaViewerFullscreen ? "rounded-full p-2 hover:bg-white/10" : "rounded-full p-2 hover:bg-muted"}
+                  onClick={() => setMediaViewerFullscreen((f) => !f)}
+                  aria-label={mediaViewerFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                >
+                  <Maximize2 className="w-5 h-5" />
+                </button>
+              </div>
+              <div
+                className={
+                  mediaViewerFullscreen
+                    ? "flex min-h-0 flex-1 items-center justify-center bg-black p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+                    : "max-h-[min(70vh,520px)] overflow-auto bg-muted/30 p-2"
+                }
+              >
+                {mediaViewer.kind === "image" ? (
+                  <img
+                    src={mediaViewer.url}
+                    alt=""
+                    className={
+                      mediaViewerFullscreen
+                        ? "max-h-full max-w-full object-contain"
+                        : "mx-auto max-h-[min(60vh,480px)] w-auto max-w-full rounded-lg object-contain"
+                    }
+                  />
+                ) : mediaViewer.kind === "video" ? (
+                  <video
+                    src={mediaViewer.url}
+                    controls
+                    playsInline
+                    className={
+                      mediaViewerFullscreen
+                        ? "max-h-full max-w-full object-contain"
+                        : "mx-auto max-h-[min(60vh,480px)] w-full rounded-lg object-contain"
+                    }
+                  />
+                ) : (
+                  <iframe
+                    title={mediaViewer.name}
+                    src={mediaViewer.url}
+                    className={
+                      mediaViewerFullscreen
+                        ? "h-full min-h-[50vh] w-full flex-1 rounded-none bg-white"
+                        : "h-[min(60vh,480px)] w-full rounded-lg border bg-white"
+                    }
+                  />
+                )}
+              </div>
+              {mediaViewer.kind === "pdf" ? (
+                <div
+                  className={
+                    mediaViewerFullscreen
+                      ? "shrink-0 border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-black/80"
+                      : "shrink-0 border-t p-3 bg-background"
+                  }
+                >
+                  <a
+                    href={mediaViewer.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={
+                      mediaViewerFullscreen
+                        ? "block text-center text-sm text-sky-400 underline"
+                        : "block text-center text-sm text-primary underline"
+                    }
+                  >
+                    Abrir PDF no navegador se não carregar aqui
+                  </a>
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

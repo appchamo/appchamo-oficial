@@ -3,10 +3,28 @@ import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, HelpCircle, Mic, X, Loader2, Paperclip, FileText, Bot, UserCircle, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  Send,
+  HelpCircle,
+  Mic,
+  X,
+  Loader2,
+  Paperclip,
+  FileText,
+  Bot,
+  RefreshCw,
+  Maximize2,
+} from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AudioPlayer from "@/components/AudioPlayer";
 import { isSupportBotMessage, SUPPORT_BOT_SENDER_ID } from "@/lib/supportBot";
+import {
+  buildSupportAttachmentTag,
+  parseAnySupportAttachment,
+  type SupportAttachKind,
+} from "@/lib/supportMessageAttachments";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface Message {
   id: string;
@@ -37,6 +55,12 @@ const SupportThread = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [mediaViewer, setMediaViewer] = useState<{
+    kind: "image" | "video" | "pdf";
+    url: string;
+    name: string;
+  } | null>(null);
+  const [mediaViewerFullscreen, setMediaViewerFullscreen] = useState(false);
 
   /** Chama a edge function de IA sem verificação de JWT duplicada */
   const invokeAI = async () => {
@@ -210,12 +234,18 @@ const SupportThread = () => {
     const originalFile = e.target.files?.[0];
     if (!originalFile || !user) return;
 
-    if (originalFile.size > 20 * 1024 * 1024) {
-      toast({ title: "Arquivo muito grande", description: "Máximo 20MB", variant: "destructive" });
+    const isImage = originalFile.type.startsWith("image/");
+    const isVideo = originalFile.type.startsWith("video/");
+    const maxBytes = isVideo ? 50 * 1024 * 1024 : isImage ? 20 * 1024 * 1024 : 25 * 1024 * 1024;
+    if (originalFile.size > maxBytes) {
+      toast({
+        title: "Arquivo muito grande",
+        description: isVideo ? "Vídeo: máximo 50 MB" : "Máximo 25 MB (imagens: 20 MB)",
+        variant: "destructive",
+      });
       return;
     }
 
-    const isImage = originalFile.type.startsWith("image/");
     setUploadingFile(true);
 
     try {
@@ -255,24 +285,41 @@ const SupportThread = () => {
         setIsCompressing(false);
       }
 
-      const ext = isImage ? "webp" : originalFile.name.split(".").pop() || "file";
+      const ext = isImage ? "webp" : originalFile.name.split(".").pop()?.replace(/[^a-z0-9]/gi, "") || "bin";
       const fileName = `support/${user.id}/${Date.now()}.${ext}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from("uploads")
-        .upload(fileName, fileToUpload);
+      const uploadMime =
+        isImage && fileToUpload instanceof File
+          ? fileToUpload.type || "image/webp"
+          : originalFile.type || undefined;
+
+      const { error: uploadError } = await supabase.storage.from("uploads").upload(fileName, fileToUpload, {
+        contentType: uploadMime,
+        upsert: false,
+      });
 
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage.from("uploads").getPublicUrl(fileName);
-      
-      await supabase.from("support_messages").insert({
-        user_id: user.id,
-        sender_id: user.id,
-        ticket_id: ticketId,
-        content: isImage ? "" : `Enviou um arquivo: ${originalFile.name}`,
-        image_urls: isImage ? [urlData.publicUrl] : null,
-      });
+
+      if (isImage) {
+        await supabase.from("support_messages").insert({
+          user_id: user.id,
+          sender_id: user.id,
+          ticket_id: ticketId,
+          content: "",
+          image_urls: [urlData.publicUrl],
+        });
+      } else {
+        const kind: SupportAttachKind = isVideo ? "VIDEO" : "FILE";
+        const tag = buildSupportAttachmentTag(kind, urlData.publicUrl, originalFile.name);
+        await supabase.from("support_messages").insert({
+          user_id: user.id,
+          sender_id: user.id,
+          ticket_id: ticketId,
+          content: tag,
+          image_urls: null,
+        });
+      }
 
     } catch (err: any) {
       toast({ title: "Erro ao enviar", description: err.message, variant: "destructive" });
@@ -389,36 +436,93 @@ const SupportThread = () => {
     }
   };
 
+  const openViewer = (kind: "image" | "video" | "pdf", url: string, name: string) => {
+    setMediaViewerFullscreen(false);
+    setMediaViewer({ kind, url, name });
+  };
+
   const renderContent = (msg: Message) => {
     const audioMatch = msg.content.match(/\[AUDIO:(.+):(\d+)\]$/);
-    if (audioMatch) return <AudioPlayer src={audioMatch[1]} duration={parseInt(audioMatch[2])} isMine={msg.sender_id === user?.id} />;
+    if (audioMatch)
+      return (
+        <AudioPlayer
+          src={audioMatch[1]}
+          duration={parseInt(audioMatch[2])}
+          isMine={msg.sender_id === user?.id}
+        />
+      );
 
     if (msg.image_urls && msg.image_urls.length > 0) {
       return (
         <div className="space-y-2">
           <div className="grid grid-cols-1 gap-1.5">
             {msg.image_urls.map((url, j) => (
-              <img 
-                key={j} src={url} alt="" 
-                className="max-w-[200px] rounded-lg cursor-pointer hover:opacity-90" 
-                onClick={() => window.open(url, '_blank')} 
-              />
+              <button
+                key={j}
+                type="button"
+                className="relative block max-w-[220px] rounded-lg overflow-hidden border border-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+                onClick={() => openViewer("image", url, "Imagem")}
+              >
+                <img src={url} alt="" className="w-full object-cover max-h-52 hover:opacity-95 transition-opacity" />
+                <span className="absolute bottom-1 right-1 rounded-md bg-black/55 p-1 text-white">
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </span>
+              </button>
             ))}
           </div>
-          {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
+          {msg.content ? <p className="whitespace-pre-wrap">{msg.content}</p> : null}
         </div>
       );
     }
 
-    const tagMatch = msg.content.match(/\[(IMAGE|VIDEO|FILE):(.+):(.+)\]$/);
-    if (tagMatch) {
-      const [, type, url, name] = tagMatch;
-      if (type === "IMAGE") return <img src={url} alt={name} className="max-w-[200px] rounded-lg cursor-pointer" onClick={() => window.open(url, '_blank')} />;
-      if (type === "VIDEO") return <video src={url} controls className="max-w-[200px] rounded-lg" />;
+    const att = parseAnySupportAttachment(msg.content.trim());
+    if (att) {
+      if (att.kind === "IMAGE") {
+        return (
+          <button
+            type="button"
+            className="relative block max-w-[220px] rounded-lg overflow-hidden border border-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+            onClick={() => openViewer("image", att.url, att.name)}
+          >
+            <img
+              src={att.url}
+              alt=""
+              className="w-full object-cover max-h-52 hover:opacity-95 transition-opacity"
+            />
+            <span className="absolute bottom-1 right-1 rounded-md bg-black/55 p-1 text-white">
+              <Maximize2 className="w-3.5 h-3.5" />
+            </span>
+          </button>
+        );
+      }
+      if (att.kind === "VIDEO") {
+        return (
+          <div className="relative max-w-[min(260px,85vw)] rounded-xl overflow-hidden border border-white/15 bg-black/30">
+            <video src={att.url} controls className="w-full max-h-56 object-contain" playsInline />
+            <button
+              type="button"
+              className="absolute top-2 right-2 rounded-full bg-black/55 p-1.5 text-white"
+              onClick={() => openViewer("video", att.url, att.name)}
+              aria-label="Tela cheia"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </button>
+            <p className="text-[10px] px-2 py-1 opacity-80 truncate">{att.name}</p>
+          </div>
+        );
+      }
       return (
-        <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline text-xs">
-          <FileText className="w-4 h-4" /> {name}
-        </a>
+        <button
+          type="button"
+          onClick={() => openViewer("pdf", att.url, att.name)}
+          className="flex w-full max-w-[260px] flex-col gap-1 rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-left hover:bg-white/10 transition-colors"
+        >
+          <span className="flex items-center gap-2 text-xs font-semibold">
+            <FileText className="w-4 h-4 shrink-0" />
+            <span className="truncate">{att.name}</span>
+          </span>
+          <span className="text-[10px] opacity-70">Toque para ver o PDF</span>
+        </button>
       );
     }
 
@@ -608,6 +712,136 @@ const SupportThread = () => {
           </div>
         </div>
       )}
+      <Dialog
+        open={!!mediaViewer}
+        onOpenChange={(o) => {
+          if (!o) {
+            setMediaViewer(null);
+            setMediaViewerFullscreen(false);
+          }
+        }}
+      >
+        <DialogContent
+          className={
+            mediaViewerFullscreen
+              ? "!fixed !inset-0 !left-0 !top-0 z-[80] flex h-[100dvh] max-h-none w-full max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 rounded-none border-0 bg-black p-0 overflow-hidden shadow-none [&>button]:hidden"
+              : "max-w-[min(100vw-1rem,28rem)] p-0 gap-0 overflow-hidden rounded-2xl [&>button]:right-2 [&>button]:top-2"
+          }
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          {mediaViewer ? (
+            <>
+              <DialogTitle className="sr-only">
+                {mediaViewer.kind === "pdf" ? "Documento" : mediaViewer.kind === "video" ? "Vídeo" : "Imagem"}
+              </DialogTitle>
+              <div
+                className={
+                  mediaViewerFullscreen
+                    ? "flex items-center justify-between gap-2 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] bg-black/80 text-white shrink-0"
+                    : "flex items-center justify-between gap-2 border-b px-3 py-2 shrink-0 bg-background"
+                }
+              >
+                <button
+                  type="button"
+                  className={
+                    mediaViewerFullscreen
+                      ? "rounded-full p-2 hover:bg-white/10"
+                      : "rounded-full p-2 hover:bg-muted"
+                  }
+                  onClick={() => setMediaViewer(null)}
+                  aria-label="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <p
+                  className={
+                    mediaViewerFullscreen
+                      ? "flex-1 truncate text-center text-xs font-medium"
+                      : "flex-1 truncate text-center text-xs font-medium text-foreground"
+                  }
+                >
+                  {mediaViewer.name}
+                </p>
+                <button
+                  type="button"
+                  className={
+                    mediaViewerFullscreen
+                      ? "rounded-full p-2 hover:bg-white/10"
+                      : "rounded-full p-2 hover:bg-muted"
+                  }
+                  onClick={() => setMediaViewerFullscreen((f) => !f)}
+                  aria-label={mediaViewerFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                >
+                  <Maximize2 className="w-5 h-5" />
+                </button>
+              </div>
+              <div
+                className={
+                  mediaViewerFullscreen
+                    ? "flex min-h-0 flex-1 items-center justify-center bg-black p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+                    : "max-h-[min(70vh,520px)] overflow-auto bg-muted/30 p-2"
+                }
+              >
+                {mediaViewer.kind === "image" ? (
+                  <img
+                    src={mediaViewer.url}
+                    alt=""
+                    className={
+                      mediaViewerFullscreen
+                        ? "max-h-full max-w-full object-contain"
+                        : "mx-auto max-h-[min(60vh,480px)] w-auto max-w-full rounded-lg object-contain"
+                    }
+                  />
+                ) : mediaViewer.kind === "video" ? (
+                  <video
+                    src={mediaViewer.url}
+                    controls
+                    playsInline
+                    className={
+                      mediaViewerFullscreen
+                        ? "max-h-full max-w-full object-contain"
+                        : "mx-auto max-h-[min(60vh,480px)] w-full rounded-lg object-contain"
+                    }
+                  />
+                ) : (
+                  <iframe
+                    title={mediaViewer.name}
+                    src={mediaViewer.url}
+                    className={
+                      mediaViewerFullscreen
+                        ? "h-full min-h-[50vh] w-full flex-1 rounded-none bg-white"
+                        : "h-[min(60vh,480px)] w-full rounded-lg border bg-white"
+                    }
+                  />
+                )}
+              </div>
+              {mediaViewer.kind === "pdf" ? (
+                <div
+                  className={
+                    mediaViewerFullscreen
+                      ? "shrink-0 border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-black/80"
+                      : "shrink-0 border-t p-3 bg-background"
+                  }
+                >
+                  <a
+                    href={mediaViewer.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={
+                      mediaViewerFullscreen
+                        ? "block text-center text-sm text-sky-400 underline"
+                        : "block text-center text-sm text-primary underline"
+                    }
+                  >
+                    Abrir PDF no navegador se não carregar aqui
+                  </a>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
       <BottomNav />
     </div>
   );

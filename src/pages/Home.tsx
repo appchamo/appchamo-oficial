@@ -36,7 +36,7 @@ import SponsorLaunchNovidadeModal from "@/components/sponsor/SponsorLaunchNovida
 
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
-  <div className="max-w-screen-lg mx-auto px-4 py-5 flex flex-col gap-6 w-full animate-in fade-in duration-500">
+  <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto px-4 lg:px-8 xl:px-12 py-5 lg:py-8 flex flex-col gap-6 lg:gap-8 w-full animate-in fade-in duration-500">
     {/* Welcome Header */}
     <div className="flex items-center gap-3 animate-pulse pt-2">
       <div className="w-12 h-12 bg-muted rounded-full"></div>
@@ -55,9 +55,9 @@ const HomeSkeleton = () => (
     {/* Categories */}
     <div className="space-y-3">
       <div className="h-4 w-32 bg-muted rounded animate-pulse"></div>
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 lg:gap-4">
         {[...Array(8)].map((_, i) => (
-          <div key={i} className="aspect-square bg-muted rounded-xl animate-pulse"></div>
+          <div key={i} className="aspect-square bg-muted rounded-xl lg:rounded-2xl animate-pulse"></div>
         ))}
       </div>
     </div>
@@ -68,43 +68,49 @@ const HomeSkeleton = () => (
 function HomeHeavyPlaceholder({ kind, title }: { kind: "sponsors" | "featured" | "categories"; title: string }) {
   if (kind === "sponsors") {
     return (
-      <section className="min-h-[160px]">
-        <h3 className="font-semibold text-foreground mb-3 px-1">{title}</h3>
-        <div className="flex gap-4 justify-start overflow-hidden pb-2">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="w-[72px] h-[72px] rounded-full bg-muted animate-pulse flex-shrink-0" />
+      <section className="min-h-[160px] lg:min-h-[180px]">
+        <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{title}</h3>
+        <div className="flex gap-4 lg:gap-6 justify-start overflow-hidden pb-2">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              className="w-[72px] h-[72px] lg:w-[84px] lg:h-[84px] rounded-full bg-muted animate-pulse flex-shrink-0"
+            />
           ))}
         </div>
-        <p className="text-xs text-muted-foreground px-1 mt-1">Carregando…</p>
+        <p className="text-xs lg:text-sm text-muted-foreground px-1 mt-1 lg:mt-2">Carregando…</p>
       </section>
     );
   }
   if (kind === "featured") {
     return (
-      <section className="min-h-[250px]">
-        <h3 className="font-semibold text-foreground mb-3 px-1">{title}</h3>
-        <div className="flex gap-3 overflow-hidden">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="flex-shrink-0 w-[140px] rounded-2xl border bg-card p-3 space-y-2">
-              <div className="w-14 h-14 rounded-full bg-muted animate-pulse mx-auto" />
-              <div className="h-3 w-20 rounded bg-muted animate-pulse mx-auto" />
-              <div className="h-3 w-16 rounded bg-muted animate-pulse mx-auto" />
+      <section className="min-h-[250px] lg:min-h-[280px]">
+        <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{title}</h3>
+        <div className="flex gap-3 lg:gap-5 overflow-hidden">
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="flex-shrink-0 w-[140px] lg:w-[168px] rounded-2xl lg:rounded-3xl border bg-card p-3 lg:p-4 space-y-2"
+            >
+              <div className="w-14 h-14 lg:w-16 lg:h-16 rounded-full bg-muted animate-pulse mx-auto" />
+              <div className="h-3 w-20 lg:w-24 rounded bg-muted animate-pulse mx-auto" />
+              <div className="h-3 w-16 lg:w-20 rounded bg-muted animate-pulse mx-auto" />
             </div>
           ))}
         </div>
-        <p className="text-xs text-muted-foreground px-1 mt-2">Carregando profissionais…</p>
+        <p className="text-xs lg:text-sm text-muted-foreground px-1 mt-2 lg:mt-3">Carregando profissionais…</p>
       </section>
     );
   }
   return (
-    <section className="min-h-[200px]">
-      <h3 className="font-semibold text-foreground mb-3 px-1">{title}</h3>
-      <div className="grid grid-cols-4 gap-3">
+    <section className="min-h-[200px] lg:min-h-[240px]">
+      <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{title}</h3>
+      <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 lg:gap-4">
         {[...Array(8)].map((_, i) => (
-          <div key={i} className="aspect-square rounded-xl bg-muted animate-pulse" />
+          <div key={i} className="aspect-square rounded-xl lg:rounded-2xl bg-muted animate-pulse" />
         ))}
       </div>
-      <p className="text-xs text-muted-foreground px-1 mt-2">Carregando categorias…</p>
+      <p className="text-xs lg:text-sm text-muted-foreground px-1 mt-2 lg:mt-3">Carregando categorias…</p>
     </section>
   );
 }
@@ -651,10 +657,12 @@ const Home = () => {
       {!contentReady ? (
         <HomeSkeleton />
       ) : user && homeFeedComunidade ? (
-        <CommunityFeed variant="embedded" highlightPostId={communityHighlightPostId} />
+        <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto lg:px-4 xl:px-6 2xl:px-8 lg:py-3">
+          <CommunityFeed variant="embedded" highlightPostId={communityHighlightPostId} />
+        </div>
       ) : (
         <div
-          className="max-w-screen-lg lg:max-w-4xl xl:max-w-6xl mx-auto px-4 py-2 flex flex-col gap-4 bg-secondary transition-opacity duration-300"
+          className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto px-4 lg:px-8 xl:px-12 py-2 lg:py-6 flex flex-col gap-4 lg:gap-6 bg-secondary transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
           {user && isPro && proId ? (

@@ -40,8 +40,23 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
   const retryCountRef = useRef(0);
   const cancelledRef = useRef(false);
   const hangRetryRef = useRef(0);
-  const cols = typeof window !== "undefined" && window.innerWidth >= 640 ? 5 : 4;
-  const visibleCount = cols * 2;
+  const [gridCols, setGridCols] = useState(4);
+
+  useEffect(() => {
+    const read = () => {
+      const w = window.innerWidth;
+      if (w >= 1536) setGridCols(8);
+      else if (w >= 1280) setGridCols(7);
+      else if (w >= 1024) setGridCols(6);
+      else if (w >= 640) setGridCols(5);
+      else setGridCols(4);
+    };
+    read();
+    window.addEventListener("resize", read);
+    return () => window.removeEventListener("resize", read);
+  }, []);
+
+  const visibleCount = gridCols * 2;
 
   useEffect(() => {
     setLoaded(false);
@@ -119,12 +134,12 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
   if (!loaded) {
     return (
       <section>
-        <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Categorias"}</h3>
-        <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+        <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{section?.title ?? "Categorias"}</h3>
+        <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 lg:gap-4">
           {[...Array(8)].map((_, i) => (
-            <div key={i} className="flex flex-col items-center gap-1.5 p-2.5 min-h-[90px] rounded-2xl bg-muted animate-pulse">
-              <div className="w-10 h-10 rounded-xl bg-muted-foreground/20" />
-              <div className="h-3 w-12 rounded bg-muted-foreground/20" />
+            <div key={i} className="flex flex-col items-center gap-1.5 lg:gap-2 p-2.5 lg:p-3.5 min-h-[90px] lg:min-h-[104px] rounded-2xl lg:rounded-3xl bg-muted animate-pulse">
+              <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-muted-foreground/20" />
+              <div className="h-3 w-12 lg:w-14 rounded bg-muted-foreground/20" />
             </div>
           ))}
         </div>
@@ -137,24 +152,24 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
 
   return (
     <section>
-      <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Categorias"}</h3>
-      <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+      <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{section?.title ?? "Categorias"}</h3>
+      <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 lg:gap-4">
       {shown.map((cat) => {
           const Icon = iconMap[cat.icon_name] || Briefcase;
           return (
             <Link
               key={cat.id}
               to={`/category/${cat.slug}`}
-              className="flex flex-col items-center justify-start gap-1.5 p-2.5 min-h-[90px] rounded-2xl bg-card border hover:border-primary/40 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group overflow-hidden"
+              className="flex flex-col items-center justify-start gap-1.5 lg:gap-2 p-2.5 lg:p-3.5 min-h-[90px] lg:min-h-[104px] rounded-2xl lg:rounded-3xl bg-card border hover:border-primary/40 hover:shadow-lg lg:hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 group overflow-hidden"
             >
-              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-200">
+              <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl lg:rounded-2xl bg-white flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-200">
                 {cat.icon_url ? (
-                  <img src={cat.icon_url} alt={cat.name} className="w-6 h-6 object-contain" />
+                  <img src={cat.icon_url} alt={cat.name} className="w-6 h-6 lg:w-7 lg:h-7 object-contain" />
                 ) : (
-                  <Icon className="w-5 h-5 text-primary" />
+                  <Icon className="w-5 h-5 lg:w-6 lg:h-6 text-primary" />
                 )}
               </div>
-              <span className="text-[9px] sm:text-[10px] font-medium text-foreground text-center leading-tight line-clamp-3 w-full min-h-[2.25rem] flex items-center justify-center break-words overflow-hidden px-0.5">
+              <span className="text-[9px] sm:text-[10px] lg:text-xs font-medium text-foreground text-center leading-tight line-clamp-3 w-full min-h-[2.25rem] lg:min-h-[2.5rem] flex items-center justify-center break-words overflow-hidden px-0.5">
                 {cat.name}
               </span>
             </Link>
@@ -164,7 +179,7 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
       {categories.length > visibleCount && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full mt-3 py-2.5 rounded-xl border text-sm font-medium text-primary hover:bg-accent transition-colors"
+          className="w-full mt-3 lg:mt-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl border text-sm lg:text-base font-medium text-primary hover:bg-accent transition-colors"
         >
           {expanded ? "Ver menos" : "Ver mais"}
         </button>

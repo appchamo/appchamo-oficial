@@ -385,7 +385,7 @@ const SponsorCarousel = ({
     const n = Math.min(Math.max(itemsPerPage, 4), 8);
     return (
       <section>
-        <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">{section?.title ?? "Patrocinadores"}</h3>
+        <h3 className="font-semibold text-sm lg:text-base text-muted-foreground mb-2 lg:mb-3 px-1">{section?.title ?? "Patrocinadores"}</h3>
         <div className="flex gap-3 overflow-hidden">
           {Array.from({ length: n }, (_, i) => (
             <div key={i} className="w-[65px] h-[65px] rounded-full bg-muted animate-pulse shrink-0" />
@@ -402,7 +402,7 @@ const SponsorCarousel = ({
   return (
     <>
     <section>
-      <h3 className="font-semibold text-sm text-muted-foreground mb-2 px-1">{title}</h3>
+      <h3 className="font-semibold text-sm lg:text-base text-muted-foreground mb-2 lg:mb-3 px-1">{title}</h3>
       <div
         ref={scrollRef}
         data-tab-swipe-ignore
@@ -428,7 +428,7 @@ const SponsorCarousel = ({
         {displayPages.map((pageSponsors, pageIndex) => (
           <div
             key={pageIndex}
-            className="flex gap-6 flex-[0_0_100%] min-w-0 shrink-0 snap-start justify-evenly items-stretch px-2"
+            className="flex gap-6 lg:gap-10 flex-[0_0_100%] min-w-0 shrink-0 snap-start justify-evenly items-stretch px-2 lg:px-6"
             style={{ scrollSnapStop: "always" }}
           >
             {pageSponsors.map((sponsor) => {
@@ -439,7 +439,7 @@ const SponsorCarousel = ({
                 onClick={() => handleClick(sponsor)}
                 className="flex-1 min-w-0 flex flex-col gap-1.5 items-center justify-start py-[4px] px-0 group"
               >
-                <div className={`w-[65px] h-[65px] rounded-full flex items-center justify-center overflow-hidden shrink-0 ${hasStory ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "ring-2 ring-muted group-hover:ring-primary/40 transition-all"}`}>
+                <div className={`w-[65px] h-[65px] lg:w-[84px] lg:h-[84px] rounded-full flex items-center justify-center overflow-hidden shrink-0 ${hasStory ? "ring-2 ring-primary ring-offset-2 ring-offset-background lg:ring-offset-4" : "ring-2 ring-muted group-hover:ring-primary/40 transition-all"}`}>
                   <div className="w-full h-full rounded-full bg-muted flex items-center justify-center overflow-hidden">
                     {sponsor.logo_url ? (
                       <img
@@ -454,8 +454,8 @@ const SponsorCarousel = ({
                     )}
                   </div>
                 </div>
-                <span className="text-[11px] font-medium text-foreground truncate w-full text-center">{sponsor.name}</span>
-                <span className={`text-[9px] -mt-1 ${hasStory ? "text-primary font-medium" : "text-muted-foreground"}`}>{hasStory ? "Novidade" : subtitle}</span>
+                <span className="text-[11px] lg:text-xs font-medium text-foreground truncate w-full text-center max-w-[100px] lg:max-w-[120px]">{sponsor.name}</span>
+                <span className={`text-[9px] lg:text-[10px] -mt-1 ${hasStory ? "text-primary font-medium" : "text-muted-foreground"}`}>{hasStory ? "Novidade" : subtitle}</span>
               </button>
               );
             })}

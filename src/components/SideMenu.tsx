@@ -121,11 +121,11 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
 
   return (
     <>
-      <nav className="p-3 flex flex-col gap-1 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+      <nav className="p-3 lg:p-4 flex flex-col gap-1 lg:gap-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
         {sections.map((section, sIdx) => (
           <div key={sIdx}>
             {section.title && (
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1 lg:text-[11px] lg:px-4">
                 {section.title}
               </p>
             )}
@@ -143,7 +143,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
                   to={item.path}
                   onClick={onNavigate}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium",
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium lg:px-4 lg:py-3 lg:text-[15px] lg:rounded-xl",
                     isActive && !isFinanceiro && "bg-accent text-accent-foreground",
                     !isActive && !isFinanceiro && "text-foreground hover:bg-muted",
                     isFinanceiro &&
@@ -152,7 +152,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
                   )}
                   {...(isTornarSePro ? { "data-onboarding": "tornar-se-pro" } : {})}
                 >
-                  <item.icon className={cn("w-4 h-4 shrink-0", isFinanceiro && "text-primary")} />
+                  <item.icon className={cn("w-4 h-4 shrink-0 lg:w-[18px] lg:h-[18px]", isFinanceiro && "text-primary")} />
                   {item.label}
                 </Link>
               );
@@ -191,11 +191,11 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
 export function DesktopSidebar() {
   return (
     <aside
-      className="hidden lg:flex w-[min(280px,22vw)] min-w-[240px] max-w-[300px] shrink-0 flex-col self-stretch min-h-0 max-h-[100dvh] sticky top-0 border-r border-border bg-card z-20 shadow-sm"
+      className="hidden lg:flex w-[min(300px,24vw)] min-w-[260px] max-w-[320px] shrink-0 flex-col self-stretch min-h-0 max-h-[100dvh] sticky top-0 border-r border-border bg-card z-20 shadow-sm"
       aria-label="Menu principal"
     >
-      <div className="flex items-center px-4 py-4 border-b border-border shrink-0">
-        <span className="text-xl font-bold text-gradient">Chamô</span>
+      <div className="flex items-center px-5 py-5 border-b border-border shrink-0">
+        <span className="text-2xl font-bold text-gradient">Chamô</span>
       </div>
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <SideMenuNav footerPaddingClass="pb-8" />

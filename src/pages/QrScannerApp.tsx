@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
 import { Capacitor } from "@capacitor/core";
@@ -29,9 +29,6 @@ import {
 } from "lucide-react";
 
 const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qr-login`;
-const SUPABASE_ANON_OR_PUBLISHABLE = (
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ""
-).trim();
 
 type Stage = "idle" | "scanning" | "processing" | "success" | "error";
 
@@ -101,27 +98,32 @@ export default function QrScannerApp() {
       if (!user) throw new Error("Você precisa estar logado no app.");
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão não encontrada.");
+      if (!SUPABASE_PUBLIC_API_KEY) {
+        throw new Error("Configuração do app incompleta (chave Supabase). Reinstale ou atualize o app.");
+      }
 
       const res = await fetch(`${EDGE_URL}/scan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(SUPABASE_ANON_OR_PUBLISHABLE
-            ? {
-                apikey: SUPABASE_ANON_OR_PUBLISHABLE,
-                Authorization: `Bearer ${session.access_token}`,
-              }
-            : { Authorization: `Bearer ${session.access_token}` }),
+          apikey: SUPABASE_PUBLIC_API_KEY,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          token,
+          token: token.trim(),
           access_token: session.access_token,
           refresh_token: session.refresh_token,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao autenticar.");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          (typeof data?.error === "string" && data.error) ||
+          (typeof data?.message === "string" && data.message) ||
+          `Erro ao autenticar (${res.status}).`;
+        throw new Error(msg);
+      }
 
       setStage("success");
       setTimeout(() => navigate(-1), 2500);

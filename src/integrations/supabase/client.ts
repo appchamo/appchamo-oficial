@@ -3,8 +3,11 @@ import type { Database } from './types';
 import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+/** Mesma chave do createClient — usar em fetch manual às Edge Functions (header `apikey`). */
+export const SUPABASE_PUBLIC_API_KEY = (
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ""
+).trim();
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -50,7 +53,7 @@ const capacitorAuthStorage = {
   },
 };
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLIC_API_KEY, {
   auth: {
     storage: isNative ? capacitorAuthStorage : window.localStorage,
     persistSession: true,

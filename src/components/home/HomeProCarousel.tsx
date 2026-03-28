@@ -208,7 +208,7 @@ export default function HomeProCarousel({
 
   return (
     <div
-      className="relative overflow-hidden rounded-2xl shadow-lg select-none"
+      className="relative overflow-hidden rounded-2xl lg:rounded-3xl shadow-lg lg:shadow-xl select-none"
       style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
@@ -220,8 +220,8 @@ export default function HomeProCarousel({
       <div className="absolute top-4 right-16 w-10 h-10 bg-white/10 rounded-full pointer-events-none z-0" />
 
       {/* Localização em destaque — acima do bloco de boas-vindas / carteira */}
-      <div className="relative z-[2] px-4 pt-4 pb-1">
-        <p className="text-[10px] font-semibold text-white/90 uppercase tracking-wide mb-1.5 px-0.5">
+      <div className="relative z-[2] px-4 lg:px-7 pt-4 lg:pt-6 pb-1 lg:pb-2">
+        <p className="text-[10px] lg:text-xs font-semibold text-white/90 uppercase tracking-wide mb-1.5 lg:mb-2 px-0.5">
           A localização que você atende
         </p>
         <button
@@ -230,11 +230,11 @@ export default function HomeProCarousel({
             e.stopPropagation();
             onLocationClick();
           }}
-          className="w-full flex items-center gap-2.5 rounded-xl bg-white/20 backdrop-blur-sm border border-white/45 px-3 py-2.5 text-left shadow-md shadow-black/15 active:scale-[0.99] transition-transform"
+          className="w-full flex items-center gap-2.5 lg:gap-3 rounded-xl lg:rounded-2xl bg-white/20 backdrop-blur-sm border border-white/45 px-3 py-2.5 lg:px-4 lg:py-3.5 text-left shadow-md shadow-black/15 active:scale-[0.99] transition-transform"
         >
-          <MapPin className="w-4 h-4 text-white shrink-0" />
-          <span className="flex-1 text-sm font-bold text-white truncate">{locationLabel}</span>
-          <span className="text-[11px] font-bold text-white/95 shrink-0">Alterar</span>
+          <MapPin className="w-4 h-4 lg:w-5 lg:h-5 text-white shrink-0" />
+          <span className="flex-1 text-sm lg:text-base font-bold text-white truncate">{locationLabel}</span>
+          <span className="text-[11px] lg:text-sm font-bold text-white/95 shrink-0">Alterar</span>
         </button>
       </div>
 
@@ -247,27 +247,27 @@ export default function HomeProCarousel({
         {/* ════ SLIDE 0 — Carteira ════ */}
         <div className="min-w-full">
           <div
-            className="px-5 pt-2 pb-5 cursor-pointer active:opacity-90"
+            className="px-5 lg:px-7 pt-2 lg:pt-3 pb-5 lg:pb-7 cursor-pointer active:opacity-90"
             onClick={() => navigate("/pro/financeiro")}
           >
             {/* avatar + saudação + prévia da próxima missão */}
-            <div className={`flex items-start gap-2 mb-4 ${hasAgenda ? "pr-10" : ""}`}>
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className={`flex items-start gap-2 lg:gap-4 mb-4 lg:mb-5 ${hasAgenda ? "pr-10 lg:pr-14" : ""}`}>
+              <div className="flex items-center gap-3 lg:gap-4 flex-1 min-w-0">
                 {profile?.avatar_url ? (
                   <img
                     src={profile.avatar_url}
                     alt={userName}
-                    className="w-12 h-12 rounded-full object-cover border-2 border-white/40 shrink-0"
+                    className="w-12 h-12 lg:w-14 lg:h-14 rounded-full object-cover border-2 border-white/40 shrink-0"
                     onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
                   />
                 ) : (
-                  <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center shrink-0">
-                    <span className="text-white font-bold text-xl">{userName.charAt(0).toUpperCase()}</span>
+                  <div className="w-12 h-12 lg:w-14 lg:h-14 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center shrink-0">
+                    <span className="text-white font-bold text-xl lg:text-2xl">{userName.charAt(0).toUpperCase()}</span>
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-white/75 text-xs leading-none mb-0.5">{welcomeWord} de volta,</p>
-                  <p className="text-white font-bold text-lg leading-tight truncate">{userName} 👋</p>
+                  <p className="text-white/75 text-xs lg:text-sm leading-none mb-0.5">{welcomeWord} de volta,</p>
+                  <p className="text-white font-bold text-lg lg:text-2xl leading-tight truncate">{userName} 👋</p>
                 </div>
               </div>
               {nextMission && (
@@ -277,26 +277,26 @@ export default function HomeProCarousel({
                     e.stopPropagation();
                     navigate("/rewards?tab=missions");
                   }}
-                  className="shrink-0 w-[118px] sm:w-[128px] rounded-xl bg-white/15 backdrop-blur-sm px-2.5 py-2 text-left border border-white/25 shadow-sm active:scale-[0.98] transition-transform"
+                  className="shrink-0 w-[118px] sm:w-[128px] lg:w-[148px] rounded-xl lg:rounded-2xl bg-white/15 backdrop-blur-sm px-2.5 py-2 lg:px-3 lg:py-2.5 text-left border border-white/25 shadow-sm active:scale-[0.98] transition-transform"
                 >
-                  <div className="flex items-center gap-0.5 text-white/85 mb-1">
-                    <Target className="w-2.5 h-2.5 shrink-0" />
-                    <span className="text-[8px] font-bold uppercase tracking-wide leading-none">
+                  <div className="flex items-center gap-0.5 lg:gap-1 text-white/85 mb-1 lg:mb-1.5">
+                    <Target className="w-2.5 h-2.5 lg:w-3 lg:h-3 shrink-0" />
+                    <span className="text-[8px] lg:text-[9px] font-bold uppercase tracking-wide leading-none">
                       {nextMission.allDone ? "Programa" : "Próxima missão"}
                     </span>
                   </div>
-                  <div className="flex items-start gap-1.5 mb-1.5">
+                  <div className="flex items-start gap-1.5 lg:gap-2 mb-1.5">
                     <ProfessionalSealIcon
                       variant={parseSealIconVariant(nextMission.icon_variant)}
                       size={26}
                       earned={nextMission.allDone}
-                      className="shrink-0 scale-90 origin-top-left"
+                      className="shrink-0 scale-90 lg:scale-100 origin-top-left"
                     />
-                    <span className="text-[10px] font-semibold text-white leading-tight line-clamp-2 min-w-0 pt-0.5">
+                    <span className="text-[10px] lg:text-xs font-semibold text-white leading-tight line-clamp-2 min-w-0 pt-0.5">
                       {nextMission.title}
                     </span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-black/25 overflow-hidden">
+                  <div className="h-1.5 lg:h-2 rounded-full bg-black/25 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-white/95 transition-all duration-500"
                       style={{ width: `${Math.round(nextMission.progress * 100)}%` }}
@@ -307,23 +307,23 @@ export default function HomeProCarousel({
             </div>
 
             {/* saldo */}
-            <div className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                  <Wallet className="w-[18px] h-[18px] text-white" />
+            <div className="bg-white/15 backdrop-blur-sm rounded-xl lg:rounded-2xl p-3.5 lg:p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 lg:gap-3.5">
+                <div className="w-9 h-9 lg:w-11 lg:h-11 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <Wallet className="w-[18px] h-[18px] lg:w-5 lg:h-5 text-white" />
                 </div>
                 <div>
-                  <p className="text-white/70 text-[10px] uppercase tracking-wider leading-none mb-0.5">Saldo a receber</p>
-                  <p className="text-white font-bold text-xl leading-none">
+                  <p className="text-white/70 text-[10px] lg:text-xs uppercase tracking-wider leading-none mb-0.5">Saldo a receber</p>
+                  <p className="text-white font-bold text-xl lg:text-2xl leading-none">
                     {walletLoaded
                       ? walletBalance.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
                       : "…"}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-1 text-white/70 text-xs font-medium">
+              <div className="flex items-center gap-1 text-white/70 text-xs lg:text-sm font-medium">
                 <span>Ver carteira</span>
-                <ChevronRight className="w-3.5 h-3.5" />
+                <ChevronRight className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
               </div>
             </div>
           </div>
@@ -333,53 +333,53 @@ export default function HomeProCarousel({
         {hasAgenda && (
           <div className="min-w-full">
             <div
-              className="p-4 cursor-pointer active:opacity-90"
+              className="p-4 lg:px-7 lg:py-6 cursor-pointer active:opacity-90"
               onClick={() => navigate("/pro/agenda/calendario")}
             >
               {/* header */}
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
-                    <CalendarCheck className="w-4 h-4 text-white" />
+              <div className="flex items-center justify-between mb-3 lg:mb-4">
+                <div className="flex items-center gap-2 lg:gap-3">
+                  <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-xl bg-white/20 flex items-center justify-center">
+                    <CalendarCheck className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-white/70 uppercase tracking-wide">Agenda de Hoje</p>
+                    <p className="text-xs lg:text-sm font-semibold text-white/70 uppercase tracking-wide">Agenda de Hoje</p>
                     {totalToday > 1 && next && next.appointment_date === format(new Date(), "yyyy-MM-dd") && (
-                      <p className="text-[10px] text-white/60">{totalToday} compromissos hoje</p>
+                      <p className="text-[10px] lg:text-xs text-white/60">{totalToday} compromissos hoje</p>
                     )}
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-white/50" />
+                <ChevronRight className="w-4 h-4 lg:w-5 lg:h-5 text-white/50" />
               </div>
 
               {/* compromisso */}
-              <div className="flex items-start gap-3">
-                <div className="flex flex-col items-center min-w-[52px]">
-                  <div className="bg-white/20 rounded-xl px-2 py-1.5 text-center">
-                    <p className="text-lg font-bold text-white leading-none">{next.start_time}</p>
-                    <p className="text-[9px] text-white/70 mt-0.5">{getDateLabel(next.appointment_date)}</p>
+              <div className="flex items-start gap-3 lg:gap-4">
+                <div className="flex flex-col items-center min-w-[52px] lg:min-w-[60px]">
+                  <div className="bg-white/20 rounded-xl lg:rounded-2xl px-2 py-1.5 lg:px-2.5 lg:py-2 text-center">
+                    <p className="text-lg lg:text-xl font-bold text-white leading-none">{next.start_time}</p>
+                    <p className="text-[9px] lg:text-[10px] text-white/70 mt-0.5">{getDateLabel(next.appointment_date)}</p>
                   </div>
                   {next.end_time && <div className="w-px h-4 bg-white/30 my-1" />}
-                  {next.end_time && <p className="text-[10px] text-white/60">{next.end_time}</p>}
+                  {next.end_time && <p className="text-[10px] lg:text-xs text-white/60">{next.end_time}</p>}
                 </div>
                 <div className="flex-1 min-w-0 pt-0.5">
-                  <p className="font-bold text-white text-sm leading-tight truncate">
+                  <p className="font-bold text-white text-sm lg:text-base leading-tight truncate">
                     {next.service_name || "Compromisso"}
                   </p>
                   {next.client_name && (
                     <div className="flex items-center gap-1 mt-1">
-                      <User className="w-3 h-3 text-white/60 shrink-0" />
-                      <p className="text-xs text-white/80 truncate">{next.client_name}</p>
+                      <User className="w-3 h-3 lg:w-3.5 lg:h-3.5 text-white/60 shrink-0" />
+                      <p className="text-xs lg:text-sm text-white/80 truncate">{next.client_name}</p>
                     </div>
                   )}
                   <div className="flex items-center gap-1.5 mt-2">
                     <div className={`w-1.5 h-1.5 rounded-full ${statusColor(next.status)}`} />
-                    <p className="text-[11px] text-white/70">{statusLabel(next.status)}</p>
+                    <p className="text-[11px] lg:text-sm text-white/70">{statusLabel(next.status)}</p>
                     {next.end_time && (
                       <>
                         <span className="text-white/30">·</span>
                         <Clock className="w-3 h-3 text-white/50" />
-                        <p className="text-[11px] text-white/70">até {next.end_time}</p>
+                        <p className="text-[11px] lg:text-sm text-white/70">até {next.end_time}</p>
                       </>
                     )}
                   </div>
@@ -397,12 +397,12 @@ export default function HomeProCarousel({
           onClick={() => goTo(slide === 0 ? 1 : 0)}
           className={`
             absolute z-10
-            w-9 h-9 rounded-full bg-black/20 backdrop-blur-sm border border-white/25
+            w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-black/20 backdrop-blur-sm border border-white/25
             flex items-center justify-center
             hover:bg-black/30 active:scale-90 transition-all duration-300
             ${slide === 0
-              ? "right-3 top-1/2 -translate-y-1/2"
-              : "left-3 top-3"}
+              ? "right-3 lg:right-5 top-1/2 -translate-y-1/2"
+              : "left-3 lg:left-5 top-3 lg:top-5"}
           `}
           aria-label={slide === 0 ? "Ver agenda" : "Ver carteira"}
         >

@@ -22,11 +22,15 @@ function json(data: unknown, status = 200) {
   });
 }
 
-/** Com verify_jwt=false, o gateway não exige JWT; exigimos apikey da app (publishable ou anon injetada no projeto). */
-function apiKeyOk(req: Request): boolean {
-  const got = (req.headers.get("apikey") ?? "").trim();
-  const expected = (Deno.env.get("SUPABASE_ANON_KEY") ?? "").trim();
-  return !!got && !!expected && got === expected;
+/**
+ * Só exige header `apikey` não vazio. O gateway do Supabase já valida que a chave
+ * pertence a este projeto antes de chegar à função.
+ * Não comparar com SUPABASE_ANON_KEY: no mesmo projeto a chave publishable (sb_publishable_*)
+ * no app e o JWT anon (eyJ*) na env da Edge Function são strings diferentes — comparação estrita
+ * quebrava o scan no mobile mesmo com build correto.
+ */
+function hasApiKeyHeader(req: Request): boolean {
+  return Boolean((req.headers.get("apikey") ?? "").trim());
 }
 
 function randomToken(): string {
@@ -47,8 +51,11 @@ function subPathAfterQrLogin(pathname: string): string {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
-  if (!apiKeyOk(req)) {
-    return json({ code: 401, message: "Invalid or missing apikey" }, 401);
+  if (!hasApiKeyHeader(req)) {
+    return json(
+      { error: "Cabeçalho apikey ausente. Atualize o app.", code: 401 },
+      401,
+    );
   }
 
   const url = new URL(req.url);
@@ -82,31 +89,46 @@ serve(async (req) => {
 
   // ── POST /scan ────────────────────────────────────────────────────────────
   if (req.method === "POST" && path === "scan") {
-    // Requer que o app esteja autenticado
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Não autorizado" }, 401);
-
-    // Verifica o usuário do app via seu JWT
-    const appSupabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-    const { data: { user }, error: userErr } = await appSupabase.auth.getUser();
-    if (userErr || !user) return json({ error: "Usuário inválido" }, 401);
+    const authHeader = (req.headers.get("Authorization") ?? "").trim();
+    const jwtMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+    const jwt = jwtMatch?.[1]?.trim() ?? "";
+    if (!jwt) return json({ error: "Não autorizado" }, 401);
 
     let body: { token: string; access_token: string; refresh_token: string };
     try { body = await req.json(); } catch { return json({ error: "Body inválido" }, 400); }
 
-    if (!body.token || !body.access_token || !body.refresh_token) {
-      return json({ error: "token, access_token e refresh_token são obrigatórios" }, 400);
+    if (!body.token?.trim() || !body.access_token?.trim()) {
+      return json({ error: "token e access_token são obrigatórios" }, 400);
     }
+    if (body.access_token.trim() !== jwt) {
+      return json({ error: "Sessão inconsistente. Tente sair e entrar de novo no app." }, 401);
+    }
+
+    const appSupabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+    );
+    const { data: { user }, error: userErr } = await appSupabase.auth.getUser(jwt);
+    if (userErr || !user) {
+      const hint = (userErr?.message ?? "").toLowerCase();
+      const msg =
+        hint.includes("expired") || hint.includes("jwt")
+          ? "Sessão expirada. Feche o app, abra de novo e faça login."
+          : "Não foi possível validar sua sessão. Abra o Perfil e confirme que está logado.";
+      return json({ error: msg }, 401);
+    }
+
+    if (!body.refresh_token?.trim()) {
+      return json({ error: "Sessão sem refresh token. Faça logout e login novamente no app." }, 400);
+    }
+
+    const qrToken = body.token.trim();
 
     // Verifica que a sessão existe e está pendente
     const { data: session, error: sessionErr } = await supabase
       .from("qr_login_sessions")
       .select("id, status, expires_at")
-      .eq("token", body.token)
+      .eq("token", qrToken)
       .single();
 
     if (sessionErr || !session) return json({ error: "QR Code inválido" }, 404);

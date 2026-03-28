@@ -153,15 +153,15 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
 
   return (
     <div ref={searchRef} className="relative">
-      <div className="rounded-2xl border-2 border-primary/25 bg-card shadow-md transition-all hover:border-primary/40 focus-within:border-primary/55 focus-within:shadow-lg focus-within:ring-4 focus-within:ring-primary/15">
-        <div className="flex items-center gap-0.5 pl-2 pr-2 py-3 sm:py-3.5">
+      <div className="rounded-2xl lg:rounded-3xl border-2 border-primary/25 bg-card shadow-md lg:shadow-lg transition-all hover:border-primary/40 focus-within:border-primary/55 focus-within:shadow-lg focus-within:ring-4 focus-within:ring-primary/15">
+        <div className="flex items-center gap-0.5 pl-2 pr-2 py-3 sm:py-3.5 lg:py-4 lg:pl-3 lg:pr-3">
           <button
             type="button"
             aria-label="Ir para busca"
             onClick={handleSearchSubmit}
             className="shrink-0 p-2.5 rounded-xl bg-primary/12 text-primary hover:bg-primary/18 active:scale-95 transition-colors"
           >
-            <Search className="w-5 h-5" strokeWidth={2.5} />
+            <Search className="w-5 h-5 lg:w-6 lg:h-6" strokeWidth={2.5} />
           </button>
           <input
             type="text"
@@ -173,7 +173,7 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
             onFocus={() => searchQuery.trim() && setShowResults(true)}
             onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()}
             placeholder={placeholder}
-            className="flex-1 min-w-0 bg-transparent text-[15px] sm:text-base leading-tight outline-none text-foreground placeholder:text-muted-foreground placeholder:font-normal"
+            className="flex-1 min-w-0 bg-transparent text-[15px] sm:text-base lg:text-lg leading-tight outline-none text-foreground placeholder:text-muted-foreground placeholder:font-normal"
           />
           {searchQuery ? (
             <button
@@ -190,7 +190,7 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
           ) : null}
         </div>
       </div>
-      <p className="text-xs text-muted-foreground mt-2 px-1 leading-snug">{hint}</p>
+      <p className="text-xs lg:text-sm text-muted-foreground mt-2 lg:mt-2.5 px-1 leading-snug">{hint}</p>
 
       {showResults && searchQuery.trim() && (
         <div className="absolute left-0 right-0 top-full mt-1 bg-card border-2 border-primary/20 rounded-2xl shadow-lg z-30 max-h-80 overflow-y-auto">

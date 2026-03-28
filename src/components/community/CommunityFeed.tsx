@@ -1699,9 +1699,10 @@ export default function CommunityFeed({
   return (
     <main
       className={cn(
-        "mx-auto w-full max-w-lg lg:max-w-3xl xl:max-w-4xl px-4 sm:px-5 py-4 pb-28 lg:pb-10",
+        "mx-auto w-full max-w-lg lg:max-w-none lg:max-w-[1480px] xl:max-w-[1600px] px-4 sm:px-5 lg:px-8 xl:px-10 py-4 lg:py-6 pb-28 lg:pb-10",
         "bg-[#EFEFF4] dark:bg-zinc-950/95",
-        embedded && "min-h-[60vh] rounded-2xl",
+        embedded &&
+          "min-h-[60vh] rounded-2xl lg:rounded-3xl lg:shadow-xl lg:ring-1 lg:ring-black/[0.06] dark:lg:ring-white/10 lg:overflow-hidden",
       )}
     >
       {!embedded && (
@@ -1723,11 +1724,11 @@ export default function CommunityFeed({
       )}
 
       {embedded && (
-        <div className="mb-5 px-0.5">
-          <p className="text-[14px] text-zinc-800 dark:text-zinc-100 leading-snug font-semibold tracking-tight">
+        <div className="mb-5 lg:mb-6 px-0.5 lg:px-1">
+          <p className="text-[14px] lg:text-xl text-zinc-800 dark:text-zinc-100 leading-snug font-semibold tracking-tight">
             Comunidade Chamô
           </p>
-          <p className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+          <p className="text-[12px] lg:text-sm text-zinc-500 dark:text-zinc-400 mt-1 lg:mt-2 leading-relaxed max-w-3xl">
             Feed para profissionais: conteúdo de valor, reputação e conexões.
           </p>
         </div>
@@ -1744,13 +1745,13 @@ export default function CommunityFeed({
       )}
 
       {user && (
-        <div className="flex flex-wrap items-center gap-2 mb-5 w-full">
-          <div className="flex flex-wrap gap-2.5 flex-1 min-w-0 items-center">
+        <div className="flex flex-wrap items-center gap-2 lg:gap-3 mb-5 lg:mb-6 w-full">
+          <div className="flex flex-wrap gap-2.5 lg:gap-3 flex-1 min-w-0 items-center">
             <button
               type="button"
               onClick={() => setFeedScope("all")}
               className={cn(
-                "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
+                "px-4 py-2.5 lg:px-5 lg:py-3 rounded-full text-[12px] lg:text-sm font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
                 feedScope === "all"
                   ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
                   : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",
@@ -1762,7 +1763,7 @@ export default function CommunityFeed({
               type="button"
               onClick={() => setFeedScope("following")}
               className={cn(
-                "px-4 py-2.5 rounded-full text-[12px] font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
+                "px-4 py-2.5 lg:px-5 lg:py-3 rounded-full text-[12px] lg:text-sm font-semibold transition-all border border-black/[0.06] shadow-sm shadow-black/[0.03]",
                 feedScope === "following"
                   ? "bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-200"
                   : "bg-white/95 text-zinc-700 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:border-white/10",

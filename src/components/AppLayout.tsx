@@ -56,7 +56,7 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
     <main
       ref={mainScrollRef}
       key={location.pathname}
-      className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain animate-in fade-in duration-300 touch-pan-y ${isHome ? "bg-secondary pt-2" : "pt-3"}`}
+      className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain animate-in fade-in duration-300 touch-pan-y ${isHome ? "bg-secondary pt-2" : "pt-3"} lg:px-5 xl:px-8 2xl:px-12`}
     >
       {children}
     </main>

@@ -10,16 +10,12 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { supabaseEdgeAnonymousHeaders } from "@/lib/supabaseEdgeFunctionHeaders";
 import { QrCode, RefreshCw, Smartphone, CheckCircle2, AlertCircle, Loader2, ArrowLeft, Globe } from "lucide-react";
 
 const BG_PHOTO = "https://wfxeiuqxzrlnvlopcrwd.supabase.co/storage/v1/object/public/uploads/tutorials/135419.png";
 const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qr-login`;
-/** Mesma chave que `integrations/supabase/client.ts` (em produção costuma ser só PUBLISHABLE; ANON_KEY fica vazio). */
-const SUPABASE_ANON_OR_PUBLISHABLE = (
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ""
-).trim();
 const QR_TTL_MS = 5 * 60 * 1000;
 const EXPIRE_SHOW_MS = 6 * 60 * 1000;
 
@@ -46,15 +42,15 @@ export default function QrAuthWeb() {
     setSecondsLeft(300);
 
     try {
-      if (!SUPABASE_ANON_OR_PUBLISHABLE) {
-        console.error("[qr-auth] VITE_SUPABASE_PUBLISHABLE_KEY (ou ANON) não definida no build");
+      if (!SUPABASE_PUBLIC_API_KEY) {
+        console.error("[qr-auth] SUPABASE_PUBLIC_API_KEY vazia no build");
         setStage("error");
         return;
       }
       const res = await fetch(`${EDGE_URL}/generate`, {
         method: "POST",
         headers: {
-          ...supabaseEdgeAnonymousHeaders(SUPABASE_ANON_OR_PUBLISHABLE),
+          ...supabaseEdgeAnonymousHeaders(SUPABASE_PUBLIC_API_KEY),
           "Content-Type": "application/json",
         },
       });
@@ -82,7 +78,7 @@ export default function QrAuthWeb() {
       pollRef.current = setInterval(async () => {
         try {
           const statusRes = await fetch(`${EDGE_URL}/status/${t}`, {
-            headers: supabaseEdgeAnonymousHeaders(SUPABASE_ANON_OR_PUBLISHABLE),
+            headers: supabaseEdgeAnonymousHeaders(SUPABASE_PUBLIC_API_KEY),
           });
           if (!statusRes.ok) return;
           const data = await statusRes.json();

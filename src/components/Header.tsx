@@ -275,7 +275,7 @@ const Header = () => {
   return (
     <>
       <header className="relative z-30 flex-shrink-0 bg-card/90 backdrop-blur-md border-b border-secondary lg:border-border/60">
-        <div className="flex items-center justify-between gap-2 px-4 py-3 max-w-screen-lg lg:max-w-none mx-auto lg:mx-0 min-w-0 lg:px-6">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto lg:mx-auto min-w-0 lg:px-2 xl:px-4 2xl:px-6 w-full">
           <div className="truncate min-w-0 flex-1 flex items-center">
             {user && isHomePath ? (
               <div
@@ -289,7 +289,7 @@ const Header = () => {
                   aria-selected={!homeFeedComunidade}
                   onClick={() => setSearchParams({}, { replace: true })}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-bold transition-all",
+                    "px-3 py-1.5 rounded-full text-xs font-bold transition-all lg:px-5 lg:py-2 lg:text-sm",
                     !homeFeedComunidade
                       ? "bg-card text-primary shadow-sm ring-1 ring-black/5"
                       : "text-muted-foreground hover:text-foreground",
@@ -303,7 +303,7 @@ const Header = () => {
                   aria-selected={homeFeedComunidade}
                   onClick={() => setSearchParams({ feed: "comunidade" }, { replace: true })}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-bold transition-all max-w-[110px] truncate",
+                    "px-3 py-1.5 rounded-full text-xs font-bold transition-all max-w-[110px] truncate lg:max-w-none lg:px-5 lg:py-2 lg:text-sm",
                     homeFeedComunidade
                       ? "bg-card text-primary shadow-sm ring-1 ring-black/5"
                       : "text-muted-foreground hover:text-foreground",

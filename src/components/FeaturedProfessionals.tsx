@@ -98,12 +98,12 @@ function FeaturedProCard({ pro }: { pro: Pro }) {
     <div ref={impressionRef} className="flex-1 min-w-0 basis-0 min-h-0 flex">
       <Link
         to={`/professional/${pro.id}`}
-        className="bg-card rounded-xl border shadow-card p-4 flex flex-col gap-2.5 flex-1 min-w-0 overflow-hidden active:scale-[0.97] transition-transform"
+        className="bg-card rounded-xl lg:rounded-2xl border shadow-card p-4 lg:p-5 flex flex-col gap-2.5 lg:gap-3 flex-1 min-w-0 overflow-hidden active:scale-[0.97] transition-transform"
       >
         {/* Foto + selos ao lado (melhor selo maior); texto abaixo da foto */}
-        <div className="flex gap-4 items-start w-full min-w-0">
+        <div className="flex gap-4 lg:gap-5 items-start w-full min-w-0">
           <div className="relative shrink-0 self-start">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
+            <div className="w-16 h-16 lg:w-[72px] lg:h-[72px] rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
               {avatarSrc ? (
                 <img
                   src={avatarSrc}
@@ -130,8 +130,8 @@ function FeaturedProCard({ pro }: { pro: Pro }) {
         </div>
 
         <div className="min-w-0 -mt-0.5">
-          <p className="font-bold text-foreground text-sm truncate leading-tight">{pro.full_name}</p>
-          <p className="text-sm font-semibold text-primary truncate mt-0.5">{pro.profession_name}</p>
+          <p className="font-bold text-foreground text-sm lg:text-base truncate leading-tight">{pro.full_name}</p>
+          <p className="text-sm lg:text-[15px] font-semibold text-primary truncate mt-0.5">{pro.profession_name}</p>
           {pro.verified && (
             <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 mt-0.5">
               <BadgeCheck className="w-3 h-3 shrink-0" /> Verificado
@@ -547,10 +547,10 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   if (!prosLoaded) {
     return (
       <section>
-        <h3 className="font-semibold text-foreground mb-3 px-1">{section?.title ?? "Profissionais em destaque"}</h3>
-        <div className="flex gap-3 overflow-x-auto pb-2" data-tab-swipe-ignore>
+        <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{section?.title ?? "Profissionais em destaque"}</h3>
+        <div className="flex gap-3 lg:gap-4 overflow-x-auto pb-2" data-tab-swipe-ignore>
           {[1, 2].map((i) => (
-            <div key={i} className="flex-shrink-0 w-[140px] rounded-2xl border bg-card p-3 space-y-2">
+            <div key={i} className="flex-shrink-0 w-[140px] lg:w-[168px] rounded-2xl border bg-card p-3 lg:p-4 space-y-2">
               <div className="w-14 h-14 rounded-full bg-muted animate-pulse mx-auto" />
               <div className="h-3 w-20 rounded bg-muted animate-pulse mx-auto" />
               <div className="h-3 w-16 rounded bg-muted animate-pulse mx-auto" />
@@ -564,9 +564,9 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
   return (
     <section className="w-full min-w-0">
-      <div className="flex items-center justify-between mb-3 px-1">
-        <h3 className="font-semibold text-foreground">{section?.title ?? "Profissionais em destaque"}</h3>
-        <Link to="/search" className="text-xs font-medium text-primary hover:underline">Ver todos</Link>
+      <div className="flex items-center justify-between mb-3 lg:mb-4 px-1">
+        <h3 className="font-semibold lg:text-lg text-foreground">{section?.title ?? "Profissionais em destaque"}</h3>
+        <Link to="/search" className="text-xs lg:text-sm font-medium text-primary hover:underline">Ver todos</Link>
       </div>
 
       <div
@@ -582,7 +582,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         {displayPages.map((pagePros, pageIndex) => (
           <div
             key={pageIndex}
-            className="flex gap-3 flex-[0_0_100%] min-w-0 shrink-0 snap-start px-2 box-border"
+            className="flex gap-3 lg:gap-5 flex-[0_0_100%] min-w-0 shrink-0 snap-start px-2 lg:px-4 box-border"
             style={{ scrollSnapStop: "always" }}
           >
             {pagePros.map((pro) => (

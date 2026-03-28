@@ -91,6 +91,33 @@ const Login = () => {
     }
   }, [location.state]);
 
+  /** Cadastro por e-mail: após "Finalizar" redireciona aqui com mensagem clara (confirmação antes da sessão). */
+  const shownCheckEmailToastRef = useRef(false);
+  useEffect(() => {
+    if (shownCheckEmailToastRef.current) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("signup") !== "check-email") return;
+    shownCheckEmailToastRef.current = true;
+    const rawEmail = params.get("email");
+    let displayEmail = "";
+    if (rawEmail) {
+      try {
+        displayEmail = decodeURIComponent(rawEmail);
+      } catch {
+        displayEmail = rawEmail;
+      }
+    }
+    toast({
+      title: "Verifique seu e-mail",
+      description: displayEmail
+        ? `Abra a caixa de entrada em ${displayEmail}, confirme o cadastro pelo link e depois entre com seu e-mail e senha. No telefone, o link pode abrir o app; no computador, abre o site.`
+        : "Abra a caixa de entrada, confirme o cadastro pelo link que enviamos e depois entre com seu e-mail e senha.",
+      duration: 16_000,
+    });
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    window.history.replaceState({}, "", `/login${hash}`);
+  }, [location.search]);
+
   // Quando não há sessão, reseta a ref de redirect para que um novo login (ex.: OAuth) possa redirecionar
   useEffect(() => {
     if (!session?.user) hasRedirectedForSessionRef.current = false;

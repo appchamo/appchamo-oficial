@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, ReactNode } from "react";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
+import { flushPendingEmailSignup } from "@/lib/pendingEmailSignup";
 import type { User, Session } from "@supabase/supabase-js";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -154,8 +155,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const userId = sess.user.id;
-        const email = (sess.user.email || "").toLowerCase().trim();
-        const fullName = (sess.user.user_metadata?.full_name || sess.user.user_metadata?.name || "") as string;
+
+        try {
+          await flushPendingEmailSignup(sess);
+        } catch (e) {
+          console.error("[auth] flush pending email signup:", e);
+        }
+
         // iOS pós-OAuth pode travar chamadas; se não conseguirmos confirmar o profile rápido, deslogamos (não permite auto-login sem cadastro)
         let p: Profile | null = null;
         let r: AppRole[] = [];
@@ -165,6 +171,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ]);
         if (profileResult.status === "fulfilled") p = profileResult.value;
         if (rolesResult.status === "fulfilled") r = rolesResult.value ?? [];
+
+        if (p?.user_type === "pending_signup") {
+          await new Promise((res) => setTimeout(res, 450));
+          try {
+            await flushPendingEmailSignup(sess);
+          } catch {
+            /* ignore */
+          }
+          const p2 = await fetchProfile(userId).catch(() => null);
+          if (p2) p = p2;
+        }
 
         if (isSignOutInProgress) return;
         // Se a sessão chegou antes do trigger inserir o profile (corrida comum pós-OAuth),

@@ -48,7 +48,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
 import {
-  fetchFavoritedProfessionalOwnerUserIds,
+  fetchSeguindoFeedAuthorUserIds,
   fetchMutualProfessionalPeerUserIds,
 } from "@/lib/chamoFriends";
 import { compressImageForChat } from "@/lib/compressChatImage";
@@ -270,7 +270,7 @@ export default function CommunityFeed({
   const [proPathByUserId, setProPathByUserId] = useState<Record<string, string>>({});
   const [favoritesForShare, setFavoritesForShare] = useState<AuthorRow[]>([]);
   const [loadingFavoritesShare, setLoadingFavoritesShare] = useState(false);
-  const [feedScope, setFeedScope] = useState<"all" | "favorites">("all");
+  const [feedScope, setFeedScope] = useState<"all" | "following">("all");
   const [favoritedAuthorUserIds, setFavoritedAuthorUserIds] = useState<Set<string>>(() => new Set());
 
   const highlightPostIdRef = useRef<string | null | undefined>(highlightPostId);
@@ -297,8 +297,8 @@ export default function CommunityFeed({
     }
     if (!opts?.silent) setLoading(true);
     try {
-      const favUids = await fetchFavoritedProfessionalOwnerUserIds(supabase, user.id);
-      setFavoritedAuthorUserIds(new Set(favUids));
+      const seguindoUids = await fetchSeguindoFeedAuthorUserIds(supabase, user.id);
+      setFavoritedAuthorUserIds(new Set(seguindoUids));
 
       const { data: hideRows } = await supabase
         .from("community_comment_user_hides" as any)
@@ -549,7 +549,7 @@ export default function CommunityFeed({
     return () => URL.revokeObjectURL(url);
   }, [composerImageFile]);
 
-  const hasPostsFromFavorites = useMemo(
+  const hasPostsFromSeguindo = useMemo(
     () => posts.some((p) => favoritedAuthorUserIds.has(p.author_id)),
     [posts, favoritedAuthorUserIds],
   );
@@ -1520,15 +1520,15 @@ export default function CommunityFeed({
           </button>
           <button
             type="button"
-            onClick={() => setFeedScope("favorites")}
+            onClick={() => setFeedScope("following")}
             className={cn(
               "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm uppercase tracking-wide",
-              feedScope === "favorites"
+              feedScope === "following"
                 ? "bg-primary text-primary-foreground border-primary shadow-primary/25"
                 : "bg-white/95 text-foreground border-border/60 hover:bg-muted/60",
             )}
           >
-            Ver favoritos
+            Seguindo
           </button>
           {hiddenPostIds.size > 0 ? (
             <button
@@ -1701,11 +1701,11 @@ export default function CommunityFeed({
           <p className="text-muted-foreground text-sm">Nenhuma publicação ainda.</p>
           {canPost && <p className="text-xs text-muted-foreground mt-2">Seja o primeiro a compartilhar.</p>}
         </div>
-      ) : displayPosts.length === 0 && feedScope === "favorites" && !hasPostsFromFavorites ? (
+      ) : displayPosts.length === 0 && feedScope === "following" && !hasPostsFromSeguindo ? (
         <div className="rounded-[20px] bg-white border border-border/50 py-14 px-4 text-center shadow-md shadow-black/[0.04]">
-          <p className="text-muted-foreground text-sm">Nenhuma publicação dos seus favoritos.</p>
+          <p className="text-muted-foreground text-sm">Nenhuma publicação de contas que segues.</p>
           <p className="text-xs text-muted-foreground mt-2">
-            Toque em <strong>Favoritar</strong> no perfil de um profissional para filtrar o feed aqui.
+            Segue profissionais no perfil deles (ou usa <strong>Favoritar</strong>) para ver só essas publicações aqui.
           </p>
         </div>
       ) : displayPosts.length === 0 && posts.length > 0 ? (

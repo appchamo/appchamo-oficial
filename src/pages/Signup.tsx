@@ -5,6 +5,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { consumePostAuthRedirect } from "@/lib/chamoAuthReturn";
+import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
+import {
+  PENDING_EMAIL_SIGNUP_KEY,
+  type PendingEmailSignupV1,
+} from "@/lib/pendingEmailSignup";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
 import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,7 +20,8 @@ import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 import { Capacitor } from "@capacitor/core";
-import { Browser } from "@capacitor/browser"; 
+import { Browser } from "@capacitor/browser";
+import type { Session } from "@supabase/supabase-js"; 
 
 type AccountType = "client" | "professional";
 type Step =
@@ -523,6 +529,8 @@ const Signup = () => {
     try {
       let userId = createdUserId;
       let signedUpWithEmail = false;
+      let signupSession: Session | null = null;
+      const emailConfirmRedirect = `${getPublicAppBaseUrl().replace(/\/$/, "")}/login`;
 
       // Se não logou via Social, faz o cadastro manual por e-mail/senha
       if (!userId) {
@@ -531,8 +539,11 @@ const Signup = () => {
           email: basicData.email,
           password: basicData.password,
           options: {
-            emailRedirectTo: window.location.origin,
-            data: { full_name: basicData.name },
+            emailRedirectTo: emailConfirmRedirect,
+            data: {
+              full_name: basicData.name,
+              user_type: "pending_signup",
+            },
           },
         });
         if (authError) {
@@ -548,20 +559,11 @@ const Signup = () => {
           return;
         }
         userId = authData.user?.id || null;
+        signupSession = authData.session ?? null;
       }
-      
-      if (!userId) { setLoading(false); return; }
 
-      // JWT fresco: o token do contexto React pode estar expirado após várias etapas (401 intermitente).
-      const token = await getAccessTokenForEdgeFunctions();
-      if (!token) {
-        toast({
-          title: "Sessão expirada",
-          description: "Volte e faça login com Google (ou e-mail) novamente para continuar.",
-          variant: "destructive",
-        });
+      if (!userId) {
         setLoading(false);
-        await forceExitToLogin();
         return;
       }
 
@@ -570,10 +572,12 @@ const Signup = () => {
           base64: await fileToBase64(file),
           ext: file.name.split(".").pop() || "jpg",
           contentType: file.type,
-        }))
+        })),
       );
 
-      const basicPayload: Record<string, unknown> = { ...basicData };
+      const { password: _pw, ...basicWithoutPassword } = basicData;
+      void _pw;
+      const basicPayload: Record<string, unknown> = { ...basicWithoutPassword };
       if (accountType === "professional" && basicData.addressCity?.trim() && basicData.addressState?.trim()) {
         try {
           const geo = await forwardGeocodeBrazil({
@@ -592,15 +596,57 @@ const Signup = () => {
         }
       }
 
-      const { data: result, error: fnError } = await supabase.functions.invoke(
-        "complete-signup",
-        {
-          body: { userId, accountType, profileData: pData, basicData: basicPayload, docFiles: docFilesPayload, planId },
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+      // Com confirmação de e-mail ativa o Supabase não devolve sessão: não há JWT para a Edge Function ainda.
+      if (signedUpWithEmail && !signupSession) {
+        const pending: PendingEmailSignupV1 = {
+          v: 1,
+          userId,
+          accountType,
+          basicData: basicPayload as PendingEmailSignupV1["basicData"],
+          profileData: pData,
+          docFiles: docFilesPayload,
+          planId,
+          referralCode: basicData.referralCode?.trim() || null,
+        };
+        try {
+          sessionStorage.setItem(PENDING_EMAIL_SIGNUP_KEY, JSON.stringify(pending));
+        } catch {
+          toast({
+            title: "Não foi possível guardar o cadastro",
+            description: "Ative armazenamento para este site ou tente noutro browser.",
+            variant: "destructive",
+          });
+          setLoading(false);
+          return;
         }
-      );
+        setLoading(false);
+        localStorage.removeItem("signup_in_progress");
+        clearSignupDrafts();
+        const em = encodeURIComponent(basicData.email);
+        navigate(`/login?signup=check-email&email=${em}`, { replace: true });
+        return;
+      }
+
+      const token = await getAccessTokenForEdgeFunctions();
+      if (!token) {
+        toast({
+          title: "Sessão expirada",
+          description: "Volte e faça login com Google (ou e-mail) novamente para continuar.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        if (!signedUpWithEmail) {
+          await forceExitToLogin();
+        }
+        return;
+      }
+
+      const { data: result, error: fnError } = await supabase.functions.invoke("complete-signup", {
+        body: { userId, accountType, profileData: pData, basicData: basicPayload, docFiles: docFilesPayload, planId },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
       if (fnError || result?.error) {
         console.error("Erro na função complete-signup:", fnError || result?.error);
@@ -627,7 +673,11 @@ const Signup = () => {
         } else if (refData && typeof refData === "object" && "ok" in refData && (refData as { ok?: boolean }).ok === false) {
           const err = (refData as { error?: string }).error;
           if (err === "code_not_found") {
-            toast({ title: "Código de convite inválido", description: "Verifique com quem te indicou e tente de novo em Perfil → Suporte, se precisar.", variant: "destructive" });
+            toast({
+              title: "Código de convite inválido",
+              description: "Verifique com quem te indicou e tente de novo em Perfil → Suporte, se precisar.",
+              variant: "destructive",
+            });
           } else if (err === "self_referral") {
             toast({ title: "Código inválido", description: "Você não pode usar o próprio código.", variant: "destructive" });
           }
@@ -644,12 +694,11 @@ const Signup = () => {
       clearSignupDrafts();
 
       if (signedUpWithEmail) {
-        // Cadastro por e-mail: exige confirmação → modal e depois ir para login
         setShowVerifyEmailModal(true);
       } else {
         setCouponPopup(true);
       }
-    } catch (err: any) {
+    } catch {
       toast({ title: "Erro ao criar conta.", variant: "destructive" });
       setLoading(false);
     }
@@ -659,9 +708,9 @@ const Signup = () => {
     if (!basicData?.email) return;
     setResending(true);
     const { error } = await supabase.auth.resend({
-      type: 'signup',
+      type: "signup",
       email: basicData.email,
-      options: { emailRedirectTo: window.location.origin }
+      options: { emailRedirectTo: `${getPublicAppBaseUrl().replace(/\/$/, "")}/login` },
     });
     if (error) toast({ title: "Aguarde um pouco", variant: "destructive" });
     else toast({ title: "E-mail reenviado!" });

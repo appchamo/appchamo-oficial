@@ -112,6 +112,24 @@ export async function fetchFavoritedProfessionalOwnerUserIds(
 }
 
 /**
+ * Autores no filtro "Seguindo" da Comunidade: união de favoritos em perfil profissional
+ * e de contas que o utilizador segue em `user_follows`.
+ */
+export async function fetchSeguindoFeedAuthorUserIds(
+  client: SupabaseClient,
+  userId: string,
+): Promise<string[]> {
+  const [{ data: followRows }, favUids] = await Promise.all([
+    client.from("user_follows").select("followed_user_id").eq("follower_user_id", userId),
+    fetchFavoritedProfessionalOwnerUserIds(client, userId),
+  ]);
+  const fromFollow = (followRows || []).map((r: { followed_user_id: string }) =>
+    String(r.followed_user_id),
+  );
+  return [...new Set([...favUids, ...fromFollow].filter(Boolean))];
+}
+
+/**
  * Profissionais (donos de linha em `professionals`) com quem há seguimento mútuo em `user_follows`.
  */
 export async function fetchMutualProfessionalPeerUserIds(

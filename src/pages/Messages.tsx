@@ -2,7 +2,7 @@ import AppLayout from "@/components/AppLayout";
 import {
   MessageSquare, MoreVertical, Archive, EyeOff, Eye, AlertTriangle,
   Inbox, Mic, Package, CheckCheck, Trash2, XCircle,   Search,
-  CheckSquare, Square, Check, X, Pin, Tag, Heart, Sparkles,
+  CheckSquare, Square, Check, X, Pin, Tag, UserCheck, Sparkles,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
@@ -43,9 +43,9 @@ interface Thread {
   is_pinned: boolean;
   label_color: ThreadLabelColor | null;
   label_text: string | null;
-  /** Profissional desta conversa está nos favoritos do utilizador. */
-  isFavoritePro?: boolean;
-  /** `following` = DM antiga por “seguir”; `service` = chamado normal. A aba Favoritos usa `isFavoritePro`. */
+  /** Profissional (ou outra parte) entra na aba Seguindo: favorito no perfil ou seguimento em user_follows. */
+  isSeguindoPro?: boolean;
+  /** `following` = DM por seguir; `service` = chamado normal. */
   request_kind?: string | null;
 }
 
@@ -96,7 +96,7 @@ const Messages = () => {
   const [hasSupportMessages, setHasSupportMessages] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [showCancelados, setShowCancelados] = useState(false);
-  const [chatTab, setChatTab] = useState<"geral" | "favoritos">("geral");
+  const [chatTab, setChatTab] = useState<"geral" | "seguindo">("geral");
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [searchChat, setSearchChat] = useState("");
@@ -124,11 +124,11 @@ const Messages = () => {
   const [peerActivityByThread, setPeerActivityByThread] = useState<Record<string, "typing" | "recording">>({});
   const navigate = useNavigate();
 
-  /** Mensagens pendentes (não lidas) só nas conversas com profissionais favoritos — entrada ativa. */
-  const favoritosPendingTotal = useMemo(() => {
+  /** Mensagens pendentes (não lidas) só nas conversas da aba Seguindo — entrada ativa. */
+  const seguindoPendingTotal = useMemo(() => {
     const dead = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
     return threads
-      .filter((t) => !dead(t) && !t.is_archived && t.isFavoritePro)
+      .filter((t) => !dead(t) && !t.is_archived && t.isSeguindoPro)
       .reduce((sum, t) => {
         if (t.unreadCount > 0) return sum + t.unreadCount;
         if (t.manual_unread) return sum + 1;
@@ -141,11 +141,11 @@ const Messages = () => {
 
     const threadsCancelados = sortThreadsByPinAndTime(threads.filter(isCancelledOrRejected));
     const threadsNonCancelled = sortThreadsByPinAndTime(threads.filter((t) => !isCancelledOrRejected(t)));
-    /** Profissional do pedido está nos favoritos do cliente (chamadas + chats com esse pro). */
-    const threadsFavoritosTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => t.isFavoritePro));
-    const threadsGeralTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => !t.isFavoritePro));
+    /** Conversa com alguém que segues (ou favoritaste no perfil profissional). */
+    const threadsSeguindoTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => t.isSeguindoPro));
+    const threadsGeralTab = sortThreadsByPinAndTime(threadsNonCancelled.filter((t) => !t.isSeguindoPro));
 
-    const tabPool = chatTab === "favoritos" ? threadsFavoritosTab : threadsGeralTab;
+    const tabPool = chatTab === "seguindo" ? threadsSeguindoTab : threadsGeralTab;
     const activeThreads = tabPool.filter((t) => !t.is_archived);
     const archivedThreads = tabPool.filter((t) => t.is_archived);
 
@@ -171,7 +171,7 @@ const Messages = () => {
 
     return {
       threadsCancelados,
-      threadsFavoritosTab,
+      threadsSeguindoTab,
       activeThreads,
       archivedThreads,
       currentList,
@@ -194,11 +194,12 @@ const Messages = () => {
     userIdRef.current = user.id;
     setCurrentUserId(user.id);
 
-    const { data: favRows } = await supabase
-      .from("professional_favorites" as any)
-      .select("professional_id")
-      .eq("user_id", user.id);
+    const [{ data: favRows }, { data: followRows }] = await Promise.all([
+      supabase.from("professional_favorites" as any).select("professional_id").eq("user_id", user.id),
+      supabase.from("user_follows" as any).select("followed_user_id").eq("follower_user_id", user.id),
+    ]);
     const favoriteProIds = new Set<string>((favRows || []).map((r: any) => String(r.professional_id)));
+    const followedUserIds = new Set<string>((followRows || []).map((r: any) => String(r.followed_user_id)));
 
     const PAGE_SIZE = 7;
     const baseLimit = (page + 1) * PAGE_SIZE;
@@ -291,9 +292,14 @@ const Messages = () => {
     const enriched: Thread[] = unique.map((req: any) => {
       const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
       if (statusData.is_deleted) return null as any;
-      const isClient = req.client_id === user.id;
-      const targetUserId = isClient ? proUserIdMap.get(req.professional_id) : req.client_id;
+      const isClientViewer = req.client_id === user.id;
+      const targetUserId = isClientViewer ? proUserIdMap.get(req.professional_id) : req.client_id;
       const profile = targetUserId ? profileMap.get(targetUserId) : null;
+      const proOwnerUserId = proUserIdMap.get(req.professional_id) ?? null;
+      const otherPartyUserId = isClientViewer ? proOwnerUserId : req.client_id;
+      const isSeguindoPro =
+        favoriteProIds.has(String(req.professional_id)) ||
+        (otherPartyUserId != null && followedUserIds.has(String(otherPartyUserId)));
       const sum = summaryByReq.get(req.id);
       const rawColor = statusData.label_color as string | null | undefined;
       const label_color: ThreadLabelColor | null =
@@ -306,7 +312,7 @@ const Messages = () => {
       return {
         ...req,
         request_kind: (req as { request_kind?: string | null }).request_kind ?? "service",
-        otherName: profile?.full_name || (isClient ? "Profissional" : "Cliente"),
+        otherName: profile?.full_name || (isClientViewer ? "Profissional" : "Cliente"),
         otherAvatar: profile?.avatar_url || null,
         lastMessage: sum?.lastMessage ?? null,
         lastMessageTime: sum?.lastMessageTime || req.updated_at,
@@ -316,7 +322,7 @@ const Messages = () => {
         is_pinned: !!statusData.is_pinned,
         label_color: label_text ? label_color : null,
         label_text,
-        isFavoritePro: favoriteProIds.has(String(req.professional_id)),
+        isSeguindoPro,
       };
     }).filter((t) => t !== null) as Thread[];
 
@@ -513,7 +519,7 @@ const Messages = () => {
     const isCancelledOrRejected = (t: Thread) => t.status === "cancelled" || t.status === "rejected";
     const pool = threads.filter((t) => !isCancelledOrRejected(t));
     const tabThreads =
-      chatTab === "favoritos" ? pool.filter((t) => t.isFavoritePro) : pool.filter((t) => !t.isFavoritePro);
+      chatTab === "seguindo" ? pool.filter((t) => t.isSeguindoPro) : pool.filter((t) => !t.isSeguindoPro);
     const targetIds = tabThreads.filter((t) => !t.is_archived).map((t) => t.id);
 
     if (targetIds.length === 0) return;
@@ -769,7 +775,7 @@ const Messages = () => {
     archivedThreads,
     currentList,
     canceladosListToShow,
-    threadsFavoritosTab,
+    threadsSeguindoTab,
   } = listSlices;
 
   const toggleCanceladoSelection = (id: string) => {
@@ -796,7 +802,7 @@ const Messages = () => {
                 hasUnread ? "ring-1 ring-rose-400/30" : ""
               }`
             : `px-4 py-3 border-b border-border/60 active:bg-muted/50 ${hasUnread ? "bg-primary/[0.04]" : ""}`
-        } ${!directStyle && t.isFavoritePro ? "bg-amber-500/[0.07] border-l-[3px] border-l-amber-400 pl-[13px]" : ""}`}
+        } ${!directStyle && t.isSeguindoPro ? "bg-amber-500/[0.07] border-l-[3px] border-l-amber-400 pl-[13px]" : ""}`}
       >
         {isCancelled && canceladosSelectMode && (
           <button type="button" onClick={() => toggleCanceladoSelection(t.id)} className="flex-shrink-0">
@@ -837,12 +843,12 @@ const Messages = () => {
                 {initials}
               </div>
             )}
-            {t.isFavoritePro && (
+            {t.isSeguindoPro && (
               <span
                 className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-amber-400 text-white flex items-center justify-center shadow border border-white"
-                title="Favorito"
+                title="Seguindo"
               >
-                <Heart className="w-3 h-3 fill-white" />
+                <UserCheck className="w-3 h-3 stroke-[2.5]" />
               </span>
             )}
           </div>
@@ -854,7 +860,7 @@ const Messages = () => {
                 {t.is_pinned ? <Pin className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden /> : null}
                 <p
                   className={`text-[15px] truncate ${hasUnread ? "font-bold text-foreground" : "font-medium text-foreground"} ${
-                    t.isFavoritePro ? "text-amber-900 dark:text-amber-100" : ""
+                    t.isSeguindoPro ? "text-amber-900 dark:text-amber-100" : ""
                   }`}
                 >
                   {t.otherName}
@@ -960,7 +966,7 @@ const Messages = () => {
         <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border/60 gap-2">
           <h1 className="text-xl font-bold tracking-tight text-foreground shrink-0">Conversas</h1>
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            {!showCancelados && !showArchived && (chatTab === "geral" || chatTab === "favoritos") && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
+            {!showCancelados && !showArchived && (chatTab === "geral" || chatTab === "seguindo") && activeThreads.some((t) => t.unreadCount > 0 || t.manual_unread) && (
               <button
                 type="button"
                 onClick={handleMarkAllRead}
@@ -1012,7 +1018,7 @@ const Messages = () => {
         <Tabs
           value={chatTab}
           onValueChange={(v) => {
-            setChatTab(v as "geral" | "favoritos");
+            setChatTab(v as "geral" | "seguindo");
             setShowCancelados(false);
           }}
           className="px-4 pt-3"
@@ -1024,27 +1030,27 @@ const Messages = () => {
               Geral
             </TabsTrigger>
             <TabsTrigger
-              value="favoritos"
+              value="seguindo"
               className="group rounded-lg text-xs font-bold data-[state=active]:shadow-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-rose-600 data-[state=active]:to-amber-600 data-[state=active]:text-white flex flex-col gap-0.5 h-auto py-2 px-1 leading-tight"
             >
               <span className="flex items-center justify-center gap-1 w-full">
-                <Heart className="w-3.5 h-3.5 shrink-0 text-rose-600 group-data-[state=active]:text-white group-data-[state=active]:fill-white" />
-                <span className="tracking-wide">FAVORITOS</span>
-                {favoritosPendingTotal > 0 ? (
+                <UserCheck className="w-3.5 h-3.5 shrink-0 text-rose-600 group-data-[state=active]:text-white" />
+                <span className="tracking-wide">SEGUINDO</span>
+                {seguindoPendingTotal > 0 ? (
                   <span className="min-w-[22px] h-[22px] rounded-full bg-rose-500 text-white text-[11px] font-black flex items-center justify-center px-1 shadow-sm group-data-[state=active]:bg-white group-data-[state=active]:text-rose-600">
-                    {favoritosPendingTotal > 99 ? "99+" : favoritosPendingTotal}
+                    {seguindoPendingTotal > 99 ? "99+" : seguindoPendingTotal}
                   </span>
                 ) : null}
               </span>
-              {favoritosPendingTotal > 0 ? (
+              {seguindoPendingTotal > 0 ? (
                 <span className="text-[9px] font-semibold text-muted-foreground group-data-[state=active]:text-white/90">
-                  {favoritosPendingTotal}{" "}
-                  {favoritosPendingTotal === 1 ? "mensagem nova" : "mensagens novas"}
+                  {seguindoPendingTotal}{" "}
+                  {seguindoPendingTotal === 1 ? "mensagem nova" : "mensagens novas"}
                 </span>
-              ) : threadsFavoritosTab.length > 0 ? (
+              ) : threadsSeguindoTab.length > 0 ? (
                 <span className="text-[9px] font-medium text-muted-foreground group-data-[state=active]:text-white/85">
-                  {threadsFavoritosTab.length}{" "}
-                  {threadsFavoritosTab.length === 1 ? "conversa" : "conversas"}
+                  {threadsSeguindoTab.length}{" "}
+                  {threadsSeguindoTab.length === 1 ? "conversa" : "conversas"}
                 </span>
               ) : null}
             </TabsTrigger>
@@ -1053,7 +1059,7 @@ const Messages = () => {
           {/* ── Search ── */}
           {((!showCancelados &&
             ((chatTab === "geral" && (activeThreads.length > 0 || archivedThreads.length > 0 || hasSupportMessages)) ||
-              (chatTab === "favoritos" && (activeThreads.length > 0 || archivedThreads.length > 0)))) ||
+              (chatTab === "seguindo" && (activeThreads.length > 0 || archivedThreads.length > 0)))) ||
             (showCancelados && threadsCancelados.length > 0)) && (
             <div className="relative mt-3">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -1143,11 +1149,12 @@ const Messages = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="favoritos" className="mt-3 -mx-4 px-1">
+          <TabsContent value="seguindo" className="mt-3 -mx-4 px-1">
             <div className="px-3 pb-2 flex items-start gap-2 text-[11px] text-muted-foreground leading-snug">
-              <Heart className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5 fill-rose-500/30" />
+              <UserCheck className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
               <span>
-                Chamadas e chats com profissionais que você marcou como <strong className="text-foreground/90">favoritos</strong> no perfil deles.
+                Chamadas e chats com profissionais que você <strong className="text-foreground/90">segue</strong> ou marcou como{" "}
+                <strong className="text-foreground/90">favoritos</strong> no perfil deles.
               </span>
             </div>
             {searchChat.trim() && currentList.length === 0 ? (
@@ -1157,11 +1164,11 @@ const Messages = () => {
             ) : currentList.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center px-4">
                 <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-rose-500/20 to-amber-500/15 flex items-center justify-center mb-4 shadow-inner border border-rose-500/10">
-                  <Heart className="w-9 h-9 text-rose-500 fill-rose-500/20" />
+                  <UserCheck className="w-9 h-9 text-rose-500" />
                 </div>
-                <p className="font-semibold text-foreground text-base mb-1">Nenhuma conversa com favoritos</p>
+                <p className="font-semibold text-foreground text-base mb-1">Nenhuma conversa em Seguindo</p>
                 <p className="text-sm text-muted-foreground max-w-xs">
-                  Abra um perfil profissional, toque em <strong className="text-foreground">Favoritar</strong> e depois em CHAMAR ou Mensagem — a conversa aparece aqui.
+                  Segue um profissional no perfil ou use <strong className="text-foreground">Favoritar</strong>; depois abra CHAMAR ou Mensagem — a conversa aparece aqui.
                 </p>
               </div>
             ) : (

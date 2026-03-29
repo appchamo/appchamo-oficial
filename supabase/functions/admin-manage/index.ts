@@ -76,7 +76,10 @@ serve(async (req) => {
       const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
       if (!jwt) throw new Error("Unauthorized");
       const { data: { user: caller }, error: userErr } = await supabase.auth.getUser(jwt);
-      if (userErr || !caller) throw new Error("Unauthorized");
+      if (userErr || !caller) {
+        console.warn("[getCaller] auth.getUser failed:", userErr?.message ?? "no user");
+        throw new Error("Unauthorized");
+      }
       return caller;
     };
 
@@ -108,6 +111,7 @@ serve(async (req) => {
       console.log(`[cascadeDeleteUser] Starting deletion for user: ${user_id}`);
 
       await sd("chat_reports", "reporter_id", user_id);
+      await sd("chat_thread_activity", "user_id", user_id);
 
       // Buscar IDs de profissional
       const { data: pros } = await supabase.from("professionals").select("id").eq("user_id", user_id);
@@ -213,7 +217,8 @@ serve(async (req) => {
       // SET NULL em sorteios (FK sem CASCADE)
       try { await supabase.from("raffles").update({ winner_user_id: null }).eq("winner_user_id", user_id); } catch (_) {}
 
-      // Profissional e perfil por último
+      // Dados privados e perfil por último
+      await sd("profile_private", "user_id", user_id);
       await sd("professionals", "user_id", user_id);
       await sd("profiles", "user_id", user_id);
 

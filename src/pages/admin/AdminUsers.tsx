@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
+import { readEdgeFunctionInvokeError } from "@/lib/readEdgeFunctionInvokeError";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -115,12 +116,15 @@ const AdminUsers = () => {
   const handleDelete = async () => {
     if (!deleteId) return;
     const user = users.find(u => u.id === deleteId);
+    if (!user?.user_id) {
+      toast({ title: "Erro ao deletar", description: "Utilizador não encontrado na lista.", variant: "destructive" });
+      return;
+    }
     const { data, error } = await invokeAdminManage({
       action: "delete_user",
-      user_id: user?.user_id,
+      user_id: user.user_id,
     });
-    // Supabase retorna error.message genérico em caso de non-2xx; o erro real está em data.error
-    const errMsg = (data as any)?.error || error?.message;
+    const errMsg = await readEdgeFunctionInvokeError(data, error);
     if (errMsg) {
       toast({ title: "Erro ao deletar", description: errMsg, variant: "destructive" });
       return;

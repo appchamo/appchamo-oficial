@@ -15,21 +15,20 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
 
-    // Verify caller is authenticated
+    // Verify caller is authenticated using service_role — mais fiável que anonKey no nativo (PKCE/Preferences).
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const callerClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authErr } = await callerClient.auth.getUser();
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    const { data: { user }, error: authErr } = await adminClient.auth.getUser(token);
     if (authErr || !user) {
+      console.error("[upload-document] auth.getUser error:", authErr?.message);
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -56,8 +55,7 @@ serve(async (req) => {
     const ext = file.name?.split(".").pop() || "jpg";
     const fileName = `documents/${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
 
-    // Use service_role to upload — bypasses all storage RLS
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    // Use service_role to upload — bypasses all storage RLS (já criado acima)
 
     const arrayBuffer = await file.arrayBuffer();
     const uint8 = new Uint8Array(arrayBuffer);

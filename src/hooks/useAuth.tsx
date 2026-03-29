@@ -251,17 +251,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const loadInitialSession = async () => {
       try {
-        const { data: { session: s } } = await supabase.auth.getSession();
+        let s = (await supabase.auth.getSession()).data.session;
         syncRealtimeJwt(s ?? null);
-        if (s) {
+        if (s?.user) {
           loadUserData(s);
           return;
         }
+        // Nativo: após OAuth o Preferences pode atrasar vs 1ª leitura — antes dávamos loadUserData(null)
+        // e o PostLoginGate mandava o utilizador de volta para /login com sessão já gravada.
         if (Capacitor.isNativePlatform()) {
-          await new Promise((r) => setTimeout(r, 300));
-          const { data: { session: s2 } } = await supabase.auth.getSession();
-          syncRealtimeJwt(s2 ?? null);
-          loadUserData(s2 ?? null);
+          for (let i = 0; i < 20; i++) {
+            await new Promise((r) => setTimeout(r, 150));
+            s = (await supabase.auth.getSession()).data.session;
+            if (s?.user) {
+              syncRealtimeJwt(s);
+              loadUserData(s);
+              return;
+            }
+          }
+          syncRealtimeJwt(null);
+          loadUserData(null);
         } else {
           loadUserData(null);
         }
@@ -380,7 +389,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Confirmação de e-mail (PKCE com ?code=): não usar flags de OAuth + reload da Home (evita +5s).
             try {
               localStorage.removeItem("manual_login_intent");
-              window.location.replace(`${window.location.origin || ""}/post-login`);
+              window.location.replace("/post-login");
+            } catch {
+              /* ignore */
+            }
+          } else if (Capacitor.isNativePlatform()) {
+            // Apple/Google: full-page para /post-login. O SPA em /login falhava (corrida storage vs React,
+            // proceedToRedirect lento, SIGNED_IN vs flags de hard-reload) — o utilizador ficava na login até reabrir a app.
+            try {
+              localStorage.removeItem("manual_login_intent");
+              localStorage.removeItem("chamo_force_hard_reload");
+              localStorage.removeItem("chamo_oauth_just_landed");
+              sessionStorage.removeItem("chamo_oauth_just_landed");
+              sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
+              sessionStorage.removeItem("chamo_featured_reload_after_oauth");
+            } catch {
+              /* ignore */
+            }
+            try {
+              window.location.replace("/post-login");
             } catch {
               /* ignore */
             }
@@ -389,10 +416,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               sessionStorage.setItem("chamo_oauth_just_landed", "1");
               localStorage.setItem("chamo_oauth_just_landed", "1");
               localStorage.setItem("chamo_force_hard_reload", "1");
-              if (Capacitor.isNativePlatform()) {
-                sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
-                sessionStorage.removeItem("chamo_featured_reload_after_oauth");
-              }
             } catch {
               /* ignore */
             }
@@ -563,7 +586,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (Capacitor.isNativePlatform()) {
       urlListener = CapacitorApp.addListener("appUrlOpen", async (data: { url: string }) => {
         if (await handleEmailConfirmTokensUrl(data.url)) return;
-        await handleUrl(data.url);
+        const exchangeOk = await handleUrl(data.url);
+        // Igual ao fluxo com getLaunchUrl: o exchange grava no storage mas o SIGNED_IN no contexto pode atrasar no iOS;
+        // força loadUserData para não ficar preso na tela de login até reabrir o app.
+        if (exchangeOk) {
+          const { data: { session: s } } = await supabase.auth.getSession();
+          if (s?.user) loadUserData(s);
+        }
       });
     }
 

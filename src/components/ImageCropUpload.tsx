@@ -233,15 +233,26 @@ onUpload(publicData.publicUrl);
           <span className="text-xs text-muted-foreground">{label}</span>
         </button>
       ) : signupAvatarMode ? (
-        <button
-          type="button"
-          onClick={onButtonClick}
-          className="flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg shadow-primary/25 hover:bg-primary/90 active:scale-[0.98] transition-all touch-manipulation whitespace-nowrap"
-          aria-label="Adicionar foto de perfil"
-        >
-          <Upload className="w-3.5 h-3.5 flex-shrink-0" />
-          Adicionar foto
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void pickFromCamera()}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg shadow-primary/25 hover:bg-primary/90 active:scale-[0.98] transition-all touch-manipulation whitespace-nowrap"
+            aria-label="Tirar foto com câmera"
+          >
+            <Camera className="w-3.5 h-3.5 flex-shrink-0" />
+            Câmera
+          </button>
+          <button
+            type="button"
+            onClick={onButtonClick}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-primary text-primary text-xs font-bold hover:bg-primary/10 active:scale-[0.98] transition-all touch-manipulation whitespace-nowrap"
+            aria-label="Escolher da galeria"
+          >
+            <Upload className="w-3.5 h-3.5 flex-shrink-0" />
+            Galeria
+          </button>
+        </div>
       ) : showCameraOption ? (
         <div className="flex items-center gap-1.5" role="group" aria-label="Foto de perfil">
           <button

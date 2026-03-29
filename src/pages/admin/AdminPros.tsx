@@ -1,7 +1,7 @@
 import AdminLayout from "@/components/AdminLayout";
 import { AdminProsSealsPanel } from "@/pages/admin/AdminProsSealsPanel";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2 } from "lucide-react";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2, RefreshCw } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -42,6 +42,8 @@ interface Professional {
   city: string | null;
   state: string | null;
   subscription_status?: string;
+  early_access?: boolean;
+  doc_type?: string;
   /** Documento principal no cadastro (perfil): CPF ou CNPJ */
   docKind: "cpf" | "cnpj" | "none";
 }
@@ -122,6 +124,7 @@ const AdminPros = () => {
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [processingSub, setProcessingSub] = useState<string | null>(null);
   const [showForceApproveForUserId, setShowForceApproveForUserId] = useState<string | null>(null);
+  const [requestingDocs, setRequestingDocs] = useState(false);
 
   // Estados para o Modal de Recusa de Cadastro
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -281,8 +284,34 @@ const AdminPros = () => {
 
   const handleApprove = async () => {
     if (!detailPro) return;
+
+    // 1. Aprovar e ativar o profissional
     await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", detailPro.id);
     await logAction("approve_professional", "professional", detailPro.id);
+
+    // 2. Se tem early_access, conceder o plano agora (pré-ativo até 15/07/2026)
+    if (detailPro.early_access) {
+      const docType = detailPro.doc_type ?? "cpf";
+      const planId = docType === "cnpj" ? "business" : "vip";
+      const userTypeForPlan = docType === "cnpj" ? "company" : "professional";
+      const EARLY_ACCESS_EXPIRES = "2026-07-15T00:00:00.000Z";
+
+      await supabase.from("subscriptions").upsert({
+        user_id: detailPro.user_id,
+        plan_id: planId,
+        status: "ACTIVE",
+        expires_at: EARLY_ACCESS_EXPIRES,
+      }, { onConflict: "user_id" });
+
+      if (userTypeForPlan === "company") {
+        await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", detailPro.user_id);
+      }
+
+      // Marca modal para aparecer quando profissional abrir o app
+      // (já pode ter sido marcado no cadastro, mas garantimos aqui)
+    }
+
+    // 3. Notificar o profissional
     await supabase.from("notifications").insert({
       user_id: detailPro.user_id,
       title: "Cadastro aprovado! 🎉",
@@ -933,44 +962,77 @@ const AdminPros = () => {
               </a>
 
               {/* Documentos de Identidade e Business */}
-              {(docs.length > 0 || detailPro.plan_id === 'business') && (
-                <div className="pt-2 border-t">
-                  <p className="text-xs font-bold text-muted-foreground uppercase mb-2">Documentos</p>
-                  
-                 {/* Documentos de Identidade (Cadastro inicial) */}
-<div className="space-y-1.5 mb-3">
-  {docs.map((d: any) => (
-    d.notFound ? (
-      <div key={d.id} className="flex items-center gap-2 text-xs text-muted-foreground italic">
-        <FileText className="w-3.5 h-3.5 text-destructive" /> {d.type} — <span className="text-destructive">arquivo não encontrado no storage (peça reenvio)</span>
-      </div>
-    ) : (
-      <a
-        key={d.id}
-        href={d.viewUrl ?? "#"}
-        onClick={!d.viewUrl ? (e) => { e.preventDefault(); toast({ title: "URL indisponível", description: "Não foi possível gerar o link do documento.", variant: "destructive" }); } : undefined}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center gap-2 text-xs text-primary hover:underline"
-      >
-        <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
-      </a>
-    )
-  ))}
-</div>
-
-                  {/* Documentos do Plano Business (Cartão CNPJ) */}
-                  {detailPro.plan_id === 'business' && detailPro.subscription_status !== 'ACTIVE' && (
-                    <div className="bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 rounded-xl p-3">
-                      <p className="text-[10px] font-bold text-violet-600 uppercase mb-2 flex items-center gap-1">
-                        <Building2 className="w-3 h-3" /> Verificação Business
-                      </p>
-                      
-                      <SubscriptionDoc userId={detailPro.user_id} />
-                    </div>
-                  )}
+              <div className="pt-2 border-t space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-muted-foreground uppercase">Documentos</p>
+                  <button
+                    onClick={async () => {
+                      if (!detailPro) return;
+                      setRequestingDocs(true);
+                      try {
+                        const { data, error } = await supabase.functions.invoke("admin-manage", {
+                          body: {
+                            action: "request_doc_reupload",
+                            professionalId: detailPro.id,
+                            userId: detailPro.user_id,
+                          },
+                        });
+                        if (error || data?.error) throw new Error((data?.error) || error?.message);
+                        toast({ title: "Solicitação enviada!", description: `${detailPro.full_name} receberá uma notificação para reenviar os documentos.` });
+                      } catch (e: any) {
+                        toast({ title: "Erro ao solicitar documentos", description: e.message, variant: "destructive" });
+                      } finally {
+                        setRequestingDocs(false);
+                      }
+                    }}
+                    disabled={requestingDocs}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-[11px] font-semibold hover:bg-amber-200 dark:hover:bg-amber-950/60 transition-colors disabled:opacity-50"
+                  >
+                    {requestingDocs ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Solicitar documentos
+                  </button>
                 </div>
-              )}
+
+                {(docs.length > 0 || detailPro.plan_id === 'business') && (
+                  <>
+                    {/* Documentos de Identidade (Cadastro inicial) */}
+                    <div className="space-y-1.5">
+                      {docs.map((d: any) => (
+                        d.notFound ? (
+                          <div key={d.id} className="flex items-center gap-2 text-xs text-muted-foreground italic">
+                            <FileText className="w-3.5 h-3.5 text-destructive" /> {d.type} — <span className="text-destructive">arquivo não encontrado no storage (peça reenvio)</span>
+                          </div>
+                        ) : (
+                          <a
+                            key={d.id}
+                            href={d.viewUrl ?? "#"}
+                            onClick={!d.viewUrl ? (e) => { e.preventDefault(); toast({ title: "URL indisponível", description: "Não foi possível gerar o link do documento.", variant: "destructive" }); } : undefined}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-xs text-primary hover:underline"
+                          >
+                            <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+                          </a>
+                        )
+                      ))}
+                    </div>
+
+                    {/* Documentos do Plano Business (Cartão CNPJ) */}
+                    {detailPro.plan_id === 'business' && detailPro.subscription_status !== 'ACTIVE' && (
+                      <div className="bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold text-violet-600 uppercase mb-2 flex items-center gap-1">
+                          <Building2 className="w-3 h-3" /> Verificação Business
+                        </p>
+                        <SubscriptionDoc userId={detailPro.user_id} />
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {docs.length === 0 && detailPro.plan_id !== 'business' && (
+                  <p className="text-xs text-muted-foreground italic">Nenhum documento enviado ainda.</p>
+                )}
+              </div>
 
               {detailPro.profile_status === "pending" && (
                 <div className="space-y-3 pt-2 border-t">

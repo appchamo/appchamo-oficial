@@ -58,7 +58,7 @@ const readOAuthErrorFromUrl = (): { error: string; description: string } | null 
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { session, refreshProfile } = useAuth();
+  const { session, refreshProfile, loading: authLoading } = useAuth();
   const returnTo = (location.state as { from?: string } | null)?.from;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -75,11 +75,12 @@ const Login = () => {
   const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Marca que abrimos o browser para OAuth (Google/Apple); evita toast "Demorou muito" quando o timeout é do fluxo social */
   const oauthBrowserOpenedRef = useRef(false);
-  const lastOAuthUrlRef = useRef<string | null>(null);
   const hasRedirectedForSessionRef = useRef(false);
-  const exchangeCodeAndRedirectRef = useRef<(url: string) => Promise<void>>(() => Promise.resolve());
   const socialLoginInProgressRef = useRef(false);
   const isRedirectingRef = useRef(false);
+  /** Id do utilizador no contexto (evita closure velha no polling nativo). */
+  const contextSessionUserIdRef = useRef<string | undefined>(undefined);
+  contextSessionUserIdRef.current = session?.user?.id;
 
   // Limpa flag de "veio do signup por sessão expirada" e permite novo toque em "Entrar com Google"
   useEffect(() => {
@@ -112,10 +113,11 @@ const Login = () => {
     window.history.replaceState({}, "", `/login${hash}`);
   }, [location.search]);
 
-  // Quando não há sessão, reseta a ref de redirect para que um novo login (ex.: OAuth) possa redirecionar
+  // Só resetar após o auth terminar de hidratar — senão, no iOS, OAuth pode zerar a ref antes do redirect.
   useEffect(() => {
+    if (authLoading) return;
     if (!session?.user) hasRedirectedForSessionRef.current = false;
-  }, [session?.user]);
+  }, [session?.user, authLoading]);
 
   // Mobile com WebView: quando a página carrega com ?code= (voltou do Google no mesmo WebView), troca e vai pra HOME
   const hasExchangedCodeFromUrlRef = useRef(false);
@@ -157,52 +159,41 @@ const Login = () => {
     };
   }, [session?.user]);
 
-  // Troca code da URL por sessão e redireciona para HOME (deep link Google/Apple no mobile)
-  const exchangeCodeAndRedirect = async (urlStr: string) => {
-    if (!urlStr?.includes("code=") || lastOAuthUrlRef.current === urlStr) return;
-    lastOAuthUrlRef.current = urlStr;
-    let fixedUrl = urlStr.replace("#", "?");
-    if (fixedUrl.startsWith("com.chamo.app:?")) fixedUrl = fixedUrl.replace("com.chamo.app:?", "com.chamo.app://?");
-    try {
-      const urlObj = new URL(fixedUrl);
-      const code = urlObj.searchParams.get("code");
-      if (!code) return;
-      await Browser.close().catch(() => {});
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error) throw error;
-      if (data?.session?.user && !hasRedirectedForSessionRef.current) {
-        hasRedirectedForSessionRef.current = true;
-        oauthBrowserOpenedRef.current = false;
-        setLoading(false);
-        setProcessingOAuth(false);
-        proceedToRedirect(data.session.user.id, data.session.user.email ?? undefined);
-      }
-    } catch (e) {
-      console.error("[Login] exchangeCodeAndRedirect:", e);
-      lastOAuthUrlRef.current = null;
-    }
-  };
-  exchangeCodeAndRedirectRef.current = exchangeCodeAndRedirect;
-
-  // Quando o Google/Apple termina e a sessão aparece (ex.: deep link), redireciona mesmo que o timeout já tenha desbloqueado a tela
+  // Pós-Apple/Google: sessão pode existir no storage antes do React ver `session` (Capacitor Preferences).
+  // Não exigir session no contexto; só bloquear se o contexto mostrar *outro* user (anti-loop pós-exclusão).
   useEffect(() => {
-    if (!session?.user) return;
     if (hasRedirectedForSessionRef.current) return;
     let cancelled = false;
-    (async () => {
+
+    const tryRedirectFromStorage = async (): Promise<boolean> => {
+      if (cancelled || hasRedirectedForSessionRef.current) return true;
       const { data: { session: live } } = await supabase.auth.getSession();
-      if (cancelled) return;
-      if (!live?.user || live.user.id !== session.user.id) return;
+      if (cancelled || hasRedirectedForSessionRef.current) return true;
+      if (!live?.user) return false;
+      const ctxId = contextSessionUserIdRef.current;
+      if (ctxId && ctxId !== live.user.id) return true;
       hasRedirectedForSessionRef.current = true;
       oauthBrowserOpenedRef.current = false;
       setLoading(false);
       setProcessingOAuth(false);
       proceedToRedirect(live.user.id, live.user.email ?? undefined);
+      return true;
+    };
+
+    (async () => {
+      const maxAttempts = Capacitor.isNativePlatform() ? 28 : 1;
+      const delayMs = Capacitor.isNativePlatform() ? 150 : 0;
+      for (let i = 0; i < maxAttempts && !cancelled; i++) {
+        if (await tryRedirectFromStorage()) return;
+        if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+        else break;
+      }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [session?.user]);
+  }, [session?.user?.id, authLoading]);
 
   // Polling no mobile: enquanto loading e não redirecionou, checa getSession a cada 1s (contexto pode atrasar)
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -358,7 +349,7 @@ const Login = () => {
 
   const proceedToRedirect = async (userId: string, emailFromAuth?: string) => {
     if (isRedirectingRef.current) return;
-    isRedirectingRef.current = true; 
+    isRedirectingRef.current = true;
 
     try {
       const normalizedSupportEmail = SUPPORT_EMAIL.toLowerCase().trim();
@@ -426,11 +417,13 @@ const Login = () => {
         localStorage.setItem("chamo_oauth_just_landed", "1");
         navigate("/post-login", { replace: true });
       }
-      
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);
-      isRedirectingRef.current = false; 
+    } finally {
+      window.setTimeout(() => {
+        isRedirectingRef.current = false;
+      }, 400);
     }
   };
 
@@ -475,38 +468,6 @@ const Login = () => {
           if (val) setBgUrl(val);
         }
       });
-
-    const runRedirect = (userId: string, email?: string) => {
-      if (isRedirectingRef.current) return;
-      proceedToRedirect(userId, email);
-    };
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user && !isRedirectingRef.current) {
-        // No Android/Capacitor a sessão pode levar um instante a ser persistida; esperar e usar getSession
-        // evita consultar o perfil com JWT antigo e mandar usuário já cadastrado para o signup.
-        if (Capacitor.isNativePlatform()) {
-          await new Promise((r) => setTimeout(r, 400));
-          const { data: { session: fresh } } = await supabase.auth.getSession();
-          if (fresh?.user) {
-            runRedirect(fresh.user.id, fresh.user.email ?? undefined);
-            return;
-          }
-        }
-        runRedirect(session.user.id, session.user.email ?? undefined);
-      }
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user && !isRedirectingRef.current) {
-        proceedToRedirect(session.user.id, session.user.email ?? undefined);
-      }
-    });
-
-    return () => {
-      authListener?.subscription?.unsubscribe?.();
-      isRedirectingRef.current = false;
-    };
   }, []);
 
   /** Reenvia e-mail de confirmação de cadastro (banner pós-signup ou campo “e-mail não confirmado”). */

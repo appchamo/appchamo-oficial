@@ -1,7 +1,7 @@
 import AppLayout from "@/components/AppLayout";
-import { Bell, ChevronDown, Loader2, XCircle, Home, UserCheck, Ticket, CalendarCheck, MessageSquare, Wallet, X, Trophy } from "lucide-react";
+import { Bell, ChevronDown, Loader2, XCircle, Home, UserCheck, Ticket, CalendarCheck, MessageSquare, Wallet, X, Trophy, Trash2 } from "lucide-react";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
@@ -82,6 +82,119 @@ const ModalIcon = ({ n }: { n: Notification }) => {
   return <Bell className="w-8 h-8 text-primary" />;
 };
 
+const SWIPE_THRESHOLD = 60; // px para abrir o botão de excluir
+const DELETE_BTN_WIDTH = 72; // largura do botão vermelho
+
+/** Item de notificação com swipe-to-delete (arrastar para esquerda revela botão vermelho). */
+function SwipeableItem({
+  children,
+  onDelete,
+  openId,
+  id,
+  setOpenId,
+}: {
+  children: React.ReactNode;
+  onDelete: () => void;
+  openId: string | null;
+  id: string;
+  setOpenId: (id: string | null) => void;
+}) {
+  const startXRef = useRef<number | null>(null);
+  const currentXRef = useRef(0);
+  const isOpen = openId === id;
+  const [offset, setOffset] = useState(0);
+  const isDraggingRef = useRef(false);
+
+  // Fecha quando outro item abre
+  useEffect(() => {
+    if (!isOpen && offset !== 0) {
+      setOffset(0);
+    }
+  }, [isOpen]);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    startXRef.current = e.touches[0].clientX;
+    currentXRef.current = isOpen ? -DELETE_BTN_WIDTH : 0;
+    isDraggingRef.current = false;
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (startXRef.current === null) return;
+    const dx = e.touches[0].clientX - startXRef.current;
+    const raw = currentXRef.current + dx;
+    // Só permite arrastar para a esquerda (negativo), máximo até a largura do botão
+    const clamped = Math.min(0, Math.max(-DELETE_BTN_WIDTH, raw));
+    if (Math.abs(dx) > 5) isDraggingRef.current = true;
+    setOffset(clamped);
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (startXRef.current === null) return;
+    const dx = e.changedTouches[0].clientX - startXRef.current;
+    startXRef.current = null;
+
+    if (isOpen) {
+      // Se puxou bastante para direita, fecha
+      if (dx > SWIPE_THRESHOLD / 2) {
+        setOffset(0);
+        setOpenId(null);
+      } else {
+        setOffset(-DELETE_BTN_WIDTH);
+        setOpenId(id);
+      }
+    } else {
+      // Se puxou bastante para esquerda, abre
+      if (dx < -SWIPE_THRESHOLD) {
+        setOffset(-DELETE_BTN_WIDTH);
+        setOpenId(id);
+      } else {
+        setOffset(0);
+      }
+    }
+  };
+
+  const handleChildClick = () => {
+    if (isDraggingRef.current) return;
+    if (isOpen) {
+      setOffset(0);
+      setOpenId(null);
+    }
+  };
+
+  return (
+    <div className="relative overflow-hidden rounded-xl">
+      {/* Botão de excluir (atrás, à direita) */}
+      <div
+        className="absolute inset-y-0 right-0 flex items-center justify-center bg-red-500 rounded-xl"
+        style={{ width: DELETE_BTN_WIDTH }}
+      >
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="flex flex-col items-center justify-center gap-1 w-full h-full active:bg-red-600 transition-colors"
+          aria-label="Excluir notificação"
+        >
+          <Trash2 className="w-5 h-5 text-white" />
+          <span className="text-[10px] text-white font-semibold">Excluir</span>
+        </button>
+      </div>
+
+      {/* Conteúdo deslizável */}
+      <div
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: isDraggingRef.current ? "none" : "transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+        }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onClick={handleChildClick}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 const Notifications = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -94,6 +207,7 @@ const Notifications = () => {
   const [expandedNotif, setExpandedNotif] = useState<Notification | null>(null);
   const [sealCelebrateNotif, setSealCelebrateNotif] = useState<Notification | null>(null);
   const [followPreviewUserId, setFollowPreviewUserId] = useState<string | null>(null);
+  const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
 
   const fetchNotifications = useCallback(async (pageIndex = 0, append = false) => {
     if (!user) return;
@@ -159,6 +273,12 @@ const Notifications = () => {
   }, [user, fetchNotifications]);
 
   const handleLoadMore = () => { fetchNotifications(page + 1, true); };
+
+  const handleDelete = useCallback(async (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setOpenSwipeId(null);
+    await supabase.from("notifications").delete().eq("id", id);
+  }, []);
 
   const handleClick = (n: Notification) => {
     if (n.type === "rejection") {
@@ -381,67 +501,81 @@ const Notifications = () => {
                 const meta = parseSealMeta(n);
                 const variant = meta?.icon_variant || "seal_default";
                 return (
-                  <button
+                  <SwipeableItem
                     key={n.id}
-                    onClick={() => handleClick(n)}
-                    className={`w-full text-left p-4 rounded-xl border-2 border-amber-400/40 transition-all bg-gradient-to-br from-amber-50/90 via-orange-50/40 to-violet-50/30 dark:from-amber-950/35 dark:via-orange-950/20 dark:to-violet-950/25 shadow-md hover:shadow-lg hover:border-amber-500/50 active:scale-[0.99]`}
+                    id={n.id}
+                    openId={openSwipeId}
+                    setOpenId={setOpenSwipeId}
+                    onDelete={() => handleDelete(n.id)}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="shrink-0 drop-shadow-md">
-                        <ProfessionalSealIcon variant={variant} size={58} earned />
+                    <button
+                      onClick={() => handleClick(n)}
+                      className={`w-full text-left p-4 rounded-xl border-2 border-amber-400/40 transition-all bg-gradient-to-br from-amber-50/90 via-orange-50/40 to-violet-50/30 dark:from-amber-950/35 dark:via-orange-950/20 dark:to-violet-950/25 shadow-md hover:shadow-lg hover:border-amber-500/50 active:scale-[0.99]`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="shrink-0 drop-shadow-md">
+                          <ProfessionalSealIcon variant={variant} size={58} earned />
+                        </div>
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className={`text-sm ${n.read ? "text-foreground" : "font-extrabold text-foreground"}`}>{n.title}</p>
+                          {message && <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-snug">{message}</p>}
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <Trophy className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                          <span className="text-[10px] text-muted-foreground">{timeAgo(n.created_at)}</span>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0 text-left">
-                        <p className={`text-sm ${n.read ? "text-foreground" : "font-extrabold text-foreground"}`}>{n.title}</p>
-                        {message && <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-snug">{message}</p>}
-                      </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <Trophy className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                        <span className="text-[10px] text-muted-foreground">{timeAgo(n.created_at)}</span>
-                      </div>
-                    </div>
-                  </button>
+                    </button>
+                  </SwipeableItem>
                 );
               }
 
               return (
-                <button
+                <SwipeableItem
                   key={n.id}
-                  onClick={() => handleClick(n)}
-                  className={`w-full text-left p-4 rounded-xl border transition-colors ${
-                    n.read ? "bg-card" : "bg-primary/5 border-primary/20"
-                  } hover:bg-muted/50 active:scale-[0.99]`}
+                  id={n.id}
+                  openId={openSwipeId}
+                  setOpenId={setOpenSwipeId}
+                  onDelete={() => handleDelete(n.id)}
                 >
-                  <div className="flex items-start gap-3">
-                    {n.image_url ? (
-                      <div className="relative flex-shrink-0 mt-0.5">
-                        <img
-                          src={n.image_url}
-                          alt=""
-                          className="w-10 h-10 rounded-full object-cover ring-2 ring-background"
+                  <button
+                    onClick={() => handleClick(n)}
+                    className={`w-full text-left p-4 rounded-xl border transition-colors ${
+                      n.read ? "bg-card" : "bg-primary/5 border-primary/20"
+                    } hover:bg-muted/50 active:scale-[0.99]`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {n.image_url ? (
+                        <div className="relative flex-shrink-0 mt-0.5">
+                          <img
+                            src={n.image_url}
+                            alt=""
+                            className="w-10 h-10 rounded-full object-cover ring-2 ring-background"
+                          />
+                          {!n.read ? (
+                            <span className="absolute -left-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div
+                          className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "bg-transparent" : "bg-primary"}`}
                         />
-                        {!n.read ? (
-                          <span className="absolute -left-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>
+                          {n.type === "follow" && message ? `${n.title} ${message}` : n.type === "friend_request" && message ? `${n.title} ${message}` : n.title}
+                        </p>
+                        {message && n.type !== "follow" && n.type !== "friend_request" ? (
+                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>
                         ) : null}
                       </div>
-                    ) : (
-                      <div
-                        className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "bg-transparent" : "bg-primary"}`}
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm ${n.read ? "text-foreground" : "font-semibold text-foreground"}`}>
-                        {n.type === "follow" && message ? `${n.title} ${message}` : n.type === "friend_request" && message ? `${n.title} ${message}` : n.title}
-                      </p>
-                      {message && n.type !== "follow" && n.type !== "friend_request" ? (
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{message}</p>
-                      ) : null}
+                      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                        <span className="text-[10px] text-muted-foreground">{timeAgo(n.created_at)}</span>
+                        <ActionHint />
+                      </div>
                     </div>
-                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                      <span className="text-[10px] text-muted-foreground">{timeAgo(n.created_at)}</span>
-                      <ActionHint />
-                    </div>
-                  </div>
-                </button>
+                  </button>
+                </SwipeableItem>
               );
             })}
 

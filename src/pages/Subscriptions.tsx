@@ -87,6 +87,7 @@ const Subscriptions = () => {
   const [proStatus, setProStatus] = useState<string | null>(null);
   const [proStatusLoaded, setProStatusLoaded] = useState(false);
   const [isEarlyAccess, setIsEarlyAccess] = useState(false);
+  const [earlyDocType, setEarlyDocType] = useState<"cpf" | "cnpj">("cpf");
 
   // Datas da promoção de acesso antecipado
   const EARLY_ACCESS_RELEASE = new Date("2026-04-15T00:00:00");
@@ -173,11 +174,12 @@ const Subscriptions = () => {
       setProStatusLoaded(false);
       const { data: pro } = await supabase
         .from("professionals")
-        .select("profile_status, early_access")
+        .select("profile_status, early_access, doc_type")
         .eq("user_id", user.id)
         .maybeSingle();
       setProStatus(pro?.profile_status ?? null);
       setIsEarlyAccess(!!(pro as any)?.early_access);
+      setEarlyDocType((pro as any)?.doc_type === "cnpj" ? "cnpj" : "cpf");
 
       const { data: plansData } = await supabase.from("plans").select("id, features");
       if (plansData) {
@@ -242,7 +244,7 @@ const Subscriptions = () => {
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/15 border-2 border-white/30 mb-3 mx-auto">
                   <Crown className="w-8 h-8 text-yellow-300" />
                 </div>
-                <h1 className="text-xl font-black mb-1">Você é Business!</h1>
+                <h1 className="text-xl font-black mb-1">{earlyDocType === "cnpj" ? "Você é Business!" : "Você é VIP!"}</h1>
                 <p className="text-white/85 text-sm">Seu acesso antecipado está ativo</p>
               </div>
             </div>
@@ -260,21 +262,20 @@ const Subscriptions = () => {
               </div>
 
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Você está aproveitando o seu <strong className="text-foreground">1 mês grátis de Business</strong>.{" "}
+                Você está aproveitando os seus{" "}
+                <strong className="text-foreground">3 meses grátis de {earlyDocType === "cnpj" ? "Business" : "VIP"}</strong>{" "}
+                (de 15/04 a 15/07/2026).{" "}
                 A aba de planos ficará disponível a partir de <strong className="text-violet-600">15/04/2026</strong>,
                 quando você poderá escolher seu plano preferido para continuar crescendo. 🚀
               </p>
 
               {/* Benefícios ativos */}
               <div className="text-left space-y-1.5 bg-muted/40 rounded-2xl p-4">
-                <p className="text-xs font-bold text-muted-foreground uppercase mb-2">Ativo agora no seu Business</p>
-                {[
-                  "Chamadas ilimitadas de clientes",
-                  "Destaque na página inicial",
-                  "Fotos de serviços no perfil",
-                  "Suporte 24h",
-                  "Vagas de emprego",
-                ].map((item) => (
+                <p className="text-xs font-bold text-muted-foreground uppercase mb-2">Ativo agora no seu {earlyDocType === "cnpj" ? "Business" : "VIP"}</p>
+                {(earlyDocType === "cnpj"
+                  ? ["Chamadas ilimitadas de clientes","Destaque na página inicial","Fotos de serviços no perfil","Suporte 24h","Vagas de emprego","Catálogo de produtos","Agenda integrada"]
+                  : ["Chamadas ilimitadas de clientes","Destaque na página inicial","Fotos de serviços no perfil","Suporte prioritário","Selo de verificado"]
+                ).map((item) => (
                   <div key={item} className="flex items-center gap-2 text-sm">
                     <CheckCircle className="w-3.5 h-3.5 text-primary shrink-0" />
                     <span className="text-foreground">{item}</span>

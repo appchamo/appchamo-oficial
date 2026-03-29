@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Lock, MapPin, Crown, Settings } from "lucide-react";
+import { ArrowLeft, ChevronRight, Lock, MapPin, Crown, Settings, ShieldCheck } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -8,7 +8,7 @@ const ProfileSettings = () => {
   const isPro = profile?.user_type === "professional" || profile?.user_type === "company";
 
   const items = [
-    { icon: Lock, label: "Alterar senha", path: "/profile/settings/senha", desc: "Atualize sua senha de acesso" },
+    { icon: ShieldCheck, label: "Segurança", path: "/profile/settings/seguranca", desc: "Senha e documentos de verificação" },
     { icon: MapPin, label: "Endereço", path: "/profile/settings/endereco", desc: "CEP, rua, cidade e estado" },
     ...(isPro
       ? [{ icon: Crown, label: "Planos e assinatura", path: "/subscriptions", desc: "Gerenciar seu plano no Chamô" } as const]

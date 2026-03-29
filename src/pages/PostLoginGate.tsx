@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
 import { peekPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
+import { Capacitor } from "@capacitor/core";
 
 export default function PostLoginGate() {
   const navigate = useNavigate();
@@ -16,11 +17,24 @@ export default function PostLoginGate() {
   }, [session?.user?.user_metadata]);
 
   useEffect(() => {
-    // Se não está logado, não deve ficar nessa tela
-    if (!loading && !session?.user) {
-      navigate("/login", { replace: true });
-      return;
-    }
+    if (loading) return;
+    if (session?.user) return;
+
+    let cancelled = false;
+    (async () => {
+      // Nativo: não expulsar enquanto getSession ainda não vê a sessão (corrida pós-OAuth / Preferences).
+      const maxWait = Capacitor.isNativePlatform() ? 24 : 4;
+      for (let i = 0; i < maxWait && !cancelled; i++) {
+        const { data: { session: live } } = await supabase.auth.getSession();
+        if (live?.user) return;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      if (!cancelled) navigate("/login", { replace: true });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [loading, session?.user?.id, navigate]);
 
   useEffect(() => {
@@ -66,11 +80,43 @@ export default function PostLoginGate() {
             const userType = (data as any)?.user_type as string | undefined;
             if (userType) {
               if (userType === "pending_signup") {
+                // Aguarda até 12s para o flushPendingEmailSignup (background) completar
+                // antes de jogar o usuário na tela de seleção CLIENTE/PROFISSIONAL
+                let finalType = userType;
+                for (let w = 0; w < 24 && !cancelled; w++) {
+                  await sleep(500);
+                  try {
+                    const { data: d2 } = await supabase
+                      .from("profiles")
+                      .select("user_type")
+                      .eq("user_id", userId)
+                      .maybeSingle();
+                    const t2 = (d2 as any)?.user_type as string | undefined;
+                    if (t2 && t2 !== "pending_signup") { finalType = t2; break; }
+                  } catch { /* continua */ }
+                }
+                if (cancelled) return;
                 setChecking(false);
-                navigate("/signup", { replace: true });
+                if (finalType !== "pending_signup") {
+                  void refreshProfile(userId).catch(() => {});
+                  void refreshRoles(userId).catch(() => {});
+                  const pending = peekPostAuthRedirect();
+                  if (pending) { clearPostAuthRedirect(); navigate(pending, { replace: true }); }
+                  else navigate("/home", { replace: true });
+                } else {
+                  navigate("/signup", { replace: true });
+                }
                 return;
               }
               setChecking(false);
+              // Se veio do fluxo de cadastro via OAuth (Google/Apple na tela de Signup),
+              // redireciona para o Signup para escolher o tipo de conta (Cliente/Profissional).
+              const isNewSignup = localStorage.getItem("signup_in_progress") === "true";
+              if (isNewSignup) {
+                localStorage.removeItem("signup_in_progress");
+                navigate("/signup", { replace: true });
+                return;
+              }
               const pending = peekPostAuthRedirect();
               if (pending) {
                 clearPostAuthRedirect();
@@ -101,15 +147,25 @@ export default function PostLoginGate() {
           return;
         }
         const meta = (u.user_metadata || {}) as Record<string, unknown>;
+        const isNewSignupFallback = localStorage.getItem("signup_in_progress") === "true";
         const { error: upsertErr } = await supabase.from("profiles").upsert(
           {
             user_id: u.id,
             email: String(u.email || "").trim(),
             full_name: String(meta.full_name || meta.name || "").trim(),
-            user_type: "client",
+            // Preservar pending_signup se veio do fluxo de cadastro para que /signup mostre a tela de tipo de conta.
+            user_type: isNewSignupFallback ? "pending_signup" : "client",
           },
           { onConflict: "user_id" },
         );
+        if (isNewSignupFallback) {
+          localStorage.removeItem("signup_in_progress");
+          if (!cancelled) {
+            setChecking(false);
+            navigate("/signup", { replace: true });
+          }
+          return;
+        }
         if (!upsertErr && !cancelled) {
           try {
             const { data: row, error: rowErr } = await Promise.race([
@@ -158,6 +214,13 @@ export default function PostLoginGate() {
     // Perfil já no contexto (ex. retry anterior)
     setChecking(false);
     if (profile.user_type === "pending_signup") {
+      navigate("/signup", { replace: true });
+      return;
+    }
+    // Se veio do fluxo de cadastro via OAuth, vai para /signup para escolher tipo de conta.
+    const isNewSignupCtx = localStorage.getItem("signup_in_progress") === "true";
+    if (isNewSignupCtx) {
+      localStorage.removeItem("signup_in_progress");
       navigate("/signup", { replace: true });
       return;
     }

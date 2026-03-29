@@ -181,6 +181,7 @@ const Home = () => {
 
   const [needsFiscalSetup, setNeedsFiscalSetup] = useState(false);
   const [earlyAccessModal, setEarlyAccessModal] = useState(false);
+  const [earlyAccessDocType, setEarlyAccessDocType] = useState<"cpf" | "cnpj">("cpf");
 
   const checkFiscalSetup = useCallback(async () => {
     if (!user?.id || profile?.user_type === "client") {
@@ -213,20 +214,27 @@ const Home = () => {
     return () => clearTimeout(t);
   }, [checkFiscalSetup]);
 
-  // Modal de acesso antecipado Business (promoção de lançamento)
-  useEffect(() => {
-    if (!user?.id || !isPro) return;
-    const storageKey = `early_access_modal_${user.id}`;
+  // Modal de acesso antecipado (VIP ou Business conforme doc_type)
+  // Abre DEPOIS do tutorial ser dispensado (ou imediatamente se tutorial não aparecer)
+  const openEarlyAccessIfPending = (uid: string) => {
+    const storageKey = `early_access_modal_${uid}`;
     if (localStorage.getItem(storageKey) !== "pending") return;
-    // Verifica se o profissional tem early_access ativo
-    supabase.from("professionals").select("early_access").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+    supabase.from("professionals").select("early_access, doc_type").eq("user_id", uid).maybeSingle().then(({ data }) => {
       if (data?.early_access) {
+        setEarlyAccessDocType((data as any).doc_type === "cnpj" ? "cnpj" : "cpf");
         setEarlyAccessModal(true);
         localStorage.setItem(storageKey, "shown");
       } else {
         localStorage.removeItem(storageKey);
       }
     });
+  };
+
+  useEffect(() => {
+    if (!user?.id || !isPro) return;
+    // Aguarda 1s para tutorial ter chance de aparecer primeiro
+    const t = window.setTimeout(() => openEarlyAccessIfPending(user.id), 1000);
+    return () => clearTimeout(t);
   }, [user?.id, isPro]);
 
   // Profissional: id + carteira num único efeito (liberta o header da Home assim que o id existe).
@@ -463,7 +471,7 @@ const Home = () => {
     return () => clearTimeout(t);
   }, [user?.id, refreshLayout, fetchUpcomingAppointments]);
 
-  // Fechou o tutorial: libera seções pesadas + um remount limpo no nativo
+  // Fechou o tutorial: libera seções pesadas + abre modal de early access se pendente
   useEffect(() => {
     const onDismiss = () => {
       if (!window.location.pathname.includes("home")) return;
@@ -471,10 +479,12 @@ const Home = () => {
         setHeavySectionsReady(true);
       }
       setTimeout(() => setContentSeed((s) => s + 1), 600);
+      // Abre modal de early access após fechar tutorial (com pequeno delay visual)
+      if (user?.id) setTimeout(() => openEarlyAccessIfPending(user.id), 800);
     };
     window.addEventListener("chamo-tutorial-dismissed", onDismiss);
     return () => window.removeEventListener("chamo-tutorial-dismissed", onDismiss);
-  }, []);
+  }, [user?.id]);
 
   // ✅ Pull-to-refresh (e ao fechar tutorial): atualiza layout + força remount das seções (sponsors, featured, categorias) para carregar 100%
   const onRefresh = async () => {
@@ -973,67 +983,88 @@ const Home = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ✨ Modal de Acesso Antecipado Business */}
+      {/* ✨ Modal de Acesso Antecipado (VIP ou Business) */}
       <Dialog open={earlyAccessModal} onOpenChange={setEarlyAccessModal}>
         <DialogContent className="max-w-sm p-0 overflow-hidden border-0 rounded-3xl shadow-2xl">
-          {/* Fundo gradiente premium */}
-          <div className="relative bg-gradient-to-br from-violet-600 via-purple-700 to-orange-500 px-6 pt-8 pb-6 text-white text-center overflow-hidden">
-            {/* Brilhos decorativos */}
-            <div className="absolute top-4 left-6 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
-            <div className="absolute bottom-4 right-6 w-24 h-24 bg-orange-400/20 rounded-full blur-2xl" />
-            <div className="absolute top-0 right-0 w-16 h-16 bg-yellow-300/10 rounded-full blur-xl" />
-
-            {/* Ícone de coroa */}
-            <div className="relative inline-flex items-center justify-center w-20 h-20 rounded-full bg-white/15 border-2 border-white/30 mb-4 mx-auto">
-              <Crown className="w-10 h-10 text-yellow-300 drop-shadow-lg" />
-              <span className="absolute -top-1 -right-1 text-lg">✨</span>
-            </div>
-
-            <h2 className="text-2xl font-black mb-1 tracking-tight drop-shadow">Parabéns! 🎉</h2>
-            <p className="text-white/90 font-semibold text-base">Você ganhou acesso antecipado ao</p>
-            <div className="inline-flex items-center gap-2 mt-2 mb-4 px-4 py-1.5 rounded-full bg-white/20 border border-white/30">
-              <Building2 className="w-4 h-4 text-yellow-300" />
-              <span className="font-black text-lg tracking-wide text-yellow-300">Chamô Business</span>
-            </div>
-
-            {/* Benefícios */}
-            <div className="space-y-2 text-left bg-white/10 rounded-2xl p-4 mb-4">
-              {[
-                "Chamadas ilimitadas de clientes",
-                "Aparece em destaque na Home",
-                "Fotos de serviços no perfil",
-                "Suporte 24h prioritário",
-                "Publicar vagas de emprego",
-                "Catálogo de produtos",
-              ].map((item) => (
-                <div key={item} className="flex items-center gap-2 text-sm">
-                  <Star className="w-3.5 h-3.5 text-yellow-300 shrink-0 fill-yellow-300" />
-                  <span className="text-white/95">{item}</span>
+          {earlyAccessDocType === "cnpj" ? (
+            /* ── Business ── */
+            <>
+              <div className="relative bg-gradient-to-br from-violet-600 via-purple-700 to-orange-500 px-6 pt-8 pb-6 text-white text-center overflow-hidden">
+                <div className="absolute top-4 left-6 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+                <div className="absolute bottom-4 right-6 w-24 h-24 bg-orange-400/20 rounded-full blur-2xl" />
+                <div className="relative inline-flex items-center justify-center w-20 h-20 rounded-full bg-white/15 border-2 border-white/30 mb-4 mx-auto">
+                  <Crown className="w-10 h-10 text-yellow-300 drop-shadow-lg" />
+                  <span className="absolute -top-1 -right-1 text-lg">✨</span>
                 </div>
-              ))}
-            </div>
-
-            <div className="bg-white/15 border border-white/25 rounded-2xl p-3 mb-5">
-              <p className="text-xs text-white/80 leading-relaxed">
-                🎁 <strong className="text-white">1 mês grátis</strong> — você tem até{" "}
-                <strong className="text-yellow-300">14/04/2026</strong> de acesso total ao Business sem pagar nada.
-                Depois disso, basta manter seu plano para continuar crescendo! 🚀
-              </p>
-            </div>
-          </div>
-
-          {/* Botão fora do gradiente */}
-          <div className="px-6 py-5 bg-card">
-            <button
-              onClick={() => setEarlyAccessModal(false)}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-violet-600 to-orange-500 text-white font-black text-base tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all"
-            >
-              Começar agora! 🚀
-            </button>
-            <p className="text-center text-[10px] text-muted-foreground mt-2">
-              Acesso válido até 14/04/2026 · Sem cartão de crédito necessário
-            </p>
-          </div>
+                <h2 className="text-2xl font-black mb-1 tracking-tight drop-shadow">Parabéns! 🎉</h2>
+                <p className="text-white/90 font-semibold text-base">Você ganhou acesso antecipado ao</p>
+                <div className="inline-flex items-center gap-2 mt-2 mb-4 px-4 py-1.5 rounded-full bg-white/20 border border-white/30">
+                  <Building2 className="w-4 h-4 text-yellow-300" />
+                  <span className="font-black text-lg tracking-wide text-yellow-300">Chamô Business</span>
+                </div>
+                <div className="space-y-2 text-left bg-white/10 rounded-2xl p-4 mb-4">
+                  {["Chamadas ilimitadas de clientes","Aparece em destaque na Home","Fotos de serviços no perfil","Suporte 24h prioritário","Publicar vagas de emprego","Catálogo de produtos","Agenda integrada"].map((item) => (
+                    <div key={item} className="flex items-center gap-2 text-sm">
+                      <Star className="w-3.5 h-3.5 text-yellow-300 shrink-0 fill-yellow-300" />
+                      <span className="text-white/95">{item}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-white/15 border border-white/25 rounded-2xl p-3 mb-2">
+                  <p className="text-xs text-white/80 leading-relaxed">
+                    🎁 <strong className="text-white">3 meses grátis</strong> — plano Business válido de{" "}
+                    <strong className="text-yellow-300">15/04</strong> a <strong className="text-yellow-300">15/07/2026</strong>.
+                    Sem cartão de crédito necessário! 🚀
+                  </p>
+                </div>
+              </div>
+              <div className="px-6 py-5 bg-card">
+                <button onClick={() => setEarlyAccessModal(false)} className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-violet-600 to-orange-500 text-white font-black text-base tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all">
+                  Começar agora! 🚀
+                </button>
+                <p className="text-center text-[10px] text-muted-foreground mt-2">Acesso válido de 15/04 a 15/07/2026 · Sem cartão necessário</p>
+              </div>
+            </>
+          ) : (
+            /* ── VIP ── */
+            <>
+              <div className="relative bg-gradient-to-br from-amber-500 via-orange-500 to-primary px-6 pt-8 pb-6 text-white text-center overflow-hidden">
+                <div className="absolute top-4 left-6 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+                <div className="absolute bottom-4 right-6 w-24 h-24 bg-yellow-400/20 rounded-full blur-2xl" />
+                <div className="relative inline-flex items-center justify-center w-20 h-20 rounded-full bg-white/15 border-2 border-white/30 mb-4 mx-auto">
+                  <Crown className="w-10 h-10 text-yellow-200 drop-shadow-lg" />
+                  <span className="absolute -top-1 -right-1 text-lg">⭐</span>
+                </div>
+                <h2 className="text-2xl font-black mb-1 tracking-tight drop-shadow">Parabéns! 🎉</h2>
+                <p className="text-white/90 font-semibold text-base">Você ganhou acesso antecipado ao</p>
+                <div className="inline-flex items-center gap-2 mt-2 mb-4 px-4 py-1.5 rounded-full bg-white/20 border border-white/30">
+                  <Crown className="w-4 h-4 text-yellow-200" />
+                  <span className="font-black text-lg tracking-wide text-yellow-200">Chamô VIP</span>
+                </div>
+                <div className="space-y-2 text-left bg-white/10 rounded-2xl p-4 mb-4">
+                  {["Chamadas ilimitadas de clientes","Aparece em destaque na Home","Fotos de serviços no perfil","Suporte prioritário","Selo de profissional verificado"].map((item) => (
+                    <div key={item} className="flex items-center gap-2 text-sm">
+                      <Star className="w-3.5 h-3.5 text-yellow-200 shrink-0 fill-yellow-200" />
+                      <span className="text-white/95">{item}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-white/15 border border-white/25 rounded-2xl p-3 mb-2">
+                  <p className="text-xs text-white/80 leading-relaxed">
+                    🎁 <strong className="text-white">3 meses grátis</strong> — plano VIP válido de{" "}
+                    <strong className="text-yellow-200">15/04</strong> a <strong className="text-yellow-200">15/07/2026</strong>.
+                    Sem cartão de crédito necessário! 🚀
+                  </p>
+                </div>
+              </div>
+              <div className="px-6 py-5 bg-card">
+                <button onClick={() => setEarlyAccessModal(false)} className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-primary text-white font-black text-base tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all">
+                  Começar agora! 🚀
+                </button>
+                <p className="text-center text-[10px] text-muted-foreground mt-2">Acesso válido de 15/04 a 15/07/2026 · Sem cartão necessário</p>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

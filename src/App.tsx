@@ -75,6 +75,7 @@ const BusinessCheckout = lazy(() => import("./pages/BusinessCheckout"));
 const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
 const ProfileSettingsPassword = lazy(() => import("./pages/ProfileSettingsPassword"));
 const ProfileSettingsAddress = lazy(() => import("./pages/ProfileSettingsAddress"));
+const ProfileSettingsSecurity = lazy(() => import("./pages/ProfileSettingsSecurity"));
 const ProfessionalReports = lazy(() => import("./pages/ProfessionalReports"));
 
 const AdminLogin = lazy(() => import("./pages/admin/AdminLogin"));
@@ -301,7 +302,11 @@ const OAuthCallbackRedirectGuard = () => {
     let cancelled = false;
     (async () => {
       // Só confiar em getSession(): após exclusão de conta o React pode ainda ter session até o próximo tick.
-      const { data: { session: live } } = await supabase.auth.getSession();
+      let live = (await supabase.auth.getSession()).data.session;
+      for (let i = 0; i < 10 && !cancelled && !live?.user; i++) {
+        await new Promise((r) => setTimeout(r, 120));
+        live = (await supabase.auth.getSession()).data.session;
+      }
       if (cancelled || !live?.user) return;
       if (profile?.user_type === "sponsor") {
         navigate("/home", { replace: true });
@@ -530,6 +535,7 @@ const AppContent = () => {
         <Route path="/how-to-pay" element={<ProtectedRoute><HowToPay /></ProtectedRoute>} />
         <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
         <Route path="/profile/settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+        <Route path="/profile/settings/seguranca" element={<ProtectedRoute><ProfileSettingsSecurity /></ProtectedRoute>} />
         <Route path="/profile/settings/senha" element={<ProtectedRoute><ProfileSettingsPassword /></ProtectedRoute>} />
         <Route path="/profile/settings/endereco" element={<ProtectedRoute><ProfileSettingsAddress /></ProtectedRoute>} />
         <Route path="/profile/relatorios" element={<ProtectedRoute><ProfessionalReports /></ProtectedRoute>} />

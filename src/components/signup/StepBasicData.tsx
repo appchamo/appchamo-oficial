@@ -746,18 +746,65 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
           {/* ✅ CAMPOS DE SENHA ESCONDIDOS SE FOR SOCIAL */}
           {!isSocialSignup && (
             <>
-              <InputRow icon={Lock} label="Senha *" fieldId="signup-field-password" error={fieldErrors.password}>
-                <PasswordInput
-                  noIcon
-                  value={password}
-                  onChange={(v) => {
-                    clearFieldError("password");
-                    setPassword(v);
-                  }}
-                  placeholder="Mínimo 6 caracteres"
-                  autoComplete="new-password"
-                />
-              </InputRow>
+              {/* Campo senha + barra de força */}
+              <div id="signup-field-password">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Senha *</label>
+                <div
+                  className={cn(
+                    "flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30 transition-colors",
+                    fieldErrors.password && "border-destructive border-2 ring-2 ring-destructive/25",
+                  )}
+                >
+                  <Lock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <PasswordInput
+                    noIcon
+                    value={password}
+                    onChange={(v) => {
+                      clearFieldError("password");
+                      setPassword(v);
+                    }}
+                    placeholder="Mínimo 6 caracteres"
+                    autoComplete="new-password"
+                  />
+                </div>
+                {/* Barra de força de senha */}
+                {password.length > 0 && (() => {
+                  const len = password.length;
+                  const hasNum = /\d/.test(password);
+                  const hasUpper = /[A-Z]/.test(password);
+                  // Score: cada critério vale pontos
+                  // 0 chars: 0 | 1-5: proporcional até 60% | 6+ chars: 70% | +num: +15% | +upper: +15%
+                  let pct = 0;
+                  if (len >= 1 && len < 6) pct = Math.round((len / 6) * 60); // até 50%
+                  if (len >= 6) pct = 70;
+                  if (len >= 6 && hasNum) pct += 15;
+                  if (len >= 6 && hasUpper) pct += 15;
+                  pct = Math.min(100, pct);
+
+                  const barColor =
+                    pct < 35 ? "bg-red-500" :
+                    pct < 70 ? "bg-orange-400" :
+                    pct < 85 ? "bg-yellow-400" :
+                    "bg-emerald-500";
+
+                  return (
+                    <div className="mt-2 px-0.5">
+                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all duration-300", barColor)}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Certifique-se de ter uma senha segura (6+ caracteres, número e letra maiúscula).
+                      </p>
+                    </div>
+                  );
+                })()}
+                {fieldErrors.password && (
+                  <p className="text-xs text-destructive font-medium mt-1.5 px-0.5">{fieldErrors.password}</p>
+                )}
+              </div>
 
               <InputRow
                 icon={Lock}

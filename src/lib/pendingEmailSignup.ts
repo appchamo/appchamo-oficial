@@ -86,6 +86,35 @@ export async function flushPendingEmailSignup(session: Session | null): Promise<
     return false;
   }
 
+  // Acesso antecipado: aplica VIP (CPF) ou Business (CNPJ) para cadastros antes de 15/04
+  if (pending.accountType === "professional") {
+    const EARLY_CUTOFF = new Date("2026-04-15T00:00:00");
+    const EARLY_EXPIRES = new Date("2026-07-15T00:00:00");
+    if (new Date() < EARLY_CUTOFF) {
+      const docType = (pending.basicData.documentType as "cpf" | "cnpj") ?? "cpf";
+      const planId = docType === "cnpj" ? "business" : "vip";
+      try {
+        const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", pending.userId).maybeSingle();
+        if (pro?.id) {
+          await supabase
+            .from("professionals")
+            .update({ doc_type: docType, early_access: true } as any)
+            .eq("id", pro.id);
+        }
+        await supabase.from("subscriptions").upsert(
+          { user_id: pending.userId, plan_id: planId, status: "ACTIVE", expires_at: EARLY_EXPIRES.toISOString() },
+          { onConflict: "user_id" },
+        );
+        if (docType === "cnpj") {
+          await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", pending.userId);
+        }
+        try { localStorage.setItem(`early_access_modal_${pending.userId}`, "pending"); } catch { void 0; }
+      } catch (e) {
+        console.warn("[pendingEmailSignup] early_access failed:", e);
+      }
+    }
+  }
+
   try {
     sessionStorage.removeItem(PENDING_EMAIL_SIGNUP_KEY);
   } catch {

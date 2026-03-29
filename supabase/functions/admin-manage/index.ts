@@ -88,87 +88,143 @@ serve(async (req) => {
       return caller;
     };
 
+    /** Executa delete em qualquer tabela sem lançar exceção; loga warnings para debug. */
+    const sd = async (table: string, col: string, val: string | string[]) => {
+      try {
+        const q = supabase.from(table as any).delete();
+        const res = Array.isArray(val)
+          ? await (q as any).in(col, val)
+          : await (q as any).eq(col, val);
+        if (res.error) console.warn(`[del] ${table}.${col}:`, res.error.message);
+      } catch (e: any) {
+        console.warn(`[del] ${table}.${col} exception:`, e.message);
+      }
+    };
+
     // Shared function to cascade-delete a user
     const cascadeDeleteUser = async (user_id: string) => {
       console.log(`[cascadeDeleteUser] Starting deletion for user: ${user_id}`);
 
-      // FK sem ON DELETE CASCADE no schema legado — se existir linha, auth.admin.deleteUser falha (400).
-      await supabase.from("chat_reports").delete().eq("reporter_id", user_id);
+      await sd("chat_reports", "reporter_id", user_id);
 
-      // Get professional IDs
+      // Buscar IDs de profissional
       const { data: pros } = await supabase.from("professionals").select("id").eq("user_id", user_id);
-      const proIds = pros?.map((p: any) => p.id) || [];
-      console.log(`[cascadeDeleteUser] Found ${proIds.length} professional records`);
+      const proIds = (pros || []).map((p: any) => p.id);
+      console.log(`[cascadeDeleteUser] proIds: ${proIds.length}`);
 
-      // Collect all service request IDs
-      let allRequestIds: string[] = [];
+      // Buscar IDs de service_requests
+      let reqIds: string[] = [];
       if (proIds.length > 0) {
-        const { data: proRequests } = await supabase.from("service_requests").select("id").in("professional_id", proIds);
-        allRequestIds.push(...(proRequests?.map((r: any) => r.id) || []));
+        const { data: pr } = await supabase.from("service_requests").select("id").in("professional_id", proIds);
+        reqIds.push(...(pr || []).map((r: any) => r.id));
       }
-      const { data: clientRequests } = await supabase.from("service_requests").select("id").eq("client_id", user_id);
-      allRequestIds.push(...(clientRequests?.map((r: any) => r.id) || []));
-      allRequestIds = [...new Set(allRequestIds)];
+      const { data: cr } = await supabase.from("service_requests").select("id").eq("client_id", user_id);
+      reqIds.push(...(cr || []).map((r: any) => r.id));
+      reqIds = [...new Set(reqIds)];
 
-      // Delete request-related data
-      if (allRequestIds.length > 0) {
-        await supabase.from("reviews").delete().in("request_id", allRequestIds);
-        await supabase.from("chat_messages").delete().in("request_id", allRequestIds);
-        await supabase.from("chat_read_status").delete().in("request_id", allRequestIds);
+      // Dados ligados a service_requests
+      if (reqIds.length > 0) {
+        await sd("chat_thread_activity", "request_id", reqIds);
+        await sd("reviews", "request_id", reqIds);
+        await sd("chat_messages", "request_id", reqIds);
+        await sd("chat_read_status", "request_id", reqIds);
       }
-
-      // Delete reviews where this user is the professional
-      if (proIds.length > 0) {
-        await supabase.from("reviews").delete().in("professional_id", proIds);
-      }
-      // Delete reviews where this user is the client
-      await supabase.from("reviews").delete().eq("client_id", user_id);
 
       if (proIds.length > 0) {
-        const { data: jobs } = await supabase.from("job_postings").select("id").in("professional_id", proIds);
-        const jobIds = jobs?.map((j: any) => j.id) || [];
-        if (jobIds.length > 0) {
-          await supabase.from("job_applications").delete().in("job_id", jobIds);
-        }
-        await supabase.from("product_catalog").delete().in("professional_id", proIds);
-        await supabase.from("professional_documents").delete().in("professional_id", proIds);
-        await supabase.from("professional_fiscal_data").delete().in("professional_id", proIds);
-        await supabase.from("job_postings").delete().in("professional_id", proIds);
-        await supabase.from("service_requests").delete().in("professional_id", proIds);
-        await supabase.from("transactions").delete().in("professional_id", proIds.map(String));
+        await sd("reviews", "professional_id", proIds);
+      }
+      await sd("reviews", "client_id", user_id);
+
+      if (proIds.length > 0) {
+        // Job applications de vagas do profissional
+        const { data: jbs } = await supabase.from("job_postings").select("id").in("professional_id", proIds);
+        const jobIds = (jbs || []).map((j: any) => j.id);
+        if (jobIds.length > 0) await sd("job_applications", "job_id", jobIds);
+
+        // Agenda
+        await sd("agenda_appointments", "professional_id", proIds);
+        await sd("agenda_reminder_log", "professional_id", proIds);
+        await sd("agenda_services", "professional_id", proIds);
+        await sd("agenda_availability_rules", "professional_id", proIds);
+        await sd("agenda_availability_blocks", "professional_id", proIds);
+        await sd("agenda_atendentes", "professional_id", proIds);
+
+        // Analytics
+        await sd("professional_analytics_events", "professional_id", proIds);
+        await sd("professional_analytics_counters", "professional_id", proIds);
+
+        // Follows / favorites ligados ao profissional
+        await sd("professional_follows", "professional_id", proIds);
+        await sd("professional_favorites", "professional_id", proIds);
+
+        // Dados do profissional
+        await sd("product_catalog", "professional_id", proIds);
+        await sd("professional_documents", "professional_id", proIds);
+        await sd("professional_fiscal_data", "professional_id", proIds);
+        await sd("job_postings", "professional_id", proIds);
+        await sd("service_requests", "professional_id", proIds);
+        await sd("transactions", "professional_id", proIds);
       }
 
-      await supabase.from("job_applications").delete().eq("applicant_id", user_id);
-      await supabase.from("service_requests").delete().eq("client_id", user_id);
-      await supabase.from("chat_read_status").delete().eq("user_id", user_id);
-      await supabase.from("notifications").delete().eq("user_id", user_id);
-      await supabase.from("coupons").delete().eq("user_id", user_id);
-      await supabase.from("subscriptions").delete().eq("user_id", user_id);
-      await supabase.from("sponsor_clicks").delete().eq("user_id", user_id);
-      await supabase.from("enterprise_upgrade_requests").delete().eq("user_id", user_id);
-      // Clear raffles winner reference (SET NULL)
-      await supabase.from("raffles").update({ winner_user_id: null }).eq("winner_user_id", user_id);
-      await supabase.from("support_messages").delete().eq("user_id", user_id);
-      await supabase.from("support_messages").delete().eq("sender_id", user_id);
-      await supabase.from("support_read_status").delete().eq("user_id", user_id);
-      await supabase.from("support_read_status").delete().eq("thread_user_id", user_id);
-      await supabase.from("support_tickets").delete().eq("user_id", user_id);
-      await supabase.from("transactions").delete().eq("client_id", user_id);
-      await supabase.from("transactions").delete().eq("professional_id", user_id);
-      await supabase.from("user_roles").delete().eq("user_id", user_id);
-      await supabase.from("professionals").delete().eq("user_id", user_id);
-      await supabase.from("profiles").delete().eq("user_id", user_id);
+      await sd("agenda_appointments", "client_id", user_id);
 
-      console.log(`[cascadeDeleteUser] All data deleted, now signing out and deleting auth user`);
+      // Follows / amizades
+      await sd("user_follows", "follower_user_id", user_id);
+      await sd("user_follows", "followed_user_id", user_id);
+      await sd("professional_follows", "user_id", user_id);
+      await sd("professional_favorites", "user_id", user_id);
+      await sd("friend_requests", "from_user_id", user_id);
+      await sd("friend_requests", "to_user_id", user_id);
+      await sd("user_friendships", "user_a", user_id);
+      await sd("user_friendships", "user_b", user_id);
 
-      // Force sign out from all devices first
-      await supabase.auth.admin.signOut(user_id, 'global');
+      // Comunidade
+      await sd("community_comment_reactions", "user_id", user_id);
+      await sd("community_comment_reports", "user_id", user_id);
+      await sd("community_comment_user_hides", "user_id", user_id);
+      await sd("community_post_comments", "user_id", user_id);
+      await sd("community_post_reactions", "user_id", user_id);
+      await sd("community_post_shares", "user_id", user_id);
+      await sd("community_post_reports", "user_id", user_id);
+      await sd("community_post_user_hides", "user_id", user_id);
+      await sd("community_posts", "author_id", user_id);
 
-      // Delete the auth user - this fully removes from auth.users so they can re-register
+      // Restante
+      await sd("user_devices", "user_id", user_id);
+      await sd("job_applications", "applicant_id", user_id);
+      await sd("service_requests", "client_id", user_id);
+      await sd("chat_read_status", "user_id", user_id);
+      await sd("notifications", "user_id", user_id);
+      await sd("coupons", "user_id", user_id);
+      await sd("subscriptions", "user_id", user_id);
+      await sd("sponsor_clicks", "user_id", user_id);
+      await sd("enterprise_upgrade_requests", "user_id", user_id);
+      await sd("support_messages", "user_id", user_id);
+      await sd("support_messages", "sender_id", user_id);
+      await sd("support_read_status", "user_id", user_id);
+      await sd("support_read_status", "thread_user_id", user_id);
+      await sd("support_tickets", "user_id", user_id);
+      await sd("transactions", "client_id", user_id);
+      await sd("transactions", "professional_id", user_id);
+      await sd("user_roles", "user_id", user_id);
+
+      // SET NULL em sorteios (FK sem CASCADE)
+      try { await supabase.from("raffles").update({ winner_user_id: null }).eq("winner_user_id", user_id); } catch (_) {}
+
+      // Profissional e perfil por último
+      await sd("professionals", "user_id", user_id);
+      await sd("profiles", "user_id", user_id);
+
+      console.log(`[cascadeDeleteUser] All data deleted, signing out auth user`);
+
+      // Encerra sessões ativas (ignora se usuário não tem sessão)
+      try { await supabase.auth.admin.signOut(user_id, "global"); } catch (_) {}
+
+      // Remove o usuário do auth — passo crítico
       const { error } = await supabase.auth.admin.deleteUser(user_id);
       if (error) {
         console.error(`[cascadeDeleteUser] Auth deletion error: ${error.message}`);
-        throw new Error(`Failed to delete auth user: ${error.message}`);
+        throw new Error(`Falha ao remover usuário do auth: ${error.message}`);
       }
 
       console.log(`[cascadeDeleteUser] User ${user_id} fully deleted`);
@@ -464,6 +520,39 @@ serve(async (req) => {
 
       console.log("[sign_document_url] OK, normalized:", normalized);
       return new Response(JSON.stringify({ signedUrl: data.signedUrl, notFound: false }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ==========================================
+    // 📄 AÇÃO: SOLICITAR REENVIO DE DOCUMENTOS
+    // ==========================================
+    if (action === "request_doc_reupload") {
+      const caller = await verifyAdmin();
+      const { professionalId, userId } = body;
+      if (!professionalId || !userId) throw new Error("professionalId e userId são obrigatórios.");
+
+      await supabase
+        .from("professionals")
+        .update({ doc_reupload_requested: true, profile_status: "pending" } as any)
+        .eq("id", professionalId);
+
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        title: "Documentos solicitados",
+        message: "A equipe do Chamô solicitou o reenvio dos seus documentos de verificação. Acesse Perfil > Configurações > Segurança para enviar.",
+        type: "admin",
+        link: "/profile/settings/seguranca",
+      });
+
+      await supabase.from("admin_logs").insert({
+        admin_user_id: caller.id,
+        action: "request_doc_reupload",
+        target_type: "professional",
+        target_id: professionalId,
+      });
+
+      return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

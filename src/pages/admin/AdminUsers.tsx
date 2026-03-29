@@ -102,10 +102,15 @@ const AdminUsers = () => {
   const handleDelete = async () => {
     if (!deleteId) return;
     const user = users.find(u => u.id === deleteId);
-    const { error } = await supabase.functions.invoke("admin-manage", {
+    const { data, error } = await supabase.functions.invoke("admin-manage", {
       body: { action: "delete_user", user_id: user?.user_id },
     });
-    if (error) { toast({ title: "Erro ao deletar", description: translateError(error.message), variant: "destructive" }); return; }
+    // Supabase retorna error.message genérico em caso de non-2xx; o erro real está em data.error
+    const errMsg = (data as any)?.error || error?.message;
+    if (errMsg) {
+      toast({ title: "Erro ao deletar", description: errMsg, variant: "destructive" });
+      return;
+    }
     await logAction("delete_user", "user", user?.user_id || "");
     toast({ title: "Usuário removido!" });
     setDeleteId(null);

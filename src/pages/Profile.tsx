@@ -1,7 +1,7 @@
 import AppLayout from "@/components/AppLayout";
 import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Loader2, Megaphone, MapPin } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
@@ -31,7 +31,6 @@ const getOptimizedAvatar = (url: string | null | undefined) => {
 };
 
 const Profile = () => {
-  const navigate = useNavigate();
   const { profile, user, signOut, refreshProfile } = useAuth();
   const { sponsor: linkedSponsor } = useLinkedSponsor(user?.id);
   const [sponsorNovidadeOpen, setSponsorNovidadeOpen] = useState(false);
@@ -248,8 +247,11 @@ const Profile = () => {
       }
       await supabase.auth.signOut();
       await hardClearNativeAuthSession();
-      navigate("/");
       toast({ title: "Conta excluída com sucesso." });
+      // Navegação completa: evita sessão "fantasma" no React (loop /login ↔ /post-login e erro replaceState>100).
+      window.setTimeout(() => {
+        window.location.href = "/login";
+      }, 400);
     } catch (e: any) {
       toast({ title: "Erro ao excluir conta", description: e.message, variant: "destructive" });
     }

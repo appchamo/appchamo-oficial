@@ -295,9 +295,14 @@ const OAuthCallbackRedirectGuard = () => {
   const navigate = useNavigate();
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || loading) return;
-    if (!session?.user) return; 
     const path = location.pathname;
-    if (path === "/oauth-callback" || path === "/login") {
+    if (path !== "/oauth-callback" && path !== "/login") return;
+
+    let cancelled = false;
+    (async () => {
+      // Só confiar em getSession(): após exclusão de conta o React pode ainda ter session até o próximo tick.
+      const { data: { session: live } } = await supabase.auth.getSession();
+      if (cancelled || !live?.user) return;
       if (profile?.user_type === "sponsor") {
         navigate("/home", { replace: true });
         return;
@@ -308,8 +313,6 @@ const OAuthCallbackRedirectGuard = () => {
       } catch {
         fromSignup = false;
       }
-      // Sem perfil no contexto: não ir direto à Home (ficava "Visitante" / Perfil em Carregando…).
-      // /post-login faz retry até o trigger criar o profiles e depois chama refreshProfile.
       if (fromSignup) {
         navigate("/signup", { replace: true });
       } else if (!profile) {
@@ -317,8 +320,12 @@ const OAuthCallbackRedirectGuard = () => {
       } else {
         navigate("/home", { replace: true });
       }
-    }
-  }, [loading, location.pathname, session?.user, profile, navigate]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, location.pathname, session?.user?.id, profile?.user_id, profile?.user_type, navigate]);
   return null;
 };
 

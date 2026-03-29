@@ -188,11 +188,20 @@ const Login = () => {
   useEffect(() => {
     if (!session?.user) return;
     if (hasRedirectedForSessionRef.current) return;
-    hasRedirectedForSessionRef.current = true;
-    oauthBrowserOpenedRef.current = false;
-    setLoading(false);
-    setProcessingOAuth(false);
-    proceedToRedirect(session.user.id, session.user.email ?? undefined);
+    let cancelled = false;
+    (async () => {
+      const { data: { session: live } } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (!live?.user || live.user.id !== session.user.id) return;
+      hasRedirectedForSessionRef.current = true;
+      oauthBrowserOpenedRef.current = false;
+      setLoading(false);
+      setProcessingOAuth(false);
+      proceedToRedirect(live.user.id, live.user.email ?? undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [session?.user]);
 
   // Polling no mobile: enquanto loading e não redirecionou, checa getSession a cada 1s (contexto pode atrasar)

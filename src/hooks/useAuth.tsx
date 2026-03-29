@@ -60,8 +60,8 @@ interface AuthContextType {
   isAdmin: boolean;
   loading: boolean;
   signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-  refreshRoles: () => Promise<void>;
+  refreshProfile: (forUserId?: string) => Promise<void>;
+  refreshRoles: (forUserId?: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -626,18 +626,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Depender só de user.id: o objeto `user` do Supabase muda a cada refresh de token e recriava estes
   // callbacks — efeitos como PostLoginGate (deps em refreshProfile) cancelavam o retry infinitamente.
   const userId = user?.id ?? null;
-  const refreshProfile = useCallback(async () => {
-    if (!userId) return;
-    const p = await fetchProfile(userId);
+  /** `forUserId`: usar após OAuth quando `session.user` já existe mas `user` no contexto ainda não (evita gate preso em "Verificando…"). */
+  const refreshProfile = useCallback(async (forUserId?: string) => {
+    const uid = forUserId ?? userId;
+    if (!uid) return;
+    const p = await fetchProfile(uid);
     if (p) {
       setProfile(p);
       localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
     }
   }, [userId]);
 
-  const refreshRoles = useCallback(async () => {
-    if (!userId) return;
-    const r = await fetchRoles(userId);
+  const refreshRoles = useCallback(async (forUserId?: string) => {
+    const uid = forUserId ?? userId;
+    if (!uid) return;
+    const r = await fetchRoles(uid);
     setRoles(r);
     localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
   }, [userId]);

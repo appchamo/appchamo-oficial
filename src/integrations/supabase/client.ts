@@ -3,11 +3,38 @@ import type { Database } from './types';
 import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+/** Mesmo projeto que `connect-src` em index.html — só se o bundle nativo vier sem VITE_SUPABASE_URL. */
+const NATIVE_FALLBACK_SUPABASE_URL = "https://wfxeiuqxzrlnvlopcrwd.supabase.co";
+
+function resolveSupabaseUrl(): string {
+  const raw = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+  if (/^https?:\/\/.+/i.test(raw)) return raw.replace(/\/+$/, "");
+  if (Capacitor.isNativePlatform()) {
+    console.warn(
+      "[Chamô] VITE_SUPABASE_URL ausente no bundle. Usando URL de produção. Para builds corretos: na raiz rode `npm run build:ios` com .env (VITE_SUPABASE_URL).",
+    );
+    return NATIVE_FALLBACK_SUPABASE_URL;
+  }
+  throw new Error(
+    "VITE_SUPABASE_URL não definida. Crie .env na raiz com VITE_SUPABASE_URL=https://....supabase.co",
+  );
+}
+
+const SUPABASE_URL = resolveSupabaseUrl();
+
 /** Mesma chave do createClient — usar em fetch manual às Edge Functions (header `apikey`). */
 export const SUPABASE_PUBLIC_API_KEY = (
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ""
 ).trim();
+
+if (!SUPABASE_PUBLIC_API_KEY) {
+  const msg =
+    "Chave pública Supabase em falta (VITE_SUPABASE_ANON_KEY ou VITE_SUPABASE_PUBLISHABLE_KEY). O .env tem de existir na raiz ao correr `npm run build` / `npm run build:ios`.";
+  if (Capacitor.isNativePlatform()) {
+    console.error("[Chamô]", msg);
+  }
+  throw new Error(msg);
+}
 
 const isNative = Capacitor.isNativePlatform();
 

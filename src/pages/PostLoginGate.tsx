@@ -70,16 +70,17 @@ export default function PostLoginGate() {
                 navigate("/signup", { replace: true });
                 return;
               }
-              await refreshProfile();
-              await refreshRoles();
               setChecking(false);
               const pending = peekPostAuthRedirect();
               if (pending) {
                 clearPostAuthRedirect();
                 navigate(pending, { replace: true });
-                return;
+              } else {
+                navigate("/home", { replace: true });
               }
-              navigate("/home", { replace: true });
+              // Sempre com userId da sessão: após Apple/Google `user` no contexto pode atrasar e refreshProfile() era no-op.
+              void refreshProfile(userId).catch(() => {});
+              void refreshRoles(userId).catch(() => {});
               return;
             }
           } catch (_) {
@@ -118,16 +119,16 @@ export default function PostLoginGate() {
             if (!cancelled && !rowErr) {
               const ut = (row as { user_type?: string } | null)?.user_type;
               if (ut && ut !== "pending_signup") {
-                await refreshProfile();
-                await refreshRoles();
                 setChecking(false);
                 const pending = peekPostAuthRedirect();
                 if (pending) {
                   clearPostAuthRedirect();
                   navigate(pending, { replace: true });
-                  return;
+                } else {
+                  navigate("/home", { replace: true });
                 }
-                navigate("/home", { replace: true });
+                void refreshProfile(userId).catch(() => {});
+                void refreshRoles(userId).catch(() => {});
                 return;
               }
             }
@@ -167,7 +168,7 @@ export default function PostLoginGate() {
       return;
     }
     navigate("/home", { replace: true });
-  }, [loading, session?.user?.id, profile, navigate, refreshProfile, refreshRoles]);
+  }, [loading, session?.user?.id, profile?.user_id, navigate, refreshProfile, refreshRoles]);
 
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-background px-4">

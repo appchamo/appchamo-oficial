@@ -66,15 +66,17 @@ serve(async (req) => {
     const body = await req.json();
     const { action } = body;
 
+    /**
+     * Identifica o utilizador pelo JWT — usa o cliente service_role (já disponível nas Edge Functions).
+     * Não depender de SUPABASE_ANON_KEY nas secrets: em produção costuma faltar e getUser() falhava → "Unauthorized".
+     */
     const getCaller = async () => {
-      const authHeader = req.headers.get("Authorization");
+      const authHeader = req.headers.get("Authorization")?.trim();
       if (!authHeader) throw new Error("Unauthorized");
-      const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
-      const callerClient = createClient(supabaseUrl, anonKey, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: { user: caller } } = await callerClient.auth.getUser();
-      if (!caller) throw new Error("Unauthorized");
+      const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+      if (!jwt) throw new Error("Unauthorized");
+      const { data: { user: caller }, error: userErr } = await supabase.auth.getUser(jwt);
+      if (userErr || !caller) throw new Error("Unauthorized");
       return caller;
     };
 

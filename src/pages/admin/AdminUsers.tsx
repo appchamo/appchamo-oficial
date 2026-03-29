@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
+import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -48,6 +49,18 @@ const AdminUsers = () => {
   };
 
   useEffect(() => { fetchUsers(); }, []);
+
+  const invokeAdminManage = async (body: Record<string, unknown>) => {
+    const token = await getAccessTokenForEdgeFunctions();
+    if (!token) {
+      toast({ title: "Sessão expirada", description: "Faça login novamente no painel admin.", variant: "destructive" });
+      return { data: null, error: new Error("Sessão expirada") };
+    }
+    return supabase.functions.invoke("admin-manage", {
+      body,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  };
 
   const filtered = users
     .filter((u) => {
@@ -102,8 +115,9 @@ const AdminUsers = () => {
   const handleDelete = async () => {
     if (!deleteId) return;
     const user = users.find(u => u.id === deleteId);
-    const { data, error } = await supabase.functions.invoke("admin-manage", {
-      body: { action: "delete_user", user_id: user?.user_id },
+    const { data, error } = await invokeAdminManage({
+      action: "delete_user",
+      user_id: user?.user_id,
     });
     // Supabase retorna error.message genérico em caso de non-2xx; o erro real está em data.error
     const errMsg = (data as any)?.error || error?.message;
@@ -187,11 +201,17 @@ const AdminUsers = () => {
     if (pro) {
       const { data: list } = await supabase.from("professional_documents").select("*").eq("professional_id", pro.id);
       const items = list || [];
+      const token = await getAccessTokenForEdgeFunctions();
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
+      if (!token) {
+        toast({ title: "Sessão expirada", description: "Faça login novamente no painel admin.", variant: "destructive" });
+      }
       const withUrls = await Promise.all(
         items.map(async (d: any) => {
           try {
             const { data, error } = await supabase.functions.invoke("admin-manage", {
               body: { action: "sign_document_url", filePath: d.file_url },
+              headers: authHeaders,
             });
             if (error) console.warn("sign_document_url error:", error?.message, "path:", d.file_url);
             return { ...d, viewUrl: data?.signedUrl ?? null, notFound: data?.notFound ?? false };

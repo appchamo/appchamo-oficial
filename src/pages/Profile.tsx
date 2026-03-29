@@ -4,7 +4,7 @@ import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -241,8 +241,13 @@ const Profile = () => {
       const res = await supabase.functions.invoke("admin-manage", {
         body: { action: "delete_own_account" },
       });
-      if (res.error) throw res.error;
+      if (res.error) {
+        const body = res.data as { error?: string } | null;
+        if (body?.error) throw new Error(body.error);
+        throw res.error;
+      }
       await supabase.auth.signOut();
+      await hardClearNativeAuthSession();
       navigate("/");
       toast({ title: "Conta excluída com sucesso." });
     } catch (e: any) {

@@ -308,7 +308,15 @@ const OAuthCallbackRedirectGuard = () => {
       } catch {
         fromSignup = false;
       }
-      navigate(fromSignup ? "/signup" : "/home", { replace: true });
+      // Sem perfil no contexto: não ir direto à Home (ficava "Visitante" / Perfil em Carregando…).
+      // /post-login faz retry até o trigger criar o profiles e depois chama refreshProfile.
+      if (fromSignup) {
+        navigate("/signup", { replace: true });
+      } else if (!profile) {
+        navigate("/post-login", { replace: true });
+      } else {
+        navigate("/home", { replace: true });
+      }
     }
   }, [loading, location.pathname, session?.user, profile, navigate]);
   return null;

@@ -165,9 +165,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // iOS pós-OAuth pode travar chamadas; se não conseguirmos confirmar o profile rápido, deslogamos (não permite auto-login sem cadastro)
         let p: Profile | null = null;
         let r: AppRole[] = [];
+        const tMs = Capacitor.isNativePlatform() ? 9000 : 4000;
         const [profileResult, rolesResult] = await Promise.allSettled([
-          withTimeout(fetchProfile(userId), 4000, "fetchProfile"),
-          withTimeout(fetchRoles(userId), 4000, "fetchRoles"),
+          withTimeout(fetchProfile(userId), tMs, "fetchProfile"),
+          withTimeout(fetchRoles(userId), tMs, "fetchRoles"),
         ]);
         if (profileResult.status === "fulfilled") p = profileResult.value;
         if (rolesResult.status === "fulfilled") r = rolesResult.value ?? [];

@@ -92,6 +92,9 @@ serve(async (req) => {
     const cascadeDeleteUser = async (user_id: string) => {
       console.log(`[cascadeDeleteUser] Starting deletion for user: ${user_id}`);
 
+      // FK sem ON DELETE CASCADE no schema legado — se existir linha, auth.admin.deleteUser falha (400).
+      await supabase.from("chat_reports").delete().eq("reporter_id", user_id);
+
       // Get professional IDs
       const { data: pros } = await supabase.from("professionals").select("id").eq("user_id", user_id);
       const proIds = pros?.map((p: any) => p.id) || [];

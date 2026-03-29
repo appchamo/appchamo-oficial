@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Mail, Lock, ArrowRight, RefreshCw, Home, X } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { supabase } from "@/integrations/supabase/client";
@@ -333,8 +333,8 @@ const Login = () => {
       return { profile: firstProfile, roles: firstRoles };
     }
 
-    // Perfil ainda não existe: trigger pode estar atrasado. Poucos retries com esperas curtas.
-    const delays = [400, 1000, 2000]; // ~3,4s no pior caso
+    // Perfil ainda não existe: trigger pode estar atrasado (Apple/Google no nativo).
+    const delays = Capacitor.isNativePlatform() ? [500, 1200, 2500, 3500] : [400, 1000, 2000];
     for (const delay of delays) {
       await new Promise((r) => setTimeout(r, delay));
       const { profile, roles } = await fetchOne();
@@ -364,24 +364,8 @@ const Login = () => {
       const { data: { session: sessAfterLogin } } = await supabase.auth.getSession();
       await flushPendingEmailSignupWithRetries(sessAfterLogin);
 
-      // 1) Verifica se já existe cadastro com esse e-mail na tabela de perfis
-      if (authEmail) {
-        const { data: existingByEmail } = await supabase
-          .from("profiles")
-          .select("id, user_type")
-          .eq("email", authEmail.toLowerCase())
-          .maybeSingle();
-
-        if (!existingByEmail || !existingByEmail.user_type || existingByEmail.user_type === "pending_signup") {
-          const back = resolveAuthReturnPath(returnTo);
-          if (back) setPostAuthRedirect(back);
-          localStorage.removeItem("signup_in_progress");
-          localStorage.removeItem("manual_login_intent");
-          navigate("/signup", { replace: true });
-          return;
-        }
-      }
-
+      // Não decidir só por e-mail antes do perfil deste user_id: pós-Apple/Google o trigger pode
+      // ainda não ter escrito a linha — consulta por email falha e mandava para /signup indevidamente.
       const { profile, roles } = await fetchProfileWithRetry(userId);
 
       const profileEmail = (profile?.email || "").toLowerCase().trim();
@@ -403,18 +387,21 @@ const Login = () => {
         return;
       }
 
-      // Sem cadastro (sem perfil ou pending_signup): manda para o fluxo de cadastro (Signup)
-      const isProfileIncomplete =
-        !profile ||
-        !profile.user_type ||
-        profile.user_type === "pending_signup";
-
-      if (isProfileIncomplete) {
+      // pending_signup: fluxo manual de cadastro (e-mail em etapas).
+      // Sem linha ainda ou só atraso do trigger (OAuth): /post-login retenta e só então /home.
+      if (!profile || !profile.user_type) {
         const back = resolveAuthReturnPath(returnTo);
         if (back) setPostAuthRedirect(back);
         localStorage.removeItem("signup_in_progress");
         localStorage.removeItem("manual_login_intent");
-
+        navigate("/post-login", { replace: true });
+        return;
+      }
+      if (profile.user_type === "pending_signup") {
+        const back = resolveAuthReturnPath(returnTo);
+        if (back) setPostAuthRedirect(back);
+        localStorage.removeItem("signup_in_progress");
+        localStorage.removeItem("manual_login_intent");
         navigate("/signup", { replace: true });
         return;
       }
@@ -717,7 +704,10 @@ const Login = () => {
       <div
         className={`flex-1 flex flex-col items-center justify-center px-4 relative min-h-0 ${verifyEmailBanner !== null ? "pt-2" : ""}`}
       >
-      {bgUrl && <div className="absolute inset-0 backdrop-blur-sm bg-[#454545]/[0.12]" />}
+      {/* pointer-events-none: no Android o overlay absoluto às vezes ficava por cima da área de toque e “matava” links (ex.: Criar conta). */}
+      {bgUrl && (
+        <div className="pointer-events-none absolute inset-0 backdrop-blur-sm bg-[#454545]/[0.12]" aria-hidden />
+      )}
       {/* Botão Início: volta para a tela inicial (Home) quando usuário foi redirecionado de Contratar/Chat */}
       <div className="absolute top-4 left-0 right-0 z-20 flex justify-between items-center px-4 max-w-sm mx-auto">
         <span className="text-lg font-bold text-primary">Chamô</span>
@@ -810,8 +800,15 @@ const Login = () => {
           </div>
         )}
 
-        <p className="text-center text-xs text-muted-foreground mt-4">
-          Não tem conta? <Link to="/signup" className="text-primary font-medium hover:underline">Criar conta</Link>
+        <p className="relative z-[25] text-center text-xs text-muted-foreground mt-4">
+          Não tem conta?{" "}
+          <button
+            type="button"
+            onClick={() => navigate("/signup")}
+            className="text-primary font-medium hover:underline cursor-pointer bg-transparent border-0 p-0 m-0 inline font-inherit"
+          >
+            Criar conta
+          </button>
         </p>
         <button type="button" onClick={() => setForgotMode(!forgotMode)} className="mx-auto mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors">
           {forgotMode ? "Voltar para login" : "Esqueceu sua senha?"}

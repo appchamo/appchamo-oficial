@@ -7,7 +7,7 @@ import { peekPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthRetu
 
 export default function PostLoginGate() {
   const navigate = useNavigate();
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, refreshProfile, refreshRoles } = useAuth();
   const [checking, setChecking] = useState(true);
 
   const firstName = useMemo(() => {
@@ -39,9 +39,10 @@ export default function PostLoginGate() {
       const run = async () => {
         // tenta por ~6s no total; normalmente o trigger insere o profile quase imediato
         const attempts = [
-          { waitBeforeMs: 0, timeoutMs: 1500 },
-          { waitBeforeMs: 500, timeoutMs: 2000 },
-          { waitBeforeMs: 800, timeoutMs: 2500 },
+          { waitBeforeMs: 0, timeoutMs: 2000 },
+          { waitBeforeMs: 500, timeoutMs: 2500 },
+          { waitBeforeMs: 900, timeoutMs: 3000 },
+          { waitBeforeMs: 1200, timeoutMs: 3500 },
         ];
 
         for (const a of attempts) {
@@ -60,6 +61,13 @@ export default function PostLoginGate() {
             if (cancelled) return;
             const userType = (data as any)?.user_type as string | undefined;
             if (userType) {
+              if (userType === "pending_signup") {
+                setChecking(false);
+                navigate("/signup", { replace: true });
+                return;
+              }
+              await refreshProfile();
+              await refreshRoles();
               setChecking(false);
               const pending = peekPostAuthRedirect();
               if (pending) {
@@ -92,8 +100,12 @@ export default function PostLoginGate() {
       };
     }
 
-    // Perfil carregado → destino pendente (ex.: link da agenda) ou home
+    // Perfil já no contexto (ex. retry anterior)
     setChecking(false);
+    if (profile.user_type === "pending_signup") {
+      navigate("/signup", { replace: true });
+      return;
+    }
     const pending = peekPostAuthRedirect();
     if (pending) {
       clearPostAuthRedirect();
@@ -101,7 +113,7 @@ export default function PostLoginGate() {
       return;
     }
     navigate("/home", { replace: true });
-  }, [loading, session?.user, profile, navigate]);
+  }, [loading, session?.user, profile, navigate, refreshProfile, refreshRoles]);
 
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-background px-4">

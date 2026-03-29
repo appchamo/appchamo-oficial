@@ -21,7 +21,7 @@ export default function PostLoginGate() {
       navigate("/login", { replace: true });
       return;
     }
-  }, [loading, session?.user, navigate]);
+  }, [loading, session?.user?.id, navigate]);
 
   useEffect(() => {
     if (loading) return;
@@ -49,16 +49,20 @@ export default function PostLoginGate() {
           if (cancelled) return;
           if (a.waitBeforeMs) await sleep(a.waitBeforeMs);
           try {
-            const { data } = await Promise.race([
+            const { data, error } = await Promise.race([
               supabase
                 .from("profiles")
                 .select("user_type")
                 .eq("user_id", userId)
-                .maybeSingle(),
+                .maybeSingle()
+                .then((res) => res),
               new Promise<never>((_, reject) => setTimeout(() => reject(new Error("post_login_profile_timeout")), a.timeoutMs)),
             ]);
 
             if (cancelled) return;
+            if (error) {
+              console.warn("[post-login] profiles select:", error.message);
+            }
             const userType = (data as any)?.user_type as string | undefined;
             if (userType) {
               if (userType === "pending_signup") {
@@ -84,8 +88,58 @@ export default function PostLoginGate() {
         }
 
         if (cancelled) return;
-        // Se ainda não apareceu profile, provavelmente travou o storage/token no iOS.
-        // Faz hard-clear e joga pro signup como fallback.
+
+        // Trigger handle_new_user pode falhar ou atrasar: criar perfil cliente com a sessão OAuth (RLS permite insert own row).
+        const { data: liveAuth } = await supabase.auth.getSession();
+        const u = liveAuth?.session?.user;
+        if (!u || u.id !== userId) {
+          if (!cancelled) {
+            setChecking(false);
+            navigate("/login", { replace: true });
+          }
+          return;
+        }
+        const meta = (u.user_metadata || {}) as Record<string, unknown>;
+        const { error: upsertErr } = await supabase.from("profiles").upsert(
+          {
+            user_id: u.id,
+            email: String(u.email || "").trim(),
+            full_name: String(meta.full_name || meta.name || "").trim(),
+            user_type: "client",
+          },
+          { onConflict: "user_id" },
+        );
+        if (!upsertErr && !cancelled) {
+          try {
+            const { data: row, error: rowErr } = await Promise.race([
+              supabase.from("profiles").select("user_type").eq("user_id", userId).maybeSingle(),
+              new Promise<never>((_, reject) => setTimeout(() => reject(new Error("post_login_after_upsert_timeout")), 5000)),
+            ]);
+            if (!cancelled && !rowErr) {
+              const ut = (row as { user_type?: string } | null)?.user_type;
+              if (ut && ut !== "pending_signup") {
+                await refreshProfile();
+                await refreshRoles();
+                setChecking(false);
+                const pending = peekPostAuthRedirect();
+                if (pending) {
+                  clearPostAuthRedirect();
+                  navigate(pending, { replace: true });
+                  return;
+                }
+                navigate("/home", { replace: true });
+                return;
+              }
+            }
+          } catch {
+            /* segue para fallback */
+          }
+        } else if (upsertErr) {
+          console.warn("[post-login] upsert profile:", upsertErr.message);
+        }
+
+        if (cancelled) return;
+        // Último recurso: sessão inválida ou bloqueio raro
         try {
           await hardClearNativeAuthSession().catch(() => {});
           await supabase.auth.signOut().catch(() => {});
@@ -113,7 +167,7 @@ export default function PostLoginGate() {
       return;
     }
     navigate("/home", { replace: true });
-  }, [loading, session?.user, profile, navigate, refreshProfile, refreshRoles]);
+  }, [loading, session?.user?.id, profile, navigate, refreshProfile, refreshRoles]);
 
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-background px-4">

@@ -623,21 +623,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Depender só de user.id: o objeto `user` do Supabase muda a cada refresh de token e recriava estes
+  // callbacks — efeitos como PostLoginGate (deps em refreshProfile) cancelavam o retry infinitamente.
+  const userId = user?.id ?? null;
   const refreshProfile = useCallback(async () => {
-    if (!user) return;
-    const p = await fetchProfile(user.id);
+    if (!userId) return;
+    const p = await fetchProfile(userId);
     if (p) {
       setProfile(p);
       localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
     }
-  }, [user]);
+  }, [userId]);
 
   const refreshRoles = useCallback(async () => {
-    if (!user) return;
-    const r = await fetchRoles(user.id);
+    if (!userId) return;
+    const r = await fetchRoles(userId);
     setRoles(r);
     localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
-  }, [user]);
+  }, [userId]);
 
   return (
     <AuthContext.Provider value={{ user, session, profile, roles, isAdmin, loading, signOut, refreshProfile, refreshRoles }}>

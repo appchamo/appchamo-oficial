@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, ReactNode } from "react";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
+import { clearLocalChamoSession } from "@/lib/localChamoSessionClear";
 import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
 import type { User, Session } from "@supabase/supabase-js";
 import { Capacitor } from "@capacitor/core";
@@ -60,6 +61,8 @@ interface AuthContextType {
   isAdmin: boolean;
   loading: boolean;
   signOut: () => Promise<void>;
+  /** Conta removida no servidor ou JWT inválido: limpa sessão local e envia para a entrada do app (/). */
+  exitSessionToLanding: () => Promise<void>;
   refreshProfile: (forUserId?: string) => Promise<void>;
   refreshRoles: (forUserId?: string) => Promise<void>;
 }
@@ -72,6 +75,7 @@ const AuthContext = createContext<AuthContextType>({
   isAdmin: false,
   loading: true,
   signOut: async () => {},
+  exitSessionToLanding: async () => {},
   refreshProfile: async () => {},
   refreshRoles: async () => {},
 });
@@ -92,15 +96,26 @@ function normalizeOAuthCode(code: string | null): string | null {
   return code.replace(/[?#\s]+$/g, "").trim() || null;
 }
 
-async function fetchProfile(userId: string) {
+type ProfileFetchStatus = "ok" | "missing" | "error";
+
+async function fetchProfileWithStatus(userId: string): Promise<{
+  p: Profile | null;
+  status: ProfileFetchStatus;
+}> {
   const { data, error } = await supabase
     .from("profiles")
     .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_city, address_state, invite_code")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) return null;
-  return data as Profile;
+  if (error) return { p: null, status: "error" };
+  if (!data) return { p: null, status: "missing" };
+  return { p: data as Profile, status: "ok" };
+}
+
+async function fetchProfile(userId: string): Promise<Profile | null> {
+  const r = await fetchProfileWithStatus(userId);
+  return r.status === "ok" ? r.p : null;
 }
 
 async function fetchRoles(userId: string) {
@@ -130,6 +145,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = useMemo(() => {
     return roles.some((r) => String(r).endsWith("_admin"));
   }, [roles]);
+
+  const exitSessionToLanding = useCallback(async () => {
+    setIsSignOutInProgress(true);
+    try {
+      await clearLocalChamoSession();
+      setUser(null);
+      setSession(null);
+      setProfile(null);
+      setRoles([]);
+    } finally {
+      setIsSignOutInProgress(false);
+      try {
+        window.location.replace("/");
+      } catch {
+        void 0;
+      }
+    }
+  }, []);
 
   const loadUserData = (sess: Session | null) => {
     // Durante signOut ficamos ~1s com isSignOutInProgress; se o utilizador entrar com outro OAuth
@@ -164,24 +197,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // iOS pós-OAuth pode travar chamadas; se não conseguirmos confirmar o profile rápido, deslogamos (não permite auto-login sem cadastro)
         let p: Profile | null = null;
+        let pFetch: ProfileFetchStatus | "timeout" = "timeout";
         let r: AppRole[] = [];
         const tMs = Capacitor.isNativePlatform() ? 9000 : 4000;
         const [profileResult, rolesResult] = await Promise.allSettled([
-          withTimeout(fetchProfile(userId), tMs, "fetchProfile"),
+          withTimeout(fetchProfileWithStatus(userId), tMs, "fetchProfile"),
           withTimeout(fetchRoles(userId), tMs, "fetchRoles"),
         ]);
-        if (profileResult.status === "fulfilled") p = profileResult.value;
+        if (profileResult.status === "fulfilled") {
+          p = profileResult.value.p;
+          pFetch = profileResult.value.status;
+        }
         if (rolesResult.status === "fulfilled") r = rolesResult.value ?? [];
 
         if (p?.user_type === "pending_signup") {
           await new Promise((res) => setTimeout(res, 400));
           const p2 = await fetchProfile(userId).catch(() => null);
-          if (p2) p = p2;
+          if (p2) {
+            p = p2;
+            pFetch = "ok";
+          }
         }
 
         if (isSignOutInProgress) return;
-        // Se a sessão chegou antes do trigger inserir o profile (corrida comum pós-OAuth),
-        // não deslogar: o gate (`/post-login`) fará retry até o profile aparecer.
+
+        // BD confirmou: não existe linha em profiles (ex.: admin apagou o utilizador). Não reutilizar cache local.
+        if (pFetch === "missing") {
+          const isPendingSignup =
+            String(sess.user.user_metadata?.user_type ?? "") === "pending_signup" ||
+            String(sess.user.app_metadata?.user_type ?? "") === "pending_signup";
+          if (isPendingSignup) {
+            await new Promise((res) => setTimeout(res, 400));
+            const r2 = await fetchProfileWithStatus(userId).catch(() => ({ p: null, status: "error" as const }));
+            if (r2.status === "ok" && r2.p) {
+              p = r2.p;
+              pFetch = "ok";
+            }
+          }
+          if (pFetch === "missing") {
+            const { data: gu, error: guErr } = await supabase.auth.getUser();
+            if (guErr || !gu?.user) {
+              await exitSessionToLanding();
+              return;
+            }
+            // Auth válido, perfil ainda não existe (corrida pós-cadastro/OAuth): gate /post-login faz retry.
+            localStorage.removeItem("chamo_cached_profile");
+            localStorage.removeItem("chamo_cached_roles");
+            setProfile(null);
+            setRoles([]);
+            window.setTimeout(() => {
+              void (async () => {
+                const {
+                  data: { session: cur },
+                } = await supabase.auth.getSession();
+                if (!cur?.user || cur.user.id !== userId) return;
+                const fp = await fetchProfileWithStatus(userId).catch(() => ({ p: null, status: "error" as const }));
+                if (fp.status === "ok" && fp.p) {
+                  setProfile(fp.p);
+                  localStorage.setItem("chamo_cached_profile", JSON.stringify(fp.p));
+                }
+              })();
+            }, 2000);
+            return;
+          }
+        }
+
+        // Erro ou timeout de rede: mantém cache para não “apagar” o perfil à toa.
         if (!p) {
           let recovered: Profile | null = null;
           try {
@@ -193,7 +274,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch {
             /* ignore */
           }
-          // Mantém perfil em cache se o fetch falhou/timeout (rede lenta, JWT refresh) — evita sumir nome/foto na Home
           if (recovered) {
             setProfile(recovered);
             try {
@@ -224,12 +304,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (p) {
-          setProfile(p);
-          setRoles(r);
-          localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
-          localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
-        }
+        setProfile(p);
+        setRoles(r);
+        localStorage.setItem("chamo_cached_profile", JSON.stringify(p));
+        localStorage.setItem("chamo_cached_roles", JSON.stringify(r));
       } catch (e) {
         console.error("Erro ao carregar dados de auth:", e);
       }
@@ -510,6 +588,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setUser(sess.user);
             }
             setLoading(false);
+            void (async () => {
+              const { error } = await supabase.auth.getUser();
+              if (error) await exitSessionToLanding();
+            })();
           } else {
             loadUserData(sess ?? null);
           }
@@ -601,7 +683,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription?.unsubscribe?.();
       if (urlListener) urlListener.then((l: any) => l.remove());
     };
-  }, [isSignOutInProgress]);
+  }, [isSignOutInProgress, exitSessionToLanding]);
 
   const signOut = async () => {
     setIsSignOutInProgress(true);
@@ -675,7 +757,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [userId]);
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, isAdmin, loading, signOut, refreshProfile, refreshRoles }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        roles,
+        isAdmin,
+        loading,
+        signOut,
+        exitSessionToLanding,
+        refreshProfile,
+        refreshRoles,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

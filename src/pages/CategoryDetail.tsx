@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { sameCityState } from "@/lib/locationUtils";
 import { useProProfileImpression } from "@/hooks/useProProfileImpression";
+import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 
 interface Profession {
   id: string;
@@ -104,16 +105,31 @@ const CategoryDetail = () => {
       }
 
       // Count professionals per profession
-      const { data: allPros } = await supabase
+      const { data: allProsRaw } = await supabase
         .from("professionals")
-        .select("id, profession_id")
+        .select("id, profession_id, user_id")
         .eq("category_id", cat.id)
         .eq("active", true)
         .eq("profile_status", "approved")
         .neq("availability_status", "unavailable");
 
+      let allPros = allProsRaw || [];
+      if (allPros.length > 0) {
+        const uids = [...new Set(allPros.map((p) => p.user_id))];
+        const { data: typesRows } = await supabase
+          .from("profiles_public" as any)
+          .select("user_id, user_type")
+          .in("user_id", uids);
+        const sponsorUids = new Set(
+          ((typesRows || []) as { user_id: string; user_type?: string | null }[])
+            .filter((r) => isSponsorClientAccount(r.user_type))
+            .map((r) => r.user_id),
+        );
+        allPros = allPros.filter((p) => !sponsorUids.has(p.user_id));
+      }
+
       const countMap = new Map<string, number>();
-      (allPros || []).forEach(p => {
+      allPros.forEach(p => {
         if (p.profession_id) countMap.set(p.profession_id, (countMap.get(p.profession_id) || 0) + 1);
       });
 
@@ -163,12 +179,15 @@ const CategoryDetail = () => {
   const enrichPros = async (data: any[]) => {
     const userIds = data.map(p => p.user_id);
     const [profilesRes, locationsRes] = await Promise.all([
-      supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
-      supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
+      supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url, user_type").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, address_city, address_state, user_type").in("user_id", userIds),
     ]);
     const profileMap = new Map(((profilesRes.data || []) as any[]).map(p => [p.user_id, p]));
     const locationMap = new Map((locationsRes.data || []).map(p => [p.user_id, p]));
-    const list = data.map(p => ({
+    const dataNoSponsor = data.filter(
+      (p) => !isSponsorClientAccount((profileMap.get(p.user_id) as any)?.user_type ?? (locationMap.get(p.user_id) as any)?.user_type),
+    );
+    const list = dataNoSponsor.map(p => ({
       id: p.id,
       user_id: p.user_id,
       rating: p.rating,

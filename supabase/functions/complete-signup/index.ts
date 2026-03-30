@@ -177,6 +177,33 @@ Deno.serve(async (req) => {
           .single();
 
         if (proData) {
+          // Substitui lote anterior: retries / reenvio do mesmo cadastro não deve acumular linhas.
+          const { data: staleRows } = await supabase
+            .from("professional_documents")
+            .select("file_url")
+            .eq("professional_id", proData.id)
+            .eq("type", "identity")
+            .eq("status", "pending");
+
+          const stalePaths = (staleRows ?? [])
+            .map((r) => r.file_url)
+            .filter(
+              (p): p is string =>
+                typeof p === "string" &&
+                p.length > 0 &&
+                !/^https?:\/\//i.test(p),
+            );
+          if (stalePaths.length > 0) {
+            const { error: rmErr } = await supabase.storage.from("uploads").remove(stalePaths);
+            if (rmErr) console.warn("complete-signup: remove stale docs:", rmErr);
+          }
+          await supabase
+            .from("professional_documents")
+            .delete()
+            .eq("professional_id", proData.id)
+            .eq("type", "identity")
+            .eq("status", "pending");
+
           for (const doc of docFiles) {
             const filePath = `documents/${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${doc.ext || "jpg"}`;
             const binaryStr = atob(doc.base64);

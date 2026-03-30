@@ -1,7 +1,7 @@
 import AdminLayout from "@/components/AdminLayout";
 import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Shield, Eye, FileText, CreditCard, Briefcase } from "lucide-react";
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
@@ -52,6 +52,7 @@ const AdminUsers = () => {
   useEffect(() => { fetchUsers(); }, []);
 
   const invokeAdminManage = async (body: Record<string, unknown>) => {
+    await supabase.auth.refreshSession().catch(() => {});
     const token = await getAccessTokenForEdgeFunctions();
     if (!token) {
       toast({ title: "Sessão expirada", description: "Faça login novamente no painel admin.", variant: "destructive" });
@@ -59,7 +60,10 @@ const AdminUsers = () => {
     }
     return supabase.functions.invoke("admin-manage", {
       body,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: SUPABASE_PUBLIC_API_KEY,
+      },
     });
   };
 

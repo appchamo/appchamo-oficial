@@ -11,6 +11,7 @@ import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from
 import { usePrevious } from "@/hooks/usePrevious";
 import { isMainAppTabPath, isOverlayStackRoute } from "@/lib/mainAppTabs";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import AuthSessionGate from "@/components/AuthSessionGate";
 import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
@@ -165,6 +166,12 @@ const BackButtonHandler = () => {
       }
       if (path === "/categories") {
         navigate("/home", { replace: true });
+        return;
+      }
+      // Android/WebView: abrir câmera ou galeria empilha entrada no histórico; history.back() volta
+      // atrás do passo do cadastro. O Signup trata o voltar nativo sem usar history.back().
+      if (path === "/signup" && Capacitor.isNativePlatform()) {
+        window.dispatchEvent(new CustomEvent("chamo-signup-hardware-back", { cancelable: true }));
         return;
       }
       if (canGoBack) window.history.back();
@@ -586,6 +593,7 @@ const App = () => {
         <BrowserRouter>
           <AuthProvider>
             <RefreshProvider>
+              <AuthSessionGate />
               <DeepLinkRouter />
               <ScrollToTop />
               <AdminRedirectGuard />

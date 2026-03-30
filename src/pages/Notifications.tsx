@@ -103,19 +103,21 @@ function SwipeableItem({
   const currentXRef = useRef(0);
   const isOpen = openId === id;
   const [offset, setOffset] = useState(0);
-  const isDraggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const draggedRef = useRef(false);
 
   // Fecha quando outro item abre
   useEffect(() => {
     if (!isOpen && offset !== 0) {
       setOffset(0);
     }
-  }, [isOpen]);
+  }, [isOpen, offset]);
 
   const onTouchStart = (e: React.TouchEvent) => {
     startXRef.current = e.touches[0].clientX;
     currentXRef.current = isOpen ? -DELETE_BTN_WIDTH : 0;
-    isDraggingRef.current = false;
+    draggedRef.current = false;
+    setDragging(false);
   };
 
   const onTouchMove = (e: React.TouchEvent) => {
@@ -124,7 +126,10 @@ function SwipeableItem({
     const raw = currentXRef.current + dx;
     // Só permite arrastar para a esquerda (negativo), máximo até a largura do botão
     const clamped = Math.min(0, Math.max(-DELETE_BTN_WIDTH, raw));
-    if (Math.abs(dx) > 5) isDraggingRef.current = true;
+    if (Math.abs(dx) > 5) {
+      draggedRef.current = true;
+      setDragging(true);
+    }
     setOffset(clamped);
   };
 
@@ -132,6 +137,7 @@ function SwipeableItem({
     if (startXRef.current === null) return;
     const dx = e.changedTouches[0].clientX - startXRef.current;
     startXRef.current = null;
+    setDragging(false);
 
     if (isOpen) {
       // Se puxou bastante para direita, fecha
@@ -154,42 +160,53 @@ function SwipeableItem({
   };
 
   const handleChildClick = () => {
-    if (isDraggingRef.current) return;
+    if (draggedRef.current) return;
     if (isOpen) {
       setOffset(0);
       setOpenId(null);
     }
   };
 
+  /**
+   * Conteúdo + ação em faixa horizontal (calc(100% + botão)), não “botão por baixo”.
+   * Cartões com bg semitransparente (ex.: não lidas) deixavam o vermelho vazar; no iOS/WebKit
+   * o empilhamento com transform também falhava até haver novo layout.
+   */
   return (
-    <div className="relative overflow-hidden rounded-xl">
-      {/* Botão de excluir (atrás, à direita) */}
+    <div className="relative w-full min-w-0 overflow-hidden rounded-xl isolate">
       <div
-        className="absolute inset-y-0 right-0 flex items-center justify-center bg-red-500 rounded-xl"
-        style={{ width: DELETE_BTN_WIDTH }}
-      >
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="flex flex-col items-center justify-center gap-1 w-full h-full active:bg-red-600 transition-colors"
-          aria-label="Excluir notificação"
-        >
-          <Trash2 className="w-5 h-5 text-white" />
-          <span className="text-[10px] text-white font-semibold">Excluir</span>
-        </button>
-      </div>
-
-      {/* Conteúdo deslizável */}
-      <div
+        className="flex min-w-0"
         style={{
-          transform: `translateX(${offset}px)`,
-          transition: isDraggingRef.current ? "none" : "transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+          width: `calc(100% + ${DELETE_BTN_WIDTH}px)`,
+          transform: `translate3d(${offset}px, 0, 0)`,
+          transition: dragging
+            ? "none"
+            : "transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+          willChange: dragging ? "transform" : undefined,
         }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onClick={handleChildClick}
       >
-        {children}
+        <div className="min-w-0 flex-1 basis-0">{children}</div>
+        <div
+          className="flex shrink-0 items-center justify-center bg-red-500 rounded-r-xl"
+          style={{ width: DELETE_BTN_WIDTH }}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="flex h-full min-h-[4.5rem] w-full flex-col items-center justify-center gap-1 active:bg-red-600 transition-colors"
+            aria-label="Excluir notificação"
+          >
+            <Trash2 className="w-5 h-5 text-white" />
+            <span className="text-[10px] font-semibold text-white">Excluir</span>
+          </button>
+        </div>
       </div>
     </div>
   );

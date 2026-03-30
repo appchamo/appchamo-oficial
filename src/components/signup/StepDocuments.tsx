@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Camera, FileText, X, CheckCircle2, ImageIcon } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { registerChamoSignupOverlayConsumer } from "@/lib/chamoSignupBack";
 import DocumentCamera from "./DocumentCamera";
 
 interface UploadedDoc {
@@ -30,6 +31,21 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
+  const cameraOpenRef = useRef(false);
+  cameraOpenRef.current = cameraOpen;
+  /** Android: após abrir o seletor de ficheiros, o 1.º “voltar” pode ir para o WebView; não mudar de etapa. */
+  const suppressHardwareBackUntilRef = useRef(0);
+
+  useEffect(() => {
+    return registerChamoSignupOverlayConsumer(() => {
+      if (cameraOpenRef.current) {
+        setCameraOpen(false);
+        return true;
+      }
+      if (Date.now() < suppressHardwareBackUntilRef.current) return true;
+      return false;
+    });
+  }, []);
 
   const slots =
     documentType === "cnpj"
@@ -53,11 +69,13 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
 
   const openCamera = (slotLabel: string) => {
     setCurrentSlot(slotLabel);
+    suppressHardwareBackUntilRef.current = Date.now() + 600;
     setCameraOpen(true);
   };
 
   const openFilePicker = (slotLabel: string) => {
     setPickForSlot(slotLabel);
+    suppressHardwareBackUntilRef.current = Date.now() + 1400;
     fileInputRef.current?.click();
   };
 
@@ -78,6 +96,7 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
   };
 
   const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    suppressHardwareBackUntilRef.current = 0;
     const file = e.target.files?.[0];
     e.target.value = "";
     const slot = pickForSlot;

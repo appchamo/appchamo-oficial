@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { ChevronRight } from "lucide-react";
 import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 
@@ -121,19 +122,23 @@ const QuickProfessionalsList = () => {
       const userIds = finalData.map((p: any) => p.user_id);
       const { data: profiles } = await supabase
         .from("profiles_public" as any)
-        .select("user_id, full_name, avatar_url")
+        .select("user_id, full_name, avatar_url, user_type")
         .in("user_id", userIds);
 
       const profileMap = new Map(
         ((profiles || []) as any[]).map((p) => [p.user_id, p])
       );
 
+      const finalNoSponsor = (finalData as any[]).filter(
+        (p) => !isSponsorClientAccount(profileMap.get(p.user_id)?.user_type),
+      );
+
       // Ordem aleatória a cada carregamento
-      for (let i = finalData.length - 1; i > 0; i--) {
+      for (let i = finalNoSponsor.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [finalData[i], finalData[j]] = [finalData[j], finalData[i]];
+        [finalNoSponsor[i], finalNoSponsor[j]] = [finalNoSponsor[j], finalNoSponsor[i]];
       }
-      const list: QuickPro[] = finalData.slice(0, 5).map((p: any) => ({
+      const list: QuickPro[] = finalNoSponsor.slice(0, 5).map((p: any) => ({
         id: p.id,
         user_id: p.user_id,
         full_name: profileMap.get(p.user_id)?.full_name || "Profissional",

@@ -7,15 +7,37 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   getHomeLocationCache,
   matchesFeaturedRegion,
+  normalizeStateToUF,
   writeHomeLocationCacheOnly,
 } from "@/lib/locationUtils";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 import { cn } from "@/lib/utils";
+import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
+/** Limite de linhas no PostgREST antes dos filtros em memória (verificado + região). */
+const FEATURED_FETCH_LIMIT = 320;
+/** Quantos cards no máximo no carrossel (antes era 10). */
+const FEATURED_SHOW_CAP = 36;
+/** Se a lista regional vier menor que isto, funde profissionais de todo o mesmo estado. */
+const MIN_MERGE_STATE_POOL = 28;
+
+const featuredProSelect =
+  "id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at";
+
+function baseFeaturedProsQuery() {
+  return supabase
+    .from("professionals")
+    .select(featuredProSelect)
+    .eq("active", true)
+    .eq("profile_status", "approved")
+    .neq("availability_status", "unavailable")
+    .order("verified", { ascending: false })
+    .order("rating", { ascending: false });
+}
 
 interface Pro {
   id: string;
@@ -268,20 +290,34 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         }
       }
 
+      // Cidade não encontrou nenhum perfil, mas há UF: amplia para todo o estado (evita destaque vazio).
+      if (hasCityFilter && locationUserIds !== null && locationUserIds.length === 0 && userState) {
+        try {
+          const uf = userState.length === 2 ? userState.toUpperCase() : userState;
+          const { data: cand } = await supabase
+            .from("profiles")
+            .select("user_id, address_city, address_state")
+            .or(`address_state.ilike.${uf},address_state.ilike.${userState}`)
+            .limit(800);
+          const matched = (cand || []).filter((row) =>
+            matchesFeaturedRegion(null, userState, row.address_city, row.address_state),
+          );
+          locationUserIds = matched.map((p) => p.user_id);
+          diagLog("info", "featured", "city had 0 profiles — widened to state", { matched: locationUserIds.length });
+        } catch {
+          locationUserIds = [];
+        }
+      }
+
       // ── Passo 2: profissionais ─────────────────────────────────────────────
       let finalPros: any[] | null = null;
       let prosErr: { message: string } | null = null;
 
-      if (hasCityFilter && locationUserIds !== null && locationUserIds.length === 0) {
-        diagLog("info", "featured", "strict city: no professionals in region — empty list");
+      if (hasCityFilter && locationUserIds !== null && locationUserIds.length === 0 && !userState) {
+        diagLog("info", "featured", "strict city, no state fallback — empty regional ids");
         finalPros = [];
       } else {
-        let prosQuery = supabase
-          .from("professionals")
-          .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
-          .eq("active", true)
-          .eq("profile_status", "approved")
-          .neq("availability_status", "unavailable");
+        let prosQuery = baseFeaturedProsQuery();
 
         if (locationUserIds !== null) {
           if (locationUserIds.length > 0) {
@@ -292,27 +328,45 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         }
 
         if (finalPros === null) {
-          const { data: pros, error: qErr } = await prosQuery.limit(60);
+          const { data: pros, error: qErr } = await prosQuery.limit(FEATURED_FETCH_LIMIT);
           if (qErr) prosErr = qErr;
           else finalPros = pros || [];
         }
       }
 
-      if (
-        !prosErr &&
-        finalPros &&
-        finalPros.length === 0 &&
-        !hasCityFilter &&
-        !userState
-      ) {
-        diagLog("info", "featured", "no location on profile — global list");
-        const { data: allPros, error: gErr } = await supabase
-          .from("professionals")
-          .select("id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at")
-          .eq("active", true)
-          .eq("profile_status", "approved")
-          .neq("availability_status", "unavailable")
-          .limit(60);
+      // Poucos na região: incluir verificados (e demais) de todo o estado do utilizador.
+      if (!prosErr && finalPros && userState && finalPros.length < MIN_MERGE_STATE_POOL) {
+        try {
+          const uf = userState.length === 2 ? userState.toUpperCase() : userState;
+          const { data: stCand } = await supabase
+            .from("profiles")
+            .select("user_id, address_city, address_state")
+            .or(`address_state.ilike.${uf},address_state.ilike.${userState}`)
+            .limit(1200);
+          const stMatched = (stCand || []).filter((row) =>
+            matchesFeaturedRegion(null, userState, row.address_city, row.address_state),
+          );
+          const stIds = stMatched.map((p) => p.user_id);
+          if (stIds.length > 0) {
+            const { data: morePros, error: mErr } = await baseFeaturedProsQuery()
+              .in("user_id", stIds)
+              .limit(FEATURED_FETCH_LIMIT);
+            if (!mErr && morePros?.length) {
+              const byId = new Map(finalPros.map((p: any) => [p.id, p]));
+              for (const p of morePros) byId.set(p.id, p);
+              finalPros = [...byId.values()];
+              diagLog("info", "featured", "merged state pool", { total: finalPros.length });
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // Sem nenhum resultado regional: lista global (prioriza verificado + rating na query).
+      if (!prosErr && finalPros && finalPros.length === 0) {
+        diagLog("info", "featured", "empty regional — global list");
+        const { data: allPros, error: gErr } = await baseFeaturedProsQuery().limit(FEATURED_FETCH_LIMIT);
         if (gErr) prosErr = gErr;
         else finalPros = allPros || [];
       }
@@ -345,7 +399,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         const pair = await Promise.race([
           Promise.all([
             supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds),
-            supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
+            supabase.from("profiles").select("user_id, address_city, address_state, user_type").in("user_id", userIds),
           ]),
           new Promise<never>((_, rej) => setTimeout(() => rej(new Error("featured_secondary_timeout")), 8_000)),
         ]);
@@ -362,32 +416,65 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         ((profilesRes.data || []) as { user_id: string; full_name: string; avatar_url: string | null }[]).map((p) => [p.user_id, p])
       );
       const locationMap = new Map(
-        ((locationsRes.data || []) as { user_id: string; address_city: string | null; address_state: string | null }[]).map((p) => [p.user_id, p])
+        ((locationsRes.data || []) as { user_id: string; address_city: string | null; address_state: string | null; user_type?: string | null }[]).map((p) => [p.user_id, p])
       );
 
-      const withLocation = finalPros
-        .map((p) => {
-          const loc = locationMap.get(p.user_id);
-          return {
-            id: p.id,
-            rating: p.rating,
-            total_services: p.total_services,
-            verified: p.verified,
-            user_id: p.user_id,
-            profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
-            full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
-            avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
-            address_city: loc?.address_city ?? null,
-            address_state: loc?.address_state ?? null,
-            created_at: (p as any).created_at as string | null,
-          };
-        })
-        .filter((p) =>
-          matchesFeaturedRegion(userCity, userState, p.address_city, p.address_state),
-        );
+      const finalProsNoSponsor = finalPros.filter(
+        (p) => !isSponsorClientAccount(locationMap.get(p.user_id)?.user_type),
+      );
 
-      // Critério 1: mais serviços → Critério 2: maior rating → Critério 3: quem se cadastrou primeiro
-      withLocation.sort((a, b) => {
+      const userUF = normalizeStateToUF(userState);
+
+      const mappedBase = finalProsNoSponsor.map((p) => {
+        const loc = locationMap.get(p.user_id);
+        return {
+          id: p.id,
+          rating: p.rating,
+          total_services: p.total_services,
+          verified: p.verified,
+          user_id: p.user_id,
+          profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
+          full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
+          avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
+          address_city: loc?.address_city ?? null,
+          address_state: loc?.address_state ?? null,
+          created_at: (p as any).created_at as string | null,
+        };
+      });
+
+      const strictInRegion = (p: (typeof mappedBase)[0]) =>
+        matchesFeaturedRegion(userCity, userState, p.address_city, p.address_state);
+
+      const tierStrict = mappedBase.filter(strictInRegion);
+      const idsStrict = new Set(tierStrict.map((p) => p.id));
+
+      const tierStateVerified = mappedBase.filter(
+        (p) =>
+          !idsStrict.has(p.id) &&
+          p.verified &&
+          !!userUF &&
+          normalizeStateToUF(p.address_state) === userUF,
+      );
+
+      let combined = [...tierStrict, ...tierStateVerified];
+      const inCombined = new Set(combined.map((p) => p.id));
+
+      if (combined.length < 12) {
+        const extraVerified = mappedBase
+          .filter((p) => p.verified && !inCombined.has(p.id))
+          .sort((a, b) => b.rating - a.rating || b.total_services - a.total_services);
+        for (const p of extraVerified) {
+          if (combined.length >= FEATURED_SHOW_CAP) break;
+          combined.push(p);
+          inCombined.add(p.id);
+        }
+      }
+
+      combined.sort((a, b) => {
+        const aS = strictInRegion(a) ? 0 : 1;
+        const bS = strictInRegion(b) ? 0 : 1;
+        if (aS !== bS) return aS - bS;
+        if (a.verified !== b.verified) return a.verified ? -1 : 1;
         if (b.total_services !== a.total_services) return b.total_services - a.total_services;
         if (b.rating !== a.rating) return b.rating - a.rating;
         const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -395,7 +482,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         return tA - tB;
       });
 
-      const top10Raw = withLocation.slice(0, 10);
+      const top10Raw = combined.slice(0, FEATURED_SHOW_CAP);
       const proIds = top10Raw.map((p) => p.id);
       const sealsByPro = new Map<string, { icon_variant: string }[]>();
 
@@ -432,7 +519,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         seals: sealsByPro.get(p.id) ?? [],
       }));
 
-      diagLog("info", "featured", "pros computed", { total: finalPros.length, shown: top10.length });
+      diagLog("info", "featured", "pros computed", { total: finalPros.length, shown: top10.length, cap: FEATURED_SHOW_CAP });
       if (loadGenRef.current !== gen) return;
       hangRetryRef.current = 0;
       setProfessionals(top10);

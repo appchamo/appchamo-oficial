@@ -9,6 +9,7 @@ import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 import { incrementProfessionalAnalytics, searchQueryMatchesDisplayName } from "@/lib/proAnalytics";
+import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -224,13 +225,17 @@ const Search = () => {
         .from("profiles_public" as any)
         .select("user_id, full_name, avatar_url")
         .in("user_id", userIds),
-      supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
+      supabase.from("profiles").select("user_id, address_city, address_state, user_type").in("user_id", userIds),
     ]);
 
     const profileMap = new Map(((profilesRes.data || []) as any[]).map((p) => [p.user_id, p]));
     const locationMap = new Map(((fullProfilesRes.data || []) as any[]).map((p) => [p.user_id, p]));
 
-    const mappedPros = prosRes.data.map((p) => {
+    const prosVisible = prosRes.data.filter(
+      (p) => !isSponsorClientAccount(locationMap.get(p.user_id)?.user_type as string | undefined),
+    );
+
+    const mappedPros = prosVisible.map((p) => {
       const loc = locationMap.get(p.user_id);
 
       return {

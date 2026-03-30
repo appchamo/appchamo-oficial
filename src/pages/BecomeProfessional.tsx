@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FileText, ShieldCheck, Clock, Star, ChevronRight, User, Building2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -31,6 +31,7 @@ const BecomeProfessional = () => {
   const [cnpjValue, setCnpjValue] = useState("");
   const [docSaving, setDocSaving] = useState(false);
   const [cameFromDocStep, setCameFromDocStep] = useState(false);
+  const profileSubmitLockRef = useRef(false);
 
   const isEarlyAccess = new Date() < EARLY_ACCESS_CUTOFF;
 
@@ -116,6 +117,8 @@ const BecomeProfessional = () => {
     console.log("📦 ARQUIVOS PARA UPLOAD:", docFiles);
 
     if (!user) return;
+    if (profileSubmitLockRef.current) return;
+    profileSubmitLockRef.current = true;
 
     setLoading(true);
 
@@ -164,6 +167,29 @@ const BecomeProfessional = () => {
       if (professionalId && docFiles.length > 0) {
         const accessToken = await getAccessTokenForEdgeFunctions();
         if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
+
+        const { data: staleRows } = await supabase
+          .from("professional_documents")
+          .select("file_url")
+          .eq("professional_id", professionalId)
+          .eq("type", "identity")
+          .eq("status", "pending");
+
+        const stalePaths = (staleRows ?? [])
+          .map((r) => r.file_url)
+          .filter(
+            (p): p is string =>
+              typeof p === "string" && p.length > 0 && !/^https?:\/\//i.test(p),
+          );
+        if (stalePaths.length > 0) {
+          await supabase.storage.from("uploads").remove(stalePaths);
+        }
+        await supabase
+          .from("professional_documents")
+          .delete()
+          .eq("professional_id", professionalId)
+          .eq("type", "identity")
+          .eq("status", "pending");
 
         for (const file of docFiles) {
           // Upload via Edge Function com service_role — garante que o arquivo vai ao storage
@@ -271,9 +297,10 @@ const BecomeProfessional = () => {
         description: err?.message || "Erro inesperado",
         variant: "destructive",
       });
+    } finally {
+      profileSubmitLockRef.current = false;
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   if (loading) {

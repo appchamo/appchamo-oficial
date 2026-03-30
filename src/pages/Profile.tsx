@@ -4,7 +4,8 @@ import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ImageCropUpload from "@/components/ImageCropUpload";
-import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/client";
+import { clearLocalChamoSession } from "@/lib/localChamoSessionClear";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -236,7 +237,6 @@ const Profile = () => {
     if (confirmText !== "EXCLUIR") return;
     setDeleting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
       const res = await supabase.functions.invoke("admin-manage", {
         body: { action: "delete_own_account" },
       });
@@ -245,17 +245,14 @@ const Profile = () => {
         if (body?.error) throw new Error(body.error);
         throw res.error;
       }
-      await supabase.auth.signOut();
-      await hardClearNativeAuthSession();
-      toast({ title: "Conta excluída com sucesso." });
-      // Navegação completa: evita sessão "fantasma" no React (loop /login ↔ /post-login e erro replaceState>100).
-      window.setTimeout(() => {
-        window.location.href = "/login";
-      }, 400);
+      // Servidor já apagou o utilizador — revoke remoto pode falhar; só limpar local e ir à entrada do app.
+      await clearLocalChamoSession();
+      toast({ title: "Conta excluída", description: "Até logo!" });
+      window.location.replace("/");
     } catch (e: any) {
       toast({ title: "Erro ao excluir conta", description: e.message, variant: "destructive" });
+      setDeleting(false);
     }
-    setDeleting(false);
   };
 
   if (!profile) return <AppLayout><main className="max-w-screen-lg mx-auto px-4 py-10 text-center text-muted-foreground">Carregando...</main></AppLayout>;

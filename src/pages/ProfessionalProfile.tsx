@@ -41,6 +41,7 @@ import { getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
+import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { cn } from "@/lib/utils";
 
 interface ProData {
@@ -130,6 +131,7 @@ const ProfessionalProfile = () => {
     const { data } = await (isUUID ? baseQuery.eq("id", id) : baseQuery.eq("slug", id)).maybeSingle();
         
       if (data) {
+        setIsOwner(false);
         let profileData = null;
 
         // 1. Tenta buscar da tabela principal 'profiles'
@@ -149,6 +151,16 @@ const ProfessionalProfile = () => {
             .eq("user_id", data.user_id)
             .maybeSingle();
           if (publicProfile) profileData = publicProfile;
+        }
+
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (isSponsorClientAccount(profileData?.user_type) && authUser?.id !== data.user_id) {
+          setPro(null);
+          setIsOwner(false);
+          setReviews([]);
+          setPublicSeals([]);
+          setLoading(false);
+          return;
         }
 
         const { data: proLocation } = await supabase
@@ -176,9 +188,8 @@ const ProfessionalProfile = () => {
           address_city: proLocation?.address_city ?? null,
           address_state: proLocation?.address_state ?? null,
         });
-        
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && user.id === data.user_id) setIsOwner(true);
+
+        if (authUser && authUser.id === data.user_id) setIsOwner(true);
 
         const { data: sub } = await supabase
           .from("subscriptions")
@@ -187,7 +198,7 @@ const ProfessionalProfile = () => {
           .maybeSingle();
         if (sub && (sub as { plan_id: string }).plan_id) setPlanId((sub as { plan_id: string }).plan_id);
 
-        if (user && user.id === data.user_id) {
+        if (authUser && authUser.id === data.user_id) {
           const [catRes, profRes] = await Promise.all([
             supabase.from("categories").select("id, name").eq("active", true).order("sort_order"),
             supabase.from("professions").select("id, name, category_id").eq("active", true).order("name"),

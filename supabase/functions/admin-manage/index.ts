@@ -67,20 +67,65 @@ serve(async (req) => {
     const { action } = body;
 
     /**
-     * Identifica o utilizador pelo JWT — usa o cliente service_role (já disponível nas Edge Functions).
-     * Não depender de SUPABASE_ANON_KEY nas secrets: em produção costuma faltar e getUser() falhava → "Unauthorized".
+     * Identifica o utilizador pelo JWT do pedido.
+     * Usar um cliente com `global.headers.Authorization` + `getUser()` (padrão Supabase Edge), com `apikey` público
+     * ou, em último caso, service_role. `getUser(jwt)` só no cliente "admin" sem override do header falhava em alguns setups.
      */
     const getCaller = async () => {
       const authHeader = req.headers.get("Authorization")?.trim();
-      if (!authHeader) throw new Error("Unauthorized");
-      const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
-      if (!jwt) throw new Error("Unauthorized");
-      const { data: { user: caller }, error: userErr } = await supabase.auth.getUser(jwt);
-      if (userErr || !caller) {
-        console.warn("[getCaller] auth.getUser failed:", userErr?.message ?? "no user");
+      if (!authHeader) {
+        console.warn("[getCaller] sem header Authorization");
         throw new Error("Unauthorized");
       }
-      return caller;
+      const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+      if (!jwt) throw new Error("Unauthorized");
+
+      const apiKeyForAuth =
+        Deno.env.get("SUPABASE_ANON_KEY") ||
+        Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
+        serviceRoleKey;
+
+      const authClient = createClient(supabaseUrl, apiKeyForAuth, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+        global: {
+          headers: { Authorization: authHeader },
+        },
+      });
+
+      const { data: { user: caller }, error: userErr } = await authClient.auth.getUser();
+      if (!userErr && caller) return caller;
+
+      console.warn("[getCaller] authClient.getUser falhou:", userErr?.message ?? "sem user");
+
+      const authBase = supabaseUrl.replace(/\/+$/, "");
+      const bearer = /^Bearer\s+/i.test(authHeader) ? authHeader : `Bearer ${jwt}`;
+      const verifyRes = await fetch(`${authBase}/auth/v1/user`, {
+        headers: {
+          Authorization: bearer,
+          apikey: apiKeyForAuth,
+          "X-Supabase-Api-Version": "2024-01-01",
+        },
+      });
+      if (verifyRes.ok) {
+        try {
+          const u = await verifyRes.json();
+          if (u && typeof u.id === "string") return u;
+        } catch {
+          /* ignore */
+        }
+      } else {
+        const tb = await verifyRes.text().catch(() => "");
+        console.warn("[getCaller] GET auth/v1/user", verifyRes.status, tb.slice(0, 300));
+      }
+
+      const { data: { user: fallback }, error: fbErr } = await supabase.auth.getUser(jwt);
+      if (!fbErr && fallback) return fallback;
+
+      console.warn("[getCaller] fallback getUser(jwt) falhou:", fbErr?.message ?? "sem user");
+      throw new Error("Unauthorized");
     };
 
     const verifyAdmin = async () => {

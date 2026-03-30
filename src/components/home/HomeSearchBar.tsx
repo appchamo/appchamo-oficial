@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { sameCityState } from "@/lib/locationUtils";
 import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
+import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 
 /** Normaliza para busca: minúsculo, sem acentos */
 const norm = (s: string) =>
@@ -87,12 +88,13 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
           .from("profiles_public")
           .select("user_id, full_name, avatar_url")
           .in("user_id", userIds),
-        supabase.from("profiles").select("user_id, address_city, address_state").in("user_id", userIds),
+        supabase.from("profiles").select("user_id, address_city, address_state, user_type").in("user_id", userIds),
       ]);
       const profileMap = new Map((profilesPublic.data || []).map((p) => [p.user_id, p]));
       const locationMap = new Map((profilesLocation.data || []).map((p) => [p.user_id, p]));
+      const prosNoSponsor = pros.filter((p) => !isSponsorClientAccount(locationMap.get(p.user_id)?.user_type as string | undefined));
       const prosToShow = (userCity || userState)
-        ? pros.filter((p) =>
+        ? prosNoSponsor.filter((p) =>
             sameCityState(
               userCity,
               userState,
@@ -100,7 +102,7 @@ const HomeSearchBar = ({ section }: HomeSearchBarProps) => {
               locationMap.get(p.user_id)?.address_state ?? null
             )
           )
-        : pros;
+        : prosNoSponsor;
 
       const items: SearchResult[] = prosToShow.map((p) => {
         const categoryName = (p.categories as any)?.name || "";

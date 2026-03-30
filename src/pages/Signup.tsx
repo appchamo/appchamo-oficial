@@ -22,6 +22,7 @@ import StepProfile from "@/components/signup/StepProfile";
 import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
+import { tryChamoSignupOverlayBack } from "@/lib/chamoSignupBack";
 import type { Session } from "@supabase/supabase-js"; 
 
 type AccountType = "client" | "professional";
@@ -86,6 +87,28 @@ function readEmailDraft(): SignupDraftEmailV1 | null {
     return d;
   } catch {
     return null;
+  }
+}
+
+/** Alvo do botão voltar nativo (Android): não usar history.back() no /signup. */
+function getSignupHardwareBackTarget(step: Step, accountType: AccountType): Step | "login" {
+  switch (step) {
+    case "method-choice":
+      return "login";
+    case "type":
+      return "method-choice";
+    case "basic":
+      return "type";
+    case "document-notice":
+      return "basic";
+    case "documents":
+      return accountType === "professional" ? "document-notice" : "basic";
+    case "profile":
+      return accountType === "professional" ? "documents" : "basic";
+    case "awaiting-email":
+      return "login";
+    default:
+      return "method-choice";
   }
 }
 
@@ -173,6 +196,8 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
   const didAdvanceFromOAuth = useRef(false);
+  /** Evita duplo envio de complete-signup (duplo toque em Finalizar / corrida de estado). */
+  const signupSubmitLockRef = useRef(false);
   /** Evita avançar no formulário antes de resolver getSession + perfil (corrida com sessão antiga → /login). */
   const [signupBootstrapReady, setSignupBootstrapReady] = useState(false);
   /** Evita um frame do wizard antes do router ir para /login (perfil já completo). */
@@ -434,6 +459,29 @@ const Signup = () => {
     }
   }, [createdUserId, accountType, step, basicData, docFiles.length]);
 
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const onHwBack = (e: Event) => {
+      if (!signupBootstrapReady || authKickPending || loading) {
+        e.preventDefault();
+        return;
+      }
+      if (tryChamoSignupOverlayBack()) {
+        e.preventDefault();
+        return;
+      }
+      const target = getSignupHardwareBackTarget(step, accountType);
+      e.preventDefault();
+      if (target === "login") {
+        navigate("/login", { replace: true });
+        return;
+      }
+      setStep(target);
+    };
+    window.addEventListener("chamo-signup-hardware-back", onHwBack);
+    return () => window.removeEventListener("chamo-signup-hardware-back", onHwBack);
+  }, [step, accountType, navigate, signupBootstrapReady, authKickPending, loading]);
+
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
     localStorage.removeItem("manual_login_intent");
@@ -599,6 +647,8 @@ const Signup = () => {
       });
       return;
     }
+    if (signupSubmitLockRef.current) return;
+    signupSubmitLockRef.current = true;
     setLoading(true);
     try {
       let userId = createdUserId;
@@ -781,6 +831,8 @@ const Signup = () => {
     } catch {
       toast({ title: "Erro ao criar conta.", variant: "destructive" });
       setLoading(false);
+    } finally {
+      signupSubmitLockRef.current = false;
     }
   };
 

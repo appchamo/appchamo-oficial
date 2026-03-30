@@ -322,7 +322,7 @@ function pickPrimaryDeviceLabel(devices: UserDeviceRow[]): string {
 }
 
 function formatSessionBreakdown(devices: UserDeviceRow[]): string {
-  if (!devices.length) return "Sem app registado (web ou sem push)";
+  if (!devices.length) return "Sem registo no app (só web) ou ainda não abriu o app após a última atualização";
   const c = { iphone: 0, android: 0, desktop: 0, outro: 0 };
   for (const d of devices) {
     c[bucketFromDeviceName(d.device_name)]++;
@@ -457,8 +457,9 @@ const DevicesTab = () => {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Dispositivos vêm de <code className="text-[10px]">user_devices</code> (app nativo com push). Utilizadores só web podem aparecer com 0
-        aparelhos. É necessária a política admin em <code className="text-[10px]">user_devices</code> (migração recente).
+        Dados de <code className="text-[10px]">user_devices</code>: o <strong>app Android/iOS</strong> regista o aparelho ao abrir (e atualiza com push
+        se ativo). <strong>Só usam o site no browser</strong> → costuma aparecer &quot;Sem app registado&quot; até haver registo nativo. Política admin
+        SELECT em <code className="text-[10px]">user_devices</code> (migração).
       </p>
       <Input
         placeholder="Filtrar por nome, e-mail, tipo ou plano…"

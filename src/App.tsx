@@ -22,6 +22,7 @@ import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
 import { Loader2 } from "lucide-react";
 import { syncAppIconBadge } from "@/lib/appBadge";
+import { registerNativeDevicePresence } from "@/lib/registerNativeDevicePresence";
 import { diagLog, diagEnabled } from "@/lib/diag";
 
 // Lazy pages – carregam sob demanda para navegação mais rápida
@@ -290,6 +291,28 @@ const AppIconBadgeClearWhenLoggedOut = () => {
     if (session?.user) return;
     syncAppIconBadge(0);
   }, [loading, session?.user]);
+  return null;
+};
+
+/** Regista Android/iPhone em `user_devices` ao abrir a app, mesmo sem permissão de push (relatório admin). */
+const NativeDevicePresenceReporter = () => {
+  const { session, loading } = useAuth();
+  const uid = session?.user?.id;
+
+  useEffect(() => {
+    if (loading || !uid || !Capacitor.isNativePlatform()) return;
+    void registerNativeDevicePresence(uid);
+  }, [loading, uid]);
+
+  useEffect(() => {
+    if (!uid || !Capacitor.isNativePlatform()) return;
+    const onVis = () => {
+      if (document.visibilityState === "visible") void registerNativeDevicePresence(uid);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [uid]);
+
   return null;
 };
 
@@ -594,6 +617,7 @@ const App = () => {
           <AuthProvider>
             <RefreshProvider>
               <AuthSessionGate />
+              <NativeDevicePresenceReporter />
               <DeepLinkRouter />
               <ScrollToTop />
               <AdminRedirectGuard />

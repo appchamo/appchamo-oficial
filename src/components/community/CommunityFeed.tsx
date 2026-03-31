@@ -66,6 +66,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export type CommunityFeedVariant = "embedded" | "standalone";
 
@@ -360,6 +369,8 @@ export default function CommunityFeed({
   const [hiddenPostIds, setHiddenPostIds] = useState<Set<string>>(() => new Set());
   const [reportReason, setReportReason] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [deletePostConfirmId, setDeletePostConfirmId] = useState<string | null>(null);
+  const [deletingPost, setDeletingPost] = useState(false);
   const [undoHideId, setUndoHideId] = useState<string | null>(null);
   const [undoHidePostId, setUndoHidePostId] = useState<string | null>(null);
   const [hiddenPostsSheetOpen, setHiddenPostsSheetOpen] = useState(false);
@@ -1023,9 +1034,31 @@ export default function CommunityFeed({
     try {
       const { error } = await supabase.from("community_post_comments" as any).delete().eq("id", commentId);
       if (error) throw error;
+      toast({ title: "Comentário excluído" });
       await refreshLoadedPostsSideData();
     } catch (e: any) {
-      toast({ title: "Erro ao apagar", description: e.message, variant: "destructive" });
+      toast({ title: "Erro ao excluir", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const confirmDeletePost = async () => {
+    if (!user || !deletePostConfirmId) return;
+    const id = deletePostConfirmId;
+    setDeletingPost(true);
+    try {
+      const { error } = await supabase.from("community_posts" as any).delete().eq("id", id);
+      if (error) throw error;
+      setDeletePostConfirmId(null);
+      if (commentsSheetPost?.id === id) setCommentsSheetPost(null);
+      if (fullscreenPost?.id === id) setFullscreenPost(null);
+      if (sharePost?.id === id) setSharePost(null);
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+      toast({ title: "Publicação excluída" });
+      await refreshLoadedPostsSideData();
+    } catch (e: any) {
+      toast({ title: "Erro ao excluir", description: e.message, variant: "destructive" });
+    } finally {
+      setDeletingPost(false);
     }
   };
 
@@ -1597,17 +1630,15 @@ export default function CommunityFeed({
                       </DropdownMenuItem>
                     </>
                   ) : null}
+                  {canCommentMenu && canDel ? <DropdownMenuSeparator /> : null}
                   {canDel ? (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive gap-2"
-                        onClick={() => void deleteComment(c.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Apagar
-                      </DropdownMenuItem>
-                    </>
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive gap-2"
+                      onClick={() => void deleteComment(c.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Excluir comentário
+                    </DropdownMenuItem>
                   ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -2131,7 +2162,24 @@ export default function CommunityFeed({
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-52">
-                              {post.author_id !== user.id ? (
+                              {post.author_id === user.id ? (
+                                <>
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive gap-2"
+                                    onClick={() => setDeletePostConfirmId(post.id)}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                    Excluir publicação
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => void hidePostForMe(post.id)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    Não quero ver isto
+                                  </DropdownMenuItem>
+                                </>
+                              ) : (
                                 <>
                                   <DropdownMenuItem
                                     onClick={() => setReportDialog({ kind: "post", postId: post.id })}
@@ -2145,13 +2193,6 @@ export default function CommunityFeed({
                                     Não quero ver isto
                                   </DropdownMenuItem>
                                 </>
-                              ) : (
-                                <DropdownMenuItem
-                                  onClick={() => void hidePostForMe(post.id)}
-                                  className="text-destructive focus:text-destructive"
-                                >
-                                  Não quero ver isto
-                                </DropdownMenuItem>
                               )}
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -2756,6 +2797,34 @@ export default function CommunityFeed({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!deletePostConfirmId}
+        onOpenChange={(o) => {
+          if (!o && !deletingPost) setDeletePostConfirmId(null);
+        }}
+      >
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir publicação?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isto remove a publicação, comentários e reações associados. Não é possível desfazer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingPost}>Cancelar</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              className="rounded-xl"
+              disabled={deletingPost}
+              onClick={() => void confirmDeletePost()}
+            >
+              {deletingPost ? <Loader2 className="w-4 h-4 animate-spin" /> : "Excluir"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={!!fullscreenPost} onOpenChange={(o) => !o && setFullscreenPost(null)}>
         <DialogContent className="!fixed !inset-0 !left-0 !top-0 z-50 flex h-[100dvh] max-h-none w-full max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 rounded-none border-0 bg-black p-0 overflow-hidden shadow-none data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 [&>button]:hidden">

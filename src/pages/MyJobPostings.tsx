@@ -191,13 +191,18 @@ const MyJobPostings = () => {
 
         // Busca avatar do publicador para exibir na notificação push
         let publisherAvatar: string | null = null;
+        let publisherName = "Alguém";
         if (publisherId) {
           const { data: pubProfile } = await supabase
             .from("profiles")
-            .select("avatar_url")
+            .select("avatar_url, full_name, display_name")
             .eq("user_id", publisherId)
             .maybeSingle();
-          publisherAvatar = (pubProfile as any)?.avatar_url ?? null;
+          const p = pubProfile as { avatar_url?: string | null; full_name?: string | null; display_name?: string | null } | null;
+          publisherAvatar = p?.avatar_url ?? null;
+          const dn = (p?.display_name ?? "").trim();
+          const fn = (p?.full_name ?? "").trim();
+          publisherName = dn || fn || publisherName;
         }
 
         const { data: recipients } = await supabase
@@ -210,7 +215,7 @@ const MyJobPostings = () => {
         const rows =
           (recipients || []).map((r: any) => ({
             user_id: r.user_id,
-            title: "Nova vaga de Emprego",
+            title: `${publisherName} publicou uma vaga`,
             message: `Confira a nova vaga "${form.title}" na sua região.`,
             type: "job",
             link: `/jobs/${createdJob.id}`,

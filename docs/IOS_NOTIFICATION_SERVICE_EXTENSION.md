@@ -36,8 +36,14 @@ A Edge Function já envia `"mutable-content": 1` no payload para iOS; falta só 
 ## O que a extensão faz
 
 - É chamada pelo sistema quando chega uma push com `mutable-content: 1`.
-- Copia o conteúdo da notificação e define:  
-  `sound = UNNotificationSound(named: "chamo_notification.caf")`.
-- Entrega esse conteúdo modificado; o sistema exibe a notificação e toca **só** esse som.
+- Define o som: `UNNotificationSound(named: "chamo_notification.caf")`.
+- **iOS 15+ — notificações de comunicação (estilo LinkedIn):** se o payload de dados incluir `ios_communication=1`, a extensão constrói um `INSendMessageIntent` com o nome em `push_sender_name` e a foto em `image_url` / `fcm_options.image`. O sistema mostra o **avatar do remetente** em destaque e o **ícone do Chamô** como badge (comportamento de “comunicação” da Apple).
+- **Fallback:** sem `ios_communication`, mantém o download da imagem como anexo (thumbnail lateral), como antes.
+
+A Edge Function `send-push-notification` envia `ios_communication`, `push_sender_name` e `communication_conv_id` para tipos `chat`, `community`, `job` (e `info` com link da comunidade).
+
+### Capabilities no Apple Developer
+
+No identificador da app (`com.chamo.app`), ative **Communication Notifications** (além de Push Notifications). O ficheiro `App.entitlements` já inclui `com.apple.developer.usernotifications.communication` e o `Info.plist` declara `INSendMessageIntent` em `NSUserActivityTypes`. Sem isto no portal, o archive pode falhar ou o estilo de comunicação não aparece.
 
 Assim evitamos o som padrão do iPhone tocando junto com o `chamo_notification.caf`.

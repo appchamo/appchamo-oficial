@@ -2,11 +2,14 @@
 //  NotificationService.swift
 //  NotificationServiceExtension
 //
-//  Configura o som chamo_notification.caf e faz download da imagem de perfil
-//  para exibir como thumbnail na notificação (lock screen / banner).
+//  • Som customizado (chamo_notification.caf)
+//  • iOS 15+: notificações de comunicação (INSendMessageIntent) → avatar circular do remetente
+//    + badge do app, estilo LinkedIn — quando o payload traz ios_communication=1 e push_sender_name.
+//  • Fallback: anexo de imagem (thumbnail) quando não for comunicação.
 //
 
 import UserNotifications
+import Intents
 
 class NotificationService: UNNotificationServiceExtension {
 
@@ -21,31 +24,23 @@ class NotificationService: UNNotificationServiceExtension {
         }
         self.bestAttemptContent = bestAttemptContent
 
-        // Som customizado do app
         bestAttemptContent.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: "chamo_notification.caf"))
 
-        // Tenta obter a URL da imagem de perfil do remetente
-        // FCM v1 envia via apns.fcm_options.image → chega como fcm_options.image no userInfo
-        let imageUrlString: String? = {
-            if let fcmOptions = request.content.userInfo["fcm_options"] as? [String: Any],
-               let img = fcmOptions["image"] as? String {
-                return img
-            }
-            // Fallback: campo image_url do data payload
-            if let img = request.content.userInfo["image_url"] as? String, !img.isEmpty {
-                return img
-            }
-            return nil
-        }()
+        let userInfo = request.content.userInfo
+        let imageUrlString = Self.resolveImageUrlString(userInfo: userInfo)
+        let imageUrl = imageUrlString.flatMap { URL(string: $0) }
 
-        guard let urlString = imageUrlString, let url = URL(string: urlString) else {
-            // Sem imagem → entrega a notificação só com o som
+        if Self.shouldUseCommunicationStyle(userInfo: userInfo) {
+            applyCommunicationStyle(content: bestAttemptContent, userInfo: userInfo, imageUrl: imageUrl, completion: contentHandler)
+            return
+        }
+
+        guard let url = imageUrl else {
             contentHandler(bestAttemptContent)
             return
         }
 
-        // Download da imagem e criação do attachment
-        downloadImage(from: url) { attachment in
+        downloadImageAttachment(from: url) { attachment in
             if let attachment = attachment {
                 bestAttemptContent.attachments = [attachment]
             }
@@ -59,16 +54,144 @@ class NotificationService: UNNotificationServiceExtension {
         }
     }
 
+    // MARK: - Communication notifications (iOS 15+)
+
+    private func applyCommunicationStyle(
+        content: UNMutableNotificationContent,
+        userInfo: [AnyHashable: Any],
+        imageUrl: URL?,
+        completion: @escaping (UNNotificationContent) -> Void
+    ) {
+        guard #available(iOSApplicationExtension 15.0, *) else {
+            if let url = imageUrl {
+                downloadImageAttachment(from: url) { att in
+                    if let att = att { content.attachments = [att] }
+                    completion(content)
+                }
+            } else {
+                completion(content)
+            }
+            return
+        }
+
+        let rawName = (userInfo["push_sender_name"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = (rawName?.isEmpty == false) ? rawName! : "Chamô"
+
+        let convRaw = (userInfo["communication_conv_id"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let conversationId = (convRaw?.isEmpty == false) ? convRaw! : (UUID().uuidString)
+
+        let messageText = content.body
+
+        func deliver(senderImage: INImage?) {
+            let handle = INPersonHandle(value: conversationId, type: .unknown)
+            let sender = INPerson(
+                personHandle: handle,
+                nameComponents: nil,
+                displayName: displayName,
+                image: senderImage,
+                contactIdentifier: nil,
+                customIdentifier: nil
+            )
+
+            let intent = INSendMessageIntent(
+                recipients: nil,
+                outgoingMessageType: .outgoingMessageText,
+                content: messageText,
+                speakableGroupName: nil,
+                conversationIdentifier: conversationId,
+                serviceName: nil,
+                sender: sender,
+                attachments: nil
+            )
+
+            let interaction = INInteraction(intent: intent, response: nil)
+            interaction.direction = .incoming
+
+            interaction.donate { [weak self] err in
+                if err != nil {
+                    self?.fallbackAttachment(content: content, imageUrl: imageUrl, completion: completion)
+                    return
+                }
+                do {
+                    let updated = try content.updating(from: intent)
+                    if let mutable = updated.mutableCopy() as? UNMutableNotificationContent {
+                        mutable.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: "chamo_notification.caf"))
+                        completion(mutable)
+                    } else {
+                        completion(updated)
+                    }
+                } catch {
+                    self?.fallbackAttachment(content: content, imageUrl: imageUrl, completion: completion)
+                }
+            }
+        }
+
+        guard let url = imageUrl else {
+            deliver(senderImage: nil)
+            return
+        }
+
+        Self.downloadImageData(from: url) { data in
+            let inImage = data.flatMap { INImage(imageData: $0) }
+            deliver(senderImage: inImage)
+        }
+    }
+
+    private func fallbackAttachment(
+        content: UNMutableNotificationContent,
+        imageUrl: URL?,
+        completion: @escaping (UNNotificationContent) -> Void
+    ) {
+        guard let url = imageUrl else {
+            completion(content)
+            return
+        }
+        downloadImageAttachment(from: url) { attachment in
+            if let attachment = attachment {
+                content.attachments = [attachment]
+            }
+            completion(content)
+        }
+    }
+
     // MARK: - Helpers
 
-    private func downloadImage(from url: URL, completion: @escaping (UNNotificationAttachment?) -> Void) {
+    private static func shouldUseCommunicationStyle(userInfo: [AnyHashable: Any]) -> Bool {
+        guard let flag = userInfo["ios_communication"] as? String else { return false }
+        return flag == "1" || flag.lowercased() == "true"
+    }
+
+    private static func resolveImageUrlString(userInfo: [AnyHashable: Any]) -> String? {
+        if let fcmOptions = userInfo["fcm_options"] as? [String: Any],
+           let img = fcmOptions["image"] as? String, !img.isEmpty {
+            return img
+        }
+        if let img = userInfo["image_url"] as? String, !img.isEmpty {
+            return img
+        }
+        return nil
+    }
+
+    private static func downloadImageData(from url: URL, completion: @escaping (Data?) -> Void) {
+        let task = URLSession.shared.dataTask(with: url) { data, _, error in
+            guard error == nil, let data = data, !data.isEmpty else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            DispatchQueue.main.async { completion(data) }
+        }
+        task.resume()
+    }
+
+    private func downloadImageAttachment(from url: URL, completion: @escaping (UNNotificationAttachment?) -> Void) {
         let task = URLSession.shared.downloadTask(with: url) { tempURL, response, error in
             guard let tempURL = tempURL, error == nil else {
-                completion(nil)
+                DispatchQueue.main.async { completion(nil) }
                 return
             }
 
-            // Determina extensão pelo content-type ou pela URL
             let ext: String
             if let mime = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") {
                 ext = Self.fileExtension(for: mime)
@@ -77,10 +200,11 @@ class NotificationService: UNNotificationServiceExtension {
             }
 
             let destURL = tempURL.deletingLastPathComponent().appendingPathComponent("avatar.\(ext)")
+            try? FileManager.default.removeItem(at: destURL)
             try? FileManager.default.moveItem(at: tempURL, to: destURL)
 
             let attachment = try? UNNotificationAttachment(identifier: "avatar", url: destURL, options: nil)
-            completion(attachment)
+            DispatchQueue.main.async { completion(attachment) }
         }
         task.resume()
     }

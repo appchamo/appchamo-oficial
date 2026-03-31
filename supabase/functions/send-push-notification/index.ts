@@ -19,6 +19,41 @@ function resolveNotificationImageUrl(raw: string | null | undefined): string | n
   return null
 }
 
+/** Nome exibido no estilo “comunicação” (iOS: avatar + badge do app). */
+function resolvePushSenderDisplayName(record: {
+  title?: string | null
+  type?: string | null
+  link?: string | null
+}): string | null {
+  const title = (record.title ?? "").trim()
+  const t = (record.type ?? "").toLowerCase()
+  if (!title) return null
+  if (t === "chat") {
+    const m = title.match(/^(.+?)\s+enviou uma mensagem/i)
+    if (m?.[1]) return m[1].trim()
+    return title
+  }
+  if (t === "community" || (t === "info" && String(record.link ?? "").includes("comunidade"))) {
+    return title
+  }
+  if (t === "job") {
+    const m = title.match(/^(.+?)\s+publicou uma vaga/i)
+    if (m?.[1]) return m[1].trim()
+    return title
+  }
+  return null
+}
+
+function shouldUseIosCommunicationStyle(record: {
+  type?: string | null
+  link?: string | null
+}): boolean {
+  const t = (record.type ?? "").toLowerCase()
+  if (t === "chat" || t === "community" || t === "job") return true
+  if (t === "info" && String(record.link ?? "").includes("comunidade")) return true
+  return false
+}
+
 /** Obtém access_token do Google OAuth2 com conta de serviço (compatível com Deno, sem google-auth-library). */
 async function getGoogleAccessToken(clientEmail: string, privateKeyPem: string): Promise<string> {
   const pem = privateKeyPem.replace(/\\n/g, '\n')
@@ -135,7 +170,15 @@ serve(async (req) => {
       type: String(record.type || "general"),
       link: String(record.link || ""),
       ...(imageUrl ? { image_url: imageUrl } : {}),
-      ...(notificationSoundUrl ? { sound_url: notificationSoundUrl } : {})
+      ...(notificationSoundUrl ? { sound_url: notificationSoundUrl } : {}),
+    }
+
+    if (shouldUseIosCommunicationStyle(record)) {
+      dataPayload.ios_communication = "1"
+      const senderName = resolvePushSenderDisplayName(record)
+      if (senderName) dataPayload.push_sender_name = senderName
+      const conv = String(record.link || record.id || "").trim().slice(0, 240)
+      dataPayload.communication_conv_id = conv.length > 0 ? conv : `notif-${record.id || "0"}`
     }
 
     const isIosDevice = (name: string | null) => {

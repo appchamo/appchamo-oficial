@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type SortDir = "desc" | "asc";
 
@@ -229,7 +230,19 @@ const FETCH_PAGE = 1000;
 
 type ProfileLite = { user_id: string; full_name: string; email: string; user_type: string };
 type SubLite = { user_id: string; plan_id: string; status: string; updated_at: string };
-type UserDeviceRow = { user_id: string; device_id: string; device_name: string | null; last_active: string | null };
+type UserDeviceRow = {
+  user_id: string;
+  device_id: string;
+  device_name: string | null;
+  last_active: string | null;
+  push_token: string | null;
+};
+
+type PrimaryDeviceBucket = "none" | "iphone" | "android" | "desktop" | "outro";
+
+type AccountKindFilter = "all" | "client" | "professional" | "company" | "sponsor" | "pending";
+
+type DeviceFilter = "all" | "none" | "iphone" | "android" | "desktop" | "outro";
 
 async function paginateProfiles(): Promise<ProfileLite[]> {
   const out: ProfileLite[] = [];
@@ -281,7 +294,7 @@ async function paginateUserDevices(): Promise<UserDeviceRow[]> {
   for (;;) {
     const { data, error } = await client
       .from("user_devices")
-      .select("user_id, device_id, device_name, last_active")
+      .select("user_id, device_id, device_name, last_active, push_token")
       .range(from, from + FETCH_PAGE - 1);
     if (error) {
       console.error("[AdminReports] user_devices", error);
@@ -296,36 +309,88 @@ async function paginateUserDevices(): Promise<UserDeviceRow[]> {
 }
 
 function bucketFromDeviceName(name: string | null): "iphone" | "android" | "desktop" | "outro" {
-  const n = (name || "").toLowerCase();
-  if (n.includes("iphone") || n.includes("ios") || n.includes("ipad")) return "iphone";
+  const n = (name || "").toLowerCase().trim();
+  if (!n) return "outro";
+  if (
+    n.includes("iphone") ||
+    n.includes("ios") ||
+    n.includes("ipad") ||
+    n.includes("ipod") ||
+    n.includes("apple") ||
+    /\bios\b/.test(n)
+  ) {
+    return "iphone";
+  }
   if (n.includes("android")) return "android";
-  if (n.includes("web") || n.includes("desktop") || n.includes("pwa") || n.includes("chrome")) return "desktop";
+  if (
+    n.includes("samsung") ||
+    n.includes("galaxy") ||
+    /\bsm-/.test(n) ||
+    n.includes("pixel") ||
+    n.includes("xiaomi") ||
+    n.includes("redmi") ||
+    n.includes("poco") ||
+    n.includes("huawei") ||
+    n.includes("honor") ||
+    n.includes("oppo") ||
+    n.includes("realme") ||
+    n.includes("oneplus") ||
+    n.includes("motorola") ||
+    n.includes("moto ") ||
+    n.includes("nokia") ||
+    n.includes("lg-") ||
+    n.includes("asus") ||
+    n.includes("zenfone") ||
+    n.includes("sony") ||
+    n.includes("xperia") ||
+    n.includes("vivo") ||
+    n.includes("nothing")
+  ) {
+    return "android";
+  }
+  if (n.includes("web") || n.includes("desktop") || n.includes("pwa") || n.includes("chrome")) {
+    return "desktop";
+  }
   return "outro";
 }
 
-function bucketLabel(b: "iphone" | "android" | "desktop" | "outro"): string {
-  if (b === "iphone") return "iPhone";
-  if (b === "android") return "Android";
-  if (b === "desktop") return "Web/Desktop";
-  return "Outro";
+/** Tokens APNs clássicos (64 hex) — comuns em registos antigos sem device_name útil. */
+function inferIosFromPushToken(token: string | null | undefined): boolean {
+  const t = (token || "").trim();
+  return t.length === 64 && /^[a-f0-9]+$/i.test(t);
 }
 
-function pickPrimaryDeviceLabel(devices: UserDeviceRow[]): string {
-  if (!devices.length) return "—";
+function deviceBucketForRow(d: UserDeviceRow): "iphone" | "android" | "desktop" | "outro" {
+  const fromName = bucketFromDeviceName(d.device_name);
+  if (fromName !== "outro") return fromName;
+  if (inferIosFromPushToken(d.push_token)) return "iphone";
+  return "outro";
+}
+
+function primaryDeviceInfo(devices: UserDeviceRow[]): { label: string; bucket: PrimaryDeviceBucket } {
+  if (!devices.length) return { label: "—", bucket: "none" };
   const sorted = [...devices].sort(
     (a, b) => new Date(b.last_active || 0).getTime() - new Date(a.last_active || 0).getTime(),
   );
+  for (const d of sorted) {
+    const b = deviceBucketForRow(d);
+    if (b === "iphone") return { label: "iPhone", bucket: "iphone" };
+    if (b === "android") return { label: "Android", bucket: "android" };
+    if (b === "desktop") return { label: "Web/Desktop", bucket: "desktop" };
+  }
   const first = sorted[0];
-  const b = bucketFromDeviceName(first.device_name);
-  if (b === "outro" && first.device_name?.trim()) return first.device_name.trim();
-  return bucketLabel(b);
+  if (first.device_name?.trim()) return { label: first.device_name.trim(), bucket: "outro" };
+  if (sorted.some((d) => d.push_token)) {
+    return { label: "App móvel (plataforma não identificada)", bucket: "outro" };
+  }
+  return { label: "Outro", bucket: "outro" };
 }
 
 function formatSessionBreakdown(devices: UserDeviceRow[]): string {
   if (!devices.length) return "Sem registo no app (só web) ou ainda não abriu o app após a última atualização";
   const c = { iphone: 0, android: 0, desktop: 0, outro: 0 };
   for (const d of devices) {
-    c[bucketFromDeviceName(d.device_name)]++;
+    c[deviceBucketForRow(d)]++;
   }
   const parts: string[] = [];
   if (c.iphone) parts.push(`${c.iphone} iPhone${c.iphone > 1 ? "s" : ""}`);
@@ -338,10 +403,34 @@ function formatSessionBreakdown(devices: UserDeviceRow[]): string {
 function userTypeBadge(userType: string): string {
   const t = (userType || "").toLowerCase();
   if (t === "professional") return "Profissional";
-  if (t === "company") return "Empresa";
+  if (t === "company" || t === "enterprise") return "Empresa";
   if (t === "client") return "Cliente";
   if (t === "pending_signup") return "Cadastro pendente";
   return userType || "—";
+}
+
+async function fetchSponsorUserIds(): Promise<Set<string>> {
+  const out = new Set<string>();
+  let from = 0;
+  const client = supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> };
+  for (;;) {
+    const { data, error } = await client
+      .from("sponsors")
+      .select("user_id")
+      .not("user_id", "is", null)
+      .range(from, from + FETCH_PAGE - 1);
+    if (error) {
+      console.error("[AdminReports] sponsors user_id", error);
+      break;
+    }
+    if (!data?.length) break;
+    for (const row of data as { user_id: string }[]) {
+      if (row.user_id) out.add(row.user_id);
+    }
+    if (data.length < FETCH_PAGE) break;
+    from += FETCH_PAGE;
+  }
+  return out;
 }
 
 function planBadgeForUser(subsByUser: Map<string, SubLite[]>, userId: string): string {
@@ -369,14 +458,19 @@ const DevicesTab = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [deviceFilter, setDeviceFilter] = useState<DeviceFilter>("all");
+  const [accountKindFilter, setAccountKindFilter] = useState<AccountKindFilter>("all");
   const [rows, setRows] = useState<
     {
       user_id: string;
       full_name: string;
       email: string;
       userType: string;
+      userTypeRaw: string;
+      isSponsor: boolean;
       plan: string;
       primary: string;
+      primaryBucket: PrimaryDeviceBucket;
       breakdown: string;
       count: number;
     }[]
@@ -387,10 +481,11 @@ const DevicesTab = () => {
       setLoading(true);
       setError(null);
       try {
-        const [profiles, subs, devices] = await Promise.all([
+        const [profiles, subs, devices, sponsorIds] = await Promise.all([
           paginateProfiles(),
           paginateSubscriptions(),
           paginateUserDevices(),
+          fetchSponsorUserIds(),
         ]);
 
         const subsByUser = new Map<string, SubLite[]>();
@@ -409,13 +504,19 @@ const DevicesTab = () => {
 
         const built = profiles.map((p) => {
           const devs = devByUser.get(p.user_id) || [];
+          const isSponsor = sponsorIds.has(p.user_id);
+          const primaryInfo = primaryDeviceInfo(devs);
+          const profileLabel = userTypeBadge(p.user_type);
           return {
             user_id: p.user_id,
             full_name: p.full_name || "—",
             email: p.email || "—",
-            userType: userTypeBadge(p.user_type),
+            userType: isSponsor ? "Patrocinador" : profileLabel,
+            userTypeRaw: (p.user_type || "").toLowerCase(),
+            isSponsor,
             plan: planBadgeForUser(subsByUser, p.user_id),
-            primary: pickPrimaryDeviceLabel(devs),
+            primary: primaryInfo.label,
+            primaryBucket: primaryInfo.bucket,
             breakdown: formatSessionBreakdown(devs),
             count: devs.length,
           };
@@ -432,15 +533,26 @@ const DevicesTab = () => {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
+    return rows.filter((r) => {
+      if (deviceFilter !== "all" && r.primaryBucket !== deviceFilter) return false;
+      if (accountKindFilter !== "all") {
+        if (accountKindFilter === "sponsor" && !r.isSponsor) return false;
+        if (accountKindFilter !== "sponsor" && r.isSponsor) return false;
+        if (accountKindFilter === "client" && r.userTypeRaw !== "client") return false;
+        if (accountKindFilter === "professional" && r.userTypeRaw !== "professional") return false;
+        if (accountKindFilter === "company" && r.userTypeRaw !== "company" && r.userTypeRaw !== "enterprise") return false;
+        if (accountKindFilter === "pending" && r.userTypeRaw !== "pending_signup") return false;
+      }
+      if (!q) return true;
+      return (
         r.full_name.toLowerCase().includes(q) ||
         r.email.toLowerCase().includes(q) ||
         r.userType.toLowerCase().includes(q) ||
-        r.plan.toLowerCase().includes(q),
-    );
-  }, [rows, query]);
+        r.plan.toLowerCase().includes(q) ||
+        r.primary.toLowerCase().includes(q)
+      );
+    });
+  }, [rows, query, deviceFilter, accountKindFilter]);
 
   if (loading) {
     return (
@@ -461,15 +573,51 @@ const DevicesTab = () => {
         se ativo). <strong>Só usam o site no browser</strong> → costuma aparecer &quot;Sem app registado&quot; até haver registo nativo. Política admin
         SELECT em <code className="text-[10px]">user_devices</code> (migração).
       </p>
-      <Input
-        placeholder="Filtrar por nome, e-mail, tipo ou plano…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        className="max-w-md"
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="space-y-1.5 min-w-[160px]">
+          <label className="text-[11px] font-medium text-muted-foreground">Último uso (dispositivo)</label>
+          <Select value={deviceFilter} onValueChange={(v) => setDeviceFilter(v as DeviceFilter)}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue placeholder="Todos" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="none">Sem app registado</SelectItem>
+              <SelectItem value="iphone">iPhone</SelectItem>
+              <SelectItem value="android">Android</SelectItem>
+              <SelectItem value="desktop">Web / desktop</SelectItem>
+              <SelectItem value="outro">Outro / indeterminado</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5 min-w-[160px]">
+          <label className="text-[11px] font-medium text-muted-foreground">Tipo de conta</label>
+          <Select value={accountKindFilter} onValueChange={(v) => setAccountKindFilter(v as AccountKindFilter)}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue placeholder="Todos" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="client">Cliente</SelectItem>
+              <SelectItem value="professional">Profissional</SelectItem>
+              <SelectItem value="company">Empresa</SelectItem>
+              <SelectItem value="sponsor">Patrocinador</SelectItem>
+              <SelectItem value="pending">Cadastro pendente</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5 flex-1 min-w-[200px] max-w-md">
+          <label className="text-[11px] font-medium text-muted-foreground">Pesquisa</label>
+          <Input
+            placeholder="Nome, e-mail, plano, texto do dispositivo…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+      </div>
       <p className="text-[11px] text-muted-foreground">
         {filtered.length} utilizador{filtered.length !== 1 ? "es" : ""}
-        {query.trim() ? ` (de ${rows.length})` : ""}
+        {(query.trim() || deviceFilter !== "all" || accountKindFilter !== "all") && ` (de ${rows.length})`}
       </p>
       <div className="bg-card border rounded-xl overflow-hidden">
         <div className="overflow-x-auto max-h-[min(70vh,720px)] overflow-y-auto">

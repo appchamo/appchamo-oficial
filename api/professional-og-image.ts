@@ -39,31 +39,34 @@ function imageResponse(req: Request, body: ArrayBuffer | Uint8Array, contentType
 }
 
 async function sealBytesResponse(req: Request): Promise<Response> {
-  for (const origin of resolveSealFetchOrigins(req)) {
-    try {
-      const url = `${origin.replace(/\/$/, "")}/seals/push/seal_chamo.png`;
-      const r = await fetch(url, {
-        method: req.method === "HEAD" ? "HEAD" : "GET",
-        redirect: "follow",
-      });
-      if (!r.ok) continue;
-      const ct = r.headers.get("content-type") || "image/png";
-      if (req.method === "HEAD") {
-        const len = r.headers.get("content-length");
-        return new Response(null, {
-          status: 200,
-          headers: {
-            "Content-Type": ct,
-            ...(len ? { "Content-Length": len } : {}),
-            "Cache-Control": "public, max-age=300, s-maxage=300",
-            "Access-Control-Allow-Origin": "*",
-          },
+  const tryPaths = ["/icon-512.png", "/seals/push/seal_chamo.png", "/seals/push/seal_chamo.svg"];
+  for (const path of tryPaths) {
+    for (const origin of resolveSealFetchOrigins(req)) {
+      try {
+        const url = `${origin.replace(/\/$/, "")}${path}`;
+        const r = await fetch(url, {
+          method: req.method === "HEAD" ? "HEAD" : "GET",
+          redirect: "follow",
         });
+        if (!r.ok) continue;
+        const ct = r.headers.get("content-type") || "image/png";
+        if (req.method === "HEAD") {
+          const len = r.headers.get("content-length");
+          return new Response(null, {
+            status: 200,
+            headers: {
+              "Content-Type": ct,
+              ...(len ? { "Content-Length": len } : {}),
+              "Cache-Control": "public, max-age=300, s-maxage=300",
+              "Access-Control-Allow-Origin": "*",
+            },
+          });
+        }
+        const buf = await r.arrayBuffer();
+        return imageResponse(req, buf, ct, "public, max-age=300, s-maxage=300");
+      } catch {
+        /* próxima origem */
       }
-      const buf = await r.arrayBuffer();
-      return imageResponse(req, buf, ct, "public, max-age=300, s-maxage=300");
-    } catch {
-      /* próxima origem */
     }
   }
   return imageResponse(

@@ -55,13 +55,12 @@ export function getPublicAgendaUrl(proKey: string): string {
 }
 
 /**
- * URL pública para partilhar um post da Comunidade (Open Graph no WhatsApp/Instagram).
- * No Vercel: requer a função `api/community-post-og` e variáveis SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+ * URL pública para partilhar um post (caminho limpo). Crawlers (WhatsApp) recebem OG via `middleware.ts` → `api/community-post-og`.
  */
 export function getCommunityPostShareUrl(postId: string): string {
   const id = (postId || "").trim();
   if (!id) return "";
-  return `${getOgShareBaseUrl()}/api/community-post-og?id=${encodeURIComponent(id)}`;
+  return `${getOgShareBaseUrl()}/p/comunidade/${encodeURIComponent(id)}`;
 }
 
 /** Rota in-app para abrir o post na Comunidade (canonical / partilha “bonita”). */

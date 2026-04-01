@@ -20,6 +20,22 @@ function escText(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** WhatsApp/Meta leem melhor URL pública direta do Storage; proxy só para buckets privados ou avatar. */
+function ogImageUrlForPost(
+  post: { image_url?: string | null },
+  imageOrigin: string,
+  postId: string,
+): string {
+  const raw = (post.image_url || "").trim();
+  if (
+    /^https:\/\//i.test(raw) &&
+    /\/storage\/v1\/(?:object|render\/image)\/public\//i.test(raw)
+  ) {
+    return raw;
+  }
+  return `${imageOrigin}/api/community-post-og-image?id=${encodeURIComponent(postId)}`;
+}
+
 export const config = { runtime: "edge" };
 
 export default async function handler(req: Request): Promise<Response> {
@@ -63,7 +79,7 @@ ${brandIconLinkTags(publicApp, escAttr)}
 
   const audience = (post as { audience?: string }).audience;
   const imageOrigin = resolveOgApiOrigin(req);
-  const ogImageBytesUrl = `${imageOrigin}/api/community-post-og-image?id=${encodeURIComponent(postId)}`;
+  const ogImageResolved = ogImageUrlForPost(post as { image_url?: string | null }, imageOrigin, postId);
 
   if (audience === "followers") {
     const title = escAttr("Comunidade Chamô");
@@ -73,10 +89,10 @@ ${brandIconLinkTags(publicApp, escAttr)}
 ${brandIconLinkTags(publicApp, escAttr)}
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="${description}" />
-<meta property="og:image" content="${escAttr(ogImageBytesUrl)}" />
-<meta property="og:image:secure_url" content="${escAttr(ogImageBytesUrl)}" />
-<meta name="twitter:card" content="summary" />
-<meta name="twitter:image" content="${escAttr(ogImageBytesUrl)}" />
+<meta property="og:image" content="${escAttr(ogImageResolved)}" />
+<meta property="og:image:secure_url" content="${escAttr(ogImageResolved)}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="${escAttr(ogImageResolved)}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(appOpen)}" />
 </head><body><p><a href="${escAttr(appOpen)}">Abrir o Chamô</a></p></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -109,15 +125,15 @@ ${brandIconLinkTags(publicApp, escAttr)}
 <meta property="og:type" content="article" />
 <meta property="og:title" content="${escAttr(title)}" />
 <meta property="og:description" content="${escAttr(description)}" />
-<meta property="og:image" content="${escAttr(ogImageBytesUrl)}" />
-<meta property="og:image:secure_url" content="${escAttr(ogImageBytesUrl)}" />
+<meta property="og:image" content="${escAttr(ogImageResolved)}" />
+<meta property="og:image:secure_url" content="${escAttr(ogImageResolved)}" />
 <meta property="og:image:alt" content="${escAttr(authorName)}" />
 <meta property="og:url" content="${escAttr(canonical)}" />
 <meta property="og:site_name" content="Chamô" />
-<meta name="twitter:card" content="summary" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${escAttr(title)}" />
 <meta name="twitter:description" content="${escAttr(description)}" />
-<meta name="twitter:image" content="${escAttr(ogImageBytesUrl)}" />
+<meta name="twitter:image" content="${escAttr(ogImageResolved)}" />
 <link rel="canonical" href="${escAttr(canonical)}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(appOpen)}" />
 <script>location.replace(${JSON.stringify(appOpen)});</script>

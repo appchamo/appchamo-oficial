@@ -27,8 +27,9 @@ export function resolveSealFetchOrigins(req: Request): string[] {
   return out;
 }
 
+/** Imagem de fallback para meta OG (≥200px). O repo tem `seal_chamo.svg`, não `.png` — PNG quebrava pré-visualização no WhatsApp. */
 export function sealImageUrlForMeta(req: Request): string {
   const origins = resolveSealFetchOrigins(req);
   const base = origins[0] || "https://appchamo.com";
-  return `${base.replace(/\/$/, "")}/seals/push/seal_chamo.png`;
+  return `${base.replace(/\/$/, "")}/icon-512.png`;
 }

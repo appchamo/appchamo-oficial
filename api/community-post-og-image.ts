@@ -39,9 +39,11 @@ function imageResponse(req: Request, body: ArrayBuffer | Uint8Array, contentType
 }
 
 async function sealBytesResponse(req: Request): Promise<Response> {
+  const tryPaths = ["/icon-512.png", "/seals/push/seal_chamo.png", "/seals/push/seal_chamo.svg"];
+  for (const path of tryPaths) {
   for (const origin of resolveSealFetchOrigins(req)) {
     try {
-      const url = `${origin.replace(/\/$/, "")}/seals/push/seal_chamo.png`;
+      const url = `${origin.replace(/\/$/, "")}${path}`;
       const r = await fetch(url, {
         method: req.method === "HEAD" ? "HEAD" : "GET",
         redirect: "follow",
@@ -65,6 +67,7 @@ async function sealBytesResponse(req: Request): Promise<Response> {
     } catch {
       /* próxima origem */
     }
+  }
   }
   return imageResponse(req, FALLBACK_SEAL_PNG, "image/png", "public, max-age=300, s-maxage=300");
 }

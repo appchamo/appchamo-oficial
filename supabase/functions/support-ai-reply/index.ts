@@ -125,7 +125,7 @@ serve(async (req) => {
     /* ── 2. Busca histórico de mensagens ── */
     const { data: msgs } = await supabase
       .from("support_messages")
-      .select("sender_id, content, created_at")
+      .select("sender_id, content, created_at, image_urls")
       .eq("ticket_id", ticket_id)
       .order("created_at", { ascending: true })
       .limit(30);
@@ -229,8 +229,18 @@ Assunto do ticket: ${ticket.subject || "Suporte geral"}`;
 
     // Histórico (filtra mensagens de sistema e vazias)
     for (const m of list) {
-      const content = m.content?.trim();
-      if (!content || content === "[CLOSED]") continue;
+      let content = (m.content ?? "").trim();
+      const imgs = m.image_urls as string[] | null | undefined;
+      const hasImages = Array.isArray(imgs) && imgs.length > 0;
+
+      if (content === "[CLOSED]") continue;
+
+      // Mensagem só com imagem (content vazio): o modelo precisa de texto
+      if (!content && hasImages && !isBot(m.sender_id)) {
+        content = "[usuário enviou uma imagem]";
+      }
+
+      if (!content) continue;
 
       // Áudio anterior: usa transcrição se disponível, senão indica
       if (content.startsWith("[AUDIO:")) {
@@ -243,9 +253,22 @@ Assunto do ticket: ${ticket.subject || "Suporte geral"}`;
         continue;
       }
 
-      // Anexos (imagem/vídeo/PDF): não enviar URL bruta ao modelo
-      if (/^\[(IMAGE|VIDEO|FILE)(\|\|\|SPT\|\|\||:)/.test(content)) continue;
+      // Anexos (imagem/vídeo/PDF no content): placeholder em vez de omitir (evita só "system" no GPT)
+      if (/^\[(IMAGE|VIDEO|FILE)(\|\|\|SPT\|\|\||:)/.test(content)) {
+        const placeholder = isBot(m.sender_id) ? content : "[usuário enviou um anexo (imagem ou ficheiro)]";
+        chatMessages.push({ role: isBot(m.sender_id) ? "assistant" : "user", content: placeholder });
+        continue;
+      }
+
       chatMessages.push({ role: isBot(m.sender_id) ? "assistant" : "user", content });
+    }
+
+    // OpenAI exige pelo menos uma mensagem de utilizador além do system
+    if (chatMessages.length === 1) {
+      chatMessages.push({
+        role: "user",
+        content: "O utilizador precisa de ajuda no app Chamô (mensagem inicial vazia ou só anexos). Responde de forma útil em português.",
+      });
     }
 
     /* ── 6. Chama GPT ── */

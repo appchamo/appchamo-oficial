@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Bell, Send, Users, Briefcase, Building2, User } from "lucide-react";
+import { Bell, Send, Users, Briefcase, Building2, User, CheckCheck } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,6 +18,9 @@ interface AdminNotif {
   created_at: string;
 }
 
+/** Sempre incluir no broadcast “Todos os usuários” (conta de painel). */
+const ADMIN_PANEL_EMAIL = "admin@appchamo.com";
+
 const AdminNotifications = () => {
   const { adminUser } = useAdminAuth();
   const [myNotifications, setMyNotifications] = useState<AdminNotif[]>([]);
@@ -29,6 +32,7 @@ const AdminNotifications = () => {
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [sending, setSending] = useState(false);
   const [sentCount, setSentCount] = useState<number | null>(null);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
 
   // Individual user search
   const [userSearch, setUserSearch] = useState("");
@@ -60,6 +64,31 @@ const AdminNotifications = () => {
   const markAsRead = async (id: string) => {
     await supabase.from("notifications").update({ read: true }).eq("id", id);
     setMyNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+  };
+
+  const unreadMineCount = myNotifications.filter((n) => !n.read).length;
+
+  const markAllMineAsRead = async () => {
+    if (!adminUser?.id || unreadMineCount === 0) return;
+    setMarkingAllRead(true);
+    try {
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read: true })
+        .eq("user_id", adminUser.id)
+        .eq("read", false);
+      if (error) throw error;
+      setMyNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      toast({ title: "Todas as notificações foram marcadas como lidas." });
+    } catch (e: unknown) {
+      toast({
+        title: "Não foi possível marcar todas como lidas",
+        description: e instanceof Error ? e.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setMarkingAllRead(false);
+    }
   };
 
   const searchUsers = async (query: string) => {
@@ -99,7 +128,19 @@ const AdminNotifications = () => {
         userIds = [selectedUser.user_id];
       } else if (target === "all") {
         const { data } = await supabase.from("profiles").select("user_id");
-        userIds = (data || []).map(p => p.user_id);
+        const ids = new Set((data || []).map((p) => p.user_id).filter(Boolean) as string[]);
+        const { data: adminProf } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .ilike("email", ADMIN_PANEL_EMAIL)
+          .maybeSingle();
+        const adminUid = (adminProf as { user_id?: string } | null)?.user_id;
+        if (adminUid) ids.add(adminUid);
+        // Conta principal do painel: garante envio mesmo se o perfil não estiver na lista (ex.: corrida RLS) ou sem linha em profiles.
+        if (adminUser?.id && adminUser.email?.toLowerCase().trim() === ADMIN_PANEL_EMAIL) {
+          ids.add(adminUser.id);
+        }
+        userIds = [...ids];
       } else if (target === "clients") {
         const { data } = await supabase.from("profiles").select("user_id").eq("user_type", "client");
         userIds = (data || []).map(p => p.user_id);
@@ -156,9 +197,26 @@ const AdminNotifications = () => {
     <AdminLayout title="Notificações">
       <div className="max-w-lg space-y-5">
         <div className="bg-card border rounded-xl p-5">
-          <h2 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
-            <Bell className="w-4 h-4 text-primary" /> Suas notificações
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <Bell className="w-4 h-4 text-primary" /> Suas notificações
+            </h2>
+            {!loadingMine && myNotifications.length > 0 && unreadMineCount > 0 && (
+              <button
+                type="button"
+                onClick={() => void markAllMineAsRead()}
+                disabled={markingAllRead}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {markingAllRead ? (
+                  <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <CheckCheck className="w-3.5 h-3.5 text-primary" />
+                )}
+                Marcar todas como lidas
+              </button>
+            )}
+          </div>
           {loadingMine ? (
             <p className="text-xs text-muted-foreground">Carregando...</p>
           ) : myNotifications.length === 0 ? (

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { isFatalAuthUserError } from "@/lib/authErrors";
 
 /**
  * Se a conta foi removida no servidor mas o cliente ainda tinha JWT até expirar / refresh:
@@ -16,7 +17,7 @@ export default function AuthSessionGate() {
 
     const verify = async () => {
       const { error } = await supabase.auth.getUser();
-      if (error) await exitSessionToLanding();
+      if (error && isFatalAuthUserError(error)) await exitSessionToLanding();
     };
 
     const onPointerDown = () => {

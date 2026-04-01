@@ -39,7 +39,8 @@ const SupportThread = () => {
   const [text, setText] = useState("");
   const [ticketSubject, setTicketSubject] = useState<string | null>(null);
   const [ticketUserId, setTicketUserId] = useState<string | null>(null);
-  const invokedAiForHumanRef = useRef(false);
+  /** Evita disparar a IA duas vezes na abertura do ticket (uma única mensagem inicial do utilizador). */
+  const invokedInitialAiRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -59,16 +60,47 @@ const SupportThread = () => {
   const [mediaViewerFullscreen, setMediaViewerFullscreen] = useState(false);
 
   /** Edge function com service role; em projetos com verify_jwt=true no dashboard, enviar JWT evita 401 no gateway. */
-  const invokeAI = async () => {
+  const invokeAI = async (): Promise<boolean> => {
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      await supabase.functions.invoke("support-ai-reply", {
+      const { data, error } = await supabase.functions.invoke("support-ai-reply", {
         body: { ticket_id: ticketId },
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
+      if (error) {
+        console.error("[Suporte IA] invoke:", error);
+        const ctx = (error as { context?: Response })?.context;
+        let detail = error.message || "Erro ao contactar o assistente.";
+        try {
+          if (ctx && typeof ctx.json === "function") {
+            const j = await ctx.json();
+            if (j && typeof j.error === "string") detail = j.error;
+          }
+        } catch {
+          /* ignore */
+        }
+        toast({ title: "Assistente indisponível", description: detail, variant: "destructive" });
+        return false;
+      }
+      const body = data as { ok?: boolean; error?: string; skipped?: string } | null;
+      if (body?.error) {
+        toast({
+          title: "Assistente indisponível",
+          description: body.error === "IA não configurada" ? "Configure OPENAI_API_KEY nas Edge Functions do Supabase." : body.error,
+          variant: "destructive",
+        });
+        return false;
+      }
+      return true;
     } catch (e) {
       console.error("[Suporte IA] Falha:", e);
+      toast({
+        title: "Assistente indisponível",
+        description: e instanceof Error ? e.message : "Tente novamente.",
+        variant: "destructive",
+      });
+      return false;
     }
   };
 
@@ -118,6 +150,10 @@ const SupportThread = () => {
   }, [user, ticketId]);
 
   useEffect(() => {
+    invokedInitialAiRef.current = false;
+  }, [ticketId]);
+
+  useEffect(() => {
     if (!user || !ticketId) return;
     loadThread();
   }, [user, ticketId, loadThread]);
@@ -131,17 +167,19 @@ const SupportThread = () => {
     }
   }, [location.pathname, location.state, navigate]);
 
-  // Disparar resposta da IA ao abrir "chat sem assunto" (já tem uma mensagem do usuário)
+  // Disparar IA na abertura: ticket criado com primeira mensagem (ex.: "Preciso de ajuda" ou botões rápidos).
+  // Antes só corria para subject === "Nova solicitação", e os outros fluxos ficavam sem resposta.
   useEffect(() => {
-    if (!user || !ticketId || invokedAiForHumanRef.current || !ticketSubject || loading) return;
-    if (ticketSubject !== "Nova solicitação") return;
-    if (messages.length !== 1 || messages[0].sender_id === SUPPORT_BOT_SENDER_ID) return;
-    invokedAiForHumanRef.current = true;
+    if (!user || !ticketId || invokedInitialAiRef.current || loading) return;
+    if (messages.length !== 1) return;
+    const only = messages[0];
+    if (only.sender_id === SUPPORT_BOT_SENDER_ID || only.sender_id !== user.id) return;
+    invokedInitialAiRef.current = true;
     (async () => {
       await new Promise((r) => setTimeout(r, 800));
       await invokeAI();
     })();
-  }, [user, ticketId, ticketSubject, messages, loading]);
+  }, [user, ticketId, messages, loading]);
 
   useEffect(() => {
     if (!user || !ticketId || typeof ticketId !== "string") return;
@@ -329,6 +367,10 @@ const SupportThread = () => {
         });
       }
 
+      if (!hasHumanAgentReplied(messages)) {
+        await new Promise((r) => setTimeout(r, 800));
+        await invokeAI();
+      }
     } catch (err: any) {
       toast({ title: "Erro ao enviar", description: err.message, variant: "destructive" });
     } finally {

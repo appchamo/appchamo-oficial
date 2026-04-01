@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, useCallback, R
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
 import { clearLocalChamoSession } from "@/lib/localChamoSessionClear";
 import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
+import { isFatalAuthUserError } from "@/lib/authErrors";
 import type { User, Session } from "@supabase/supabase-js";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -85,10 +86,18 @@ export const useAuth = () => useContext(AuthContext);
 // 🛡️ Trava para evitar processamento duplicado (AbortError: Lock broken)
 let lastProcessedCode: string | null = null;
 let isExchangingOAuth = false;
-const OAUTH_COOLDOWN_MS = 60000; // 1 min — só processa o primeiro callback; ignora segundo se usuário abriu o browser de novo
-const OAUTH_FAILED_CODE_TTL_MS = 300000; // 5 min — não reprocessar código que já falhou (evita loop no iOS)
+/** Não reprocessar o mesmo código OAuth que já falhou (evita loop no iOS com getLaunchUrl antigo). */
+const OAUTH_FAILED_CODE_TTL_MS = 300000; // 5 min
 export const OAUTH_FAILED_KEY = "chamo_oauth_failed";
-let lastOAuthProcessedAt = 0;
+
+/** Liberta travas OAuth após logout — um cooldown global bloqueava login com outra conta durante ~1 min. */
+function resetOAuthGuardsAfterSignOut() {
+  lastProcessedCode = null;
+  isExchangingOAuth = false;
+  if (Capacitor.isNativePlatform()) {
+    void Preferences.remove({ key: OAUTH_FAILED_KEY }).catch(() => {});
+  }
+}
 
 /** Código na URL pode vir com ? ou # no final (ex.: ...code=xxx#); normalizar para comparar/salvar. */
 function normalizeOAuthCode(code: string | null): string | null {
@@ -236,10 +245,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           if (pFetch === "missing") {
             const { data: gu, error: guErr } = await supabase.auth.getUser();
-            if (guErr || !gu?.user) {
+            if (guErr && isFatalAuthUserError(guErr)) {
               await exitSessionToLanding();
               return;
             }
+            if (!guErr && !gu?.user) {
+              await exitSessionToLanding();
+              return;
+            }
+            // Erro de rede / 5xx: não expulsar — a sessão local ainda é válida; /post-login ou retry de perfil trata.
             // Auth válido, perfil ainda não existe (corrida pós-cadastro/OAuth): gate /post-login faz retry.
             localStorage.removeItem("chamo_cached_profile");
             localStorage.removeItem("chamo_cached_roles");
@@ -432,7 +446,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       code = normalizeOAuthCode(code);
       if (!code) return false;
       const now = Date.now();
-      if (now - lastOAuthProcessedAt < OAUTH_COOLDOWN_MS) return false;
+      // Só ignorar reentrada do *mesmo* código (duplo appUrlOpen / launch URL repetido).
       if (lastProcessedCode === code) return false;
       if (isExchangingOAuth) return false;
       // No iOS, após falha redirecionamos para /login e getLaunchUrl continua devolvendo a mesma URL → loop. Ignorar código já tentado.
@@ -447,7 +461,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (_) {}
       }
       lastProcessedCode = code;
-      lastOAuthProcessedAt = now;
       isExchangingOAuth = true;
       let exchangeOk = false;
       try {
@@ -563,8 +576,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         console.log("🔐 Auth Event:", event);
         if (event === 'SIGNED_OUT') {
-          lastProcessedCode = null;
-          isExchangingOAuth = false;
+          resetOAuthGuardsAfterSignOut();
           setUser(null);
           setSession(null);
           setProfile(null);
@@ -590,7 +602,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(false);
             void (async () => {
               const { error } = await supabase.auth.getUser();
-              if (error) await exitSessionToLanding();
+              if (error && isFatalAuthUserError(error)) await exitSessionToLanding();
             })();
           } else {
             loadUserData(sess ?? null);
@@ -687,6 +699,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     setIsSignOutInProgress(true);
+    resetOAuthGuardsAfterSignOut();
     try {
       // Limpeza do mapeamento do dispositivo para evitar que notificações do usuário anterior continuem chegando
       // quando o mesmo celular faz login em outra conta.
@@ -718,6 +731,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ];
       authKeys.forEach((k) => localStorage.removeItem(k));
       try {
+        localStorage.removeItem("chamo_ios_post_oauth_hard_reload_done");
         sessionStorage.removeItem("chamo_featured_reload_after_oauth");
         sessionStorage.removeItem("chamo_oauth_just_landed");
         sessionStorage.removeItem("chamo_hang_reload_grace_until");

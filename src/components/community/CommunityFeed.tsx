@@ -1490,17 +1490,10 @@ export default function CommunityFeed({
     }
   };
 
+  /** Só o URL: WhatsApp/Instagram mostram o cartão OG sem texto nem link solto por baixo (estilo LinkedIn). */
   const buildShareCopy = (post: PostRow) => {
-    const author = authors[post.author_id];
-    const name = authorLabel(author);
-    const raw = (post.body || "").replace(/\s+/g, " ").trim();
-    const snippet = raw.slice(0, 140);
     const url = getCommunityPostShareUrl(post.id);
-    const text = raw
-      ? `“${snippet}${raw.length > 140 ? "…" : ""}” — ${name} no Chamô`
-      : `${name} no Chamô — Comunidade`;
-    const full = `${text}\n\n${url}`;
-    return { url, text, full };
+    return { url };
   };
 
   const shareCopyLinkExternal = async () => {
@@ -1516,17 +1509,16 @@ export default function CommunityFeed({
 
   const shareNativeExternal = async () => {
     if (!sharePost) return;
-    const { full, url } = buildShareCopy(sharePost);
+    const { url } = buildShareCopy(sharePost);
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "Comunidade Chamô",
-          text: full,
+          title: "Chamô — Comunidade",
           url,
         });
         return;
       } catch {
-        /* cancelado */
+        /* cancelado ou API sem suporte a só url */
       }
     }
     await shareCopyLinkExternal();
@@ -1534,14 +1526,14 @@ export default function CommunityFeed({
 
   const shareWhatsAppExternal = () => {
     if (!sharePost) return;
-    const { full } = buildShareCopy(sharePost);
-    window.open(`https://wa.me/?text=${encodeURIComponent(full)}`, "_blank", "noopener,noreferrer");
+    const { url } = buildShareCopy(sharePost);
+    window.open(`https://wa.me/?text=${encodeURIComponent(url)}`, "_blank", "noopener,noreferrer");
   };
 
   const shareSmsExternal = () => {
     if (!sharePost) return;
-    const { full } = buildShareCopy(sharePost);
-    window.location.href = `sms:?&body=${encodeURIComponent(full)}`;
+    const { url } = buildShareCopy(sharePost);
+    window.location.href = `sms:?&body=${encodeURIComponent(url)}`;
   };
 
   const shareInstagramHint = async () => {

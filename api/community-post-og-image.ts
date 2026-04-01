@@ -161,8 +161,8 @@ export default async function handler(req: Request): Promise<Response> {
   const avatarRef = ((prof as { avatar_url?: string | null } | null)?.avatar_url || "").trim();
   const postImageRef = (row.image_url || "").trim();
 
-  /** Prioridade: avatar do autor (pedido do produto); depois mídia do post. */
-  for (const ref of [avatarRef, postImageRef]) {
+  /** Prioridade: mídia do post (pré-visualização tipo LinkedIn); senão avatar do autor. */
+  for (const ref of [postImageRef, avatarRef]) {
     const got = await downloadStorageImage(supabase, ref, maxOgImageBytes);
     if (got) {
       return imageResponse(req, got.buf, got.ct, "public, max-age=86400, s-maxage=86400");

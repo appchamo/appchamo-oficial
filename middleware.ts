@@ -6,13 +6,14 @@ import { next, rewrite } from "@vercel/edge";
  */
 /** Inclui `meta-externalagent` — é o que o Depurador de compartilhamento da Meta usa (não só facebookexternalhit). */
 const OG_CRAWLER_UA =
-  /facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Instagram|LinkedInBot|Slackbot|Twitterbot|SkypeUriPreview|TelegramBot|Discordbot|Bytespider|Pinterest|vkShare|redditbot|Applebot/i;
+  /facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Instagram|LinkedInBot|Slackbot|Twitterbot|SkypeUriPreview|TelegramBot|Discordbot|Bytespider|Pinterest|vkShare|redditbot|Applebot|Googlebot|bingbot/i;
 
 const POST_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** `:postId+` em alguns deploys Vite/Vercel não fazia match; um segmento `:postId` basta para o UUID. */
 export const config = {
-  matcher: ["/professional/:path+", "/p/comunidade/:postId+"],
+  matcher: ["/professional/:path+", "/p/comunidade/:postId"],
 };
 
 export default function middleware(request: Request): Response {

@@ -25,6 +25,17 @@
       "destination": "/sw.js"
     },
     {
+      "source": "/p/comunidade/:postId",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Instagram|LinkedInBot|Slackbot|Twitterbot|SkypeUriPreview|TelegramBot|Discordbot|Bytespider|Pinterest|vkShare|redditbot|Applebot|Googlebot|bingbot).*"
+        }
+      ],
+      "destination": "/api/community-post-og?id=:postId"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

@@ -20,7 +20,10 @@ function escText(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** WhatsApp/Meta leem melhor URL pública direta do Storage; proxy só para buckets privados ou avatar. */
+/**
+ * URL em og:image: preferir ficheiro público do Supabase (qualquer variante de path) para o crawler ir direto à imagem.
+ * Caso contrário o proxy com service role trata path relativo, bucket privado ou avatar.
+ */
 function ogImageUrlForPost(
   post: { image_url?: string | null },
   imageOrigin: string,
@@ -29,7 +32,8 @@ function ogImageUrlForPost(
   const raw = (post.image_url || "").trim();
   if (
     /^https:\/\//i.test(raw) &&
-    /\/storage\/v1\/(?:object|render\/image)\/public\//i.test(raw)
+    /\.supabase\.co\//i.test(raw) &&
+    /\/storage\/v1\//i.test(raw)
   ) {
     return raw;
   }

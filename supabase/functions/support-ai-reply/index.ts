@@ -11,6 +11,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildSupportSystemPrompt } from "./supportKnowledge.ts";
 
 const BOT_SENDER_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
 
@@ -204,24 +205,7 @@ serve(async (req) => {
     }
 
     /* ── 5. Monta histórico para o GPT ── */
-    const systemPrompt = `Você é o Chamô, assistente virtual do app Chamô — plataforma que conecta clientes a profissionais e empresas de serviços.
-
-Responda SEMPRE em português do Brasil, de forma amigável, clara e objetiva. Use no máximo 3-4 frases por resposta.
-
-Sobre o app Chamô:
-- Clientes encontram e contratam profissionais e empresas de serviços (eletricistas, pintores, designers, barbeiros etc.)
-- Profissionais e empresas se cadastram, criam perfil, gerenciam agenda e recebem pagamentos pelo app
-- Planos: Gratuito (limitado) e Business (recursos completos com agenda, pagamentos, etc.)
-- Pagamentos: o app cobra uma taxa sobre os serviços. O saldo fica disponível na Carteira
-- Suporte: atendimento via chat (você), com opção de falar com atendente humano se necessário
-
-Regras:
-- Se não souber a resposta exata, diga que vai verificar e sugira falar com um atendente humano
-- Nunca invente valores, taxas ou prazos específicos que não conhece
-- Se o problema for muito específico (pagamento bloqueado, conta suspensa, fraude), indique falar com atendente humano
-- Seja empático e prestativo
-
-Assunto do ticket: ${ticket.subject || "Suporte geral"}`;
+    const systemPrompt = buildSupportSystemPrompt(ticket.subject || "Suporte geral");
 
     const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
       { role: "system", content: systemPrompt },

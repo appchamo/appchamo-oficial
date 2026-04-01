@@ -44,6 +44,7 @@ export function isFullPageScrollRoute(pathname: string): boolean {
   if (pathname.startsWith("/profile/settings")) return true;
   if (pathname === "/profile/relatorios") return true;
   if (pathname === "/pro/comunidade") return true;
+  if (/^\/p\/comunidade\/[^/]+$/.test(pathname)) return true;
   return false;
 }
 

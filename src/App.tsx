@@ -53,7 +53,7 @@ const ProfessionalProfile = lazy(() => import("./pages/ProfessionalProfile"));
 const ProAgenda = lazy(() => import("./pages/ProAgenda"));
 const ProAgendaCalendar = lazy(() => import("./pages/ProAgendaCalendar"));
 const Community = lazy(() => import("./pages/Community"));
-const CommunityPostDeepLink = lazy(() => import("./pages/CommunityPostDeepLink"));
+const CommunityPostPage = lazy(() => import("./pages/CommunityPostPage"));
 const MeusAgendamentos = lazy(() => import("./pages/MeusAgendamentos"));
 const PublicAgenda = lazy(() => import("./pages/PublicAgenda"));
 const BecomeProfessional = lazy(() => import("./pages/BecomeProfessional"));
@@ -167,6 +167,10 @@ const BackButtonHandler = () => {
       }
       if (path === "/categories") {
         navigate("/home", { replace: true });
+        return;
+      }
+      if (/^\/p\/comunidade\/[^/]+$/.test(path)) {
+        navigate("/home?feed=comunidade", { replace: true });
         return;
       }
       // Android/WebView: abrir câmera ou galeria empilha entrada no histórico; history.back() volta
@@ -548,7 +552,7 @@ const AppContent = () => {
         <Route path="/pro/agenda" element={<ProtectedRoute><ProAgenda /></ProtectedRoute>} />
         <Route path="/pro/agenda/calendario" element={<ProtectedRoute><ProAgendaCalendar /></ProtectedRoute>} />
         <Route path="/pro/comunidade" element={<ProtectedRoute><Community /></ProtectedRoute>} />
-        <Route path="/p/comunidade/:postId" element={<CommunityPostDeepLink />} />
+        <Route path="/p/comunidade/:postId" element={<ProtectedRoute><CommunityPostPage /></ProtectedRoute>} />
         <Route path="/meus-agendamentos" element={<ProtectedRoute><MeusAgendamentos /></ProtectedRoute>} />
         <Route path="/pro/:id" element={<ProfessionalProfile />} />
         <Route path="/professional/:id" element={<ProfessionalProfile />} />

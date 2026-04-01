@@ -4,7 +4,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
-import { resolveStorageImageForOg } from "../api-utils/resolveStorageImageForOg";
+import { resolveOgApiOrigin } from "../api-utils/resolveOgApiOrigin";
 import { sealImageUrlForMeta } from "../api-utils/resolveSealAssetOrigin";
 import { brandIconLinkTags } from "../api-utils/brandIconLinkTags";
 
@@ -45,8 +45,8 @@ ${brandIconLinkTags(publicApp, escAttr)}
 <meta property="og:site_name" content="Chamô" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:image" content="${seal}" />
-<meta http-equiv="refresh" content="0;url=${escAttr(`${publicApp}/home?feed=comunidade&post=${postId}`)}" />
-</head><body><p><a href="${escAttr(`${publicApp}/home?feed=comunidade&post=${postId}`)}">Abrir no Chamô</a></p></body></html>`;
+<meta http-equiv="refresh" content="0;url=${escAttr(`${publicApp}/p/comunidade/${encodeURIComponent(postId)}`)}" />
+</head><body><p><a href="${escAttr(`${publicApp}/p/comunidade/${encodeURIComponent(postId)}`)}">Abrir no Chamô</a></p></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
@@ -62,16 +62,21 @@ ${brandIconLinkTags(publicApp, escAttr)}
   }
 
   const audience = (post as { audience?: string }).audience;
+  const imageOrigin = resolveOgApiOrigin(req);
+  const ogImageBytesUrl = `${imageOrigin}/api/community-post-og-image?id=${encodeURIComponent(postId)}`;
+
   if (audience === "followers") {
     const title = escAttr("Comunidade Chamô");
     const description = escAttr("Publicação visível para seguidores no app Chamô.");
-    const seal = escAttr(sealImageUrlForMeta(req));
     const appOpen = `${publicApp}/home?feed=comunidade`;
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
 ${brandIconLinkTags(publicApp, escAttr)}
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="${description}" />
-<meta property="og:image" content="${seal}" />
+<meta property="og:image" content="${escAttr(ogImageBytesUrl)}" />
+<meta property="og:image:secure_url" content="${escAttr(ogImageBytesUrl)}" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:image" content="${escAttr(ogImageBytesUrl)}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(appOpen)}" />
 </head><body><p><a href="${escAttr(appOpen)}">Abrir o Chamô</a></p></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -90,11 +95,9 @@ ${brandIconLinkTags(publicApp, escAttr)}
     .slice(0, 220);
   const description = bodySnippet.length > 0 ? bodySnippet : "Publicação na Comunidade Chamô";
   const title = `${authorName} no Chamô`;
-  const sealUrl = sealImageUrlForMeta(req);
-  const ogImage = await resolveStorageImageForOg(supabase, post.image_url, supabaseUrl, sealUrl);
 
   const canonical = `${publicApp}/p/comunidade/${postId}`;
-  const appOpen = `${publicApp}/home?feed=comunidade&post=${encodeURIComponent(postId)}`;
+  const appOpen = `${publicApp}/p/comunidade/${encodeURIComponent(postId)}`;
 
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -106,13 +109,15 @@ ${brandIconLinkTags(publicApp, escAttr)}
 <meta property="og:type" content="article" />
 <meta property="og:title" content="${escAttr(title)}" />
 <meta property="og:description" content="${escAttr(description)}" />
-<meta property="og:image" content="${escAttr(ogImage)}" />
+<meta property="og:image" content="${escAttr(ogImageBytesUrl)}" />
+<meta property="og:image:secure_url" content="${escAttr(ogImageBytesUrl)}" />
+<meta property="og:image:alt" content="${escAttr(authorName)}" />
 <meta property="og:url" content="${escAttr(canonical)}" />
 <meta property="og:site_name" content="Chamô" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="${escAttr(title)}" />
 <meta name="twitter:description" content="${escAttr(description)}" />
-<meta name="twitter:image" content="${escAttr(ogImage)}" />
+<meta name="twitter:image" content="${escAttr(ogImageBytesUrl)}" />
 <link rel="canonical" href="${escAttr(canonical)}" />
 <meta http-equiv="refresh" content="0;url=${escAttr(appOpen)}" />
 <script>location.replace(${JSON.stringify(appOpen)});</script>

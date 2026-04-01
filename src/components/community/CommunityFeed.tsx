@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Heart,
@@ -52,7 +52,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { getCommunityPostShareUrl } from "@/lib/publicAppUrl";
+import { getCommunityPostInAppPath, getCommunityPostShareUrl } from "@/lib/publicAppUrl";
 import {
   fetchSeguindoFeedAuthorUserIds,
   fetchMutualProfessionalPeerUserIds,
@@ -327,12 +327,19 @@ function totalReactionCount(sum: Partial<Record<ReactionType, number>> | undefin
 export default function CommunityFeed({
   variant,
   highlightPostId,
+  singlePostId,
+  showBackToCommunity,
 }: {
   variant: CommunityFeedVariant;
-  /** Destaca e abre comentários deste post (ex.: deep link da notificação). */
+  /** Destaca este post no feed (scroll); não abre mais o painel de comentários automaticamente. */
   highlightPostId?: string | null;
+  /** Apenas um post — rota dedicada `/p/comunidade/:id`. */
+  singlePostId?: string | null;
+  /** Mostrar botão grande para voltar ao feed da comunidade na Home. */
+  showBackToCommunity?: boolean;
 }) {
   const embedded = variant === "embedded";
+  const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { sponsor: linkedSponsorForPost } = useLinkedSponsor(user?.id);
   const { getSection } = useHomeLayout();
@@ -410,6 +417,8 @@ export default function CommunityFeed({
   }, [posts]);
 
   const communityLink = "/home?feed=comunidade";
+  const singlePostIdTrim = (singlePostId ?? "").trim();
+  const isSinglePostMode = singlePostIdTrim.length > 0;
 
   const canPost =
     profile?.user_type === "professional" ||
@@ -586,8 +595,67 @@ export default function CommunityFeed({
     [user, applyHydrationForPosts],
   );
 
+  const loadSinglePostFeed = useCallback(async () => {
+    if (!user) {
+      setFavoritedAuthorUserIds(new Set());
+      setHiddenPostIds(new Set());
+      setPosts([]);
+      postsRef.current = [];
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const seguindoUids = await fetchSeguindoFeedAuthorUserIds(supabase, user.id);
+      setFavoritedAuthorUserIds(new Set(seguindoUids));
+
+      const { data: hideRows } = await supabase
+        .from("community_comment_user_hides" as any)
+        .select("comment_id")
+        .eq("user_id", user.id);
+      setHiddenCommentIds(new Set((hideRows || []).map((h: any) => h.comment_id as string)));
+      const { data: postHideRows } = await supabase
+        .from("community_post_user_hides" as any)
+        .select("post_id")
+        .eq("user_id", user.id);
+      setHiddenPostIds(new Set((postHideRows || []).map((h: any) => h.post_id as string)));
+
+      const { data: row, error: pe } = await supabase
+        .from("community_posts" as any)
+        .select("id, author_id, body, image_url, video_url, audience, created_at")
+        .eq("id", singlePostIdTrim)
+        .maybeSingle();
+      if (pe || !row) {
+        toast({
+          title: "Publicação não encontrada",
+          description: "Pode ter sido removida ou não tens acesso.",
+          variant: "destructive",
+        });
+        setPosts([]);
+        postsRef.current = [];
+        setHasMoreFeed(false);
+        return;
+      }
+      const pr = row as PostRow;
+      setPosts([pr]);
+      postsRef.current = [pr];
+      feedDbNextOffsetRef.current = 1;
+      setHasMoreFeed(false);
+      await applyHydrationForPosts([pr]);
+    } catch (e: any) {
+      console.error(e);
+      toast({
+        title: "Erro ao carregar publicação",
+        description: e.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [user, singlePostIdTrim, applyHydrationForPosts]);
+
   const loadMoreFeed = useCallback(async () => {
-    if (!user || loadingMoreFeed || loading || !hasMoreFeed) return;
+    if (isSinglePostMode || !user || loadingMoreFeed || loading || !hasMoreFeed) return;
     setLoadingMoreFeed(true);
     try {
       const start = feedDbNextOffsetRef.current;
@@ -626,14 +694,19 @@ export default function CommunityFeed({
     } finally {
       setLoadingMoreFeed(false);
     }
-  }, [user, loadingMoreFeed, loading, hasMoreFeed, applyHydrationForPosts]);
+  }, [user, loadingMoreFeed, loading, hasMoreFeed, isSinglePostMode, applyHydrationForPosts]);
 
   useEffect(() => {
-    loadFeed();
-  }, [loadFeed]);
+    if (isSinglePostMode) {
+      void loadSinglePostFeed();
+    } else {
+      void loadFeed();
+    }
+  }, [isSinglePostMode, loadFeed, loadSinglePostFeed]);
 
   /** Deep link / suporte: post fora do primeiro lote carregado — carrega o post pelo id. */
   useEffect(() => {
+    if (isSinglePostMode) return;
     if (!user || !highlightPostId) return;
     if (loading) return;
     if (posts.some((p) => p.id === highlightPostId)) return;
@@ -750,7 +823,7 @@ export default function CommunityFeed({
     return () => {
       cancelled = true;
     };
-  }, [user, highlightPostId, loading, posts]);
+  }, [user, highlightPostId, loading, posts, isSinglePostMode]);
 
   useEffect(() => {
     if (!composerImageFile) {
@@ -818,7 +891,7 @@ export default function CommunityFeed({
 
   useEffect(() => {
     const el = loadMoreSentinelRef.current;
-    if (!el || !user || feedScope === "hidden" || !hasMoreFeed || loading) return;
+    if (isSinglePostMode || !el || !user || feedScope === "hidden" || !hasMoreFeed || loading) return;
     const ob = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && !loadingMoreFeed) void loadMoreFeed();
@@ -827,7 +900,7 @@ export default function CommunityFeed({
     );
     ob.observe(el);
     return () => ob.disconnect();
-  }, [user, feedScope, hasMoreFeed, loading, loadingMoreFeed, loadMoreFeed]);
+  }, [user, feedScope, hasMoreFeed, loading, loadingMoreFeed, loadMoreFeed, isSinglePostMode]);
 
   const reactionSummary = useMemo(() => {
     const m: Record<string, Partial<Record<ReactionType, number>>> = {};
@@ -960,7 +1033,8 @@ export default function CommunityFeed({
       setComposerImageFile(null);
       setComposerModalOpen(false);
       toast({ title: "Publicado na Comunidade" });
-      await loadFeed({ silent: true });
+      if (isSinglePostMode) await loadSinglePostFeed();
+      else await loadFeed({ silent: true });
     } catch (e: any) {
       toast({ title: "Erro ao publicar", description: e.message, variant: "destructive" });
     } finally {
@@ -1279,6 +1353,7 @@ export default function CommunityFeed({
 
   const highlightDoneRef = useRef<string | null>(null);
   useEffect(() => {
+    if (isSinglePostMode) return;
     if (!highlightPostId) {
       highlightDoneRef.current = null;
       return;
@@ -1292,10 +1367,8 @@ export default function CommunityFeed({
         behavior: "smooth",
         block: "center",
       });
-      const hp = posts.find((p) => p.id === highlightPostId);
-      if (hp) setCommentsSheetPost(hp);
     });
-  }, [highlightPostId, loading, posts]);
+  }, [highlightPostId, loading, posts, isSinglePostMode]);
 
   useEffect(() => {
     if (!sharePost || !user) {
@@ -1403,7 +1476,7 @@ export default function CommunityFeed({
         message: "enviou uma publicação da Comunidade para você",
         type: "community",
         read: false,
-        link: `/messages/${threadId}`,
+        link: getCommunityPostInAppPath(sharePost.id),
         image_url: notifImage,
       });
       toast({ title: "Enviado" });
@@ -1736,7 +1809,7 @@ export default function CommunityFeed({
           "min-h-[60vh] rounded-2xl lg:rounded-3xl lg:shadow-xl lg:ring-1 lg:ring-black/[0.06] dark:lg:ring-white/10 lg:overflow-hidden",
       )}
     >
-      {!embedded && (
+      {!embedded && !isSinglePostMode && (
         <div className="flex items-center gap-3 mb-6">
           <Link
             to="/pro"
@@ -1754,6 +1827,19 @@ export default function CommunityFeed({
         </div>
       )}
 
+      {isSinglePostMode && showBackToCommunity && (
+        <div className="mb-5">
+          <Button
+            type="button"
+            className="w-full min-h-[56px] rounded-2xl text-base font-bold shadow-md"
+            onClick={() => navigate("/home?feed=comunidade")}
+          >
+            <ArrowLeft className="w-5 h-5 mr-2 shrink-0" />
+            Voltar para a comunidade
+          </Button>
+        </div>
+      )}
+
       {embedded && (
         <div className="mb-5 lg:mb-6 px-0.5 lg:px-1">
           <p className="text-[14px] lg:text-xl text-zinc-800 dark:text-zinc-100 leading-snug font-semibold tracking-tight">
@@ -1765,7 +1851,7 @@ export default function CommunityFeed({
         </div>
       )}
 
-      {user && (
+      {user && !isSinglePostMode && (
         <div className="mb-5 -mx-0.5">
           <SponsorCarousel
             key="community-sponsors"
@@ -1775,7 +1861,7 @@ export default function CommunityFeed({
         </div>
       )}
 
-      {user && (
+      {user && !isSinglePostMode && (
         <div className="flex flex-wrap items-center gap-2 lg:gap-3 mb-5 lg:mb-6 w-full">
           <div className="flex flex-wrap gap-2.5 lg:gap-3 flex-1 min-w-0 items-center">
             <button
@@ -1846,7 +1932,7 @@ export default function CommunityFeed({
         </div>
       ) : null}
 
-      {canPost && (
+      {canPost && !isSinglePostMode && (
         <>
           <div
             className={cn(
@@ -2342,10 +2428,10 @@ export default function CommunityFeed({
         </div>
       )}
 
-      {user && !loading && feedScope !== "hidden" && hasMoreFeed ? (
+      {user && !isSinglePostMode && !loading && feedScope !== "hidden" && hasMoreFeed ? (
         <div ref={loadMoreSentinelRef} className="h-10 w-full shrink-0" aria-hidden />
       ) : null}
-      {user && !loading && feedScope !== "hidden" && loadingMoreFeed ? (
+      {user && !isSinglePostMode && !loading && feedScope !== "hidden" && loadingMoreFeed ? (
         <div className="flex justify-center py-4">
           <Loader2 className="w-7 h-7 animate-spin text-primary" />
         </div>

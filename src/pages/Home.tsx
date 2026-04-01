@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useRefreshAtKey, useIsRefreshing } from "@/contexts/RefreshContext";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, ChevronRight, Crown, Sparkles, Building2, Star, Megaphone } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -117,9 +117,9 @@ function HomeHeavyPlaceholder({ kind, title }: { kind: "sponsors" | "featured" |
 
 const Home = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const homeFeedComunidade = searchParams.get("feed") === "comunidade";
-  const communityHighlightPostId = searchParams.get("post");
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
   const { sponsor: linkedSponsor } = useLinkedSponsor(user?.id);
 
@@ -128,6 +128,14 @@ const Home = () => {
       setSearchParams({}, { replace: true });
     }
   }, [user, homeFeedComunidade, setSearchParams]);
+
+  /** Links antigos `?feed=comunidade&post=` → página dedicada do post (notificações novas já vêm com `/p/comunidade/:id`). */
+  useEffect(() => {
+    if (!user?.id) return;
+    const post = searchParams.get("post")?.trim();
+    if (searchParams.get("feed") !== "comunidade" || !post) return;
+    navigate(`/p/comunidade/${encodeURIComponent(post)}`, { replace: true });
+  }, [user?.id, searchParams, navigate]);
 
   useEffect(() => {
     if (!user?.id || !linkedSponsor) return;
@@ -668,7 +676,7 @@ const Home = () => {
         <HomeSkeleton />
       ) : user && homeFeedComunidade ? (
         <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto lg:px-4 xl:px-6 2xl:px-8 lg:py-3">
-          <CommunityFeed variant="embedded" highlightPostId={communityHighlightPostId} />
+          <CommunityFeed variant="embedded" />
         </div>
       ) : (
         <div

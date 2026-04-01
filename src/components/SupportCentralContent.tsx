@@ -23,6 +23,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { isSupportBotMessage } from "@/lib/supportBot";
 import { parseAnySupportAttachment } from "@/lib/supportMessageAttachments";
 import CommunityReportedPostPreview from "@/components/community/CommunityReportedPostPreview";
+import { getCommunityPostInAppPath } from "@/lib/publicAppUrl";
 
 export interface TicketThread {
   id: string;
@@ -353,7 +354,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
     const link =
       opts.kind === "post" || opts.kind === "comment"
         ? opts.postId
-          ? `/home?feed=comunidade&post=${opts.postId}`
+          ? getCommunityPostInAppPath(opts.postId)
           : "/home?feed=comunidade"
         : "/messages";
     const msg =
@@ -963,7 +964,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                               <Eye className="w-4 h-4" /> Ver publicação
                             </button>
                             <Link
-                              to={`/home?feed=comunidade&post=${r.post_id}`}
+                              to={getCommunityPostInAppPath(r.post_id)}
                               className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
                             >
                               Abrir na Comunidade
@@ -1061,7 +1062,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                             <Eye className="w-4 h-4" /> Ver publicação
                           </button>
                           <Link
-                            to={`/home?feed=comunidade&post=${r.post_id}`}
+                            to={getCommunityPostInAppPath(r.post_id)}
                             className="flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors text-center"
                           >
                             Abrir na Comunidade

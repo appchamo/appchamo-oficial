@@ -15,7 +15,6 @@ import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunct
 import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ticket, MailCheck, Mail, Home } from "lucide-react";
-import StepAccountType from "@/components/signup/StepAccountType";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
@@ -98,7 +97,7 @@ function getSignupHardwareBackTarget(step: Step, accountType: AccountType): Step
     case "type":
       return "method-choice";
     case "basic":
-      return "type";
+      return "method-choice";
     case "document-notice":
       return "basic";
     case "documents":
@@ -265,6 +264,12 @@ const Signup = () => {
 
         if (!currentSession?.user) {
           const ed = readEmailDraft();
+          if (ed && ed.step === "type") {
+            setAccountType("client");
+            setBasicData(ed.basicData);
+            setStep("basic");
+            return;
+          }
           if (ed && ed.step !== "method-choice" && ed.step !== "type") {
             setAccountType(ed.accountType);
             setBasicData(ed.basicData);
@@ -335,6 +340,13 @@ const Signup = () => {
           };
 
           const draft = readOAuthDraft(u.id);
+          if (draft && draft.step === "type") {
+            setCreatedUserId(u.id);
+            setAccountType("client");
+            setBasicData(draft.basicData ?? oauthDefaults);
+            setStep("basic");
+            return;
+          }
           if (draft && draft.step !== "method-choice" && draft.step !== "type") {
             const nextStep = resolveRestoredStep(draft.accountType, draft.step, draft.hadDocuments);
             setCreatedUserId(u.id);
@@ -351,8 +363,9 @@ const Signup = () => {
           }
 
           setCreatedUserId(u.id);
+          setAccountType("client");
           setBasicData(oauthDefaults);
-          setStep("type");
+          setStep("basic");
         } catch (err) {
           console.error("Erro na Blitz Social:", err);
         } finally {
@@ -369,7 +382,7 @@ const Signup = () => {
     };
   }, [navigate]);
 
-  // Quando volta do OAuth no mobile: sessão chega depois; avança para "Escolha o tipo" (type)
+  // Quando volta do OAuth no mobile: sessão chega depois; avança para dados básicos (cliente)
   useEffect(() => {
     if (authLoading || !session?.user) return;
     if (localStorage.getItem("manual_login_intent") === "true") return;
@@ -406,6 +419,14 @@ const Signup = () => {
     };
 
     const draft = readOAuthDraft(session.user.id);
+    if (draft && draft.step === "type") {
+      didAdvanceFromOAuth.current = true;
+      setCreatedUserId(session.user.id);
+      setAccountType("client");
+      setBasicData(draft.basicData ?? oauthDefaults);
+      setStep("basic");
+      return;
+    }
     if (draft && draft.step !== "method-choice" && draft.step !== "type") {
       didAdvanceFromOAuth.current = true;
       const nextStep = resolveRestoredStep(draft.accountType, draft.step, draft.hadDocuments);
@@ -424,13 +445,14 @@ const Signup = () => {
 
     didAdvanceFromOAuth.current = true;
     setCreatedUserId(session.user.id);
+    setAccountType("client");
     setBasicData(oauthDefaults);
-    setStep("type");
+    setStep("basic");
   }, [session, profile, authLoading, step, navigate]);
 
   // Mantém tipo de conta + passo no sessionStorage (evita voltar a "cliente" após remount/reload).
   useEffect(() => {
-    if (step === "method-choice" || step === "type") return;
+    if (step === "method-choice") return;
     try {
       const hadDocuments = docFiles.length > 0;
       if (createdUserId) {
@@ -542,15 +564,12 @@ const Signup = () => {
         addressState: "",
         addressCountry: "Brasil",
       } as any));
-      // Vai para o fluxo de cadastro normalmente
-      if (step === "method-choice") setStep("type");
+      if (step === "method-choice") {
+        setAccountType("client");
+        setStep("basic");
+      }
     } catch (_) {}
   }, []);
-
-  const handleTypeSelect = (type: AccountType) => {
-    setAccountType(type);
-    setStep("basic");
-  };
 
   const handleBasicNext = useCallback(
     async (data: BasicData) => {
@@ -596,9 +615,8 @@ const Signup = () => {
     [accountType, createdUserId, navigate],
   );
 
-  /** Sempre volta para Cliente / Profissional (não para Google/Apple/e-mail após OAuth). */
   const handleBasicBack = useCallback(() => {
-    setStep("type");
+    setStep("method-choice");
   }, []);
 
   const handleDocumentsNext = (files: File[]) => {
@@ -927,7 +945,14 @@ const Signup = () => {
                 <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Ou</span></div>
               </div>
 
-              <button onClick={() => setStep("type")} className="w-full flex items-center justify-center gap-3 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all shadow-md active:scale-95">
+              <button
+                type="button"
+                onClick={() => {
+                  setAccountType("client");
+                  setStep("basic");
+                }}
+                className="w-full flex items-center justify-center gap-3 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all shadow-md active:scale-95"
+              >
                 <Mail className="w-5 h-5" />
                 Continuar com e-mail
               </button>
@@ -946,7 +971,6 @@ const Signup = () => {
         </div>
       )}
 
-      {!loading && step === "type" && <StepAccountType onSelect={handleTypeSelect} />}
       {!loading && step === "basic" && (
         <StepBasicData
           key={`basic-${accountType}-${createdUserId ?? "new"}`}

@@ -8,13 +8,81 @@ import { resolveSealFetchOrigins } from "../api-utils/resolveSealAssetOrigin";
 
 export const config = { runtime: "edge" };
 
-function mimeFromPath(path: string): string {
+function mimeFromPath(pathOrUrl: string): string {
+  let path = pathOrUrl;
+  try {
+    if (/^https?:\/\//i.test(pathOrUrl)) path = new URL(pathOrUrl).pathname;
+  } catch {
+    /* manter */
+  }
   const lower = path.toLowerCase();
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
   if (lower.endsWith(".gif")) return "image/gif";
   if (lower.endsWith(".webp")) return "image/webp";
   return "application/octet-stream";
+}
+
+/** Meta/WhatsApp usam este UA ao ir buscar og:image; Storage às vezes devolve octet-stream — inferir pelo path. */
+const OG_IMAGE_FETCH_UA =
+  "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
+
+function normalizeImageContentType(urlOrPath: string, headerCt: string | null): string {
+  const inferred = mimeFromPath(urlOrPath);
+  const h = (headerCt || "").split(";")[0].trim().toLowerCase();
+  if (h.startsWith("image/") && h !== "image/octet-stream") return h;
+  if (inferred.startsWith("image/") && inferred !== "application/octet-stream") return inferred;
+  return "image/jpeg";
+}
+
+/** Transformação Supabase (melhor para pré-visualização que object/public em alguns casos). */
+function supabaseRenderImageUrl(publicObjectUrl: string): string | null {
+  try {
+    const u = new URL(publicObjectUrl);
+    if (!/\.supabase\.co$/i.test(u.hostname)) return null;
+    const marker = "/storage/v1/object/public/";
+    const i = u.pathname.indexOf(marker);
+    if (i === -1) return null;
+    const rest = u.pathname.slice(i + marker.length);
+    if (!rest) return null;
+    return `${u.origin}/storage/v1/render/image/public/${rest}?width=1200&height=1200&resize=contain&quality=86`;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchImageOverHttp(
+  imageUrl: string,
+  maxBytes: number,
+): Promise<{ buf: ArrayBuffer; ct: string } | null> {
+  const trimmed = imageUrl.trim();
+  if (!/^https:\/\//i.test(trimmed)) return null;
+
+  const tryUrls = [trimmed];
+  const render = supabaseRenderImageUrl(trimmed);
+  if (render && render !== trimmed) tryUrls.push(render);
+
+  for (const u of tryUrls) {
+    try {
+      const imgRes = await fetch(u, {
+        method: "GET",
+        headers: {
+          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+          "User-Agent": OG_IMAGE_FETCH_UA,
+        },
+        redirect: "follow",
+      });
+      if (!imgRes.ok) continue;
+      const buf = await imgRes.arrayBuffer();
+      if (buf.byteLength === 0 || buf.byteLength > maxBytes) continue;
+      const ct = normalizeImageContentType(u, imgRes.headers.get("content-type"));
+      if (!ct.startsWith("image/")) continue;
+      return { buf, ct };
+    } catch {
+      /* próximo URL */
+    }
+  }
+  return null;
 }
 
 const FALLBACK_SEAL_PNG = Uint8Array.from(
@@ -99,24 +167,9 @@ async function downloadStorageImage(
   }
 
   if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const imgRes = await fetch(trimmed, {
-        method: "GET",
-        headers: {
-          Accept: "image/*,*/*;q=0.8",
-          "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-        },
-        redirect: "follow",
-      });
-      if (!imgRes.ok) return null;
-      const ct = imgRes.headers.get("content-type") || "application/octet-stream";
-      if (!ct.startsWith("image/")) return null;
-      const buf = await imgRes.arrayBuffer();
-      if (buf.byteLength > maxBytes) return null;
-      return { buf, ct };
-    } catch {
-      return null;
-    }
+    const got = await fetchImageOverHttp(trimmed, maxBytes);
+    if (got) return got;
+    return null;
   }
 
   return null;
@@ -164,9 +217,20 @@ export default async function handler(req: Request): Promise<Response> {
   const avatarRef = ((prof as { avatar_url?: string | null } | null)?.avatar_url || "").trim();
   const postImageRef = (row.image_url || "").trim();
 
-  /** Prioridade: mídia do post (pré-visualização tipo LinkedIn); senão avatar do autor. */
-  for (const ref of [postImageRef, avatarRef]) {
-    const got = await downloadStorageImage(supabase, ref, maxOgImageBytes);
+  /** Post: HTTP primeiro (bucket público + UA da Meta); depois SDK Storage (signed paths, etc.). */
+  if (postImageRef) {
+    const viaHttp = await fetchImageOverHttp(postImageRef, maxOgImageBytes);
+    if (viaHttp) {
+      return imageResponse(req, viaHttp.buf, viaHttp.ct, "public, max-age=86400, s-maxage=86400");
+    }
+    const viaSdk = await downloadStorageImage(supabase, postImageRef, maxOgImageBytes);
+    if (viaSdk) {
+      return imageResponse(req, viaSdk.buf, viaSdk.ct, "public, max-age=86400, s-maxage=86400");
+    }
+  }
+
+  if (avatarRef) {
+    const got = await downloadStorageImage(supabase, avatarRef, maxOgImageBytes);
     if (got) {
       return imageResponse(req, got.buf, got.ct, "public, max-age=86400, s-maxage=86400");
     }

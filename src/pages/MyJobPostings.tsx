@@ -106,6 +106,14 @@ const MyJobPostings = () => {
     setLoading(false);
   };
 
+  const notifyJobPostingsChanged = () => {
+    try {
+      window.dispatchEvent(new Event("chamo-job-postings-changed"));
+    } catch {
+      void 0;
+    }
+  };
+
   useEffect(() => {
     void fetchJobs();
   }, [user?.id]);
@@ -231,6 +239,7 @@ const MyJobPostings = () => {
       }
 
       toast({ title: "Vaga publicada!" });
+      notifyJobPostingsChanged();
       setCreateOpen(false);
       setForm({ title: "", description: "", cep: "", location: "", city: "", state: "", salary_range: "", requirements: "" });
       fetchJobs();
@@ -241,12 +250,14 @@ const MyJobPostings = () => {
   const handleDelete = async (jobId: string) => {
     await supabase.from("job_postings").delete().eq("id", jobId);
     toast({ title: "Vaga removida." });
+    notifyJobPostingsChanged();
     fetchJobs();
   };
 
   const handleToggle = async (jobId: string, active: boolean) => {
     await supabase.from("job_postings").update({ active: !active }).eq("id", jobId);
     toast({ title: active ? "Vaga pausada." : "Vaga ativada." });
+    notifyJobPostingsChanged();
     fetchJobs();
   };
 

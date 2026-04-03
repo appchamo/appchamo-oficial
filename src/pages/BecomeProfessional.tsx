@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FileText, ShieldCheck, Clock, Star, ChevronRight, User, Building2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -34,6 +34,20 @@ const BecomeProfessional = () => {
   const profileSubmitLockRef = useRef(false);
 
   const isEarlyAccess = new Date() < EARLY_ACCESS_CUTOFF;
+
+  const persistAvatarToProfile = useCallback(
+    async (publicUrl: string) => {
+      const trimmed = publicUrl?.trim();
+      if (!user?.id || !trimmed) return;
+      const { error } = await supabase.from("profiles").update({ avatar_url: trimmed }).eq("user_id", user.id);
+      if (error) {
+        console.warn("[BecomeProfessional] persist avatar:", error);
+        return;
+      }
+      await refreshProfile();
+    },
+    [user?.id, refreshProfile],
+  );
 
   useEffect(() => {
     if (profile && profile.user_type !== "client") {
@@ -113,9 +127,6 @@ const BecomeProfessional = () => {
     services?: string[];
     bio?: string;
   }) => {
-    console.log("🚀 HANDLE PROFILE NEXT EXECUTANDO");
-    console.log("📦 ARQUIVOS PARA UPLOAD:", docFiles);
-
     if (!user) return;
     if (profileSubmitLockRef.current) return;
     profileSubmitLockRef.current = true;
@@ -123,11 +134,30 @@ const BecomeProfessional = () => {
     setLoading(true);
 
     try {
+      const avatarFinal = profileData.avatarUrl?.trim() || profile?.avatar_url || null;
+      if (!avatarFinal) {
+        toast({
+          title: "Foto de perfil obrigatória",
+          description: "Adicione uma foto de perfil antes de finalizar.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (docFiles.length === 0) {
+        toast({
+          title: "Documentos obrigatórios",
+          description: "Volte à etapa de documentos e envie todos os arquivos solicitados.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const { error: profileError } = await supabase
         .from("profiles")
         .update({
           user_type: "professional",
-          avatar_url: profileData.avatarUrl || profile?.avatar_url,
+          avatar_url: avatarFinal,
         })
         .eq("user_id", user.id);
 
@@ -164,66 +194,65 @@ const BecomeProfessional = () => {
 
       professionalId = upsertedPro?.id ?? professionalId;
 
-      if (professionalId && docFiles.length > 0) {
-        const accessToken = await getAccessTokenForEdgeFunctions();
-        if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
+      if (!professionalId) {
+        throw new Error("Não foi possível criar o registro profissional. Tente novamente.");
+      }
 
-        const { data: staleRows } = await supabase
+      const accessToken = await getAccessTokenForEdgeFunctions();
+      if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
+
+      const { data: staleRows } = await supabase
           .from("professional_documents")
           .select("file_url")
           .eq("professional_id", professionalId)
           .eq("type", "identity")
           .eq("status", "pending");
 
-        const stalePaths = (staleRows ?? [])
-          .map((r) => r.file_url)
-          .filter(
-            (p): p is string =>
-              typeof p === "string" && p.length > 0 && !/^https?:\/\//i.test(p),
-          );
-        if (stalePaths.length > 0) {
-          await supabase.storage.from("uploads").remove(stalePaths);
+      const stalePaths = (staleRows ?? [])
+        .map((r) => r.file_url)
+        .filter(
+          (p): p is string =>
+            typeof p === "string" && p.length > 0 && !/^https?:\/\//i.test(p),
+        );
+      if (stalePaths.length > 0) {
+        await supabase.storage.from("uploads").remove(stalePaths);
+      }
+      await supabase
+        .from("professional_documents")
+        .delete()
+        .eq("professional_id", professionalId)
+        .eq("type", "identity")
+        .eq("status", "pending");
+
+      for (const file of docFiles) {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("userId", user.id);
+
+        const uploadUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-document`;
+
+        const uploadRes = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: formData,
+        });
+
+        const uploadResult = await uploadRes.json();
+
+        if (!uploadRes.ok || !uploadResult.path) {
+          throw new Error(uploadResult.error || `Falha ao enviar documento (${uploadRes.status}). Tente novamente.`);
         }
-        await supabase
+
+        const { error: insertDocError } = await supabase
           .from("professional_documents")
-          .delete()
-          .eq("professional_id", professionalId)
-          .eq("type", "identity")
-          .eq("status", "pending");
-
-        for (const file of docFiles) {
-          // Upload via Edge Function com service_role — garante que o arquivo vai ao storage
-          const formData = new FormData();
-          formData.append("file", file);
-          formData.append("userId", user.id);
-
-          const uploadUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-document`;
-          console.log("📤 Enviando para Edge Function:", uploadUrl, "file:", file.name, "size:", file.size, "type:", file.type);
-
-          const uploadRes = await fetch(uploadUrl, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${accessToken}` },
-            body: formData,
+          .insert({
+            professional_id: professionalId,
+            file_url: uploadResult.path,
+            type: "identity",
+            status: "pending",
           });
 
-          const uploadResult = await uploadRes.json();
-          console.log("📝 UPLOAD RESULT status:", uploadRes.status, "body:", JSON.stringify(uploadResult));
-
-          if (!uploadRes.ok || !uploadResult.path) {
-            throw new Error(uploadResult.error || `Falha ao enviar documento (${uploadRes.status}). Tente novamente.`);
-          }
-
-          const { error: insertDocError } = await supabase
-            .from("professional_documents")
-            .insert({
-              professional_id: professionalId,
-              file_url: uploadResult.path,
-              type: "identity",
-              status: "pending",
-            });
-
-          if (insertDocError) throw insertDocError;
-        }
+        if (insertDocError) throw insertDocError;
       }
 
       // ──────────────────────────────────────────────────────────────
@@ -259,8 +288,10 @@ const BecomeProfessional = () => {
         // 4. Marca que modal de early access deve ser mostrado após tutorial
         localStorage.setItem(`early_access_modal_${user.id}`, "pending");
       } else if (professionalId) {
-        // Sem early access: salva doc_type normalmente
         await supabase.from("professionals").update({ doc_type: docType } as any).eq("id", professionalId);
+        if (docType === "cnpj") {
+          await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", user.id);
+        }
       }
 
       await refreshProfile();
@@ -290,7 +321,7 @@ const BecomeProfessional = () => {
 
       navigate("/home");
     } catch (err: any) {
-      console.error("❌ ERRO:", err);
+      console.error("[BecomeProfessional] submit:", err);
 
       toast({
         title: "Erro",
@@ -569,7 +600,7 @@ const BecomeProfessional = () => {
 
       {step === "documents" && (
         <StepDocuments
-          documentType="cpf"
+          documentType={docType}
           onNext={handleDocumentsNext}
           onBack={() => setStep("doc-notice")}
         />
@@ -578,6 +609,8 @@ const BecomeProfessional = () => {
       {step === "profile" && (
         <StepProfile
           accountType="professional"
+          initialAvatarUrl={profile?.avatar_url}
+          onAvatarUploaded={(url) => void persistAvatarToProfile(url)}
           onNext={handleProfileNext}
           onBack={() => setStep("documents")}
         />

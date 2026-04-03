@@ -46,28 +46,44 @@ const StepAccountType = ({ onSelect }: Props) => {
               icon: ScanSearch,
               label: "Cliente",
               desc: "Contrate profissionais",
+              disabled: false,
             },
             {
               type: "professional" as const,
               icon: IdCard,
               label: "Profissional",
               desc: "Ofereça seus serviços",
+              disabled: true,
             },
           ].map((opt) => (
             <button
               key={opt.type}
               type="button"
-              onClick={() => onSelect(opt.type)}
-              className="group flex items-center gap-4 bg-card border border-border/80 rounded-2xl p-5 hover:border-primary/35 hover:shadow-md transition-all text-left"
+              disabled={opt.disabled}
+              onClick={() => !opt.disabled && onSelect(opt.type)}
+              className={`group flex items-center gap-4 bg-card border border-border/80 rounded-2xl p-5 text-left transition-all ${
+                opt.disabled
+                  ? "opacity-55 cursor-not-allowed border-dashed"
+                  : "hover:border-primary/35 hover:shadow-md"
+              }`}
             >
               <div
-                className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/[0.14] via-primary/[0.07] to-transparent ring-1 ring-primary/15 shadow-sm transition-transform duration-200 group-hover:scale-[1.02] group-hover:ring-primary/25"
+                className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/[0.14] via-primary/[0.07] to-transparent ring-1 ring-primary/15 shadow-sm ${
+                  opt.disabled ? "" : "transition-transform duration-200 group-hover:scale-[1.02] group-hover:ring-primary/25"
+                }`}
                 aria-hidden
               >
                 <opt.icon className="h-7 w-7 text-primary" strokeWidth={1.5} />
               </div>
-              <div>
-                <p className="font-semibold text-foreground">{opt.label}</p>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-foreground">{opt.label}</p>
+                  {opt.disabled ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
+                      Em breve
+                    </span>
+                  ) : null}
+                </div>
                 <p className="text-xs text-muted-foreground">{opt.desc}</p>
               </div>
             </button>

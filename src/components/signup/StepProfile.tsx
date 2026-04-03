@@ -19,6 +19,10 @@ interface Props {
   onNext: (data: StepProfileData) => void;
   onBack: () => void;
   onExitToLogin?: () => void | Promise<void>;
+  /** Pré-preenche a foto (ex.: avatar já salvo no perfil do cliente). */
+  initialAvatarUrl?: string | null;
+  /** Chamado após upload bem-sucedido da foto (URL público no storage). */
+  onAvatarUploaded?: (publicUrl: string) => void;
 }
 
 interface Category {
@@ -32,7 +36,7 @@ interface Profession {
   category_id: string;
 }
 
-const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
+const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatarUrl, onAvatarUploaded }: Props) => {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
   const [professions, setProfessions] = useState<Profession[]>([]);
@@ -52,6 +56,12 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
       });
     }
   }, [accountType]);
+
+  useEffect(() => {
+    const u = initialAvatarUrl?.trim();
+    if (!u) return;
+    setAvatarUrl((prev) => (prev.trim() ? prev : u));
+  }, [initialAvatarUrl]);
 
   const filteredProfessions = professions.filter(p => p.category_id === categoryId);
 
@@ -126,6 +136,7 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin }: Props) => {
                   onUpload={(url) => {
                     setAvatarUrl(url);
                     setAvatarError(false);
+                    onAvatarUploaded?.(url);
                   }}
                   aspect={1}
                   shape="round"

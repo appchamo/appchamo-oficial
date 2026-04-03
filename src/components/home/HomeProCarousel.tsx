@@ -144,6 +144,7 @@ export default function HomeProCarousel({
     if (!professionalId) return;
     let cancelled = false;
     (async () => {
+      await supabase.rpc("try_award_my_call_seals");
       const { data, error } = await supabase.rpc("get_my_seal_missions");
       if (cancelled || error) {
         if (error) console.warn("get_my_seal_missions:", error.message);

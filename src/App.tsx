@@ -46,6 +46,10 @@ const MyJobPostings = lazy(() => import("./pages/MyJobPostings"));
 const MyCatalog = lazy(() => import("./pages/MyCatalog"));
 const MyServices = lazy(() => import("./pages/MyServices"));
 const ClientRequests = lazy(() => import("./pages/ClientRequests"));
+const SolicitarServico = lazy(() => import("./pages/SolicitarServico"));
+const ClientOpenRequests = lazy(() => import("./pages/ClientOpenRequests"));
+const ClientOpenRequestDetail = lazy(() => import("./pages/ClientOpenRequestDetail"));
+const ProOpenRequests = lazy(() => import("./pages/ProOpenRequests"));
 const ClientDashboard = lazy(() => import("./pages/ClientDashboard"));
 const ProfessionalDashboard = lazy(() => import("./pages/ProfessionalDashboard"));
 const ProfessionalFinancial = lazy(() => import("./pages/ProfessionalFinancial"));
@@ -545,6 +549,10 @@ const AppContent = () => {
         <Route path="/client" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
         <Route path="/client/requests" element={<ProtectedRoute><ClientRequests /></ProtectedRoute>} />
+        <Route path="/solicitar-servico" element={<ProtectedRoute><SolicitarServico /></ProtectedRoute>} />
+        <Route path="/client/pedidos-abertos" element={<ProtectedRoute><ClientOpenRequests /></ProtectedRoute>} />
+        <Route path="/client/pedidos-abertos/:id" element={<ProtectedRoute><ClientOpenRequestDetail /></ProtectedRoute>} />
+        <Route path="/pro/pedidos-abertos" element={<ProtectedRoute><ProOpenRequests /></ProtectedRoute>} />
         <Route path="/pro" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro-dashboard" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro/financeiro" element={<ProtectedRoute><ProfessionalFinancial /></ProtectedRoute>} />

@@ -579,6 +579,95 @@ export type Database = {
         }
         Relationships: []
       }
+      open_service_request_interests: {
+        Row: {
+          created_at: string
+          id: string
+          open_request_id: string
+          professional_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          open_request_id: string
+          professional_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          open_request_id?: string
+          professional_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "open_service_request_interests_open_request_id_fkey"
+            columns: ["open_request_id"]
+            isOneToOne: false
+            referencedRelation: "open_service_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "open_service_request_interests_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      open_service_requests: {
+        Row: {
+          category_id: string
+          city: string
+          client_id: string
+          created_at: string
+          description: string
+          id: string
+          max_professional_interests: number
+          neighborhood: string | null
+          state: string
+          status: string
+          updated_at: string
+          urgency: string
+        }
+        Insert: {
+          category_id: string
+          city: string
+          client_id: string
+          created_at?: string
+          description: string
+          id?: string
+          max_professional_interests?: number
+          neighborhood?: string | null
+          state: string
+          status?: string
+          updated_at?: string
+          urgency: string
+        }
+        Update: {
+          category_id?: string
+          city?: string
+          client_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          max_professional_interests?: number
+          neighborhood?: string | null
+          state?: string
+          status?: string
+          updated_at?: string
+          urgency?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "open_service_requests_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       plans: {
         Row: {
           active: boolean
@@ -1816,6 +1905,10 @@ export type Database = {
           progress_ratio: number
           detail_label: string
         }[]
+      }
+      try_award_my_call_seals: {
+        Args: never
+        Returns: Json
       }
       get_transaction_summary: {
         Args: never

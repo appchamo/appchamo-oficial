@@ -1,6 +1,6 @@
 import AppLayout from "@/components/AppLayout";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
-import { Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText, Image, Wallet } from "lucide-react";
+import { Users, Briefcase, DollarSign, Pencil, CreditCard, ShoppingBag, FileText, Image, Wallet, Handshake } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -63,6 +63,7 @@ const ProfessionalDashboard = () => {
   ];
 
   const actions = [
+    { icon: Handshake, label: "Pedidos na região", description: "Clientes buscando serviço na sua UF", path: "/pro/pedidos-abertos" },
     { icon: Pencil, label: "Editar perfil", description: "Atualize suas informações", path: "/profile" },
     { icon: Wallet, label: "Carteira", description: "Saldo a receber e recebido", path: "/pro/financeiro" },
     { icon: DollarSign, label: "Extrato", description: "Relatório de faturamento", path: "/pro/financeiro?tab=transactions" },

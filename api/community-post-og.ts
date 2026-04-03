@@ -4,7 +4,6 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
-import { resolveOgApiOrigin } from "../api-utils/resolveOgApiOrigin";
 import { sealImageUrlForMeta } from "../api-utils/resolveSealAssetOrigin";
 import { brandIconLinkTags } from "../api-utils/brandIconLinkTags";
 
@@ -21,23 +20,12 @@ function escText(s: string) {
 }
 
 /**
- * URL em og:image: preferir ficheiro público do Supabase (qualquer variante de path) para o crawler ir direto à imagem.
- * Caso contrário o proxy com service role trata path relativo, bucket privado ou avatar.
+ * Sempre proxy no mesmo domínio do link partilhado (ex.: appchamo.com).
+ * URLs diretas em *.supabase.co falham muitas vezes na pré-visualização do WhatsApp/Meta.
  */
-function ogImageUrlForPost(
-  post: { image_url?: string | null },
-  imageOrigin: string,
-  postId: string,
-): string {
-  const raw = (post.image_url || "").trim();
-  if (
-    /^https:\/\//i.test(raw) &&
-    /\.supabase\.co\//i.test(raw) &&
-    /\/storage\/v1\//i.test(raw)
-  ) {
-    return raw;
-  }
-  return `${imageOrigin}/api/community-post-og-image?id=${encodeURIComponent(postId)}`;
+function ogImageProxyUrl(publicApp: string, postId: string): string {
+  const base = publicApp.replace(/\/$/, "");
+  return `${base}/api/community-post-og-image?id=${encodeURIComponent(postId)}`;
 }
 
 export const config = { runtime: "edge" };
@@ -82,8 +70,7 @@ ${brandIconLinkTags(publicApp, escAttr)}
   }
 
   const audience = (post as { audience?: string }).audience;
-  const imageOrigin = resolveOgApiOrigin(req);
-  const ogImageResolved = ogImageUrlForPost(post as { image_url?: string | null }, imageOrigin, postId);
+  const ogImageResolved = ogImageProxyUrl(publicApp, postId);
 
   if (audience === "followers") {
     const title = escAttr("Comunidade Chamô");

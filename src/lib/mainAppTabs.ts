@@ -42,6 +42,9 @@ const FULL_PAGE_SCROLL_EXACT = new Set([
 export function isFullPageScrollRoute(pathname: string): boolean {
   if (FULL_PAGE_SCROLL_EXACT.has(pathname)) return true;
   if (pathname.startsWith("/profile/settings")) return true;
+  if (pathname === "/solicitar-servico") return true;
+  if (pathname === "/client/pedidos-abertos" || pathname.startsWith("/client/pedidos-abertos/")) return true;
+  if (pathname === "/pro/pedidos-abertos") return true;
   if (pathname === "/profile/relatorios") return true;
   if (pathname === "/pro/comunidade") return true;
   if (/^\/p\/comunidade\/[^/]+$/.test(pathname)) return true;

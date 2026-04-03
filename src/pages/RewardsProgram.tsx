@@ -239,6 +239,7 @@ function RewardsMissionsTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    await supabase.rpc("try_award_my_call_seals");
     const { data, error } = await supabase.rpc("get_my_seal_missions");
     if (error) {
       toast({ title: "Não foi possível carregar as missões", description: error.message, variant: "destructive" });

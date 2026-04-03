@@ -1,4 +1,4 @@
-import { Star, BadgeCheck, MapPin } from "lucide-react";
+import { Star, BadgeCheck, MapPin, ChevronsUpDown, Check } from "lucide-react";
 import { sortPublicSealsForDisplay } from "@/components/seals/FeaturedSealStack";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
 import { Link } from "react-router-dom";
@@ -15,15 +15,27 @@ import { Capacitor } from "@capacitor/core";
 import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 import { cn } from "@/lib/utils";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
 /** Limite de linhas no PostgREST antes dos filtros em memória (verificado + região). */
 const FEATURED_FETCH_LIMIT = 320;
-/** Quantos cards no máximo no carrossel (antes era 10). */
-const FEATURED_SHOW_CAP = 36;
+/** Máximo de candidatos na região antes de escolher os 20 exibidos. */
+const FEATURED_POOL_MAX = 200;
+/** Quantos profissionais aparecem no carrossel (aleatório ou ordenado). */
+const FEATURED_DISPLAY_COUNT = 20;
 /** Se a lista regional vier menor que isto, funde profissionais de todo o mesmo estado. */
 const MIN_MERGE_STATE_POOL = 28;
+
+type FeaturedSortMode = "random" | "rating" | "name" | "verified";
+
+const FEATURED_SORT_OPTIONS: { value: FeaturedSortMode; label: string }[] = [
+  { value: "random", label: "Ordem aleatória" },
+  { value: "rating", label: "Avaliação" },
+  { value: "name", label: "Nome" },
+  { value: "verified", label: "Verificado" },
+];
 
 const featuredProSelect =
   "id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at";
@@ -53,6 +65,36 @@ interface Pro {
   created_at: string | null;
   /** Selos públicos (ordenados: destaque primeiro) */
   seals?: { icon_variant: string }[];
+}
+
+function shuffleArray<T>(items: T[]): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickFeaturedDisplay(pool: Pro[], mode: FeaturedSortMode): Pro[] {
+  if (pool.length === 0) return [];
+  const n = Math.min(FEATURED_DISPLAY_COUNT, pool.length);
+  switch (mode) {
+    case "random":
+      return shuffleArray(pool).slice(0, n);
+    case "rating":
+      return [...pool]
+        .sort((a, b) => b.rating - a.rating || b.total_services - a.total_services)
+        .slice(0, n);
+    case "name":
+      return [...pool].sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR", { sensitivity: "base" })).slice(0, n);
+    case "verified":
+      return [...pool]
+        .sort((a, b) => (a.verified === b.verified ? 0 : a.verified ? -1 : 1) || b.rating - a.rating)
+        .slice(0, n);
+    default:
+      return pool.slice(0, n);
+  }
 }
 
 interface FeaturedProfessionalsProps {
@@ -188,8 +230,12 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activePage, setActivePage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  /** Candidatos regionais (até FEATURED_POOL_MAX); ordenação final = pickFeaturedDisplay + selos. */
+  const [rawPool, setRawPool] = useState<Pro[]>([]);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
   const [prosLoaded, setProsLoaded] = useState(false);
+  const [sortMode, setSortMode] = useState<FeaturedSortMode>("random");
+  const [filterOpen, setFilterOpen] = useState(false);
 
   // Init from localStorage immediately — avoids waiting for DB before first render
   const cachedLoc = useMemo(() => getHomeLocationCache(), []);
@@ -223,6 +269,8 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     loadGenRef.current += 1;
     const gen = loadGenRef.current;
     setProsLoaded(false);
+    setRawPool([]);
+    setProfessionals([]);
 
     const timeoutMs = Capacitor.isNativePlatform() ? 12_000 : 9_000;
 
@@ -236,6 +284,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         setTimeout(() => loadPros(), 1_200);
       } else {
         hangRetryRef.current = 0;
+        setRawPool([]);
         setProfessionals([]);
         setProsLoaded(true);
       }
@@ -379,13 +428,14 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         hangRetryRef.current += 1;
         loadGenRef.current += 1;
         if (hangRetryRef.current <= 3) setTimeout(() => loadPros(), 1_200);
-        else { hangRetryRef.current = 0; setProfessionals([]); setProsLoaded(true); }
+        else { hangRetryRef.current = 0; setRawPool([]); setProfessionals([]); setProsLoaded(true); }
         return;
       }
 
       if (!finalPros || finalPros.length === 0) {
         diagLog("warn", "featured", "no pros after all fallbacks");
         hangRetryRef.current = 0;
+        setRawPool([]);
         setProfessionals([]);
         setProsLoaded(true);
         return;
@@ -464,7 +514,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           .filter((p) => p.verified && !inCombined.has(p.id))
           .sort((a, b) => b.rating - a.rating || b.total_services - a.total_services);
         for (const p of extraVerified) {
-          if (combined.length >= FEATURED_SHOW_CAP) break;
+          if (combined.length >= FEATURED_POOL_MAX) break;
           combined.push(p);
           inCombined.add(p.id);
         }
@@ -482,47 +532,16 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         return tA - tB;
       });
 
-      const top10Raw = combined.slice(0, FEATURED_SHOW_CAP);
-      const proIds = top10Raw.map((p) => p.id);
-      const sealsByPro = new Map<string, { icon_variant: string }[]>();
+      const poolCapped = combined.slice(0, FEATURED_POOL_MAX);
 
-      if (proIds.length > 0) {
-        try {
-          const { data: sealData } = await supabase.rpc("public_professional_seals" as any, { p_ids: proIds });
-          type SealRow = {
-            professional_id: string;
-            icon_variant: string;
-            sort_order: number;
-            is_special: boolean;
-          };
-          const rows = (sealData || []) as SealRow[];
-          const grouped = new Map<string, SealRow[]>();
-          for (const r of rows) {
-            const list = grouped.get(r.professional_id) || [];
-            list.push(r);
-            grouped.set(r.professional_id, list);
-          }
-          grouped.forEach((list, pid) => {
-            const sorted = sortPublicSealsForDisplay(list);
-            sealsByPro.set(
-              pid,
-              sorted.map((s) => ({ icon_variant: s.icon_variant }))
-            );
-          });
-        } catch (sealErr) {
-          diagLog("warn", "featured", "public_professional_seals failed", { e: String(sealErr) });
-        }
-      }
-
-      const top10 = top10Raw.map((p) => ({
-        ...p,
-        seals: sealsByPro.get(p.id) ?? [],
-      }));
-
-      diagLog("info", "featured", "pros computed", { total: finalPros.length, shown: top10.length, cap: FEATURED_SHOW_CAP });
+      diagLog("info", "featured", "pros pool ready", {
+        total: finalPros.length,
+        pool: poolCapped.length,
+        displayCap: FEATURED_DISPLAY_COUNT,
+      });
       if (loadGenRef.current !== gen) return;
       hangRetryRef.current = 0;
-      setProfessionals(top10);
+      setRawPool(poolCapped);
     } catch (e) {
       clearTimeout(watchdog);
       if (loadGenRef.current === gen) {
@@ -530,12 +549,76 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         hangRetryRef.current += 1;
         loadGenRef.current += 1;
         if (hangRetryRef.current <= 3) setTimeout(() => loadPros(), 1_200);
-        else { hangRetryRef.current = 0; setProfessionals([]); setProsLoaded(true); }
+        else { hangRetryRef.current = 0; setRawPool([]); setProfessionals([]); setProsLoaded(true); }
       }
     } finally {
       if (loadGenRef.current === gen) setProsLoaded(true);
     }
   }, [userCity, userState]);
+
+  const displayPicked = useMemo(() => pickFeaturedDisplay(rawPool, sortMode), [rawPool, sortMode]);
+
+  useEffect(() => {
+    const picked = displayPicked;
+    if (picked.length === 0) {
+      setProfessionals([]);
+      return;
+    }
+
+    let cancelled = false;
+    setProfessionals([]);
+
+    void (async () => {
+      const proIds = picked.map((p) => p.id);
+      const sealsByPro = new Map<string, { icon_variant: string }[]>();
+      try {
+        const { data: sealData } = await supabase.rpc("public_professional_seals" as any, { p_ids: proIds });
+        type SealRow = {
+          professional_id: string;
+          icon_variant: string;
+          sort_order: number;
+          is_special: boolean;
+        };
+        const rows = (sealData || []) as SealRow[];
+        const grouped = new Map<string, SealRow[]>();
+        for (const r of rows) {
+          const list = grouped.get(r.professional_id) || [];
+          list.push(r);
+          grouped.set(r.professional_id, list);
+        }
+        grouped.forEach((list, pid) => {
+          const sorted = sortPublicSealsForDisplay(list);
+          sealsByPro.set(
+            pid,
+            sorted.map((s) => ({ icon_variant: s.icon_variant })),
+          );
+        });
+      } catch (sealErr) {
+        diagLog("warn", "featured", "public_professional_seals failed", { e: String(sealErr) });
+      }
+
+      if (cancelled) return;
+      setProfessionals(
+        picked.map((p) => ({
+          ...p,
+          seals: sealsByPro.get(p.id) ?? [],
+        })),
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayPicked]);
+
+  const displayKey = useMemo(() => displayPicked.map((p) => p.id).join("|"), [displayPicked]);
+
+  useEffect(() => {
+    setActivePage(0);
+    isScrollFromUser.current = false;
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ left: 0, behavior: "auto" });
+  }, [displayKey, sortMode]);
 
   const pages = useMemo(() => {
     const p: Pro[][] = [];
@@ -631,10 +714,18 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     return () => { el.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
   }, [totalDisplayPages, syncPageFromScroll]);
 
-  if (!prosLoaded) {
+  const showFeaturedSkeleton = !prosLoaded || (rawPool.length > 0 && professionals.length === 0);
+
+  if (showFeaturedSkeleton) {
     return (
       <section>
-        <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{section?.title ?? "Profissionais em destaque"}</h3>
+        <h3 className="font-semibold lg:text-lg text-foreground text-center w-full mb-2 lg:mb-3 px-1">
+          {section?.title ?? "Profissionais em destaque"}
+        </h3>
+        <div className="mb-3 lg:mb-4 px-1 flex items-center justify-between gap-2">
+          <div className="h-9 w-[9.5rem] max-w-[45%] rounded-xl bg-muted animate-pulse" aria-hidden />
+          <div className="h-4 w-16 rounded bg-muted animate-pulse shrink-0" aria-hidden />
+        </div>
         <div className="flex gap-3 lg:gap-4 overflow-x-auto pb-2" data-tab-swipe-ignore>
           {[1, 2].map((i) => (
             <div key={i} className="flex-shrink-0 w-[140px] lg:w-[168px] rounded-2xl border bg-card p-3 lg:p-4 space-y-2">
@@ -647,13 +738,66 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       </section>
     );
   }
-  if (professionals.length === 0) return null;
+  if (rawPool.length === 0) return null;
+
+  const sortTriggerLabel = FEATURED_SORT_OPTIONS.find((o) => o.value === sortMode)?.label ?? "Ordenar";
 
   return (
     <section className="w-full min-w-0">
-      <div className="flex items-center justify-between mb-3 lg:mb-4 px-1">
-        <h3 className="font-semibold lg:text-lg text-foreground">{section?.title ?? "Profissionais em destaque"}</h3>
-        <Link to="/search" className="text-xs lg:text-sm font-medium text-primary hover:underline">Ver todos</Link>
+      <h3 className="font-semibold lg:text-lg text-foreground text-center w-full mb-2 lg:mb-3 px-1">
+        {section?.title ?? "Profissionais em destaque"}
+      </h3>
+      <div className="flex items-center justify-between gap-2 mb-3 lg:mb-4 px-1 min-w-0">
+        <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="flex min-w-0 max-w-[min(100%,11rem)] sm:max-w-[13rem] items-center gap-1.5 rounded-xl border border-border bg-card px-2.5 py-2 text-left text-xs font-medium text-foreground shadow-sm outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-primary/30"
+              aria-label="Ordenar profissionais em destaque"
+              aria-expanded={filterOpen}
+            >
+              <span className="min-w-0 flex-1 truncate">{sortTriggerLabel}</span>
+              <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            sideOffset={6}
+            className="w-[min(100vw-1.5rem,17.5rem)] rounded-2xl border border-border/80 bg-card p-2 shadow-xl"
+          >
+            <p className="px-2 pt-1 pb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+              Ordenar por
+            </p>
+            <ul className="space-y-0.5" role="listbox">
+              {FEATURED_SORT_OPTIONS.map((opt) => {
+                const selected = sortMode === opt.value;
+                return (
+                  <li key={opt.value} role="option" aria-selected={selected}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSortMode(opt.value);
+                        setFilterOpen(false);
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors",
+                        selected ? "bg-primary/12 text-foreground" : "text-foreground hover:bg-primary/8",
+                      )}
+                    >
+                      <span className="flex w-5 shrink-0 justify-center text-primary">
+                        {selected ? <Check className="h-4 w-4" strokeWidth={2.5} /> : null}
+                      </span>
+                      <span className="min-w-0 leading-snug">{opt.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </PopoverContent>
+        </Popover>
+        <Link to="/search" className="text-xs lg:text-sm font-medium text-primary hover:underline whitespace-nowrap shrink-0">
+          Ver todos
+        </Link>
       </div>
 
       <div

@@ -21,6 +21,8 @@ import {
   Image,
   Gift,
   UsersRound,
+  Radio,
+  Handshake,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -59,6 +61,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
         ...(profile?.user_type === "professional" || profile?.user_type === "company"
           ? [
               { icon: Wallet, label: "Carteira", path: "/pro/financeiro" },
+              { icon: Handshake, label: "Pedidos na região", path: "/pro/pedidos-abertos" },
               { icon: UsersRound, label: "Comunidade", path: "/home?feed=comunidade" },
               ...(profile?.user_type === "company"
                 ? [
@@ -96,6 +99,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
       title: "Cliente",
       items: [
         { icon: FileText, label: "Minhas Solicitações", path: "/client/requests" },
+        { icon: Radio, label: "Pedidos abertos", path: "/client/pedidos-abertos" },
         { icon: CalendarCheck, label: "Meus agendamentos", path: "/meus-agendamentos" },
         { icon: MessageSquare, label: "Mensagens", path: "/messages" },
         { icon: Ticket, label: "Meus Cupons", path: "/coupons" },

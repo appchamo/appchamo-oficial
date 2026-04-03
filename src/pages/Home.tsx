@@ -14,6 +14,7 @@ import { Zap, Ticket, X, MapPin, Briefcase, Loader2, AlertTriangle, Landmark, Ch
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HomeSearchBar from "@/components/home/HomeSearchBar";
+import HomeOpenRequestCta from "@/components/home/HomeOpenRequestCta";
 import HomeJobsBanner from "@/components/home/HomeJobsBanner";
 import HomeWelcome from "@/components/home/HomeWelcome";
 import HomeAlertCarousel from "@/components/home/HomeAlertCarousel";
@@ -280,6 +281,25 @@ const Home = () => {
   }, [checkFiscalSetup]);
 
   const [jobCount, setJobCount] = useState(0);
+
+  /**
+   * Mesma regra que `/jobs`: só vagas ativas; com cidade+UF no perfil, conta só da região
+   * (evita “1 vaga” na Home e lista vazia ao abrir Vagas).
+   */
+  const refreshJobCount = useCallback(async () => {
+    let query = supabase
+      .from("job_postings")
+      .select("id", { count: "exact", head: true })
+      .eq("active", true);
+    const city = (profile?.address_city ?? "").trim();
+    const state = (profile?.address_state ?? "").trim();
+    if (city && state) {
+      query = query.eq("city" as any, city).eq("state" as any, state);
+    }
+    const { count, error } = await query;
+    if (!error) setJobCount(count ?? 0);
+  }, [profile?.address_city, profile?.address_state]);
+
   const [showCoupon, setShowCoupon] = useState(false);
   const [isReady, setIsReady] = useState(false); // ✅ Controle de renderização global
   const [contentSeed, setContentSeed] = useState(0);
@@ -320,11 +340,7 @@ const Home = () => {
   }, []);
 
   useEffect(() => {
-    supabase
-      .from("job_postings")
-      .select("id", { count: "exact", head: true })
-      .eq("active", true)
-      .then(({ count }) => setJobCount(count || 0));
+    void refreshJobCount();
 
     const justSignedUp = localStorage.getItem("just_signed_up");
     if (justSignedUp === "true") {
@@ -334,7 +350,18 @@ const Home = () => {
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [refreshJobCount]);
+
+  useEffect(() => {
+    if (location.pathname !== "/home") return;
+    void refreshJobCount();
+  }, [location.pathname, refreshJobCount]);
+
+  useEffect(() => {
+    const onJobsChanged = () => void refreshJobCount();
+    window.addEventListener("chamo-job-postings-changed", onJobsChanged);
+    return () => window.removeEventListener("chamo-job-postings-changed", onJobsChanged);
+  }, [refreshJobCount]);
 
   const fetchUpcomingAppointments = useCallback(async (): Promise<boolean> => {
     if (!user?.id) return false;
@@ -385,11 +412,7 @@ const Home = () => {
       /* ignore */
     }
 
-    const jobPromise = supabase
-      .from("job_postings")
-      .select("id", { count: "exact", head: true })
-      .eq("active", true)
-      .then(({ count }) => setJobCount(count ?? 0));
+    const jobPromise = refreshJobCount();
 
     const walletPromise = (async () => {
       if (!user?.id || !isPro) return;
@@ -406,7 +429,7 @@ const Home = () => {
     })();
 
     await Promise.all([jobPromise, walletPromise]);
-  }, [user?.id, isPro]);
+  }, [user?.id, isPro, refreshJobCount]);
 
   const homeNavPathRef = useRef<string | null>(null);
   useEffect(() => {
@@ -468,16 +491,12 @@ const Home = () => {
       if (!Capacitor.isNativePlatform()) {
         setContentSeed((s) => s + 1);
       }
-      supabase
-        .from("job_postings")
-        .select("id", { count: "exact", head: true })
-        .eq("active", true)
-        .then(({ count }) => setJobCount(count ?? 0));
+      void refreshJobCount();
       if (user?.id) void fetchUpcomingAppointments();
     };
     const t = window.setTimeout(run, 0);
     return () => clearTimeout(t);
-  }, [user?.id, refreshLayout, fetchUpcomingAppointments]);
+  }, [user?.id, refreshLayout, fetchUpcomingAppointments, refreshJobCount]);
 
   // Fechou o tutorial: libera seções pesadas + abre modal de early access se pendente
   useEffect(() => {
@@ -639,7 +658,12 @@ const Home = () => {
       />
     ),
     jobs: null,
-    search: <HomeSearchBar key={`search-${profile?.address_city}-${profile?.address_state}`} section={getSection("search")} />,
+    search: (
+      <div key={`search-${profile?.address_city}-${profile?.address_state}`} className="flex flex-col gap-3 w-full">
+        <HomeOpenRequestCta />
+        <HomeSearchBar section={getSection("search")} />
+      </div>
+    ),
     featured: <FeaturedProfessionals key={`featured-${contentSeed}`} section={getSection("featured")} />,
     categories: <CategoriesGrid key={`categories-${contentSeed}`} section={getSection("categories")} />,
     benefits: <BenefitsPanel key="benefits" section={getSection("benefits")} />,
@@ -659,7 +683,7 @@ const Home = () => {
     welcome: "min-h-[60px]",
     sponsors: "min-h-[160px]",
     jobs: "min-h-[90px]",
-    search: "min-h-[60px]",
+    search: "min-h-[132px]",
     featured: "min-h-[250px]",
     categories: "min-h-[300px]",
     benefits: "min-h-[200px]",
@@ -723,6 +747,30 @@ const Home = () => {
           ) : user ? (
             /* ── Welcome cliente ── */
             <div className="flex flex-col gap-3">
+              {profile?.user_type === "client" && !linkedSponsor ? (
+                <div className="relative -mt-0.5 overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-b from-primary/[0.09] via-primary/[0.03] to-transparent px-4 pt-3.5 pb-3 shadow-sm ring-1 ring-primary/[0.06] dark:from-primary/[0.14] dark:via-primary/[0.06] dark:to-transparent">
+                  <div
+                    className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-primary/[0.12] blur-2xl dark:bg-primary/[0.2]"
+                    aria-hidden
+                  />
+                  <div className="relative flex flex-col gap-2.5">
+                    <div className="flex items-center justify-center gap-2 px-0.5">
+                      <Sparkles className="h-4 w-4 shrink-0 text-primary" strokeWidth={2} aria-hidden />
+                      <p className="text-center text-[13px] font-semibold leading-none tracking-tight text-foreground sm:text-sm whitespace-nowrap">
+                        Quer oferecer seu serviço?
+                      </p>
+                    </div>
+                    <Link
+                      to="/signup-pro"
+                      className="flex items-center justify-center gap-2 w-full rounded-full bg-primary py-3 pl-4 pr-3 text-sm font-bold text-primary-foreground shadow-md shadow-primary/20 transition-[transform,box-shadow] hover:shadow-lg hover:shadow-primary/25 active:scale-[0.98]"
+                    >
+                      <Briefcase className="h-4 w-4 shrink-0 opacity-95" strokeWidth={2.25} />
+                      <span className="flex-1 text-center">Tornar-se profissional</span>
+                      <ChevronRight className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+                    </Link>
+                  </div>
+                </div>
+              ) : null}
               <div className="flex items-center gap-3">
                 {profile?.avatar_url ? (
                   <img src={profile.avatar_url} alt={userName} className="w-11 h-11 rounded-full object-cover border border-border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
@@ -912,6 +960,7 @@ const Home = () => {
           {/* Mostra para cliente ou quando perfil ainda não carregou (igual Android no iPhone) */}
           {profile?.user_type !== "professional" &&
             profile?.user_type !== "company" &&
+            profile?.user_type !== "client" &&
             !linkedSponsor && (
             <Link
               to="/signup-pro"

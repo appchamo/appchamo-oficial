@@ -1,28 +1,19 @@
 /**
  * Devolve os bytes da foto de perfil para og:image (WhatsApp / Facebook).
  * Suporta GET e HEAD — crawlers da Meta usam HEAD primeiro; 405 quebrava o depurador.
+ * Ordem: HTTPS (UA Meta + URL render) → URL pública do bucket → download SDK.
  */
 import { createClient } from "@supabase/supabase-js";
 import { extractSupabaseStorageObjectRef } from "../api-utils/extractSupabaseStorageObjectRef";
 import { resolveSealFetchOrigins } from "../api-utils/resolveSealAssetOrigin";
+import {
+  fetchImageOverHttp,
+  mimeFromPathForOg,
+  supabasePublicObjectHttpUrl,
+} from "../api-utils/ogImageHttpFetch";
+import { resolveProfessionalByPublicKey } from "../api-utils/resolveProfessionalByPublicKey";
 
 export const config = { runtime: "edge" };
-
-function mimeFromPath(path: string): string {
-  const lower = path.toLowerCase();
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".gif")) return "image/gif";
-  if (lower.endsWith(".webp")) return "image/webp";
-  return "application/octet-stream";
-}
-
-const FALLBACK_SEAL_PNG = Uint8Array.from(
-  atob(
-    "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAYAAAA5ZDbSAAAAs0lEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOA8WLAAAdk5JckAAAAASUVORK5CYII=",
-  ),
-  (c) => c.charCodeAt(0),
-);
 
 function imageResponse(req: Request, body: ArrayBuffer | Uint8Array, contentType: string, cache: string): Response {
   const headers: Record<string, string> = {
@@ -37,6 +28,13 @@ function imageResponse(req: Request, body: ArrayBuffer | Uint8Array, contentType
   }
   return new Response(body, { status: 200, headers });
 }
+
+const FALLBACK_SEAL_PNG = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAYAAAA5ZDbSAAAAs0lEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOA8WLAAAdk5JckAAAAASUVORK5CYII=",
+  ),
+  (c) => c.charCodeAt(0),
+);
 
 async function sealBytesResponse(req: Request): Promise<Response> {
   const tryPaths = ["/icon-512.png", "/seals/push/seal_chamo.png", "/seals/push/seal_chamo.svg"];
@@ -69,12 +67,7 @@ async function sealBytesResponse(req: Request): Promise<Response> {
       }
     }
   }
-  return imageResponse(
-    req,
-    FALLBACK_SEAL_PNG,
-    "image/png",
-    "public, max-age=300, s-maxage=300",
-  );
+  return imageResponse(req, FALLBACK_SEAL_PNG, "image/png", "public, max-age=300, s-maxage=300");
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -91,46 +84,53 @@ export default async function handler(req: Request): Promise<Response> {
 
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const maxOgImageBytes = 2_800_000;
 
     if (!supabaseUrl || !serviceKey) {
       return sealBytesResponse(req);
     }
 
-    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    const isUuid = uuidRe.test(key);
-
     const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-    const { data: pro, error: proErr } = await supabase
-      .from("professionals")
-      .select("id, user_id, slug, cover_image_url")
-      .eq(isUuid ? "id" : "slug", key)
-      .maybeSingle();
-
-    if (proErr || !pro) {
+    const proRowRaw = await resolveProfessionalByPublicKey(
+      supabase,
+      key,
+      "id, user_id, slug, cover_image_url",
+    );
+    if (!proRowRaw) {
       return sealBytesResponse(req);
     }
+    const proRow = proRowRaw as { user_id: string; cover_image_url?: string | null };
 
-    const proRow = pro as { user_id: string; cover_image_url?: string | null };
     const { data: prof } = await supabase
       .from("profiles")
       .select("avatar_url")
       .eq("user_id", proRow.user_id)
       .maybeSingle();
 
-    const avatarRef = (prof as { avatar_url?: string | null } | null)?.avatar_url ?? null;
+    const avatarRef = ((prof as { avatar_url?: string | null } | null)?.avatar_url || "").trim();
     const coverRef = (proRow.cover_image_url || "").trim();
-    const raw = (avatarRef || "").trim() || coverRef;
+    const raw = avatarRef || coverRef;
 
     if (!raw) {
       return sealBytesResponse(req);
     }
 
-    /** Limite generoso: fotos antigas (JPEG) e OG; Edge aguenta ~few MB. */
-    const maxOgImageBytes = 1_800_000;
+    if (/^https:\/\//i.test(raw)) {
+      const viaHttp = await fetchImageOverHttp(raw, maxOgImageBytes);
+      if (viaHttp) {
+        return imageResponse(req, viaHttp.buf, viaHttp.ct, "public, max-age=86400, s-maxage=86400");
+      }
+    }
 
     const storageRef = extractSupabaseStorageObjectRef(raw);
     if (storageRef) {
+      const publicUrl = supabasePublicObjectHttpUrl(supabaseUrl, storageRef.bucket, storageRef.objectPath);
+      const viaPublic = await fetchImageOverHttp(publicUrl, maxOgImageBytes);
+      if (viaPublic) {
+        return imageResponse(req, viaPublic.buf, viaPublic.ct, "public, max-age=86400, s-maxage=86400");
+      }
+
       const { data: blob, error: dlErr } = await supabase.storage
         .from(storageRef.bucket)
         .download(storageRef.objectPath);
@@ -139,7 +139,7 @@ export default async function handler(req: Request): Promise<Response> {
         const ct =
           blob.type && blob.type !== "application/octet-stream"
             ? blob.type
-            : mimeFromPath(storageRef.objectPath);
+            : mimeFromPathForOg(storageRef.objectPath);
         if (ct.startsWith("image/") && buf.byteLength > 0 && buf.byteLength <= maxOgImageBytes) {
           return imageResponse(req, buf, ct, "public, max-age=86400, s-maxage=86400");
         }
@@ -147,29 +147,12 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     if (/^https?:\/\//i.test(raw)) {
-      try {
-        const imgRes = await fetch(raw, {
-          method: "GET",
-          headers: {
-            Accept: "image/*,*/*;q=0.8",
-            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-          },
-          redirect: "follow",
-        });
-        if (!imgRes.ok) {
-          return sealBytesResponse(req);
-        }
-        const ct = imgRes.headers.get("content-type") || "application/octet-stream";
-        if (!ct.startsWith("image/")) {
-          return sealBytesResponse(req);
-        }
-        const buf = await imgRes.arrayBuffer();
-        if (buf.byteLength > maxOgImageBytes) {
-          return sealBytesResponse(req);
-        }
-        return imageResponse(req, buf, ct, "public, max-age=86400, s-maxage=86400");
-      } catch {
-        return sealBytesResponse(req);
+      const viaHttp = await fetchImageOverHttp(
+        raw.startsWith("http://") ? raw.replace(/^http:/i, "https:") : raw,
+        maxOgImageBytes,
+      );
+      if (viaHttp) {
+        return imageResponse(req, viaHttp.buf, viaHttp.ct, "public, max-age=86400, s-maxage=86400");
       }
     }
 

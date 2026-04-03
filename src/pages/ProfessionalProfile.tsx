@@ -38,6 +38,7 @@ import AgendaBookingDialog from "@/components/AgendaBookingDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { getProfessionalProfileShareUrl } from "@/lib/publicAppUrl";
+import { shareUrl } from "@/lib/shareUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
@@ -432,25 +433,19 @@ const ProfessionalProfile = () => {
 
   const handleShareLink = async () => {
     if (!profileLink || !pro) return;
-    if (navigator.share) {
-      try {
-        const role =
-          pro.profession_name && pro.profession_name !== "—"
-            ? pro.profession_name
-            : pro.category_name && pro.category_name !== "—"
-              ? pro.category_name
-              : "Profissional";
-        await navigator.share({
-          title: `${pro.full_name} - ${role} - Perfil Oficial | Chamô`,
-          text: `Confira o perfil de ${pro.full_name} no Chamô.`,
-          url: profileLink,
-        });
-        return;
-      } catch {
-        // cancelado ou não suportado — cai para cópia
-      }
+    const role =
+      pro.profession_name && pro.profession_name !== "—"
+        ? pro.profession_name
+        : pro.category_name && pro.category_name !== "—"
+          ? pro.category_name
+          : "Profissional";
+    const title = `${pro.full_name} - ${role} | Chamô`;
+    const result = await shareUrl({ title, url: profileLink });
+    if (result === "copied") {
+      toast({ title: "Link copiado!", description: "Pronto para WhatsApp, Instagram ou navegador." });
+    } else if (result === "failed") {
+      toast({ title: "Seu link:", description: profileLink });
     }
-    handleCopyLink();
   };
 
   const handleCopyLink = async () => {

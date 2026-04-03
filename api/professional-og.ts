@@ -7,6 +7,7 @@ import { resolveOgPublicAppOrigin } from "../api-utils/resolveOgPublicOrigin";
 import { resolveOgApiOrigin } from "../api-utils/resolveOgApiOrigin";
 import { sealImageUrlForMeta } from "../api-utils/resolveSealAssetOrigin";
 import { brandIconLinkTags } from "../api-utils/brandIconLinkTags";
+import { resolveProfessionalByPublicKey } from "../api-utils/resolveProfessionalByPublicKey";
 
 function escAttr(s: string) {
   return s
@@ -20,6 +21,22 @@ function escText(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Evita URLs na pré-visualização (WhatsApp às vezes junta corpo + meta). */
+function stripUrlsForOg(s: string): string {
+  return s
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildOgDescription(displayName: string, bio: string | null | undefined): string {
+  const bioClean = stripUrlsForOg(bio || "");
+  if (bioClean.length >= 15) {
+    return bioClean.length > 240 ? `${bioClean.slice(0, 237)}…` : bioClean;
+  }
+  return `Contrate ${displayName} no Chamô — serviços verificados e chat direto.`;
+}
+
 export const config = { runtime: "edge" };
 
 export default async function handler(req: Request): Promise<Response> {
@@ -28,9 +45,6 @@ export default async function handler(req: Request): Promise<Response> {
   if (!key || key.length > 200) {
     return new Response("Not found", { status: 404 });
   }
-
-  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const isUuid = uuidRe.test(key);
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -57,23 +71,22 @@ ${brandIconLinkTags(publicApp, escAttr)}
 
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  const proQuery = supabase
-    .from("professionals")
-    .select("id, user_id, slug, profession_id, category_id")
-    .eq(isUuid ? "id" : "slug", key)
-    .maybeSingle();
-
-  const { data: pro, error: proErr } = await proQuery;
-  if (proErr || !pro) {
+  const proRaw = await resolveProfessionalByPublicKey(
+    supabase,
+    key,
+    "id, user_id, slug, profession_id, category_id, bio",
+  );
+  if (!proRaw) {
     return new Response("Not found", { status: 404 });
   }
 
-  const proRow = pro as {
+  const proRow = proRaw as {
     id: string;
     user_id: string;
     slug: string | null;
     profession_id: string | null;
     category_id: string | null;
+    bio?: string | null;
   };
 
   let professionName: string | null = null;
@@ -110,7 +123,7 @@ ${brandIconLinkTags(publicApp, escAttr)}
           ? "Empresa"
           : "Profissional";
   const title = `${displayName} - ${rolePart} - Perfil Oficial | Chamô`;
-  const description = `Contrate ${displayName} no Chamô — serviços verificados e chat direto.`;
+  const description = buildOgDescription(displayName, proRow.bio);
 
   /** Host com TLS estável (Vercel) — não usar só o domínio custom se o certificado dele falhar para crawlers. */
   const imageOrigin = resolveOgApiOrigin(req);
@@ -126,6 +139,7 @@ ${brandIconLinkTags(publicApp, escAttr)}
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 ${brandIconLinkTags(publicApp, escAttr)}
 <title>${escText(title)}</title>
+<meta name="description" content="${escAttr(description)}" />
 <meta property="og:type" content="profile" />
 <meta property="og:title" content="${escAttr(title)}" />
 <meta property="og:description" content="${escAttr(description)}" />
@@ -142,10 +156,7 @@ ${brandIconLinkTags(publicApp, escAttr)}
 <meta http-equiv="refresh" content="0;url=${escAttr(canonical)}" />
 <script>location.replace(${JSON.stringify(canonical)});</script>
 </head>
-<body style="font-family:system-ui,sans-serif;padding:1.5rem;color:#333;">
-<p>${escText(description)}</p>
-<p><a href="${escAttr(canonical)}">Abrir perfil no Chamô</a></p>
-</body>
+<body></body>
 </html>`;
 
   return new Response(html, {

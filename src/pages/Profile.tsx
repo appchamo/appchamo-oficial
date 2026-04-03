@@ -11,6 +11,7 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
+import { shareUrl } from "@/lib/shareUrl";
 import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
 import SponsorLaunchNovidadeModal from "@/components/sponsor/SponsorLaunchNovidadeModal";
@@ -214,16 +215,11 @@ const Profile = () => {
   const handleShareProfile = async () => {
     if (!proData?.slug) return;
     const link = getPublicProfessionalProfileUrl(proData.slug);
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: `${profile?.full_name || "Meu perfil"} no Chamô`, url: link });
-        return;
-      } catch { /* cancelado */ }
-    }
-    try {
-      await navigator.clipboard.writeText(link);
+    const title = `${profile?.full_name || "Meu perfil"} no Chamô`;
+    const result = await shareUrl({ title, url: link });
+    if (result === "copied") {
       toast({ title: "Link copiado!", description: link });
-    } catch {
+    } else if (result === "failed") {
       toast({ title: "Seu link:", description: link });
     }
   };

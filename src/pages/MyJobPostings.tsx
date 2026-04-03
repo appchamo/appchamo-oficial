@@ -172,12 +172,13 @@ const MyJobPostings = () => {
       return;
     }
     setSaving(true);
+    const uf = (form.state ?? "").trim().toUpperCase().slice(0, 2) || null;
     const row: Record<string, unknown> = {
       title: form.title,
       description: form.description || null,
       location: form.location || null,
-      city: form.city || null,
-      state: form.state || null,
+      city: (form.city ?? "").trim() || null,
+      state: uf,
       salary_range: form.salary_range || null,
       requirements: form.requirements || null,
     };

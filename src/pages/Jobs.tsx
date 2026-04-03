@@ -2,6 +2,7 @@ import AppLayout from "@/components/AppLayout";
 import { Briefcase, MapPin, DollarSign, Clock, Search, Building2, ChevronRight, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchActiveJobPostings } from "@/lib/jobRegionFilter";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,20 +56,14 @@ const Jobs = () => {
         setUserCity(cityFilter);
       }
 
-      // 2. Busca vagas: filtra por cidade/estado do usuário se disponível
-      let query = supabase
-        .from("job_postings")
-        .select(
-          "id, title, description, location, salary_range, created_at, professional_id, sponsor_id, professionals(user_id), sponsors(name, logo_url, user_id)",
-        )
-        .eq("active", true)
-        .order("created_at", { ascending: false });
-
-      if (cityFilter && stateFilter) {
-        query = query.eq("city" as any, cityFilter).eq("state" as any, stateFilter);
-      }
-
-      const { data } = await query;
+      // 2. Vagas ativas: cidade/UF tolerantes (ilike + fallback só UF) — evita lista vazia por diferença de texto CEP vs perfil
+      const JOB_SELECT =
+        "id, title, description, location, salary_range, created_at, professional_id, sponsor_id, professionals(user_id), sponsors(name, logo_url, user_id)";
+      const { data } = await fetchActiveJobPostings(supabase, {
+        select: JOB_SELECT,
+        profileCity: cityFilter,
+        profileState: stateFilter,
+      });
 
       if (data) {
         const userIds = [...new Set(data.map((j: any) => j.professionals?.user_id).filter(Boolean))];

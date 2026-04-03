@@ -50,6 +50,8 @@ const resolveAction = (n: Notification): "navigate" | "modal" => {
   if (n.type === "appointment" || t.includes("agendamento")) return "navigate";
   if (n.type === "reminder" && n.link) return "navigate";
   if (n.type === "follow" && n.link) return "navigate";
+  if (n.type === "open_request_new" && n.link) return "navigate";
+  if (n.type === "open_request_interest" && n.link) return "navigate";
   if (n.type === "community" && n.link) return "navigate";
   if (n.link && (n.link.includes("feed=comunidade") || n.link.includes("feed%3Dcomunidade")))
     return "navigate";

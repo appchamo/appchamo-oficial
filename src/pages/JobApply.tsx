@@ -32,15 +32,24 @@ const JobApply = () => {
         return;
       }
       
-      const { data: jobData } = await supabase
+      const { data: row } = await supabase
         .from("job_postings")
-        .select("title, professionals(user_id)")
+        .select("title, professional_id, sponsor_id")
         .eq("id", id!)
         .maybeSingle();
 
-      if (jobData) {
-        setJobTitle(jobData.title);
-        setJobOwnerId((jobData as any).professionals?.user_id);
+      if (row) {
+        setJobTitle(row.title);
+        const jr = row as { sponsor_id: string | null; professional_id: string | null };
+        if (jr.sponsor_id) {
+          const { data: sp } = await supabase.from("sponsors").select("user_id").eq("id", jr.sponsor_id).maybeSingle();
+          setJobOwnerId(sp?.user_id ?? null);
+        } else if (jr.professional_id) {
+          const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", jr.professional_id).maybeSingle();
+          setJobOwnerId(pro?.user_id ?? null);
+        } else {
+          setJobOwnerId(null);
+        }
       }
 
       if (!form.full_name) {

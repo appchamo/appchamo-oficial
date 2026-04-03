@@ -27,6 +27,7 @@ import { fetchViaCep } from "@/lib/viacep";
 import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { setHomeLocationCache } from "@/lib/locationUtils";
 import { diagLog } from "@/lib/diag";
+import { countActiveJobPostings } from "@/lib/jobRegionFilter";
 import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
 import CommunityFeed from "@/components/community/CommunityFeed";
@@ -287,17 +288,8 @@ const Home = () => {
    * (evita “1 vaga” na Home e lista vazia ao abrir Vagas).
    */
   const refreshJobCount = useCallback(async () => {
-    let query = supabase
-      .from("job_postings")
-      .select("id", { count: "exact", head: true })
-      .eq("active", true);
-    const city = (profile?.address_city ?? "").trim();
-    const state = (profile?.address_state ?? "").trim();
-    if (city && state) {
-      query = query.eq("city" as any, city).eq("state" as any, state);
-    }
-    const { count, error } = await query;
-    if (!error) setJobCount(count ?? 0);
+    const n = await countActiveJobPostings(supabase, profile?.address_city, profile?.address_state);
+    setJobCount(n);
   }, [profile?.address_city, profile?.address_state]);
 
   const [showCoupon, setShowCoupon] = useState(false);

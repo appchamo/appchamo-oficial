@@ -45,75 +45,99 @@ const JobDetail = () => {
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase
+      if (!id) {
+        setLoading(false);
+        return;
+      }
+
+      const { data: row, error: rowErr } = await supabase
         .from("job_postings")
         .select(
-          "id, title, description, location, salary_range, requirements, created_at, professional_id, sponsor_id, professionals(user_id), sponsors(name, logo_url, user_id)",
+          "id, title, description, location, salary_range, requirements, created_at, professional_id, sponsor_id",
         )
-        .eq("id", id!)
+        .eq("id", id)
         .maybeSingle();
 
-      if (data) {
-        const row = data as any;
-        const sp = row.sponsors as { name?: string; logo_url?: string | null; user_id?: string } | null;
-        const proUserId = row.professionals?.user_id as string | undefined;
+      if (rowErr || !row) {
+        setLoading(false);
+        return;
+      }
 
-        if (sp?.name != null || sp?.user_id) {
-          setJob({
-            ...row,
-            company_name: (sp?.name || "").trim() || "Patrocinador",
-            company_avatar: sp?.logo_url || null,
-            company_user_id: sp?.user_id ?? null,
-          });
-        } else if (proUserId) {
-          const { data: profile } = await supabase
-            .from("profiles")
+      const r = row as {
+        id: string;
+        title: string;
+        description: string | null;
+        location: string | null;
+        salary_range: string | null;
+        requirements: string | null;
+        created_at: string;
+        professional_id: string | null;
+        sponsor_id: string | null;
+      };
+
+      let company_name = "Empresa";
+      let company_avatar: string | null = null;
+      let company_user_id: string | null = null;
+
+      if (r.sponsor_id) {
+        const { data: sp } = await supabase
+          .from("sponsors")
+          .select("name, logo_url, user_id")
+          .eq("id", r.sponsor_id)
+          .maybeSingle();
+        if (sp) {
+          company_name = (sp.name || "").trim() || "Patrocinador";
+          company_avatar = sp.logo_url ?? null;
+          company_user_id = sp.user_id ?? null;
+        }
+      } else if (r.professional_id) {
+        const { data: pro } = await supabase.from("professionals").select("user_id").eq("id", r.professional_id).maybeSingle();
+        const proUserId = pro?.user_id;
+        if (proUserId) {
+          const { data: pub } = await supabase
+            .from("profiles_public" as any)
             .select("full_name, avatar_url")
             .eq("user_id", proUserId)
             .maybeSingle();
-
-          setJob({
-            ...row,
-            company_name: profile?.full_name || "Empresa",
-            company_avatar: profile?.avatar_url || null,
-            company_user_id: proUserId,
-          });
-        } else {
-          setJob({
-            ...row,
-            company_name: "Empresa",
-            company_avatar: null,
-            company_user_id: null,
-          });
+          company_name = pub?.full_name?.trim() || "Empresa";
+          company_avatar = pub?.avatar_url ?? null;
+          company_user_id = proUserId;
         }
+      }
 
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { count } = await supabase
-            .from("job_applications")
-            .select("*", { count: "exact", head: true })
-            .eq("job_id", data.id)
-            .eq("applicant_id", user.id);
-          if ((count || 0) > 0) setAlreadyApplied(true);
+      setJob({
+        ...r,
+        company_name,
+        company_avatar,
+        company_user_id,
+      });
 
-          const { data: myProfile } = await supabase
-            .from("profiles")
-            .select("full_name, email, phone")
-            .eq("user_id", user.id)
-            .maybeSingle();
-          if (myProfile) {
-            setForm((f) => ({
-              ...f,
-              full_name: myProfile.full_name || "",
-              email: myProfile.email || "",
-              phone: myProfile.phone || "",
-            }));
-          }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { count } = await supabase
+          .from("job_applications")
+          .select("*", { count: "exact", head: true })
+          .eq("job_id", r.id)
+          .eq("applicant_id", user.id);
+        if ((count || 0) > 0) setAlreadyApplied(true);
+
+        const { data: myProfile } = await supabase
+          .from("profiles")
+          .select("full_name, email, phone")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (myProfile) {
+          setForm((f) => ({
+            ...f,
+            full_name: myProfile.full_name || "",
+            email: myProfile.email || "",
+            phone: myProfile.phone || "",
+          }));
         }
       }
       setLoading(false);
     };
-    if (id) load();
+    void load();
   }, [id]);
 
   const handleApply = async () => {

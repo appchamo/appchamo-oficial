@@ -38,6 +38,7 @@ interface Profile {
   job_posting_enabled?: boolean;
   /** male | female | prefer_not_say – usado para "Bem-vindo(a)" na Home */
   gender?: string | null;
+  address_zip?: string | null;
   address_neighborhood?: string | null;
   address_city?: string | null;
   address_state?: string | null;
@@ -114,7 +115,7 @@ async function fetchProfileWithStatus(userId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_neighborhood, address_city, address_state, invite_code")
+    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_zip, address_neighborhood, address_city, address_state, invite_code")
     .eq("user_id", userId)
     .maybeSingle();
 

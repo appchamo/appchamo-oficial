@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, MapPin } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
+import { fetchViaCep } from "@/lib/viacep";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +28,12 @@ const URGENCY_OPTIONS: { value: Urgency; label: string; hint: string }[] = [
   { value: "flexible", label: "Flexível", hint: "Nos próximos dias" },
 ];
 
+function maskCepInput(value: string) {
+  const d = value.replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 5) return d;
+  return `${d.slice(0, 5)}-${d.slice(5)}`;
+}
+
 const SolicitarServico = () => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
@@ -36,6 +43,9 @@ const SolicitarServico = () => {
 
   const [categoryId, setCategoryId] = useState<string>("");
   const [description, setDescription] = useState("");
+  const [zip, setZip] = useState("");
+  const [cepLoading, setCepLoading] = useState(false);
+  const [locationOk, setLocationOk] = useState(false);
   const [neighborhood, setNeighborhood] = useState("");
   const [city, setCity] = useState("");
   const [stateUf, setStateUf] = useState("");
@@ -64,12 +74,47 @@ const SolicitarServico = () => {
     };
   }, []);
 
+  const applyViaCep = useCallback(async (cepRaw: string, opts?: { silent?: boolean }) => {
+    const digits = cepRaw.replace(/\D/g, "");
+    if (digits.length !== 8) {
+      setLocationOk(false);
+      return;
+    }
+    setCepLoading(true);
+    const v = await fetchViaCep(cepRaw);
+    setCepLoading(false);
+    if (!v?.localidade || !v?.uf) {
+      setLocationOk(false);
+      setCity("");
+      setStateUf("");
+      if (!opts?.silent) {
+        toast({ title: "CEP não encontrado", description: "Confira os números e tente de novo.", variant: "destructive" });
+      }
+      return;
+    }
+    setCity(v.localidade.trim());
+    setStateUf(v.uf.trim().toUpperCase().slice(0, 2));
+    if (v.bairro?.trim()) {
+      setNeighborhood((prev) => (prev.trim() ? prev : v.bairro!.trim()));
+    }
+    setLocationOk(true);
+  }, []);
+
   useEffect(() => {
-    if (!profile) return;
-    setNeighborhood((profile.address_neighborhood || "").trim());
-    setCity((profile.address_city || "").trim());
-    setStateUf((profile.address_state || "").trim().toUpperCase().slice(0, 2));
-  }, [profile?.address_neighborhood, profile?.address_city, profile?.address_state]);
+    if (!profile?.address_zip) return;
+    const digits = profile.address_zip.replace(/\D/g, "");
+    if (digits.length !== 8) return;
+    setZip(maskCepInput(digits));
+  }, [profile?.address_zip]);
+
+  useEffect(() => {
+    const digits = zip.replace(/\D/g, "");
+    if (digits.length !== 8) return;
+    const t = setTimeout(() => {
+      void applyViaCep(digits, { silent: true });
+    }, 450);
+    return () => clearTimeout(t);
+  }, [zip, applyViaCep]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,12 +131,22 @@ const SolicitarServico = () => {
       toast({ title: "Descreva melhor o serviço", description: "Use pelo menos 3 caracteres.", variant: "destructive" });
       return;
     }
+    const cepDigits = zip.replace(/\D/g, "");
+    if (cepDigits.length !== 8 || !locationOk) {
+      toast({
+        title: "CEP inválido",
+        description: "Digite o CEP com 8 dígitos e aguarde a busca da cidade.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const c = city.trim();
     const st = stateUf.trim().toUpperCase().slice(0, 2);
     if (!c || st.length !== 2) {
       toast({
         title: "Localização incompleta",
-        description: "Informe cidade e UF (2 letras).",
+        description: "Busque o CEP novamente para preencher cidade e UF.",
         variant: "destructive",
       });
       return;
@@ -128,9 +183,20 @@ const SolicitarServico = () => {
 
     toast({
       title: "Pedido publicado!",
-      description: "Profissionais da sua região podem manifestar interesse em breve.",
+      description:
+        "Profissionais da categoria na mesma UF foram notificados e podem manifestar interesse.",
     });
     navigate("/client/pedidos-abertos");
+  };
+
+  const handleZipBlur = () => {
+    const digits = zip.replace(/\D/g, "");
+    if (digits.length === 8) void applyViaCep(digits, { silent: false });
+    else if (digits.length > 0) {
+      setLocationOk(false);
+      setCity("");
+      setStateUf("");
+    }
   };
 
   return (
@@ -189,52 +255,60 @@ const SolicitarServico = () => {
           </div>
 
           <div className="space-y-3">
-            <Label>Localização</Label>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="neighborhood" className="text-xs font-normal text-muted-foreground">
-                  Bairro (opcional)
-                </Label>
+            <Label>Local do serviço (CEP)</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="cep" className="text-xs font-normal text-muted-foreground">
+                CEP
+              </Label>
+              <div className="relative max-w-[200px]">
                 <Input
-                  id="neighborhood"
-                  value={neighborhood}
-                  onChange={(e) => setNeighborhood(e.target.value)}
-                  placeholder="Centro, Jardins…"
-                  maxLength={120}
+                  id="cep"
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  value={zip}
+                  onChange={(e) => {
+                    setZip(maskCepInput(e.target.value));
+                    setLocationOk(false);
+                  }}
+                  onBlur={handleZipBlur}
+                  placeholder="00000-000"
+                  maxLength={9}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="city" className="text-xs font-normal text-muted-foreground">
-                  Cidade
-                </Label>
-                <Input
-                  id="city"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="São Paulo"
-                  maxLength={120}
-                  required
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="uf" className="text-xs font-normal text-muted-foreground">
-                  UF
-                </Label>
-                <Input
-                  id="uf"
-                  value={stateUf}
-                  onChange={(e) => setStateUf(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2))}
-                  placeholder="SP"
-                  maxLength={2}
-                  className="uppercase max-w-[88px]"
-                  required
-                />
+                {cepLoading ? (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-muted-foreground" />
+                ) : null}
               </div>
             </div>
+            {locationOk && city && stateUf ? (
+              <div className="flex items-start gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2.5 text-sm">
+                <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" aria-hidden />
+                <div>
+                  <p className="font-semibold text-foreground">{city}</p>
+                  <p className="text-xs text-muted-foreground">UF {stateUf} · confirmado pelo CEP</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Ao sair do campo (ou ao terminar 8 dígitos), buscamos cidade e UF automaticamente.
+              </p>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="neighborhood" className="text-xs font-normal text-muted-foreground">
+                Bairro (opcional — preenchido pelo CEP se disponível)
+              </Label>
+              <Input
+                id="neighborhood"
+                value={neighborhood}
+                onChange={(e) => setNeighborhood(e.target.value)}
+                placeholder="Ajuste o bairro se quiser"
+                maxLength={120}
+              />
+            </div>
             <p className="text-xs text-muted-foreground">
-              Profissionais com perfil na mesma UF verão seu pedido.{" "}
+              Profissionais da <strong className="text-foreground font-medium">categoria escolhida</strong>, ativos e com
+              UF igual à do CEP no perfil, recebem notificação e veem o pedido em Pedidos na região.{" "}
               <Link to="/profile/settings/endereco" className="text-primary font-medium underline-offset-2 hover:underline">
-                Ajustar endereço no perfil
+                Seu CEP no perfil
               </Link>
             </p>
           </div>

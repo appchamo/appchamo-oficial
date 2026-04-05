@@ -72,6 +72,14 @@ export function normalizeJobCity(city: string | null | undefined): string {
   return (city ?? "").trim();
 }
 
+/** Perfil às vezes guarda "Cidade, UF" ou "Cidade - Estado" — compara só o nome da cidade com a vaga. */
+export function normalizeProfileCityForJobs(city: string | null | undefined): string {
+  const c = normalizeJobCity(city);
+  if (!c) return "";
+  const first = c.split(/[,–—|]/)[0]?.trim() ?? c;
+  return first;
+}
+
 function isValidBrazilUf(uf: string): boolean {
   return uf.length === 2 && BRAZIL_UFS.has(uf);
 }
@@ -90,21 +98,38 @@ function sameCityAccentInsensitive(a: string, b: string): boolean {
 /**
  * Quando a coluna `state` da vaga não normaliza para UF (vazia/ilegível), tenta o texto em `location`.
  */
+function locationImpliesUf(row: JobRegionRow, uf: string): boolean {
+  const raw = (row.location ?? "").trim();
+  if (!raw) return false;
+  const loc = stripAccents(raw).toUpperCase();
+  const u = uf.toUpperCase();
+  return (
+    loc.includes(`/${u}`) ||
+    loc.includes(`-${u}`) ||
+    loc.includes(`, ${u}`) ||
+    new RegExp(`\\b${u}\\b`).test(loc)
+  );
+}
+
 function jobMatchesRegionByLocationOnly(row: JobRegionRow, profileCity: string, profileUf: string): boolean {
   if (normalizeJobUf(row.state)) return false;
   const raw = (row.location ?? "").trim();
   if (!raw) return false;
   const loc = stripAccents(raw).toUpperCase();
-  const city = normalizeJobCity(profileCity);
+  const city = normalizeProfileCityForJobs(profileCity);
   const citySt = city ? stripAccents(city).toUpperCase() : "";
   const uf = profileUf.toUpperCase();
-  const hasUfToken =
-    loc.includes(`/${uf}`) ||
-    loc.includes(`-${uf}`) ||
-    loc.includes(`, ${uf}`) ||
-    new RegExp(`\\b${uf}\\b`).test(loc);
+  const hasUfToken = locationImpliesUf(row, profileUf);
   if (citySt && loc.includes(citySt) && hasUfToken) return true;
   return hasUfToken;
+}
+
+/** Mesmo estado (UF) pela coluna state OU por location tipo Cidade/MG quando state veio vazio na vaga. */
+function rowMatchesProfileUf(row: JobRegionRow, profileUf: string): boolean {
+  const ru = normalizeJobUf(row.state);
+  if (ru === profileUf) return true;
+  if (ru) return false;
+  return locationImpliesUf(row, profileUf);
 }
 
 /**
@@ -114,16 +139,16 @@ function jobMatchesRegionByLocationOnly(row: JobRegionRow, profileCity: string, 
  * - Se nenhuma vaga com UF reconhecida, fallback por location (vagas antigas só com texto).
  */
 export function filterJobPostingsToProfileRegion<T extends JobRegionRow>(rows: T[], profileCity: string, profileUf: string): T[] {
-  const city = normalizeJobCity(profileCity);
+  const city = normalizeProfileCityForJobs(profileCity);
   const uf = profileUf;
 
-  const inState = rows.filter((r) => normalizeJobUf(r.state) === uf);
-  if (inState.length > 0) {
-    const strict = inState.filter((r) => {
+  const inRegion = rows.filter((r) => rowMatchesProfileUf(r, uf));
+  if (inRegion.length > 0) {
+    const strict = inRegion.filter((r) => {
       const rc = normalizeJobCity(r.city);
       return rc.length > 0 && sameCityAccentInsensitive(rc, city);
     });
-    return strict.length > 0 ? strict : inState;
+    return strict.length > 0 ? strict : inRegion;
   }
 
   return rows.filter((r) => jobMatchesRegionByLocationOnly(r, city, uf));
@@ -138,7 +163,7 @@ export async function fetchActiveJobPostings(
   supabase: SupabaseClient,
   opts: { select: string; profileCity: string | null | undefined; profileState: string | null | undefined },
 ) {
-  const city = normalizeJobCity(opts.profileCity);
+  const city = normalizeProfileCityForJobs(opts.profileCity);
   const uf = normalizeJobUf(opts.profileState);
   const sel = opts.select;
 
@@ -160,7 +185,7 @@ export async function countActiveJobPostings(
   profileCity: string | null | undefined,
   profileState: string | null | undefined,
 ): Promise<number> {
-  const city = normalizeJobCity(profileCity);
+  const city = normalizeProfileCityForJobs(profileCity);
   const uf = normalizeJobUf(profileState);
 
   if (!city || !isValidBrazilUf(uf)) {

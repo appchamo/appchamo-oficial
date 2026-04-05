@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Menu, Clock, Crown, Bell, LogIn, XCircle, CalendarCheck } from "lucide-react";
-import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams, Link } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
 import { useAuth } from "@/hooks/useAuth";
@@ -402,18 +402,27 @@ const Header = () => {
             })()}
 
             {user && (
-              <button
-                onClick={() => navigate("/notifications")}
-                className="relative p-2 rounded-lg hover:bg-muted transition-colors"
+              <Link
+                to="/notifications"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  (e.currentTarget as HTMLAnchorElement).blur();
+                }}
+                className={cn(
+                  "relative inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl",
+                  "touch-manipulation select-none active:opacity-80",
+                  "text-foreground no-underline [-webkit-tap-highlight-color:transparent]",
+                  "hover:bg-muted/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+                )}
                 aria-label="Notificações"
               >
-                <Bell className="w-5 h-5 text-foreground" />
+                <Bell className="pointer-events-none w-5 h-5 text-foreground" strokeWidth={2} />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center">
+                  <span className="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
-              </button>
+              </Link>
             )}
             <button
               type="button"

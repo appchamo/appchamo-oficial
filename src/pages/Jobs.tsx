@@ -1,8 +1,9 @@
 import AppLayout from "@/components/AppLayout";
 import { Briefcase, MapPin, DollarSign, Clock, Search, Building2, ChevronRight, FileText } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchActiveJobPostings } from "@/lib/jobRegionFilter";
+import { useAuth } from "@/hooks/useAuth";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,23 @@ interface MyApplication {
   company_name: string;
 }
 
+type JobRowFlat = {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  salary_range: string | null;
+  created_at: string;
+  professional_id: string | null;
+  sponsor_id: string | null;
+};
+
+/** Só job_postings — embeds professionals/sponsors podiam falhar (RLS) e zerar a lista com o contador da Home ok. */
+const JOB_SELECT_FLAT =
+  "id, title, description, location, salary_range, created_at, professional_id, sponsor_id";
+
 const Jobs = () => {
+  const { user, profile } = useAuth();
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -38,59 +55,85 @@ const Jobs = () => {
   const [myApplications, setMyApplications] = useState<MyApplication[]>([]);
   const [loadingMyApps, setLoadingMyApps] = useState(false);
   const [userCity, setUserCity] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   useEffect(() => {
+    const seq = ++loadSeq.current;
     const load = async () => {
-      // 1. Busca a cidade do usuário logado
-      const { data: { user } } = await supabase.auth.getUser();
-      let cityFilter: string | null = null;
-      let stateFilter: string | null = null;
-      if (user) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("address_city, address_state")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        cityFilter = prof?.address_city ?? null;
-        stateFilter = prof?.address_state ?? null;
-        setUserCity(cityFilter);
-      }
+      setLoading(true);
+      const cityFilter = profile?.address_city ?? null;
+      const stateFilter = profile?.address_state ?? null;
+      setUserCity(cityFilter);
 
-      // 2. Vagas ativas: cidade/UF tolerantes (ilike + fallback só UF) — evita lista vazia por diferença de texto CEP vs perfil
-      const JOB_SELECT =
-        "id, title, description, location, salary_range, created_at, professional_id, sponsor_id, professionals(user_id), sponsors(name, logo_url, user_id)";
-      const { data } = await fetchActiveJobPostings(supabase, {
-        select: JOB_SELECT,
-        profileCity: cityFilter,
-        profileState: stateFilter,
-      });
+      try {
+        const { data, error } = await fetchActiveJobPostings(supabase, {
+          select: JOB_SELECT_FLAT,
+          profileCity: cityFilter,
+          profileState: stateFilter,
+        });
 
-      if (data) {
-        const userIds = [...new Set(data.map((j: any) => j.professionals?.user_id).filter(Boolean))];
-        const { data: profiles } = userIds.length
-          ? ((await supabase
-              .from("profiles_public" as any)
-              .select("user_id, full_name, avatar_url")
-              .in("user_id", userIds)) as {
-              data: { user_id: string; full_name: string; avatar_url: string | null }[] | null;
-            })
-          : { data: null };
+        if (seq !== loadSeq.current) return;
 
-        const mapped = data.map((j: any) => {
-          const sp = j.sponsors as { name?: string; logo_url?: string | null; user_id?: string } | null;
-          if (sp?.name || sp?.user_id) {
-            return {
-              id: j.id,
-              title: j.title,
-              description: j.description,
-              location: j.location,
-              salary_range: j.salary_range,
-              created_at: j.created_at,
-              company_name: sp.name?.trim() || "Patrocinador",
-              company_avatar: sp.logo_url || null,
-            };
+        if (error) {
+          console.warn("[Jobs] fetchActiveJobPostings", error);
+        }
+
+        const rows = (data ?? []) as JobRowFlat[];
+        if (rows.length === 0) {
+          setJobs([]);
+          return;
+        }
+
+        const sponsorIds = [...new Set(rows.map((r) => r.sponsor_id).filter(Boolean))] as string[];
+        const proIds = [...new Set(rows.map((r) => r.professional_id).filter(Boolean))] as string[];
+
+        const [sponsorsRes, prosRes] = await Promise.all([
+          sponsorIds.length
+            ? supabase.from("sponsors").select("id, name, logo_url, user_id").in("id", sponsorIds)
+            : Promise.resolve({ data: [] as { id: string; name: string | null; logo_url: string | null; user_id: string }[] }),
+          proIds.length
+            ? supabase.from("professionals").select("id, user_id").in("id", proIds)
+            : Promise.resolve({ data: [] as { id: string; user_id: string }[] }),
+        ]);
+
+        if (seq !== loadSeq.current) return;
+
+        const sponsorById = Object.fromEntries((sponsorsRes.data ?? []).map((s) => [s.id, s]));
+        const userIdByProId = Object.fromEntries((prosRes.data ?? []).map((p) => [p.id, p.user_id]));
+
+        const userIds = [...new Set(Object.values(userIdByProId))];
+        const { data: pubProfiles } =
+          userIds.length > 0
+            ? await supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", userIds)
+            : { data: [] as { user_id: string; full_name: string | null; avatar_url: string | null }[] };
+
+        if (seq !== loadSeq.current) return;
+
+        const profileByUserId = Object.fromEntries(
+          (pubProfiles ?? []).map((p: { user_id: string; full_name?: string | null; avatar_url?: string | null }) => [
+            p.user_id,
+            p,
+          ]),
+        );
+
+        const mapped: JobPosting[] = rows.map((j) => {
+          if (j.sponsor_id) {
+            const sp = sponsorById[j.sponsor_id];
+            if (sp && (sp.name || sp.user_id)) {
+              return {
+                id: j.id,
+                title: j.title,
+                description: j.description,
+                location: j.location,
+                salary_range: j.salary_range,
+                created_at: j.created_at,
+                company_name: (sp.name || "").trim() || "Patrocinador",
+                company_avatar: sp.logo_url ?? null,
+              };
+            }
           }
-          const prof = profiles?.find((p) => p.user_id === j.professionals?.user_id);
+          const uid = j.professional_id ? userIdByProId[j.professional_id] : undefined;
+          const prof = uid ? profileByUserId[uid] : undefined;
           return {
             id: j.id,
             title: j.title,
@@ -98,16 +141,18 @@ const Jobs = () => {
             location: j.location,
             salary_range: j.salary_range,
             created_at: j.created_at,
-            company_name: prof?.full_name || "Empresa",
-            company_avatar: prof?.avatar_url || null,
+            company_name: prof?.full_name?.trim() || "Empresa",
+            company_avatar: prof?.avatar_url ?? null,
           };
         });
+
         setJobs(mapped);
+      } finally {
+        if (seq === loadSeq.current) setLoading(false);
       }
-      setLoading(false);
     };
-    load();
-  }, []);
+    void load();
+  }, [user?.id, profile?.address_city, profile?.address_state]);
 
   const filtered = jobs.filter(
     (j) =>

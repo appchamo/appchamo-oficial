@@ -36,6 +36,8 @@ import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
 import SponsorLaunchNovidadeModal from "@/components/sponsor/SponsorLaunchNovidadeModal";
 
+const CHAMO_HOME_CLIENT_SIGNUP_PRO_TOP_DISMISSED = "chamo_home_client_signup_pro_top_dismissed";
+
 // ✅ 1. SKELETON LOADING: Mostrado enquanto a tela está processando (Evita o clarão)
 const HomeSkeleton = () => (
   <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto px-4 lg:px-8 xl:px-12 py-5 lg:py-8 flex flex-col gap-6 lg:gap-8 w-full animate-in fade-in duration-500">
@@ -185,7 +187,22 @@ const Home = () => {
   );
   const [sponsorNovidadeOpen, setSponsorNovidadeOpen] = useState(false);
   const [sponsorReportsKey, setSponsorReportsKey] = useState(0);
-  
+  const [clientSignupProTopDismissed, setClientSignupProTopDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(CHAMO_HOME_CLIENT_SIGNUP_PRO_TOP_DISMISSED) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismissClientSignupProTop = useCallback(() => {
+    try {
+      localStorage.setItem(CHAMO_HOME_CLIENT_SIGNUP_PRO_TOP_DISMISSED, "1");
+    } catch {
+      /* ignore */
+    }
+    setClientSignupProTopDismissed(true);
+  }, []);
+
   // ✅ ATIVAÇÃO DO PUSH: Registra o token assim que o perfil carregar
   usePush(profile?.user_id || profile?.id); 
 
@@ -684,6 +701,8 @@ const Home = () => {
 
   // Só monta o conteúdo (e os fetches) depois da sessão estar pronta — evita getSession() null pós-OAuth
   const contentReady = !authLoading && isReady;
+  const showClientSignupProEndCta =
+    contentReady && !!user && profile?.user_type === "client" && !linkedSponsor;
 
   return (
     <AppLayout>
@@ -693,6 +712,18 @@ const Home = () => {
       ) : user && homeFeedComunidade ? (
         <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto lg:px-4 xl:px-6 2xl:px-8 lg:py-3">
           <CommunityFeed variant="embedded" />
+          {showClientSignupProEndCta ? (
+            <div className="mt-8 px-4 pb-4 max-w-screen-lg mx-auto">
+              <Link
+                to="/signup-pro"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-bold text-primary-foreground shadow-md shadow-primary/20 transition-[transform,box-shadow] hover:shadow-lg hover:shadow-primary/25 active:scale-[0.99]"
+              >
+                <Briefcase className="h-4 w-4 shrink-0 opacity-95" strokeWidth={2.25} />
+                Tornar-se profissional
+                <ChevronRight className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+              </Link>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div
@@ -739,8 +770,16 @@ const Home = () => {
           ) : user ? (
             /* ── Welcome cliente ── */
             <div className="flex flex-col gap-3">
-              {profile?.user_type === "client" && !linkedSponsor ? (
-                <div className="relative -mt-0.5 overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-b from-primary/[0.09] via-primary/[0.03] to-transparent px-4 pt-3.5 pb-3 shadow-sm ring-1 ring-primary/[0.06] dark:from-primary/[0.14] dark:via-primary/[0.06] dark:to-transparent">
+              {profile?.user_type === "client" && !linkedSponsor && !clientSignupProTopDismissed ? (
+                <div className="relative -mt-0.5 overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-b from-primary/[0.09] via-primary/[0.03] to-transparent px-4 pt-3.5 pb-3 pr-10 shadow-sm ring-1 ring-primary/[0.06] dark:from-primary/[0.14] dark:via-primary/[0.06] dark:to-transparent">
+                  <button
+                    type="button"
+                    onClick={dismissClientSignupProTop}
+                    className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground active:scale-95"
+                    aria-label="Fechar convite para profissional"
+                  >
+                    <X className="h-4 w-4" strokeWidth={2.25} />
+                  </button>
                   <div
                     className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-primary/[0.12] blur-2xl dark:bg-primary/[0.2]"
                     aria-hidden
@@ -962,6 +1001,19 @@ const Home = () => {
               Tornar-se profissional
             </Link>
           )}
+
+          {showClientSignupProEndCta ? (
+            <div className="mt-2">
+              <Link
+                to="/signup-pro"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-bold text-primary-foreground shadow-md shadow-primary/20 transition-[transform,box-shadow] hover:shadow-lg hover:shadow-primary/25 active:scale-[0.99]"
+              >
+                <Briefcase className="h-4 w-4 shrink-0 opacity-95" strokeWidth={2.25} />
+                Tornar-se profissional
+                <ChevronRight className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+              </Link>
+            </div>
+          ) : null}
 
           <footer className="text-center py-6 pt-6 pb-24 border-t mt-4 space-y-3">
             <p className="text-xs text-muted-foreground px-2">

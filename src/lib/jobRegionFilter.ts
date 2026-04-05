@@ -1,8 +1,71 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** UF em 2 letras (ex.: "sp" → "SP"). */
+/** UFs válidas (evita tratar "Minas Gerais".slice(0,2) como "MI"). */
+const BRAZIL_UFS = new Set([
+  "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT",
+  "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
+]);
+
+/** Nome do estado (sem acento, maiúsculas) → sigla */
+const STATE_NAME_TO_UF: Record<string, string> = {
+  ACRE: "AC",
+  ALAGOAS: "AL",
+  AMAZONAS: "AM",
+  AMAPA: "AP",
+  BAHIA: "BA",
+  CEARA: "CE",
+  "DISTRITO FEDERAL": "DF",
+  "ESPIRITO SANTO": "ES",
+  GOIAS: "GO",
+  MARANHAO: "MA",
+  "MATO GROSSO": "MT",
+  "MATO GROSSO DO SUL": "MS",
+  "MINAS GERAIS": "MG",
+  PARA: "PA",
+  PARAIBA: "PB",
+  PARANA: "PR",
+  PERNAMBUCO: "PE",
+  PIAUI: "PI",
+  "RIO DE JANEIRO": "RJ",
+  "RIO GRANDE DO NORTE": "RN",
+  "RIO GRANDE DO SUL": "RS",
+  RONDONIA: "RO",
+  RORAIMA: "RR",
+  "SANTA CATARINA": "SC",
+  "SAO PAULO": "SP",
+  SERGIPE: "SE",
+  TOCANTINS: "TO",
+};
+
+function stripAccents(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toUpperCase();
+}
+
+/**
+ * Converte o campo de estado do perfil para sigla de 2 letras.
+ * Não usa mais slice(0,2) em textos longos ("Minas Gerais" → era "MI" e zerava a lista).
+ */
 export function normalizeJobUf(uf: string | null | undefined): string {
-  return (uf ?? "").trim().toUpperCase().slice(0, 2);
+  const raw = (uf ?? "").trim();
+  if (!raw) return "";
+
+  const upper = raw.toUpperCase().replace(/\s+/g, " ");
+  const firstSegment = upper.split(/[-–—,/|]/)[0]?.trim() ?? upper;
+  if (firstSegment.length === 2 && /^[A-Z]{2}$/.test(firstSegment) && BRAZIL_UFS.has(firstSegment)) {
+    return firstSegment;
+  }
+
+  const folded = stripAccents(upper);
+  if (STATE_NAME_TO_UF[folded]) return STATE_NAME_TO_UF[folded];
+  if (STATE_NAME_TO_UF[upper]) return STATE_NAME_TO_UF[upper];
+
+  const foldedSeg = stripAccents(firstSegment);
+  if (STATE_NAME_TO_UF[foldedSeg]) return STATE_NAME_TO_UF[foldedSeg];
+
+  return "";
 }
 
 export function normalizeJobCity(city: string | null | undefined): string {
@@ -10,18 +73,66 @@ export function normalizeJobCity(city: string | null | undefined): string {
 }
 
 function isValidBrazilUf(uf: string): boolean {
-  return /^[A-Z]{2}$/.test(uf);
+  return uf.length === 2 && BRAZIL_UFS.has(uf);
 }
 
-/** Evita que % e _ na cidade quebrem o ILIKE. */
-function escapeIlikeExact(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+type JobRegionRow = {
+  city?: string | null;
+  state?: string | null;
+  location?: string | null;
+};
+
+function sameCityAccentInsensitive(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  return stripAccents(a).toLowerCase() === stripAccents(b).toLowerCase();
+}
+
+/**
+ * Quando a coluna `state` da vaga não normaliza para UF (vazia/ilegível), tenta o texto em `location`.
+ */
+function jobMatchesRegionByLocationOnly(row: JobRegionRow, profileCity: string, profileUf: string): boolean {
+  if (normalizeJobUf(row.state)) return false;
+  const raw = (row.location ?? "").trim();
+  if (!raw) return false;
+  const loc = stripAccents(raw).toUpperCase();
+  const city = normalizeJobCity(profileCity);
+  const citySt = city ? stripAccents(city).toUpperCase() : "";
+  const uf = profileUf.toUpperCase();
+  const hasUfToken =
+    loc.includes(`/${uf}`) ||
+    loc.includes(`-${uf}`) ||
+    loc.includes(`, ${uf}`) ||
+    new RegExp(`\\b${uf}\\b`).test(loc);
+  if (citySt && loc.includes(citySt) && hasUfToken) return true;
+  return hasUfToken;
+}
+
+/**
+ * Mesma regra para lista e contador (Home vs /jobs):
+ * - UF da vaga via normalizeJobUf(state) === UF do perfil (aceita sigla ou nome completo na coluna).
+ * - Se houver vagas nesse estado, prioriza mesma cidade (coluna city); senão mostra todo o estado.
+ * - Se nenhuma vaga com UF reconhecida, fallback por location (vagas antigas só com texto).
+ */
+export function filterJobPostingsToProfileRegion<T extends JobRegionRow>(rows: T[], profileCity: string, profileUf: string): T[] {
+  const city = normalizeJobCity(profileCity);
+  const uf = profileUf;
+
+  const inState = rows.filter((r) => normalizeJobUf(r.state) === uf);
+  if (inState.length > 0) {
+    const strict = inState.filter((r) => {
+      const rc = normalizeJobCity(r.city);
+      return rc.length > 0 && sameCityAccentInsensitive(rc, city);
+    });
+    return strict.length > 0 ? strict : inState;
+  }
+
+  return rows.filter((r) => jobMatchesRegionByLocationOnly(r, city, uf));
 }
 
 /**
  * Vagas ativas com filtro regional tolerante ao perfil:
- * - UF sempre normalizada; cidade com ILIKE (ignora maiúsculas).
- * - Se não houver nada na cidade com esse critério, mostra todas da mesma UF (evita lista vazia quando CEP da vaga ≠ texto do perfil).
+ * - Se UF/cidade do perfil forem inválidos, lista todas as vagas ativas.
+ * - Caso contrário, busca todas as ativas e filtra no cliente (evita mismatch SQL com state="Minas Gerais" vs "MG").
  */
 export async function fetchActiveJobPostings(
   supabase: SupabaseClient,
@@ -39,13 +150,9 @@ export async function fetchActiveJobPostings(
     return { data: (data ?? []) as unknown[], error };
   }
 
-  const strict = await base().eq("state", uf).ilike("city", escapeIlikeExact(city));
-  if (!strict.error && strict.data && strict.data.length > 0) {
-    return { data: strict.data as unknown[], error: strict.error };
-  }
-
-  const loose = await base().eq("state", uf);
-  return { data: (loose.data ?? []) as unknown[], error: loose.error };
+  const { data, error } = await base();
+  const filtered = filterJobPostingsToProfileRegion((data ?? []) as JobRegionRow[], city, uf);
+  return { data: filtered as unknown[], error };
 }
 
 export async function countActiveJobPostings(
@@ -56,19 +163,13 @@ export async function countActiveJobPostings(
   const city = normalizeJobCity(profileCity);
   const uf = normalizeJobUf(profileState);
 
-  const head = () =>
-    supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true);
-
   if (!city || !isValidBrazilUf(uf)) {
-    const { count, error } = await head();
+    const { count, error } = await supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("active", true);
     if (error) return 0;
     return count ?? 0;
   }
 
-  const strict = await head().eq("state", uf).ilike("city", escapeIlikeExact(city));
-  if (!strict.error && (strict.count ?? 0) > 0) return strict.count ?? 0;
-
-  const loose = await head().eq("state", uf);
-  if (loose.error) return 0;
-  return loose.count ?? 0;
+  const { data, error } = await supabase.from("job_postings").select("id, city, state, location").eq("active", true);
+  if (error) return 0;
+  return filterJobPostingsToProfileRegion(data ?? [], city, uf).length;
 }

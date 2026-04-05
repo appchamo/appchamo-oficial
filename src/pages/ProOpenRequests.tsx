@@ -225,7 +225,7 @@ const ProOpenRequests = () => {
               Pedidos na região
             </h1>
             <p className="text-sm text-muted-foreground">
-              Pedidos abertos na sua UF
+              Pedidos na sua cidade e UF
               {proRow?.category_id ? " · mesma categoria do seu perfil" : ""}
             </p>
           </div>
@@ -251,8 +251,8 @@ const ProOpenRequests = () => {
             <Handshake className="w-10 h-10 text-muted-foreground mx-auto mb-3 opacity-70" />
             <p className="font-semibold text-foreground mb-1">Nenhum pedido no momento</p>
             <p className="text-sm text-muted-foreground">
-              Quando clientes publicarem pedidos na sua UF
-              {proRow?.category_id ? " e categoria" : ""}, eles aparecerão aqui.
+              Quando clientes publicarem pedidos na sua cidade
+              {proRow?.category_id ? ", na sua categoria" : ""}, eles aparecerão aqui.
             </p>
           </div>
         ) : (
@@ -327,7 +327,7 @@ const ProOpenRequests = () => {
         )}
 
         <p className="text-xs text-muted-foreground mt-6 text-center">
-          A UF do pedido precisa coincidir com a do seu{" "}
+          Cidade e UF do pedido precisam coincidir com as do seu{" "}
           <Link to="/profile/settings/endereco" className="text-primary font-medium underline-offset-2 hover:underline">
             endereço no perfil
           </Link>

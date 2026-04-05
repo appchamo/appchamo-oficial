@@ -3,7 +3,7 @@ import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, Chec
 import { Link, useSearchParams } from "react-router-dom";
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { normalizeLocation, normalizeStateToUF } from "@/lib/locationUtils";
+import { normalizeLocation, normalizeStateToUF, matchesFeaturedRegion } from "@/lib/locationUtils";
 import { fetchCitiesByState } from "@/lib/brazilLocations";
 import { SEARCH_ALIASES, isPrimaryMatch } from "@/lib/searchAliases";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
@@ -206,6 +206,7 @@ const Search = () => {
         .from("professionals")
         .select("id, rating, total_services, verified, user_id, availability_status, category_id, profession_id, categories(name), professions:profession_id(name)")
         .eq("active", true)
+        .eq("profile_status", "approved")
         .neq("availability_status", "unavailable")
         .order("rating", { ascending: false }),
       supabase.from("categories").select("id, name").eq("active", true).order("name"),
@@ -281,18 +282,10 @@ const Search = () => {
         if (!searchMatchesPro(q, target, cat, prof)) return false;
       }
       
-      if (filterState) {
-        const pStateNorm = normalizeStateToUF(p.state);
-        const fStateNorm = normalizeStateToUF(filterState);
-        if (pStateNorm !== fStateNorm) return false;
-      }
-
-      if (filterCity) {
-        const pCity = normalizeLocation(p.city);
-        const fCity = normalizeLocation(filterCity);
-        // Só filtra fora quem tem cidade cadastrada e é diferente da cidade filtrada.
-        // Profissional sem cidade (pCity vazio) não é filtrado — endereço pode estar incompleto.
-        if (pCity && pCity !== fCity) return false;
+      // Mesma regra que os destaques da Home (matchesFeaturedRegion): aceita "Patrocínio" no perfil
+      // quando o pro tem "Patrocínio/MG", "Patrocínio - MG", etc.; igualdade estrita removia estes.
+      if (filterState || filterCity) {
+        if (!matchesFeaturedRegion(filterCity || null, filterState || null, p.city, p.state)) return false;
       }
 
       if (filterCategory && p.category_id !== filterCategory) return false;

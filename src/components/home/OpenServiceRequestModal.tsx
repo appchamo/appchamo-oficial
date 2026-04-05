@@ -219,7 +219,7 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
 
     toast({
       title: "Pedido publicado!",
-      description: "Profissionais da categoria na mesma UF foram notificados.",
+      description: "Profissionais da mesma categoria na sua cidade foram notificados.",
     });
     onOpenChange(false);
     navigate("/client/pedidos-abertos");
@@ -383,7 +383,7 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
                 </RadioGroup>
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Profissionais da mesma categoria e UF do CEP recebem notificação.{" "}
+                Profissionais da mesma categoria na mesma cidade e UF do CEP recebem notificação.{" "}
                 <Link to="/profile/settings/endereco" className="text-primary font-medium underline-offset-2 hover:underline">
                   Endereço no perfil
                 </Link>

@@ -3,6 +3,7 @@ import { Briefcase, MapPin, DollarSign, Clock, Search, Building2, ChevronRight, 
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchActiveJobPostings } from "@/lib/jobRegionFilter";
+import { isMissingSponsorIdColumnError, jobPostingsSelectLegacyCompatible } from "@/lib/jobPostingsSelectCompat";
 import { useAuth } from "@/hooks/useAuth";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +40,7 @@ type JobRowFlat = {
   salary_range: string | null;
   created_at: string;
   professional_id: string | null;
-  sponsor_id: string | null;
+  sponsor_id?: string | null;
 };
 
 /** Só job_postings — embeds professionals/sponsors podiam falhar (RLS) e zerar a lista com o contador da Home ok. */
@@ -47,29 +48,23 @@ const JOB_SELECT_FLAT =
   "id, title, description, location, salary_range, created_at, professional_id, sponsor_id";
 
 const Jobs = () => {
-  const { user, profile } = useAuth();
+  useAuth();
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [myCandidaturasOpen, setMyCandidaturasOpen] = useState(false);
   const [myApplications, setMyApplications] = useState<MyApplication[]>([]);
   const [loadingMyApps, setLoadingMyApps] = useState(false);
-  const [userCity, setUserCity] = useState<string | null>(null);
   const loadSeq = useRef(0);
 
   useEffect(() => {
     const seq = ++loadSeq.current;
     const load = async () => {
       setLoading(true);
-      const cityFilter = profile?.address_city ?? null;
-      const stateFilter = profile?.address_state ?? null;
-      setUserCity(cityFilter);
 
       try {
         const { data, error } = await fetchActiveJobPostings(supabase, {
           select: JOB_SELECT_FLAT,
-          profileCity: cityFilter,
-          profileState: stateFilter,
         });
 
         if (seq !== loadSeq.current) return;
@@ -152,7 +147,7 @@ const Jobs = () => {
       }
     };
     void load();
-  }, [user?.id, profile?.address_city, profile?.address_state]);
+  }, []);
 
   const filtered = jobs.filter(
     (j) =>
@@ -190,10 +185,15 @@ const Jobs = () => {
       return;
     }
     const jobIds = [...new Set((apps as { job_id: string }[]).map((a) => a.job_id))];
-    const { data: jobRows } = await supabase
-      .from("job_postings")
-      .select("id, title, location, salary_range, professional_id, sponsor_id, sponsors(name)")
-      .in("id", jobIds);
+    const jobSelFull = "id, title, location, salary_range, professional_id, sponsor_id, sponsors(name)";
+    let jobRes = await supabase.from("job_postings").select(jobSelFull).in("id", jobIds);
+    if (jobRes.error && isMissingSponsorIdColumnError(jobRes.error)) {
+      jobRes = await supabase
+        .from("job_postings")
+        .select(jobPostingsSelectLegacyCompatible(jobSelFull))
+        .in("id", jobIds);
+    }
+    const { data: jobRows } = jobRes;
     const proIds = [...new Set((jobRows || []).map((j: any) => j.professional_id).filter(Boolean))];
     let companyMap: Record<string, string> = {};
     if (proIds.length > 0) {
@@ -241,12 +241,10 @@ const Jobs = () => {
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
             <h1 className="text-xl font-bold text-foreground">Vagas</h1>
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              {userCity ? (
-                <><MapPin className="w-3 h-3" /> {userCity} · {filtered.length} oportunidades</>
-              ) : (
-                <>{filtered.length} oportunidades</>
-              )}
+            <p className="text-xs text-muted-foreground">
+              {filtered.length}{" "}
+              {filtered.length === 1 ? "oportunidade disponível" : "oportunidades disponíveis"}{" "}
+              <span className="text-muted-foreground/80">(todas as regiões)</span>
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -286,11 +284,7 @@ const Jobs = () => {
               <Briefcase className="w-8 h-8 text-muted-foreground/40" />
             </div>
             <p className="text-sm font-medium">Nenhuma vaga disponível</p>
-            <p className="text-xs max-w-[200px]">
-              {userCity
-                ? `Ainda não há vagas em ${userCity}. Volte em breve!`
-                : "Volte em breve para novas oportunidades."}
-            </p>
+            <p className="text-xs max-w-[220px]">Volte em breve para novas oportunidades.</p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">

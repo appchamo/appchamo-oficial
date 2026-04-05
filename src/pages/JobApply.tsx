@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Send, Upload, Loader2, FileText } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { isMissingSponsorIdColumnError, jobPostingsSelectLegacyCompatible } from "@/lib/jobPostingsSelectCompat";
 import { toast } from "@/hooks/use-toast";
 
 const JobApply = () => {
@@ -32,15 +33,20 @@ const JobApply = () => {
         return;
       }
       
-      const { data: row } = await supabase
-        .from("job_postings")
-        .select("title, professional_id, sponsor_id")
-        .eq("id", id!)
-        .maybeSingle();
+      const fullSel = "title, professional_id, sponsor_id";
+      let rowRes = await supabase.from("job_postings").select(fullSel).eq("id", id!).maybeSingle();
+      if (rowRes.error && isMissingSponsorIdColumnError(rowRes.error)) {
+        rowRes = await supabase
+          .from("job_postings")
+          .select(jobPostingsSelectLegacyCompatible(fullSel))
+          .eq("id", id!)
+          .maybeSingle();
+      }
+      const { data: row } = rowRes;
 
       if (row) {
         setJobTitle(row.title);
-        const jr = row as { sponsor_id: string | null; professional_id: string | null };
+        const jr = row as { sponsor_id?: string | null; professional_id: string | null };
         if (jr.sponsor_id) {
           const { data: sp } = await supabase.from("sponsors").select("user_id").eq("id", jr.sponsor_id).maybeSingle();
           setJobOwnerId(sp?.user_id ?? null);

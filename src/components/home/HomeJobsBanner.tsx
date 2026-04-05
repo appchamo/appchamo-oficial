@@ -17,7 +17,7 @@ const HomeJobsBanner = ({ jobCount, section }: HomeJobsBannerProps) => {
 
   const title = (section?.title || "{count} vaga(s) de emprego disponíveis")
     .replace("{count}", String(jobCount));
-  const subtitle = section?.subtitle || "Confira as oportunidades na sua região";
+  const subtitle = section?.subtitle || "Confira as oportunidades disponíveis";
 
   return (
     <Link to="/jobs" className="flex items-center gap-3 bg-accent border border-primary/20 rounded-xl p-3.5 hover:border-primary/40 transition-all">

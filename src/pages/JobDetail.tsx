@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, MapPin, DollarSign, Clock, Briefcase, Send, Upload } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { isMissingSponsorIdColumnError, jobPostingsSelectLegacyCompatible } from "@/lib/jobPostingsSelectCompat";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -50,13 +51,17 @@ const JobDetail = () => {
         return;
       }
 
-      const { data: row, error: rowErr } = await supabase
-        .from("job_postings")
-        .select(
-          "id, title, description, location, salary_range, requirements, created_at, professional_id, sponsor_id",
-        )
-        .eq("id", id)
-        .maybeSingle();
+      const fullSel =
+        "id, title, description, location, salary_range, requirements, created_at, professional_id, sponsor_id";
+      let rowRes = await supabase.from("job_postings").select(fullSel).eq("id", id).maybeSingle();
+      if (rowRes.error && isMissingSponsorIdColumnError(rowRes.error)) {
+        rowRes = await supabase
+          .from("job_postings")
+          .select(jobPostingsSelectLegacyCompatible(fullSel))
+          .eq("id", id)
+          .maybeSingle();
+      }
+      const { data: row, error: rowErr } = rowRes;
 
       if (rowErr || !row) {
         setLoading(false);
@@ -72,7 +77,7 @@ const JobDetail = () => {
         requirements: string | null;
         created_at: string;
         professional_id: string | null;
-        sponsor_id: string | null;
+        sponsor_id?: string | null;
       };
 
       let company_name = "Empresa";

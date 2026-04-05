@@ -119,7 +119,7 @@ const HomeAlertCarousel = ({
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-foreground">🔥 {jobCount} vaga(s) disponíveis</p>
-                <p className="text-xs text-muted-foreground">Confira as oportunidades na sua região</p>
+                <p className="text-xs text-muted-foreground">Confira as oportunidades disponíveis</p>
               </div>
               <span className="text-xs font-bold text-primary shrink-0">Ver →</span>
             </Link>

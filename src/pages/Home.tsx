@@ -300,14 +300,11 @@ const Home = () => {
 
   const [jobCount, setJobCount] = useState(0);
 
-  /**
-   * Mesma regra que `/jobs`: só vagas ativas; com cidade+UF no perfil, conta só da região
-   * (evita “1 vaga” na Home e lista vazia ao abrir Vagas).
-   */
+  /** Contador de vagas ativas no app inteiro (sem filtro por localização do perfil). */
   const refreshJobCount = useCallback(async () => {
-    const n = await countActiveJobPostings(supabase, profile?.address_city, profile?.address_state);
+    const n = await countActiveJobPostings(supabase);
     setJobCount(n);
-  }, [profile?.address_city, profile?.address_state]);
+  }, []);
 
   const [showCoupon, setShowCoupon] = useState(false);
   const [isReady, setIsReady] = useState(false); // ✅ Controle de renderização global

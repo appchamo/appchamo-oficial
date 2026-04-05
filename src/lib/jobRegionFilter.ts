@@ -102,34 +102,38 @@ function locationImpliesUf(row: JobRegionRow, uf: string): boolean {
   const raw = (row.location ?? "").trim();
   if (!raw) return false;
   const loc = stripAccents(raw).toUpperCase();
+  const compact = loc.replace(/\s+/g, "");
   const u = uf.toUpperCase();
   return (
-    loc.includes(`/${u}`) ||
-    loc.includes(`-${u}`) ||
+    compact.includes(`/${u}`) ||
+    compact.includes(`-${u}`) ||
     loc.includes(`, ${u}`) ||
     new RegExp(`\\b${u}\\b`).test(loc)
   );
 }
 
 function jobMatchesRegionByLocationOnly(row: JobRegionRow, profileCity: string, profileUf: string): boolean {
-  if (normalizeJobUf(row.state)) return false;
+  const hasLocUf = locationImpliesUf(row, profileUf);
+  if (!hasLocUf && normalizeJobUf(row.state)) return false;
   const raw = (row.location ?? "").trim();
   if (!raw) return false;
   const loc = stripAccents(raw).toUpperCase();
   const city = normalizeProfileCityForJobs(profileCity);
   const citySt = city ? stripAccents(city).toUpperCase() : "";
-  const uf = profileUf.toUpperCase();
-  const hasUfToken = locationImpliesUf(row, profileUf);
-  if (citySt && loc.includes(citySt) && hasUfToken) return true;
-  return hasUfToken;
+  if (citySt && loc.includes(citySt) && hasLocUf) return true;
+  return hasLocUf;
 }
 
-/** Mesmo estado (UF) pela coluna state OU por location tipo Cidade/MG quando state veio vazio na vaga. */
+/**
+ * UF do perfil: coluna `state` da vaga OU texto em `location` (ex.: Patrocínio/MG).
+ * Importante: se o CEP gravou UF errada na coluna `state`, ainda assim mostramos para quem está na UF
+ * indicada em `location` (caso comum em dados inconsistentes).
+ */
 function rowMatchesProfileUf(row: JobRegionRow, profileUf: string): boolean {
   const ru = normalizeJobUf(row.state);
   if (ru === profileUf) return true;
-  if (ru) return false;
-  return locationImpliesUf(row, profileUf);
+  if (locationImpliesUf(row, profileUf)) return true;
+  return false;
 }
 
 /**

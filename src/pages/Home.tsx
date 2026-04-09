@@ -31,7 +31,6 @@ import { countActiveJobPostings } from "@/lib/jobRegionFilter";
 import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
 import CommunityFeed from "@/components/community/CommunityFeed";
-import HomeLaunchBanner from "@/components/home/HomeLaunchBanner";
 import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
 import SponsorLaunchNovidadeModal from "@/components/sponsor/SponsorLaunchNovidadeModal";
@@ -703,7 +702,6 @@ const Home = () => {
 
   return (
     <AppLayout>
-      {contentReady ? <HomeLaunchBanner /> : null}
       {!contentReady ? (
         <HomeSkeleton />
       ) : user && homeFeedComunidade ? (

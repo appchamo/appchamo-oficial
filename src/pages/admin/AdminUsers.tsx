@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Shield, Eye, FileText, CreditCard, Briefcase } from "lucide-react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -16,7 +16,40 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+function maskCpf(value: string | null | undefined): string {
+  if (!value) return "";
+  const d = value.replace(/\D/g, "");
+  if (d.length !== 11) return value;
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+}
+
+function maskCnpj(value: string | null | undefined): string {
+  if (!value) return "";
+  const d = value.replace(/\D/g, "");
+  if (d.length !== 14) return value;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+}
+
+function formatBrazilPhone(value: string | null | undefined): string {
+  if (!value?.trim()) return "";
+  const d = value.replace(/\D/g, "");
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return value.trim();
+}
+
+function buildProfileAddress(p: Profile): string | null {
+  const line1 = [p.address_street, p.address_number].filter(Boolean).join(", ");
+  const extra = [p.address_complement, p.address_neighborhood].filter(Boolean).join(" · ");
+  const first = [line1, extra].filter(Boolean).join(extra ? " — " : "");
+  const cityUf = [p.address_city, p.address_state].filter(Boolean).join("/");
+  const cep = p.address_zip?.trim() ? `CEP ${p.address_zip.replace(/\D/g, "").replace(/^(\d{5})(\d{3})$/, "$1-$2") || p.address_zip}` : "";
+  const parts = [first, cityUf, cep, p.address_country?.trim()].filter(Boolean) as string[];
+  const s = parts.join(" · ");
+  return s.trim() || null;
+}
 
 interface Profile {
   id: string;
@@ -27,6 +60,17 @@ interface Profile {
   is_blocked: boolean;
   job_posting_enabled?: boolean;
   created_at: string;
+  phone?: string | null;
+  cpf?: string | null;
+  cnpj?: string | null;
+  address_street?: string | null;
+  address_number?: string | null;
+  address_complement?: string | null;
+  address_neighborhood?: string | null;
+  address_city?: string | null;
+  address_state?: string | null;
+  address_zip?: string | null;
+  address_country?: string | null;
 }
 
 const AdminUsers = () => {
@@ -41,6 +85,7 @@ const AdminUsers = () => {
   const [docsLoading, setDocsLoading] = useState(false);
   const [planUser, setPlanUser] = useState<Profile | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("free");
+  const [detailsUser, setDetailsUser] = useState<Profile | null>(null);
 
   const fetchUsers = async () => {
     const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
@@ -323,6 +368,9 @@ const AdminUsers = () => {
                             <DropdownMenuItem onClick={() => toggleBlock(user)}>
                               {user.is_blocked ? <><CheckCircle className="w-3.5 h-3.5 mr-2" /> Desbloquear</> : <><Ban className="w-3.5 h-3.5 mr-2" /> Bloquear</>}
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDetailsUser(user)}>
+                              <Contact className="w-3.5 h-3.5 mr-2" /> Ver detalhes
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openDocs(user)}>
                               <FileText className="w-3.5 h-3.5 mr-2" /> Ver documentos
                             </DropdownMenuItem>
@@ -363,6 +411,55 @@ const AdminUsers = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={!!detailsUser} onOpenChange={(o) => !o && setDetailsUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Detalhes — {detailsUser?.full_name || "Usuário"}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Telefone, endereço e documento do utilizador selecionado.
+            </DialogDescription>
+          </DialogHeader>
+          {detailsUser ? (
+            <div className="space-y-4 text-sm">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">E-mail</p>
+                <p className="text-foreground mt-0.5 break-all">{detailsUser.email || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Telefone</p>
+                <p className="text-foreground mt-0.5">
+                  {formatBrazilPhone(detailsUser.phone ?? null) || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Endereço</p>
+                <p className="text-foreground mt-0.5 whitespace-pre-wrap">
+                  {buildProfileAddress(detailsUser) || "Não informado"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CPF / CNPJ</p>
+                <div className="text-foreground mt-0.5 space-y-1">
+                  {detailsUser.cpf?.trim() ? (
+                    <p>
+                      <span className="text-muted-foreground">CPF: </span>
+                      {maskCpf(detailsUser.cpf)}
+                    </p>
+                  ) : null}
+                  {detailsUser.cnpj?.trim() ? (
+                    <p>
+                      <span className="text-muted-foreground">CNPJ: </span>
+                      {maskCnpj(detailsUser.cnpj)}
+                    </p>
+                  ) : null}
+                  {!detailsUser.cpf?.trim() && !detailsUser.cnpj?.trim() ? <p>—</p> : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       {/* Documents Dialog */}
       <Dialog open={!!docsUser} onOpenChange={(o) => !o && setDocsUser(null)}>

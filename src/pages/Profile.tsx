@@ -463,6 +463,7 @@ const Profile = () => {
                     bucketPath="professionals"
                     currentImage={proData.cover_image_url || undefined}
                     label="Alterar capa"
+                    variant="onDark"
                     maxSize={900}
                     quality={0.68}
                   />

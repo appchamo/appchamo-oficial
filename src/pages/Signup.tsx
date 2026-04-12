@@ -22,7 +22,8 @@ import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
 import { tryChamoSignupOverlayBack } from "@/lib/chamoSignupBack";
-import type { Session } from "@supabase/supabase-js"; 
+import type { Session } from "@supabase/supabase-js";
+import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 
 type AccountType = "client" | "professional";
 type Step =
@@ -290,7 +291,7 @@ const Signup = () => {
         try {
           const { data: profileRow, error: profileError } = await supabase
             .from("profiles")
-            .select("cpf, phone")
+            .select("cpf, phone, user_type, accepted_terms_version, signup_completed_at")
             .eq("user_id", currentSession.user.id)
             .maybeSingle();
           // Sessão inválida (ex.: usuário excluído no Supabase) → limpa e manda pro login
@@ -305,7 +306,7 @@ const Signup = () => {
             await forceExitToLogin();
             return;
           }
-          const isComplete = profileRow?.cpf || profileRow?.phone;
+          const isComplete = profileRow && isProfileSignupComplete(profileRow);
           if (isComplete) {
             setAuthKickPending(true);
             localStorage.removeItem("signup_in_progress");
@@ -391,8 +392,7 @@ const Signup = () => {
     if (!localStorage.getItem("signup_in_progress")) return;
     if (didAdvanceFromOAuth.current) return;
 
-    const isComplete = profile?.cpf || profile?.phone;
-    if (isComplete) {
+    if (profile && isProfileSignupComplete(profile)) {
       localStorage.removeItem("signup_in_progress");
       // Já existe cadastro completo para esse e-mail → levar direto para a Home (mantendo sessão)
       navigate("/home", { replace: true });

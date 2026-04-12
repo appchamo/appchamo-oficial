@@ -100,9 +100,9 @@ const Header = () => {
       if (profile.user_type === "client") {
         // Cliente: só armazenar status se for "rejected" (para exibir badge REPROVADO)
         setProStatus(pro?.profile_status === "rejected" ? "rejected" : null);
-      } else if (profile.user_type === "professional") {
-        setProStatus(pro?.profile_status ?? "pending");
       } else {
+        // Profissional/empresa: só o valor real da tabela. Não usar "pending" como fallback —
+        // cada aba (Home, Perfil…) tem o seu próprio Header; fallback gerava "em análise" após aprovação.
         setProStatus(pro?.profile_status ?? null);
       }
 
@@ -143,7 +143,7 @@ const Header = () => {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, profile]);
+  }, [user, profile, location.pathname]);
 
   useEffect(() => {
     if (!user) return;

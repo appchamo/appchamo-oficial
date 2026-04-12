@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { usePrevious } from "@/hooks/usePrevious";
 import { isMainAppTabPath, isOverlayStackRoute } from "@/lib/mainAppTabs";
+import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import AuthSessionGate from "@/components/AuthSessionGate";
 import { RefreshProvider } from "@/contexts/RefreshContext";
@@ -262,6 +263,9 @@ const RedirectLoggedIn = () => {
   }
 
   if (!profile) return <Navigate to="/post-login" replace />;
+  if (!isProfileSignupComplete(profile)) {
+    return <Navigate to="/signup" replace />;
+  }
   return <Navigate to="/home" replace />;
 };
 
@@ -360,6 +364,8 @@ const OAuthCallbackRedirectGuard = () => {
         navigate("/signup", { replace: true });
       } else if (!profile) {
         navigate("/post-login", { replace: true });
+      } else if (!isProfileSignupComplete(profile)) {
+        navigate("/signup", { replace: true });
       } else {
         navigate("/home", { replace: true });
       }

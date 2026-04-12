@@ -1,13 +1,14 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2 } from "lucide-react";
+import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 
 type Props = {
   children: JSX.Element;
 };
 
 export default function ProtectedRoute({ children }: Props) {
-  const { session, loading } = useAuth();
+  const { session, loading, profile } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -21,6 +22,10 @@ export default function ProtectedRoute({ children }: Props) {
   if (!session) {
     const from = `${location.pathname}${location.search}${location.hash}`;
     return <Navigate to="/login" replace state={{ from }} />;
+  }
+
+  if (profile && !isProfileSignupComplete(profile)) {
+    return <Navigate to="/signup" replace />;
   }
 
   return children;

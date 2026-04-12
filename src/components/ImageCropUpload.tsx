@@ -7,6 +7,7 @@ import { Upload, ZoomIn, Check, X, Camera } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Capacitor } from "@capacitor/core";
+import { cn } from "@/lib/utils";
 
 interface ImageCropUploadProps {
   onUpload: (path: string) => void;
@@ -15,6 +16,8 @@ interface ImageCropUploadProps {
   bucketPath?: string;
   currentImage?: string | null;
   label?: string;
+  /** Sobre foto/capa escura: fundo claro sólido e texto forte (ex.: “Alterar capa” no perfil). */
+  variant?: "default" | "onDark";
   /** Dimensão máxima (px) do maior lado da imagem final. Default: 520 */
   maxSize?: number;
   /** Qualidade WebP 0–1. Default: 0.65 */
@@ -81,6 +84,7 @@ const ImageCropUpload = ({
   showCameraOption = false,
   signupAvatarMode = false,
   signupTrigger,
+  variant = "default",
 }: ImageCropUploadProps) => {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -221,21 +225,44 @@ onUpload(publicData.publicUrl);
         <button
           type="button"
           onClick={onButtonClick}
-          className="group relative flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-4 hover:border-primary/50 transition-colors cursor-pointer bg-muted/30"
-        >
-          {currentImage ? (
-            <img
-              src={currentImage}
-              alt="Preview"
-              className={`w-20 h-20 object-cover ${
-                shape === "round" ? "rounded-full" : "rounded-lg"
-              }`}
-            />
-          ) : (
-            <Upload className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
+          className={cn(
+            "group relative cursor-pointer transition-all active:scale-[0.98]",
+            variant === "onDark"
+              ? "flex flex-row items-center gap-2.5 rounded-xl border-2 border-white bg-white/95 px-3 py-2 shadow-[0_4px_20px_rgba(0,0,0,0.4)] backdrop-blur-sm hover:bg-white dark:border-zinc-500 dark:bg-zinc-900/95 dark:hover:bg-zinc-900"
+              : "flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-4 hover:border-primary/50 bg-muted/30",
           )}
-
-          <span className="text-xs text-muted-foreground">{label}</span>
+        >
+          {variant === "onDark" ? (
+            <>
+              {currentImage ? (
+                <img
+                  src={currentImage}
+                  alt=""
+                  className="w-9 h-9 shrink-0 rounded-md object-cover ring-2 ring-zinc-200 dark:ring-zinc-600"
+                />
+              ) : (
+                <Upload className="h-5 w-5 shrink-0 text-primary" strokeWidth={2.35} aria-hidden />
+              )}
+              <span className="text-left text-xs font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                {label}
+              </span>
+            </>
+          ) : (
+            <>
+              {currentImage ? (
+                <img
+                  src={currentImage}
+                  alt="Preview"
+                  className={`w-20 h-20 object-cover ${
+                    shape === "round" ? "rounded-full" : "rounded-lg"
+                  }`}
+                />
+              ) : (
+                <Upload className="w-8 h-8 text-muted-foreground transition-colors group-hover:text-primary" />
+              )}
+              <span className="text-xs text-muted-foreground">{label}</span>
+            </>
+          )}
         </button>
       ) : signupAvatarMode ? (
         signupTrigger ? (

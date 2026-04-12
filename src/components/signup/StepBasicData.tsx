@@ -10,9 +10,9 @@ type AccountType = "client" | "professional";
 export type GenderOption = "male" | "female" | "prefer_not_say";
 
 export interface BasicData {
-  /** Nome de identidade (mesmo da identidade/documento). */
+  /** Nome completo (como no documento). */
   name: string;
-  /** Nome que aparece para outros usuários. */
+  /** Preenchido automaticamente com o nome completo (compatível com a API). */
   displayName: string;
   email: string;
   phone: string;
@@ -38,7 +38,6 @@ export interface BasicData {
 /** Campos do passo 1 com erro visual + scroll. */
 export type BasicFieldKey =
   | "name"
-  | "displayName"
   | "email"
   | "phone"
   | "birthDate"
@@ -53,7 +52,6 @@ export type BasicFieldKey =
 
 const BASIC_FIELD_SCROLL_ORDER: BasicFieldKey[] = [
   "name",
-  "displayName",
   "email",
   "phone",
   "birthDate",
@@ -134,8 +132,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
     const t = window.setTimeout(() => setNativeFormReady(true), NATIVE_FORM_DEFER_MS);
     return () => clearTimeout(t);
   }, []);
-  const [name, setName] = useState(initialData?.name || ""); // ✅ Preenche se vier do Google
-  const [displayName, setDisplayName] = useState(initialData?.displayName || initialData?.name || "");
+  const [name, setName] = useState(initialData?.name || initialData?.displayName || "");
   const [email, setEmail] = useState(initialData?.email || ""); // ✅ Preenche se vier do Google
   const [phone, setPhone] = useState("");
   const [documentType, setDocumentType] = useState<"cpf" | "cnpj">("cpf");
@@ -152,7 +149,8 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   const [addressCountry, setAddressCountry] = useState("Brasil");
   /** Exibição DD/MM/AAAA (DIA/MES/ANO). */
   const [birthDateBr, setBirthDateBr] = useState("");
-  const [gender, setGender] = useState<BasicData["gender"]>(initialData?.gender ?? "prefer_not_say");
+  /** Campo removido do formulário; enviamos sempre "prefiro não informar", exceto se o OAuth já trouxe valor. */
+  const gender: GenderOption = (initialData?.gender as GenderOption | undefined) ?? "prefer_not_say";
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [referralCode, setReferralCode] = useState(() => {
@@ -417,7 +415,6 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
     const docClean = document.replace(/\D/g, "");
 
     if (!name.trim()) errs.name = "Campo obrigatório.";
-    if (!displayName.trim()) errs.displayName = "Campo obrigatório.";
     if (!email.trim()) errs.email = "Campo obrigatório.";
     if (!phone.replace(/\D/g, "")) errs.phone = "Campo obrigatório.";
 
@@ -468,6 +465,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
 
     setFieldErrors({});
     const birthIso = brBirthToIso(birthDateBr) as string;
+    const displayName = name.trim();
 
     const referralToSubmit =
       refTrim.length >= 6 && referralValidated && refTrim === referralValidatedCode ? refTrim : undefined;
@@ -550,7 +548,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
           }
 
           onNext({
-            name,
+            name: name.trim(),
             displayName,
             email,
             phone: phone.replace(/\D/g, ""),
@@ -571,7 +569,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
     }
 
     onNext({
-      name,
+      name: name.trim(),
       displayName,
       email,
       phone: phone.replace(/\D/g, ""),
@@ -597,7 +595,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   }
 
   return (
-    <div className="min-h-full w-full bg-background flex flex-col items-center justify-start px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+    <div className="min-h-full w-full bg-background flex flex-col items-center justify-start px-4 py-6 pb-[max(2rem,env(safe-area-inset-bottom,0px)+0.75rem)]">
       <div className="w-full max-w-sm">
         <div className="text-center mb-4">
           <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
@@ -608,7 +606,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
         </div>
 
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-5 shadow-card space-y-3">
-          <InputRow icon={User} label="Nome *" fieldId="signup-field-name" error={fieldErrors.name}>
+          <InputRow icon={User} label="Nome completo *" fieldId="signup-field-name" error={fieldErrors.name}>
             <input
               type="text"
               value={name}
@@ -616,24 +614,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                 clearFieldError("name");
                 setName(e.target.value);
               }}
-              placeholder="Mesmo nome da identidade"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-            />
-          </InputRow>
-          <InputRow
-            icon={UserCircle}
-            label="Nome de exibição *"
-            fieldId="signup-field-displayName"
-            error={fieldErrors.displayName}
-          >
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => {
-                clearFieldError("displayName");
-                setDisplayName(e.target.value);
-              }}
-              placeholder="Nome que aparecerá para outros usuários"
+              placeholder="Como no documento"
               className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
             />
           </InputRow>
@@ -680,22 +661,6 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             />
           </InputRow>
           {underageHint}
-
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Sexo</label>
-            <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
-              <UserCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <select
-                value={gender}
-                onChange={(e) => setGender(e.target.value as BasicData["gender"])}
-                className="flex-1 bg-transparent text-sm outline-none text-foreground"
-              >
-                <option value="male">Masculino</option>
-                <option value="female">Feminino</option>
-                <option value="prefer_not_say">Prefiro não informar</option>
-              </select>
-            </div>
-          </div>
 
           {/* Documento */}
           <div id="signup-field-document">
@@ -1015,7 +980,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
           </button>
         </form>
 
-        <p className="text-center text-xs text-muted-foreground mt-6 pb-2">
+        <p className="text-center text-xs text-muted-foreground mt-8 mb-1 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
           Já tem uma conta?{" "}
           <button
             type="button"

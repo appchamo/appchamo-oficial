@@ -1222,6 +1222,7 @@ export type Database = {
           id: string
           is_blocked: boolean
           phone: string | null
+          signup_completed_at: string | null
           updated_at: string
           user_id: string
           user_type: string
@@ -1247,6 +1248,7 @@ export type Database = {
           id?: string
           is_blocked?: boolean
           phone?: string | null
+          signup_completed_at?: string | null
           updated_at?: string
           user_id: string
           user_type?: string
@@ -1272,6 +1274,7 @@ export type Database = {
           id?: string
           is_blocked?: boolean
           phone?: string | null
+          signup_completed_at?: string | null
           updated_at?: string
           user_id?: string
           user_type?: string

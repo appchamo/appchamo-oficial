@@ -1,7 +1,7 @@
 import AdminLayout from "@/components/AdminLayout";
 import { AdminProsSealsPanel } from "@/pages/admin/AdminProsSealsPanel";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2, RefreshCw } from "lucide-react";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2, RefreshCw, Copy } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -1437,9 +1437,34 @@ const AdminPros = () => {
                         <div key={r.id} className="flex items-center justify-between gap-2 p-2.5 bg-muted/40 rounded-xl">
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-medium text-foreground truncate">{r.client_name}</p>
-                            <p className="text-[10px] text-muted-foreground">
-                              {new Date(r.created_at).toLocaleDateString("pt-BR")}
-                              {r.protocol && <span className="ml-1.5 font-mono text-primary/80">#{r.protocol}</span>}
+                            <p className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                              <span>{new Date(r.created_at).toLocaleDateString("pt-BR")}</span>
+                              {r.protocol ? (
+                                <>
+                                  <span className="font-mono text-primary/80">#{r.protocol}</span>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const p = r.protocol!.trim();
+                                      if (!p) return;
+                                      try {
+                                        await navigator.clipboard.writeText(p);
+                                        toast({ title: "Protocolo copiado", description: p });
+                                      } catch {
+                                        toast({
+                                          title: "Não foi possível copiar",
+                                          description: "Permita acesso à área de transferência ou copie manualmente.",
+                                          variant: "destructive",
+                                        });
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-0.5 rounded-md border border-primary/35 bg-primary/8 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary hover:bg-primary/15 transition-colors"
+                                  >
+                                    <Copy className="w-2.5 h-2.5 shrink-0" aria-hidden />
+                                    Copiar
+                                  </button>
+                                </>
+                              ) : null}
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">

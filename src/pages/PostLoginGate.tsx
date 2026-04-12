@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase, hardClearNativeAuthSession } from "@/integrations/supabase/client";
 import { peekPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
 import { Capacitor } from "@capacitor/core";
+import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 
 export default function PostLoginGate() {
   const navigate = useNavigate();
@@ -66,7 +67,7 @@ export default function PostLoginGate() {
             const { data, error } = await Promise.race([
               supabase
                 .from("profiles")
-                .select("user_type")
+                .select("user_type, signup_completed_at, accepted_terms_version")
                 .eq("user_id", userId)
                 .maybeSingle()
                 .then((res) => res),
@@ -77,7 +78,12 @@ export default function PostLoginGate() {
             if (error) {
               console.warn("[post-login] profiles select:", error.message);
             }
-            const userType = (data as any)?.user_type as string | undefined;
+            const row = data as {
+              user_type?: string;
+              signup_completed_at?: string | null;
+              accepted_terms_version?: string | null;
+            } | null;
+            const userType = row?.user_type;
             if (userType) {
               if (userType === "pending_signup") {
                 // Aguarda até 12s para o flushPendingEmailSignup (background) completar
@@ -88,10 +94,10 @@ export default function PostLoginGate() {
                   try {
                     const { data: d2 } = await supabase
                       .from("profiles")
-                      .select("user_type")
+                      .select("user_type, signup_completed_at, accepted_terms_version")
                       .eq("user_id", userId)
                       .maybeSingle();
-                    const t2 = (d2 as any)?.user_type as string | undefined;
+                    const t2 = (d2 as { user_type?: string } | null)?.user_type;
                     if (t2 && t2 !== "pending_signup") { finalType = t2; break; }
                   } catch { /* continua */ }
                 }
@@ -100,9 +106,24 @@ export default function PostLoginGate() {
                 if (finalType !== "pending_signup") {
                   void refreshProfile(userId).catch(() => {});
                   void refreshRoles(userId).catch(() => {});
-                  const pending = peekPostAuthRedirect();
-                  if (pending) { clearPostAuthRedirect(); navigate(pending, { replace: true }); }
-                  else navigate("/home", { replace: true });
+                  const lastRow = await supabase
+                    .from("profiles")
+                    .select("user_type, signup_completed_at, accepted_terms_version")
+                    .eq("user_id", userId)
+                    .maybeSingle()
+                    .then((r) => r.data as {
+                      user_type?: string | null;
+                      signup_completed_at?: string | null;
+                      accepted_terms_version?: string | null;
+                    } | null);
+                  if (cancelled) return;
+                  if (!lastRow || !isProfileSignupComplete(lastRow)) {
+                    navigate("/signup", { replace: true });
+                  } else {
+                    const pending = peekPostAuthRedirect();
+                    if (pending) { clearPostAuthRedirect(); navigate(pending, { replace: true }); }
+                    else navigate("/home", { replace: true });
+                  }
                 } else {
                   navigate("/signup", { replace: true });
                 }
@@ -113,7 +134,10 @@ export default function PostLoginGate() {
               // redireciona para o Signup para escolher o tipo de conta (Cliente/Profissional).
               const isNewSignup = localStorage.getItem("signup_in_progress") === "true";
               if (isNewSignup) {
-                localStorage.removeItem("signup_in_progress");
+                navigate("/signup", { replace: true });
+                return;
+              }
+              if (!isProfileSignupComplete(row ?? {})) {
                 navigate("/signup", { replace: true });
                 return;
               }
@@ -159,7 +183,6 @@ export default function PostLoginGate() {
           { onConflict: "user_id" },
         );
         if (isNewSignupFallback) {
-          localStorage.removeItem("signup_in_progress");
           if (!cancelled) {
             setChecking(false);
             navigate("/signup", { replace: true });
@@ -169,12 +192,26 @@ export default function PostLoginGate() {
         if (!upsertErr && !cancelled) {
           try {
             const { data: row, error: rowErr } = await Promise.race([
-              supabase.from("profiles").select("user_type").eq("user_id", userId).maybeSingle(),
+              supabase
+                .from("profiles")
+                .select("user_type, signup_completed_at, accepted_terms_version")
+                .eq("user_id", userId)
+                .maybeSingle(),
               new Promise<never>((_, reject) => setTimeout(() => reject(new Error("post_login_after_upsert_timeout")), 5000)),
             ]);
             if (!cancelled && !rowErr) {
               const ut = (row as { user_type?: string } | null)?.user_type;
+              const r = row as {
+                user_type?: string;
+                signup_completed_at?: string | null;
+                accepted_terms_version?: string | null;
+              } | null;
               if (ut && ut !== "pending_signup") {
+                if (!isProfileSignupComplete(r ?? {})) {
+                  setChecking(false);
+                  navigate("/signup", { replace: true });
+                  return;
+                }
                 setChecking(false);
                 const pending = peekPostAuthRedirect();
                 if (pending) {
@@ -220,7 +257,10 @@ export default function PostLoginGate() {
     // Se veio do fluxo de cadastro via OAuth, vai para /signup para escolher tipo de conta.
     const isNewSignupCtx = localStorage.getItem("signup_in_progress") === "true";
     if (isNewSignupCtx) {
-      localStorage.removeItem("signup_in_progress");
+      navigate("/signup", { replace: true });
+      return;
+    }
+    if (!isProfileSignupComplete(profile)) {
       navigate("/signup", { replace: true });
       return;
     }

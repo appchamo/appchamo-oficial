@@ -90,6 +90,7 @@ Deno.serve(async (req) => {
       birth_date: basicData.birthDate || null,
       accepted_terms_version: "1.0",
       accepted_terms_at: new Date().toISOString(),
+      signup_completed_at: new Date().toISOString(),
       address_zip: basicData.addressZip || null,
       address_street: basicData.addressStreet || null,
       address_number: basicData.addressNumber || null,

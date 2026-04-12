@@ -8,9 +8,10 @@ import {
   type ComponentType,
   type LazyExoticComponent,
 } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 import {
   MAIN_APP_TAB_PATHS,
   MAIN_TAB_PERSIST_ATTR,
@@ -42,6 +43,10 @@ function tabNeedsAuth(path: MainAppTabPath): boolean {
 
 function TabInner({ path }: { path: MainAppTabPath }) {
   const Cmp = TabComponents[path];
+  const { session, profile } = useAuth();
+  if (session?.user && profile && !isProfileSignupComplete(profile)) {
+    return <Navigate to="/signup" replace />;
+  }
   if (tabNeedsAuth(path)) {
     return (
       <ProtectedRoute>

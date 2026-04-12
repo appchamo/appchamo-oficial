@@ -3,6 +3,8 @@ import { AdminProsSealsPanel } from "@/pages/admin/AdminProsSealsPanel";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
 import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2, RefreshCw } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
@@ -46,6 +48,15 @@ interface Professional {
   doc_type?: string;
   /** Documento principal no cadastro (perfil): CPF ou CNPJ */
   docKind: "cpf" | "cnpj" | "none";
+}
+
+function formatProfessionalDocSentAt(createdAt: string | null | undefined): string | null {
+  if (!createdAt) return null;
+  try {
+    return format(new Date(createdAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+  } catch {
+    return null;
+  }
 }
 
 function profileDocKind(cpf: string | null | undefined, cnpj: string | null | undefined): "cpf" | "cnpj" | "none" {
@@ -152,6 +163,7 @@ const AdminPros = () => {
 
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc" | "plan_asc" | "plan_desc">("date_desc");
   const [docFilter, setDocFilter] = useState<"all" | "cpf" | "cnpj">("all");
+  const [verifiedFilter, setVerifiedFilter] = useState<"all" | "verified" | "unverified">("all");
 
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [reviewsPro, setReviewsPro] = useState<Professional | null>(null);
@@ -243,7 +255,11 @@ const AdminPros = () => {
         docFilter === "all" ||
         (docFilter === "cpf" && p.docKind === "cpf") ||
         (docFilter === "cnpj" && p.docKind === "cnpj");
-      return matchesSearch && matchesTab && matchesDoc;
+      const matchesVerified =
+        verifiedFilter === "all" ||
+        (verifiedFilter === "verified" && p.verified) ||
+        (verifiedFilter === "unverified" && !p.verified);
+      return matchesSearch && matchesTab && matchesDoc && matchesVerified;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -725,6 +741,7 @@ const AdminPros = () => {
               <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Categoria</th>
               <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Plano</th>
               <th className="text-left p-3 font-medium text-muted-foreground">Chamadas</th>
+              <th className="text-left p-3 font-medium text-muted-foreground">Verificado</th>
               <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Visibilidade</th>
               <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
               <th className="p-3"></th>
@@ -761,6 +778,17 @@ const AdminPros = () => {
                     {pro.bonus_calls > 0 && (
                       <span className="text-[10px] text-primary ml-1">(+{pro.bonus_calls} bônus)</span>
                     )}
+                  </td>
+                  <td className="p-3">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        pro.verified
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/35 dark:text-emerald-300"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {pro.verified ? "Sim" : "Não"}
+                    </span>
                   </td>
                   <td className="p-3 hidden md:table-cell">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${av.cls}`}>{av.label}</span>
@@ -814,7 +842,7 @@ const AdminPros = () => {
               );
             })}
             {items.length === 0 && (
-              <tr><td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">Nenhum profissional encontrado</td></tr>
+              <tr><td colSpan={8} className="p-8 text-center text-muted-foreground text-sm">Nenhum profissional encontrado</td></tr>
             )}
           </tbody>
         </table>
@@ -840,6 +868,15 @@ const AdminPros = () => {
           <option value="all">Doc: todos</option>
           <option value="cpf">Doc: CPF (PF)</option>
           <option value="cnpj">Doc: CNPJ (PJ)</option>
+        </select>
+        <select
+          value={verifiedFilter}
+          onChange={(e) => setVerifiedFilter(e.target.value as typeof verifiedFilter)}
+          className="border rounded-xl px-3 py-2.5 text-sm bg-card outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer min-w-[12rem]"
+        >
+          <option value="all">Verificação: todos</option>
+          <option value="verified">Verificação: verificados</option>
+          <option value="unverified">Verificação: não verificados</option>
         </select>
         <select
           value={sortBy}
@@ -997,10 +1034,20 @@ const AdminPros = () => {
                   <>
                     {/* Documentos de Identidade (Cadastro inicial) */}
                     <div className="space-y-1.5">
-                      {docs.map((d: any) => (
-                        d.notFound ? (
-                          <div key={d.id} className="flex items-center gap-2 text-xs text-muted-foreground italic">
-                            <FileText className="w-3.5 h-3.5 text-destructive" /> {d.type} — <span className="text-destructive">arquivo não encontrado no storage (peça reenvio)</span>
+                      {docs.map((d: any) => {
+                        const sentLabel = formatProfessionalDocSentAt(d.created_at);
+                        const sentPrefix = sentLabel ? (
+                          <span className="text-[11px] font-medium text-muted-foreground tabular-nums shrink-0">{sentLabel}</span>
+                        ) : null;
+                        return d.notFound ? (
+                          <div key={d.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground italic">
+                            {sentPrefix}
+                            <span className="flex items-center gap-2 min-w-0">
+                              <FileText className="w-3.5 h-3.5 text-destructive shrink-0" />
+                              <span>
+                                {d.type} — <span className="text-destructive">arquivo não encontrado no storage (peça reenvio)</span>
+                              </span>
+                            </span>
                           </div>
                         ) : (
                           <a
@@ -1009,12 +1056,18 @@ const AdminPros = () => {
                             onClick={!d.viewUrl ? (e) => { e.preventDefault(); toast({ title: "URL indisponível", description: "Não foi possível gerar o link do documento.", variant: "destructive" }); } : undefined}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-2 text-xs text-primary hover:underline"
+                            className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-primary hover:underline"
                           >
-                            <FileText className="w-3.5 h-3.5" /> {d.type} — {d.status}
+                            {sentPrefix}
+                            <span className="flex items-center gap-2 min-w-0">
+                              <FileText className="w-3.5 h-3.5 shrink-0" />
+                              <span>
+                                {d.type} — <span className="text-foreground font-medium">{d.status}</span>
+                              </span>
+                            </span>
                           </a>
-                        )
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* Documentos do Plano Business (Cartão CNPJ) */}

@@ -30,7 +30,6 @@ import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorCarousel from "@/components/SponsorCarousel";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -175,6 +174,7 @@ interface ReactionRow {
   post_id: string;
   user_id: string;
   reaction_type: ReactionType;
+  created_at?: string;
 }
 
 interface CommentRow {
@@ -324,6 +324,10 @@ function totalReactionCount(sum: Partial<Record<ReactionType, number>> | undefin
   return (sum.like || 0) + (sum.love || 0) + (sum.congrats || 0) + (sum.genius || 0);
 }
 
+function reactionTypeMeta(type: ReactionType) {
+  return REACTIONS.find((r) => r.type === type) ?? REACTIONS[0];
+}
+
 export default function CommunityFeed({
   variant,
   highlightPostId,
@@ -341,7 +345,6 @@ export default function CommunityFeed({
   const embedded = variant === "embedded";
   const navigate = useNavigate();
   const { user, profile } = useAuth();
-  const { sponsor: linkedSponsorForPost } = useLinkedSponsor(user?.id);
   const { getSection } = useHomeLayout();
   const [loading, setLoading] = useState(true);
   const [posts, setPosts] = useState<PostRow[]>([]);
@@ -397,6 +400,10 @@ export default function CommunityFeed({
   const [shareSearching, setShareSearching] = useState(false);
   const [shareSending, setShareSending] = useState(false);
   const [proPathByUserId, setProPathByUserId] = useState<Record<string, string>>({});
+  const [postReactionsSheetPostId, setPostReactionsSheetPostId] = useState<string | null>(null);
+  const [postReactionsSheetLoading, setPostReactionsSheetLoading] = useState(false);
+  /** Perfis de utilizadores que reagiram (nem sempre são autores de posts/comentários no feed atual). */
+  const [reactionExtraAuthors, setReactionExtraAuthors] = useState<Record<string, AuthorRow>>({});
   const [favoritesForShare, setFavoritesForShare] = useState<AuthorRow[]>([]);
   const [loadingFavoritesShare, setLoadingFavoritesShare] = useState(false);
   const [feedScope, setFeedScope] = useState<"all" | "following" | "hidden">("all");
@@ -420,10 +427,7 @@ export default function CommunityFeed({
   const singlePostIdTrim = (singlePostId ?? "").trim();
   const isSinglePostMode = singlePostIdTrim.length > 0;
 
-  const canPost =
-    profile?.user_type === "professional" ||
-    profile?.user_type === "company" ||
-    !!linkedSponsorForPost;
+  const canPost = !!user;
 
   const applyHydrationForPosts = useCallback(async (mergedList: PostRow[]) => {
     if (!mergedList.length) {
@@ -434,6 +438,7 @@ export default function CommunityFeed({
       setProPathByUserId({});
       setAuthorProMeta({});
       setCommentReactions([]);
+      setReactionExtraAuthors({});
       return;
     }
     const authorIds = [...new Set(mergedList.map((p) => p.author_id))];
@@ -450,7 +455,7 @@ export default function CommunityFeed({
     const pids = mergedList.map((p) => p.id);
     const { data: rx } = await supabase
       .from("community_post_reactions" as any)
-      .select("post_id, user_id, reaction_type")
+      .select("post_id, user_id, reaction_type, created_at")
       .in("post_id", pids);
     setReactions((rx || []) as ReactionRow[]);
 
@@ -737,7 +742,7 @@ export default function CommunityFeed({
 
         const { data: rx } = await supabase
           .from("community_post_reactions" as any)
-          .select("post_id, user_id, reaction_type")
+          .select("post_id, user_id, reaction_type, created_at")
           .eq("post_id", hid);
         if (!cancelled && rx?.length) {
           setReactions((prev) => [...prev.filter((r) => r.post_id !== hid), ...(rx as ReactionRow[])]);
@@ -921,6 +926,60 @@ export default function CommunityFeed({
     return m;
   }, [reactions, user]);
 
+  useEffect(() => {
+    if (!user) setReactionExtraAuthors({});
+  }, [user]);
+
+  const postReactionsSheetSorted = useMemo(() => {
+    if (!postReactionsSheetPostId) return [];
+    const resolve = (uid: string) => authors[uid] || commentAuthors[uid] || reactionExtraAuthors[uid];
+    return reactions
+      .filter((r) => r.post_id === postReactionsSheetPostId)
+      .slice()
+      .sort((a, b) => {
+        const ca = a.created_at || "";
+        const cb = b.created_at || "";
+        if (ca && cb && ca !== cb) return cb.localeCompare(ca);
+        return authorLabel(resolve(a.user_id)).localeCompare(authorLabel(resolve(b.user_id)), "pt-BR");
+      });
+  }, [postReactionsSheetPostId, reactions, authors, commentAuthors, reactionExtraAuthors]);
+
+  const openPostReactionsSheet = useCallback(
+    async (postId: string) => {
+      setPostReactionsSheetPostId(postId);
+      const uids = [...new Set(reactions.filter((r) => r.post_id === postId).map((r) => r.user_id))];
+      if (uids.length === 0) return;
+      setPostReactionsSheetLoading(true);
+      try {
+        const [{ data: profs }, { data: proRows }] = await Promise.all([
+          supabase.from("profiles").select("user_id, display_name, full_name, avatar_url").in("user_id", uids),
+          supabase.from("professionals").select("user_id, id, slug").in("user_id", uids),
+        ]);
+        setReactionExtraAuthors((prev) => {
+          const next = { ...prev };
+          (profs || []).forEach((p: any) => {
+            next[p.user_id] = p as AuthorRow;
+          });
+          return next;
+        });
+        const paths: Record<string, string> = {};
+        (proRows || []).forEach((row: any) => {
+          const key = String(row.slug || row.id || "").trim();
+          if (key) paths[row.user_id] = `/professional/${encodeURIComponent(key)}`;
+        });
+        if (Object.keys(paths).length) {
+          setProPathByUserId((prev) => ({ ...prev, ...paths }));
+        }
+      } catch (e) {
+        console.error(e);
+        toast({ title: "Erro ao carregar reações", variant: "destructive" });
+      } finally {
+        setPostReactionsSheetLoading(false);
+      }
+    },
+    [reactions],
+  );
+
   const commentReactionSummary = useMemo(() => {
     const m: Record<string, Partial<Record<ReactionType, number>>> = {};
     commentReactions.forEach((r) => {
@@ -1051,7 +1110,7 @@ export default function CommunityFeed({
       prevType = row?.reaction_type as ReactionType | undefined;
       const rest = prev.filter((x) => !(x.post_id === postId && x.user_id === uid));
       if (prevType === type) return rest;
-      return [...rest, { post_id: postId, user_id: uid, reaction_type: type }];
+      return [...rest, { post_id: postId, user_id: uid, reaction_type: type, created_at: new Date().toISOString() }];
     });
     try {
       if (prevType === type) {
@@ -2049,13 +2108,6 @@ export default function CommunityFeed({
         </>
       )}
 
-      {!canPost && (
-        <p className="text-[13px] text-zinc-600 dark:text-zinc-400 mb-5 rounded-2xl border border-zinc-200/80 bg-white/70 px-4 py-3 shadow-sm shadow-black/[0.03] dark:bg-zinc-900/50 dark:border-white/10 leading-relaxed">
-          <strong className="text-zinc-900 dark:text-zinc-100">Profissionais, empresas e patrocinadores</strong> publicam
-          aqui. Podes reagir, comentar e receber partilhamentos.
-        </p>
-      )}
-
       {loading ? (
         <div className="flex justify-center py-24">
           <Loader2 className="w-9 h-9 animate-spin text-primary" />
@@ -2329,8 +2381,12 @@ export default function CommunityFeed({
                   <div className="mx-5 mt-3 flex items-center justify-between gap-3 border-t border-zinc-100 dark:border-zinc-800/80 pt-3 text-[12px] text-zinc-500 dark:text-zinc-400">
                     <div className="flex items-center gap-2 min-h-[22px] min-w-0">
                       {totalRx > 0 ? (
-                        <>
-                          <span className="flex -space-x-1.5">
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 min-h-[22px] min-w-0 rounded-xl -mx-1.5 px-1.5 py-1 hover:bg-zinc-100/90 dark:hover:bg-zinc-800/70 active:scale-[0.99] transition-colors text-left touch-manipulation"
+                          onClick={() => void openPostReactionsSheet(post.id)}
+                        >
+                          <span className="flex -space-x-1.5 pointer-events-none">
                             {REACTIONS.filter((r) => (sum[r.type] || 0) > 0)
                               .slice(0, 3)
                               .map((r) => (
@@ -2342,8 +2398,10 @@ export default function CommunityFeed({
                                 </span>
                               ))}
                           </span>
-                          <span className="font-semibold text-zinc-600 dark:text-zinc-300 tabular-nums">{totalRx}</span>
-                        </>
+                          <span className="font-semibold text-zinc-600 dark:text-zinc-300 tabular-nums pointer-events-none">
+                            {totalRx}
+                          </span>
+                        </button>
                       ) : (
                         <span className="tabular-nums"> </span>
                       )}
@@ -2611,6 +2669,78 @@ export default function CommunityFeed({
                 </span>
               </button>
             </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={!!postReactionsSheetPostId}
+        onOpenChange={(o) => {
+          if (!o) setPostReactionsSheetPostId(null);
+        }}
+      >
+        <SheetContent
+          side="bottom"
+          className="rounded-t-[28px] p-0 gap-0 max-h-[min(72vh,560px)] flex flex-col overflow-hidden border-t border-primary/15 bg-background shadow-[0_-12px_48px_-10px_rgba(0,0,0,0.18)]"
+        >
+          <div className="mx-auto mt-2.5 mb-1 h-1 w-11 rounded-full bg-muted-foreground/20 shrink-0" aria-hidden />
+          <SheetHeader className="px-5 pt-1 pb-3 text-left border-b border-border/40 space-y-1">
+            <SheetTitle className="text-lg font-bold tracking-tight">Reações</SheetTitle>
+            <SheetDescription className="text-[13px] font-normal leading-snug">
+              Pessoas que reagiram a esta publicação.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-3 py-2 min-h-0">
+            {postReactionsSheetLoading && postReactionsSheetSorted.length === 0 ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            ) : postReactionsSheetSorted.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-10">Nenhuma reação ainda.</p>
+            ) : (
+              <ul className="space-y-1">
+                {postReactionsSheetSorted.map((row) => {
+                  const ar =
+                    authors[row.user_id] || commentAuthors[row.user_id] || reactionExtraAuthors[row.user_id];
+                  const proTo = proPathByUserId[row.user_id];
+                  const meta = reactionTypeMeta(row.reaction_type);
+                  const Mi = meta.Icon;
+                  const inner = (
+                    <>
+                      <div className="w-11 h-11 rounded-full bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.06]">
+                        {ar?.avatar_url ? (
+                          <img src={ar.avatar_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-sm font-bold text-primary">{authorLabel(ar).slice(0, 2).toUpperCase()}</span>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[15px] font-semibold text-foreground truncate">{authorLabel(ar)}</p>
+                        <p className="text-[12px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                          <Mi className={cn("w-3.5 h-3.5 shrink-0", reactionSummaryIconClass(row.reaction_type))} />
+                          {meta.label}
+                        </p>
+                      </div>
+                    </>
+                  );
+                  return (
+                    <li key={row.user_id}>
+                      {proTo ? (
+                        <Link
+                          to={proTo}
+                          onClick={() => setPostReactionsSheetPostId(null)}
+                          className="flex items-center gap-3 rounded-2xl px-2 py-2.5 hover:bg-muted/70 active:bg-muted transition-colors"
+                        >
+                          {inner}
+                        </Link>
+                      ) : (
+                        <div className="flex items-center gap-3 rounded-2xl px-2 py-2.5">{inner}</div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </SheetContent>
       </Sheet>

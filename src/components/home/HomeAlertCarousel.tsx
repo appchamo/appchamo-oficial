@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarCheck, Briefcase, X } from "lucide-react";
+import { CalendarCheck, X, ChevronRight } from "lucide-react";
+import { JobBriefcase3DIcon } from "./JobBriefcase3DIcon";
 
 interface Props {
   hasAppointment: boolean;
@@ -112,16 +113,21 @@ const HomeAlertCarousel = ({
           <div className="flex-[0_0_100%] shrink-0 snap-start px-0.5">
             <Link
               to="/jobs"
-              className="flex items-center gap-3 bg-accent border border-primary/20 rounded-xl p-3.5 hover:border-primary/40 transition-all"
+              className="group flex items-center gap-3.5 rounded-2xl bg-gradient-to-br from-primary via-primary to-orange-600 p-3.5 text-left shadow-md shadow-primary/25 ring-1 ring-white/25 transition-all hover:brightness-[1.06] active:scale-[0.99] dark:to-orange-700"
             >
-              <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shrink-0">
-                <Briefcase className="w-4.5 h-4.5 text-white" />
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15 p-1 ring-1 ring-white/30">
+                <JobBriefcase3DIcon className="h-8 w-8 drop-shadow-md" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground">🔥 {jobCount} vaga(s) disponíveis</p>
-                <p className="text-xs text-muted-foreground">Confira as oportunidades disponíveis</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold leading-snug text-white">Vagas de emprego</p>
+                <p className="mt-0.5 text-xs leading-snug text-white/85">
+                  Confira as vagas de emprego disponíveis
+                </p>
               </div>
-              <span className="text-xs font-bold text-primary shrink-0">Ver →</span>
+              <span className="flex shrink-0 items-center gap-0.5 text-xs font-bold text-white">
+                Ver
+                <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" strokeWidth={2.5} />
+              </span>
             </Link>
           </div>
         )}

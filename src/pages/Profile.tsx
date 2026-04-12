@@ -9,6 +9,7 @@ import { clearLocalChamoSession } from "@/lib/localChamoSessionClear";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPublicProfessionalProfileUrl } from "@/lib/publicAppUrl";
 import { shareUrl } from "@/lib/shareUrl";
@@ -265,16 +266,9 @@ const Profile = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold tracking-tight text-foreground">Meu Perfil</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Dados da conta e preferências</p>
-          </div>
-          {!editing && (
-            <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 transition-colors shrink-0">
-              <Pencil className="w-3.5 h-3.5" /> Editar
-            </button>
-          )}
+        <div className="mb-4">
+          <h1 className="text-xl font-bold tracking-tight text-foreground">Meu Perfil</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Dados da conta e preferências</p>
         </div>
 
         {linkedSponsor ? (
@@ -530,6 +524,18 @@ const Profile = () => {
             </div>
           </div>
 
+          {!editing && !hasPending && (
+            <Button
+              type="button"
+              size="lg"
+              className="w-full mt-5 h-12 rounded-xl text-base font-bold shadow-md shadow-primary/15 gap-2.5"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="w-5 h-5" />
+              Editar perfil
+            </Button>
+          )}
+
           {proData && !editing && (
             <div className="flex items-center gap-4 mt-4 pt-3 border-t text-sm">
               <span className="flex items-center gap-1"><Star className="w-4 h-4 fill-amber-400 text-amber-400" /><strong>{Number(proData.rating).toFixed(1)}</strong></span>
@@ -610,7 +616,10 @@ const Profile = () => {
                     </div>
                   )}
                   {!proData?.experience && !(proData?.services?.length) && !proData?.bio && (
-                    <p className="text-sm text-muted-foreground">Nenhuma informação de perfil preenchida. Clique em Editar para adicionar.</p>
+                    <p className="text-sm text-muted-foreground">
+                      Nenhuma informação de perfil preenchida. Use o botão{" "}
+                      <strong className="text-foreground font-semibold">Editar perfil</strong> acima para adicionar.
+                    </p>
                   )}
                 </>
               )}

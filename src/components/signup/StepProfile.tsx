@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
-import { UserRound, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { useState, useEffect, useMemo, startTransition } from "react";
+import { UserRound, ChevronDown, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ImageCropUpload from "@/components/ImageCropUpload";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 export interface StepProfileData {
@@ -42,6 +43,8 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [categoryId, setCategoryId] = useState("");
   const [professionId, setProfessionId] = useState("");
+  const [professionPopoverOpen, setProfessionPopoverOpen] = useState(false);
+  const [professionQuery, setProfessionQuery] = useState("");
   const [experience, setExperience] = useState("");
   const [services, setServices] = useState<string[]>([""]);
   const [bio, setBio] = useState("");
@@ -63,7 +66,26 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
     setAvatarUrl((prev) => (prev.trim() ? prev : u));
   }, [initialAvatarUrl]);
 
-  const filteredProfessions = professions.filter(p => p.category_id === categoryId);
+  useEffect(() => {
+    setProfessionQuery("");
+    setProfessionPopoverOpen(false);
+  }, [categoryId]);
+
+  const filteredProfessions = useMemo(
+    () => professions.filter((p) => p.category_id === categoryId),
+    [professions, categoryId],
+  );
+
+  const professionListVisible = useMemo(() => {
+    const q = professionQuery.trim().toLowerCase();
+    if (!q) return filteredProfessions.slice(0, 48);
+    return filteredProfessions.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 80);
+  }, [filteredProfessions, professionQuery]);
+
+  const selectedProfessionLabel = useMemo(
+    () => filteredProfessions.find((p) => p.id === professionId)?.name ?? "",
+    [filteredProfessions, professionId],
+  );
 
   const [avatarError, setAvatarError] = useState(false);
   const [categoryFieldError, setCategoryFieldError] = useState(false);
@@ -73,7 +95,7 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
       setAvatarError(true);
       toast({
         title: "Foto de perfil obrigatória",
-        description: "Toque em Adicionar foto (galeria ou câmera) e confirme o recorte.",
+        description: "Toque na foto de perfil, escolha galeria ou câmera e confirme o recorte.",
         variant: "destructive",
       });
       requestAnimationFrame(() => {
@@ -116,39 +138,57 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
         <div className="bg-card border rounded-2xl p-5 shadow-card space-y-4">
           {/* Avatar */}
           <div id="signup-field-profile-avatar" className="flex flex-col items-center gap-3">
-            <div className="relative flex flex-col items-center pt-1">
-              <div
-                className={cn(
-                  "w-28 h-28 rounded-full flex items-center justify-center overflow-hidden border-2 transition-colors",
-                  avatarError && "border-destructive ring-2 ring-destructive/30",
-                  !avatarError && avatarUrl && "border-primary/25 ring-2 ring-primary/10",
-                  !avatarError && !avatarUrl && "border-border bg-gradient-to-b from-muted/80 to-muted/40",
-                )}
-              >
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                  <UserRound className="w-12 h-12 text-muted-foreground/50" strokeWidth={1.25} />
-                )}
-              </div>
-              <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 z-10">
-                <ImageCropUpload
-                  onUpload={(url) => {
-                    setAvatarUrl(url);
-                    setAvatarError(false);
-                    onAvatarUploaded?.(url);
-                  }}
-                  aspect={1}
-                  shape="round"
-                  bucketPath="avatars"
-                  label=""
-                  maxSize={336}
-                  quality={0.7}
-                  signupAvatarMode
-                />
-              </div>
+            <div
+              className={cn(
+                "relative w-28 h-28 shrink-0 rounded-full overflow-hidden border-2 transition-colors",
+                avatarError && "border-destructive ring-2 ring-destructive/30",
+                !avatarError && avatarUrl && "border-primary/25 ring-2 ring-primary/10",
+                !avatarError && !avatarUrl && "border-border bg-gradient-to-b from-muted/80 to-muted/40",
+              )}
+            >
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+              ) : (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <UserRound className="h-12 w-12 text-muted-foreground/45" strokeWidth={1.25} />
+                </div>
+              )}
+              <ImageCropUpload
+                onUpload={(url) => {
+                  setAvatarUrl(url);
+                  setAvatarError(false);
+                  onAvatarUploaded?.(url);
+                }}
+                aspect={1}
+                shape="round"
+                bucketPath="avatars"
+                label=""
+                maxSize={336}
+                quality={0.7}
+                signupAvatarMode
+                signupTrigger={
+                  <button
+                    type="button"
+                    className={cn(
+                      "absolute z-10 flex items-center justify-center rounded-full touch-manipulation outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      avatarUrl
+                        ? "bottom-0 right-0 mb-0.5 mr-0.5 h-10 w-10 bg-primary text-primary-foreground shadow-md border-2 border-background"
+                        : "inset-0 bg-transparent",
+                    )}
+                    aria-label={avatarUrl ? "Alterar foto de perfil" : "Adicionar foto de perfil"}
+                  >
+                    {!avatarUrl ? (
+                      <span className="pointer-events-none flex h-[46px] w-[46px] items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/35">
+                        <Upload className="h-[22px] w-[22px]" strokeWidth={2.5} />
+                      </span>
+                    ) : (
+                      <Upload className="h-[18px] w-[18px]" strokeWidth={2.5} />
+                    )}
+                  </button>
+                }
+              />
             </div>
-            <p className={`text-xs text-center mt-4 max-w-[16rem] ${avatarError ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+            <p className={`text-xs text-center max-w-[16rem] ${avatarError ? "text-destructive font-medium" : "text-muted-foreground"}`}>
               {avatarError ? "⚠ Foto de perfil obrigatória" : "Adicione uma foto de perfil *"}
             </p>
           </div>
@@ -162,8 +202,11 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
                     value={categoryId}
                     onChange={(e) => {
                       setCategoryFieldError(false);
-                      setCategoryId(e.target.value);
-                      setProfessionId("");
+                      const v = e.target.value;
+                      startTransition(() => {
+                        setCategoryId(v);
+                        setProfessionId("");
+                      });
                     }}
                     className={cn(
                       "w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 appearance-none transition-colors",
@@ -185,16 +228,55 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
               {categoryId && filteredProfessions.length > 0 && (
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Profissão</label>
-                  <div className="relative">
-                    <select value={professionId} onChange={(e) => setProfessionId(e.target.value)}
-                      className="w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 appearance-none">
-                      <option value="">Selecione sua profissão</option>
-                      {filteredProfessions.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                  </div>
+                  <Popover open={professionPopoverOpen} onOpenChange={setProfessionPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className="w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-left outline-none focus:ring-2 focus:ring-primary/30 flex items-center justify-between gap-2 touch-manipulation"
+                      >
+                        <span className={selectedProfessionLabel ? "text-foreground truncate" : "text-muted-foreground truncate"}>
+                          {selectedProfessionLabel || "Toque para buscar ou escolher"}
+                        </span>
+                        <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-[min(calc(100vw-2rem),22rem)] p-2"
+                      onOpenAutoFocus={(e) => e.preventDefault()}
+                    >
+                      <input
+                        type="search"
+                        autoComplete="off"
+                        value={professionQuery}
+                        onChange={(e) => setProfessionQuery(e.target.value)}
+                        placeholder="Digite para filtrar…"
+                        className="w-full border rounded-lg px-2 py-2 text-sm bg-background mb-2 outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                      <div className="max-h-56 overflow-y-auto overscroll-contain -mx-0.5">
+                        {professionListVisible.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setProfessionId(p.id);
+                              setProfessionPopoverOpen(false);
+                              setProfessionQuery("");
+                            }}
+                            className={cn(
+                              "w-full text-left px-2 py-2.5 text-sm rounded-lg hover:bg-muted transition-colors",
+                              professionId === p.id && "bg-muted font-medium",
+                            )}
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                        {professionListVisible.length === 0 ? (
+                          <p className="text-xs text-muted-foreground px-2 py-2">Nenhuma profissão encontrada.</p>
+                        ) : null}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               )}
 

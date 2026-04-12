@@ -1,4 +1,4 @@
-import { Star, BadgeCheck, MapPin, ChevronsUpDown, Check } from "lucide-react";
+import { Star, BadgeCheck, MapPin, ChevronsUpDown, Check, ChevronRight } from "lucide-react";
 import { sortPublicSealsForDisplay } from "@/components/seals/FeaturedSealStack";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
 import { Link } from "react-router-dom";
@@ -16,15 +16,17 @@ import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 import { cn } from "@/lib/utils";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAuth } from "@/hooks/useAuth";
 
-const ITEMS_PER_PAGE = 2;
 const AUTO_ADVANCE_MS = 6000;
+/** Espaço entre cards no carrossel (alinhar ao gap-3 ≈ 0.75rem). */
+const CAROUSEL_GAP_PX = 12;
 /** Limite de linhas no PostgREST antes dos filtros em memória (verificado + região). */
 const FEATURED_FETCH_LIMIT = 320;
-/** Máximo de candidatos na região antes de escolher os 20 exibidos. */
+/** Máximo de candidatos na região antes de escolher os exibidos no carrossel. */
 const FEATURED_POOL_MAX = 200;
-/** Quantos profissionais aparecem no carrossel (aleatório ou ordenado). */
-const FEATURED_DISPLAY_COUNT = 20;
+/** Quantos profissionais aparecem no carrossel (aleatório ou ordenado); o último slide é o CTA “Ver todos”. */
+const FEATURED_DISPLAY_COUNT = 12;
 /** Se a lista regional vier menor que isto, funde profissionais de todo o mesmo estado. */
 const MIN_MERGE_STATE_POOL = 28;
 
@@ -67,6 +69,20 @@ interface Pro {
   seals?: { icon_variant: string }[];
 }
 
+/** Remove espaços invisíveis / ZW* que quebram ordem “alfabética” na UI. */
+function normalizeForNameSort(raw: string): string {
+  return (raw || "")
+    .trim()
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .normalize("NFC");
+}
+
+const nameSortCollator = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true });
+
+function compareFeaturedNamesAsc(a: Pro, b: Pro): number {
+  return nameSortCollator.compare(normalizeForNameSort(a.full_name), normalizeForNameSort(b.full_name));
+}
+
 function shuffleArray<T>(items: T[]): T[] {
   const a = [...items];
   for (let i = a.length - 1; i > 0; i--) {
@@ -87,7 +103,7 @@ function pickFeaturedDisplay(pool: Pro[], mode: FeaturedSortMode): Pro[] {
         .sort((a, b) => b.rating - a.rating || b.total_services - a.total_services)
         .slice(0, n);
     case "name":
-      return [...pool].sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR", { sensitivity: "base" })).slice(0, n);
+      return [...pool].sort(compareFeaturedNamesAsc).slice(0, n);
     case "verified":
       return [...pool]
         .sort((a, b) => (a.verified === b.verified ? 0 : a.verified ? -1 : 1) || b.rating - a.rating)
@@ -95,6 +111,17 @@ function pickFeaturedDisplay(pool: Pro[], mode: FeaturedSortMode): Pro[] {
     default:
       return pool.slice(0, n);
   }
+}
+
+/** Profissional logado sempre em 1.º, se estiver no pool regional (até FEATURED_DISPLAY_COUNT itens). */
+function applySelfFirstInFeatured(picked: Pro[], rawPool: Pro[], selfUserId: string | undefined): Pro[] {
+  if (!selfUserId) return picked;
+  const selfPro = rawPool.find((p) => p.user_id === selfUserId);
+  if (!selfPro) return picked;
+  const withoutSelf = picked.filter((p) => p.id !== selfPro.id);
+  const maxLen = FEATURED_DISPLAY_COUNT;
+  const rest = withoutSelf.slice(0, Math.max(0, maxLen - 1));
+  return [selfPro, ...rest];
 }
 
 interface FeaturedProfessionalsProps {
@@ -159,10 +186,10 @@ function FeaturedProCard({ pro }: { pro: Pro }) {
       ? [pro.address_city, pro.address_state].filter(Boolean).join(", ")
       : null;
   return (
-    <div ref={impressionRef} className="flex-1 min-w-0 basis-0 min-h-0 flex">
+    <div ref={impressionRef} className="w-full min-w-0 min-h-0 flex">
       <Link
         to={`/professional/${pro.id}`}
-        className="bg-card rounded-xl lg:rounded-2xl border shadow-card p-4 lg:p-5 flex flex-col gap-2.5 lg:gap-3 flex-1 min-w-0 overflow-hidden active:scale-[0.97] transition-transform"
+        className="bg-card rounded-xl lg:rounded-2xl border shadow-card p-4 lg:p-5 flex flex-col gap-2.5 lg:gap-3 w-full min-w-0 overflow-hidden active:scale-[0.97] transition-transform"
       >
         {/* Foto + selos ao lado (melhor selo maior); texto abaixo da foto */}
         <div className="flex gap-4 lg:gap-5 items-start w-full min-w-0">
@@ -228,22 +255,23 @@ function FeaturedProCard({ pro }: { pro: Pro }) {
 
 const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [activePage, setActivePage] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  /** Candidatos regionais (até FEATURED_POOL_MAX); ordenação final = pickFeaturedDisplay + selos. */
+  /** Candidatos regionais (até FEATURED_POOL_MAX); ordenação final = pickFeaturedDisplay + self primeiro + selos. */
   const [rawPool, setRawPool] = useState<Pro[]>([]);
   const [professionals, setProfessionals] = useState<Pro[]>([]);
   const [prosLoaded, setProsLoaded] = useState(false);
   const [sortMode, setSortMode] = useState<FeaturedSortMode>("random");
   const [filterOpen, setFilterOpen] = useState(false);
+  const { user, profile } = useAuth();
+  const featuredSelfUserId =
+    profile?.user_type === "professional" || profile?.user_type === "company" ? user?.id : undefined;
 
   // Init from localStorage immediately — avoids waiting for DB before first render
   const cachedLoc = useMemo(() => getHomeLocationCache(), []);
   const [userCity, setUserCity] = useState<string | null>(cachedLoc?.city ?? null);
   const [userState, setUserState] = useState<string | null>(cachedLoc?.state ?? null);
 
-  const fromCloneToReset = useRef(false);
-  const isScrollFromUser = useRef(false);
   const loadGenRef = useRef(0);
   const hangRetryRef = useRef(0);
 
@@ -556,7 +584,10 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     }
   }, [userCity, userState]);
 
-  const displayPicked = useMemo(() => pickFeaturedDisplay(rawPool, sortMode), [rawPool, sortMode]);
+  const displayPicked = useMemo(
+    () => applySelfFirstInFeatured(pickFeaturedDisplay(rawPool, sortMode), rawPool, featuredSelfUserId),
+    [rawPool, sortMode, featuredSelfUserId],
+  );
 
   useEffect(() => {
     const picked = displayPicked;
@@ -614,25 +645,10 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const displayKey = useMemo(() => displayPicked.map((p) => p.id).join("|"), [displayPicked]);
 
   useEffect(() => {
-    setActivePage(0);
-    isScrollFromUser.current = false;
+    setActiveIndex(0);
     const el = scrollRef.current;
     if (el) el.scrollTo({ left: 0, behavior: "auto" });
   }, [displayKey, sortMode]);
-
-  const pages = useMemo(() => {
-    const p: Pro[][] = [];
-    for (let i = 0; i < professionals.length; i += ITEMS_PER_PAGE)
-      p.push(professionals.slice(i, i + ITEMS_PER_PAGE));
-    return p;
-  }, [professionals]);
-
-  const displayPages = useMemo(() => {
-    if (pages.length <= 1) return pages;
-    return [...pages, pages[0]];
-  }, [pages]);
-  const totalDisplayPages = displayPages.length;
-  const totalPages = pages.length;
 
   useEffect(() => {
     refreshUserLocation();
@@ -665,66 +681,89 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     };
   }, [loadPros]);
 
-  const scrollToPage = useCallback((pageIndex: number) => {
-    if (!scrollRef.current || totalPages === 0) return;
-    const page = Math.max(0, Math.min(pageIndex, totalPages - 1));
-    isScrollFromUser.current = false;
-    setActivePage(page);
-    scrollRef.current.scrollTo({ left: page * scrollRef.current.clientWidth, behavior: "smooth" });
-  }, [totalPages]);
+  const getFeaturedCardEls = useCallback(() => {
+    const root = scrollRef.current;
+    if (!root) return [] as HTMLElement[];
+    return Array.from(root.querySelectorAll<HTMLElement>("[data-featured-card]"));
+  }, []);
 
-  const syncPageFromScroll = useCallback(() => {
+  const scrollToCardIndex = useCallback(
+    (index: number) => {
+      const el = scrollRef.current;
+      const cards = getFeaturedCardEls();
+      if (!el || cards.length === 0) return;
+      const i = Math.max(0, Math.min(index, cards.length - 1));
+      setActiveIndex(i);
+      const card = cards[i];
+      const pad = parseFloat(getComputedStyle(el).paddingLeft) || 0;
+      el.scrollTo({ left: card.offsetLeft - pad, behavior: "smooth" });
+    },
+    [getFeaturedCardEls],
+  );
+
+  const syncActiveIndexFromScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || totalDisplayPages === 0) return;
-    const pageIndex = Math.round(el.scrollLeft / el.clientWidth);
-    isScrollFromUser.current = true;
-    setActivePage(Math.max(0, Math.min(pageIndex, totalDisplayPages - 1)));
-  }, [totalDisplayPages]);
+    const cards = getFeaturedCardEls();
+    if (!el || cards.length === 0) return;
+    const center = el.scrollLeft + el.clientWidth / 2;
+    let best = 0;
+    for (let i = 0; i < cards.length; i++) {
+      const c = cards[i];
+      const mid = c.offsetLeft + c.offsetWidth / 2;
+      if (mid <= center) best = i;
+    }
+    setActiveIndex(best);
+  }, [getFeaturedCardEls]);
 
   useEffect(() => {
-    if (isPaused || totalDisplayPages <= 1) return;
+    if (isPaused || professionals.length === 0) return;
     const interval = setInterval(() => {
-      isScrollFromUser.current = false;
-      setActivePage((p) => {
-        const next = (p + 1) % totalDisplayPages;
-        if (p === totalDisplayPages - 1 && next === 0) fromCloneToReset.current = true;
-        return next;
-      });
+      const el = scrollRef.current;
+      if (!el) return;
+      const cards = Array.from(el.querySelectorAll<HTMLElement>("[data-featured-card]"));
+      if (cards.length === 0) return;
+      const gapStr = getComputedStyle(el).gap;
+      const gapPx = parseFloat(gapStr);
+      const gap = Number.isFinite(gapPx) ? gapPx : CAROUSEL_GAP_PX;
+      const step = cards[0].offsetWidth + gap;
+      const max = el.scrollWidth - el.clientWidth;
+      let next = el.scrollLeft + step;
+      if (next >= max - 2) next = 0;
+      el.scrollTo({ left: next, behavior: "smooth" });
     }, AUTO_ADVANCE_MS);
     return () => clearInterval(interval);
-  }, [isPaused, totalDisplayPages]);
-
-  useEffect(() => {
-    if (!scrollRef.current || totalDisplayPages === 0) return;
-    if (isScrollFromUser.current) { isScrollFromUser.current = false; return; }
-    const behavior = activePage === 0 && fromCloneToReset.current ? "auto" : "smooth";
-    if (fromCloneToReset.current) fromCloneToReset.current = false;
-    scrollRef.current.scrollTo({ left: activePage * scrollRef.current.clientWidth, behavior });
-  }, [activePage, totalDisplayPages]);
+  }, [isPaused, professionals.length]);
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || totalDisplayPages <= 1) return;
+    if (!el || professionals.length === 0) return;
     let raf = 0;
     const onScroll = () => {
       if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => { syncPageFromScroll(); raf = 0; });
+      raf = requestAnimationFrame(() => {
+        syncActiveIndexFromScroll();
+        raf = 0;
+      });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => { el.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
-  }, [totalDisplayPages, syncPageFromScroll]);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [professionals.length, syncActiveIndexFromScroll]);
 
   const showFeaturedSkeleton = !prosLoaded || (rawPool.length > 0 && professionals.length === 0);
 
   if (showFeaturedSkeleton) {
     return (
-      <section>
-        <h3 className="font-semibold lg:text-lg text-foreground text-center w-full mb-2 lg:mb-3 px-1">
-          {section?.title ?? "Profissionais em destaque"}
-        </h3>
-        <div className="mb-3 lg:mb-4 px-1 flex items-center justify-between gap-2">
-          <div className="h-9 w-[9.5rem] max-w-[45%] rounded-xl bg-muted animate-pulse" aria-hidden />
-          <div className="h-4 w-16 rounded bg-muted animate-pulse shrink-0" aria-hidden />
+      <section className="w-full min-w-0">
+        <div className="px-1 mb-3 lg:mb-4">
+          <h3 className="font-semibold lg:text-lg text-foreground text-center w-full mb-3">
+            {section?.title ?? "Profissionais em destaque"}
+          </h3>
+          <div className="rounded-2xl border border-border/60 bg-muted/25 p-1.5">
+            <div className="h-10 w-full rounded-xl bg-muted animate-pulse" aria-hidden />
+          </div>
         </div>
         <div className="flex gap-3 lg:gap-4 overflow-x-auto pb-2" data-tab-swipe-ignore>
           {[1, 2].map((i) => (
@@ -742,99 +781,121 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
   const sortTriggerLabel = FEATURED_SORT_OPTIONS.find((o) => o.value === sortMode)?.label ?? "Ordenar";
 
+  const featuredCardWidthClass =
+    "flex-none w-[min(11rem,calc(50vw-1.75rem))] sm:w-[13.5rem] lg:w-[15rem] min-w-0";
+
   return (
     <section className="w-full min-w-0">
-      <h3 className="font-semibold lg:text-lg text-foreground text-center w-full mb-2 lg:mb-3 px-1">
-        {section?.title ?? "Profissionais em destaque"}
-      </h3>
-      <div className="flex items-center justify-between gap-2 mb-3 lg:mb-4 px-1 min-w-0">
-        <Popover open={filterOpen} onOpenChange={setFilterOpen}>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="flex min-w-0 max-w-[min(100%,11rem)] sm:max-w-[13rem] items-center gap-1.5 rounded-xl border border-border bg-card px-2.5 py-2 text-left text-xs font-medium text-foreground shadow-sm outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-primary/30"
-              aria-label="Ordenar profissionais em destaque"
-              aria-expanded={filterOpen}
+      <div className="px-1 mb-3 lg:mb-4">
+        <h3 className="font-semibold lg:text-lg text-foreground text-center w-full mb-3 tracking-tight">
+          {section?.title ?? "Profissionais em destaque"}
+        </h3>
+        <div className="rounded-2xl border border-border/80 bg-gradient-to-b from-card to-muted/20 dark:to-muted/10 p-1.5 shadow-sm min-w-0">
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-border/70 bg-background/90 px-3 py-2.5 text-left text-xs sm:text-sm font-semibold text-foreground shadow-sm outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-primary/35"
+                aria-label="Ordenar profissionais em destaque"
+                aria-expanded={filterOpen}
+              >
+                <span className="min-w-0 flex-1 truncate">{sortTriggerLabel}</span>
+                <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              sideOffset={6}
+              className="w-[min(100vw-1.5rem,17.5rem)] rounded-2xl border border-border/80 bg-card p-2 shadow-xl"
             >
-              <span className="min-w-0 flex-1 truncate">{sortTriggerLabel}</span>
-              <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            sideOffset={6}
-            className="w-[min(100vw-1.5rem,17.5rem)] rounded-2xl border border-border/80 bg-card p-2 shadow-xl"
-          >
-            <p className="px-2 pt-1 pb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-              Ordenar por
-            </p>
-            <ul className="space-y-0.5" role="listbox">
-              {FEATURED_SORT_OPTIONS.map((opt) => {
-                const selected = sortMode === opt.value;
-                return (
-                  <li key={opt.value} role="option" aria-selected={selected}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSortMode(opt.value);
-                        setFilterOpen(false);
-                      }}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors",
-                        selected ? "bg-primary/12 text-foreground" : "text-foreground hover:bg-primary/8",
-                      )}
-                    >
-                      <span className="flex w-5 shrink-0 justify-center text-primary">
-                        {selected ? <Check className="h-4 w-4" strokeWidth={2.5} /> : null}
-                      </span>
-                      <span className="min-w-0 leading-snug">{opt.label}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </PopoverContent>
-        </Popover>
-        <Link to="/search" className="text-xs lg:text-sm font-medium text-primary hover:underline whitespace-nowrap shrink-0">
-          Ver todos
-        </Link>
+              <p className="px-2 pt-1 pb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                Ordenar por
+              </p>
+              <ul className="space-y-0.5" role="listbox">
+                {FEATURED_SORT_OPTIONS.map((opt) => {
+                  const selected = sortMode === opt.value;
+                  return (
+                    <li key={opt.value} role="option" aria-selected={selected}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSortMode(opt.value);
+                          setFilterOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors",
+                          selected ? "bg-primary/12 text-foreground" : "text-foreground hover:bg-primary/8",
+                        )}
+                      >
+                        <span className="flex w-5 shrink-0 justify-center text-primary">
+                          {selected ? <Check className="h-4 w-4" strokeWidth={2.5} /> : null}
+                        </span>
+                        <span className="min-w-0 leading-snug">{opt.label}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
       <div
         ref={scrollRef}
         data-tab-swipe-ignore
-        className="flex overflow-x-auto overflow-y-hidden pb-2 scrollbar-hide snap-x snap-mandatory scroll-smooth"
-        style={{ scrollBehavior: "smooth" }}
+        className="flex overflow-x-auto overflow-y-hidden gap-3 lg:gap-5 pb-2 scrollbar-hide px-2 lg:px-4 box-border overscroll-x-contain touch-pan-x"
+        style={{ WebkitOverflowScrolling: "touch" }}
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
         onTouchStart={() => setIsPaused(true)}
         onTouchEnd={() => setIsPaused(false)}
       >
-        {displayPages.map((pagePros, pageIndex) => (
-          <div
-            key={pageIndex}
-            className="flex gap-3 lg:gap-5 flex-[0_0_100%] min-w-0 shrink-0 snap-start px-2 lg:px-4 box-border"
-            style={{ scrollSnapStop: "always" }}
-          >
-            {pagePros.map((pro) => (
-              <FeaturedProCard key={pro.id} pro={pro} />
-            ))}
+        {professionals.map((pro) => (
+          <div key={pro.id} data-featured-card className={featuredCardWidthClass}>
+            <FeaturedProCard pro={pro} />
           </div>
         ))}
+        <div data-featured-card className={featuredCardWidthClass}>
+          <Link
+            to="/search"
+            className="flex h-full min-h-[17.5rem] flex-col items-center justify-center gap-3 rounded-xl lg:rounded-2xl border-2 border-dashed border-primary/40 bg-gradient-to-b from-primary/12 via-primary/6 to-transparent p-4 text-center shadow-inner shadow-primary/5 transition-all hover:border-primary/55 hover:from-primary/16 active:scale-[0.98]"
+          >
+            <span className="text-[15px] sm:text-base font-black uppercase tracking-[0.12em] text-primary leading-tight">
+              Ver todos
+            </span>
+            <span className="text-[11px] sm:text-xs text-muted-foreground leading-snug px-1">
+              Explorar todos os profissionais na busca
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-md">
+              Abrir busca
+              <ChevronRight className="h-4 w-4" aria-hidden />
+            </span>
+          </Link>
+        </div>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex justify-center gap-1.5 mt-2">
-          {pages.map((_, i) => (
+      {professionals.length + 1 > 1 && (
+        <div className="flex justify-center gap-1.5 mt-2 flex-wrap">
+          {professionals.map((pro, i) => (
             <button
-              key={i}
-              onClick={() => scrollToPage(i)}
+              key={pro.id}
+              type="button"
+              onClick={() => scrollToCardIndex(i)}
               className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
-                i === activePage % totalPages ? "bg-primary" : "bg-muted-foreground/30"
+                i === activeIndex ? "bg-primary" : "bg-muted-foreground/30"
               }`}
-              aria-label={`Página ${i + 1}`}
+              aria-label={`Profissional ${i + 1} de ${professionals.length}`}
             />
           ))}
+          <button
+            type="button"
+            onClick={() => scrollToCardIndex(professionals.length)}
+            className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
+              activeIndex === professionals.length ? "bg-primary" : "bg-muted-foreground/30"
+            }`}
+            aria-label="Ver todos os profissionais"
+          />
         </div>
       )}
     </section>

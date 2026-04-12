@@ -15,24 +15,17 @@ const BusinessCheckout = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Dados de preço/período recebidos da tela de planos
+  // Preço vindo da tela de planos (sempre mensal no app)
   const navState = (location.state as {
-    billingPeriod?: "monthly" | "semester" | "annual";
     totalCharge?: number | null;
-    monthlyEquiv?: number | null;
     priceMonthly?: number | null;
-    priceAnnual?: number | null;
-    priceSemester?: number | null;
   } | null) ?? {};
 
-  const billingPeriod: "monthly" | "semester" | "annual" = navState.billingPeriod ?? "monthly";
-  // Valor que será cobrado: total anual, total semestral ou mensalidade
+  const billingPeriod = "monthly" as const;
   const totalCharge = navState.totalCharge ?? navState.priceMonthly ?? 250;
-  // Equivalente mensal para exibição
-  const monthlyEquiv = navState.monthlyEquiv ?? navState.priceMonthly ?? 250;
 
-  const periodLabel = billingPeriod === "annual" ? "ano" : billingPeriod === "semester" ? "semestre" : "mês";
-  const periodBadge = billingPeriod === "annual" ? "Cobrança anual" : billingPeriod === "semester" ? "Cobrança semestral" : "Cobrança mensal";
+  const periodLabel = "mês";
+  const periodBadge = "Cobrança mensal";
 
   const [loading, setLoading] = useState(false);
   const [searchingCep, setSearchingCep] = useState(false);
@@ -107,11 +100,16 @@ const BusinessCheckout = () => {
 
       const fullAddress = `${businessData.street}, ${businessData.number} - ${businessData.neighborhood}, ${businessData.city}/${businessData.state} (CEP: ${businessData.cep})`;
 
-      // Registra no banco
+      const startedAt = new Date().toISOString();
+      // Registra no banco (alinhado à tela Planos / Subscriptions)
       const { error: upsertError } = await supabase.from("subscriptions").upsert({
         user_id: user.id,
         plan_id: "business",
         status: "ACTIVE",
+        billing_period: billingPeriod,
+        cancel_at_period_end: false,
+        period_ends_at: null,
+        started_at: startedAt,
         business_cnpj: businessData.cnpj,
         business_address: fullAddress,
         business_proof_url: proofUrl,
@@ -192,14 +190,7 @@ const BusinessCheckout = () => {
               </span>
               <span className="text-sm font-medium text-muted-foreground">/{periodLabel}</span>
             </div>
-            {billingPeriod !== "monthly" && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Equivale a R$ {monthlyEquiv.toFixed(2).replace(".", ",")}/mês
-              </p>
-            )}
-            <span className={`inline-block mt-2 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-              billingPeriod === "annual" ? "bg-primary/10 text-primary" : billingPeriod === "semester" ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"
-            }`}>
+            <span className="inline-block mt-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
               {periodBadge}
             </span>
           </div>

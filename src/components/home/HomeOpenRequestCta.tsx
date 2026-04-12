@@ -17,18 +17,20 @@ const HomeOpenRequestCta = () => {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-3 w-full rounded-2xl border-2 border-primary/40 bg-gradient-to-r from-primary/[0.12] via-amber-50/80 to-primary/[0.08] dark:from-primary/15 dark:via-background dark:to-primary/10 px-4 py-3.5 shadow-md shadow-primary/10 hover:border-primary/55 hover:shadow-lg hover:shadow-primary/15 active:scale-[0.99] transition-all text-left ring-1 ring-primary/10"
+        className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-card px-3.5 py-3 text-left transition-colors hover:bg-muted/40 active:scale-[0.99] dark:bg-card/80"
       >
-        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shrink-0 shadow-inner shadow-black/10">
-          <Radio className="w-5 h-5 text-primary-foreground" aria-hidden />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-foreground tracking-tight">Solicitar serviço</p>
-          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
-            Passo a passo rápido — publique o que precisa na sua região
-          </p>
-        </div>
-        <ChevronRight className="w-5 h-5 text-primary shrink-0" aria-hidden />
+        <span className="flex min-w-0 items-center gap-2.5">
+          <Radio
+            className="h-[18px] w-[18px] shrink-0 text-primary opacity-90"
+            strokeWidth={2}
+            aria-hidden
+          />
+          <span className="text-sm font-semibold text-foreground tracking-tight">Solicitar serviço</span>
+        </span>
+        <ChevronRight
+          className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+          aria-hidden
+        />
       </button>
       <OpenServiceRequestModal open={open} onOpenChange={setOpen} />
     </>

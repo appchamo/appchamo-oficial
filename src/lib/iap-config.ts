@@ -7,15 +7,12 @@
  *
  *  Product ID                          | Plano    | Duração    | Preço BRL
  *  ------------------------------------|----------|------------|-----------
- *  com.chamo.app.pro.monthly           | Pro      | 1 mês      | R$ 49,90
- *  com.chamo.app.pro.semester          | Pro      | 6 meses    | R$ 269,00
- *  com.chamo.app.pro.annual            | Pro      | 1 ano      | R$ 499,00
- *  com.chamo.app.vip.monthly           | VIP      | 1 mês      | R$ 140,00
- *  com.chamo.app.vip.semester          | VIP      | 6 meses    | R$ 756,00
- *  com.chamo.app.vip.annual            | VIP      | 1 ano      | R$ 1.512,00
- *  com.chamo.app.business.monthly      | Business | 1 mês      | R$ 250,00
- *  com.chamo.app.business.semester     | Business | 6 meses    | R$ 1.350,00
- *  com.chamo.app.business.annual       | Business | 1 ano      | R$ 3.000,00
+ *  com.chamo.app.pro.monthly           | Pro      | 1 mês      | (preço na loja)
+ *  com.chamo.app.vip.monthly           | VIP      | 1 mês      | …
+ *  com.chamo.app.business.monthly      | Business | 1 mês      | …
+ *
+ *  Produtos .semester / .annual podem existir na App Store para quem já assinou;
+ *  o app só oferece compra do .monthly (getAllProductIds).
  */
 
 export type IAPPlanId = "pro" | "vip" | "business";
@@ -43,14 +40,9 @@ export const IAP_PRODUCT_IDS: Record<IAPPlanId, Record<IAPBillingPeriod, string>
 /** Lista de planos pagos que têm produto IAP (não inclui free). */
 export const IAP_PAID_PLANS: IAPPlanId[] = ["pro", "vip", "business"];
 
-/** Todos os product IDs registrados (para carregamento na loja). */
+/** Product IDs pedidos à loja no checkout (só mensal). */
 export function getAllProductIds(): string[] {
-  const ids: string[] = [];
-  for (const plan of IAP_PAID_PLANS) {
-    ids.push(IAP_PRODUCT_IDS[plan].monthly);
-    ids.push(IAP_PRODUCT_IDS[plan].annual);
-  }
-  return ids;
+  return IAP_PAID_PLANS.map((plan) => IAP_PRODUCT_IDS[plan].monthly);
 }
 
 /**

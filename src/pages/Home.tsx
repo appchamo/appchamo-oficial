@@ -177,6 +177,7 @@ const Home = () => {
   const nameFromAuth = (user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined;
   const userName = nameFromProfile || nameFromAuth?.trim().split(/\s+/)[0] || "Usuário";
   const isPro = profile?.user_type === "professional" || profile?.user_type === "company";
+  const isClientUser = profile?.user_type === "client";
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletLoaded, setWalletLoaded] = useState(false);
   const [proId, setProId] = useState<string | null>(null);
@@ -806,11 +807,25 @@ const Home = () => {
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-base font-bold text-foreground leading-tight">
-                    {welcomeWord}, <span className="text-primary">{userName}</span> 👋
-                  </p>
+                  {isClientUser ? (
+                    <>
+                      <p className="text-xs font-medium text-muted-foreground leading-tight">{welcomeWord} de volta</p>
+                      <p className="text-base font-bold text-foreground leading-tight mt-0.5">
+                        <span className="text-primary">{userName}</span> 👋
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-base font-bold text-foreground leading-tight">
+                      {welcomeWord}, <span className="text-primary">{userName}</span> 👋
+                    </p>
+                  )}
                 </div>
               </div>
+              {isClientUser ? (
+                <div className={`w-full ${sectionMinHeights.benefits}`}>
+                  <BenefitsPanel key="benefits-client-top" section={getSection("benefits")} />
+                </div>
+              ) : null}
               <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground px-0.5 -mb-1">
                 A região onde você vê profissionais e destaques
               </p>
@@ -904,7 +919,9 @@ const Home = () => {
           }
 
 
-          {sections.filter((s) => s.visible).map((section) => {
+          {sections
+            .filter((s) => s.visible && !(isClientUser && s.id === "benefits"))
+            .map((section) => {
             const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
             const isWelcomeCollapsed = section.id === "welcome";
             const heavyDefer =

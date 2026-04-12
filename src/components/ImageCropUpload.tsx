@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, type ReactElement } from "react";
 import Cropper, { Area } from "react-easy-crop";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
 import { Upload, ZoomIn, Check, X, Camera } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,8 +21,10 @@ interface ImageCropUploadProps {
   quality?: number;
   /** Mostra botão de câmera ao lado do upload (ex.: cadastro — foto de perfil). */
   showCameraOption?: boolean;
-  /** Um único botão “Adicionar foto” (galeria/câmera pelo seletor do sistema). */
+  /** Abre sheet Galeria/Câmera; use com `signupTrigger` (ex.: ícone no círculo do avatar). */
   signupAvatarMode?: boolean;
+  /** Botão/área que abre o menu de origem (deve ser posicionado pelo pai, ex. `absolute inset-0`). */
+  signupTrigger?: ReactElement;
 }
 
 function createImage(url: string): Promise<HTMLImageElement> {
@@ -77,6 +80,7 @@ const ImageCropUpload = ({
   quality = 0.65,
   showCameraOption = false,
   signupAvatarMode = false,
+  signupTrigger,
 }: ImageCropUploadProps) => {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -84,6 +88,7 @@ const ImageCropUpload = ({
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraCaptureRef = useRef<HTMLInputElement>(null);
 
@@ -233,26 +238,66 @@ onUpload(publicData.publicUrl);
           <span className="text-xs text-muted-foreground">{label}</span>
         </button>
       ) : signupAvatarMode ? (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void pickFromCamera()}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg shadow-primary/25 hover:bg-primary/90 active:scale-[0.98] transition-all touch-manipulation whitespace-nowrap"
-            aria-label="Tirar foto com câmera"
-          >
-            <Camera className="w-3.5 h-3.5 flex-shrink-0" />
-            Câmera
-          </button>
-          <button
-            type="button"
-            onClick={onButtonClick}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-primary text-primary text-xs font-bold hover:bg-primary/10 active:scale-[0.98] transition-all touch-manipulation whitespace-nowrap"
-            aria-label="Escolher da galeria"
-          >
-            <Upload className="w-3.5 h-3.5 flex-shrink-0" />
-            Galeria
-          </button>
-        </div>
+        signupTrigger ? (
+          <Sheet open={sourceSheetOpen} onOpenChange={setSourceSheetOpen}>
+            <SheetTrigger asChild>{signupTrigger}</SheetTrigger>
+            <SheetContent side="bottom" className="rounded-t-3xl pb-8">
+              <SheetHeader className="text-left space-y-1 pb-2">
+                <SheetTitle className="text-base font-semibold">Adicionar foto</SheetTitle>
+                <p className="text-xs text-muted-foreground font-normal">Escolha de onde virá a imagem</p>
+              </SheetHeader>
+              <div className="flex flex-col gap-2 pt-2">
+                <button
+                  type="button"
+                  className="flex items-center gap-3 w-full rounded-2xl border-2 border-border px-4 py-3.5 text-left text-sm font-semibold hover:bg-muted/70 active:scale-[0.99] transition-all touch-manipulation"
+                  onClick={() => {
+                    setSourceSheetOpen(false);
+                    setTimeout(() => inputRef.current?.click(), 120);
+                  }}
+                >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                    <Upload className="w-5 h-5" strokeWidth={2.25} />
+                  </span>
+                  Galeria
+                </button>
+                <button
+                  type="button"
+                  className="flex items-center gap-3 w-full rounded-2xl border-2 border-border px-4 py-3.5 text-left text-sm font-semibold hover:bg-muted/70 active:scale-[0.99] transition-all touch-manipulation"
+                  onClick={() => {
+                    setSourceSheetOpen(false);
+                    setTimeout(() => void pickFromCamera(), 120);
+                  }}
+                >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                    <Camera className="w-5 h-5" strokeWidth={2.25} />
+                  </span>
+                  Câmera
+                </button>
+              </div>
+            </SheetContent>
+          </Sheet>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void pickFromCamera()}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg shadow-primary/25 hover:bg-primary/90 active:scale-[0.98] transition-all touch-manipulation whitespace-nowrap"
+              aria-label="Tirar foto com câmera"
+            >
+              <Camera className="w-3.5 h-3.5 flex-shrink-0" />
+              Câmera
+            </button>
+            <button
+              type="button"
+              onClick={onButtonClick}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-primary text-primary text-xs font-bold hover:bg-primary/10 active:scale-[0.98] transition-all touch-manipulation whitespace-nowrap"
+              aria-label="Escolher da galeria"
+            >
+              <Upload className="w-3.5 h-3.5 flex-shrink-0" />
+              Galeria
+            </button>
+          </div>
+        )
       ) : showCameraOption ? (
         <div className="flex items-center gap-1.5" role="group" aria-label="Foto de perfil">
           <button

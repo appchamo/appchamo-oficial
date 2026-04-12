@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin, Smartphone, CheckCircle } from "lucide-react";
+import { Check, Crown, Star, Zap, Building2, ArrowLeft, CreditCard, Lock, Clock, AlertTriangle, FileText, Upload, Search, MapPin, Smartphone } from "lucide-react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
@@ -79,20 +79,15 @@ const Subscriptions = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [changing, setChanging] = useState<string | null>(null);
-  const [billingPeriod, setBillingPeriod] = useState<"monthly" | "semester" | "annual">("annual");
+  /** Apenas mensal — semestral/anual removidos da UI e da compra na loja. */
+  const billingPeriod = "monthly" as const;
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "", address: "", cpf: "" });
   const [processing, setProcessing] = useState(false);
   const [proStatus, setProStatus] = useState<string | null>(null);
   const [proStatusLoaded, setProStatusLoaded] = useState(false);
-  const [isEarlyAccess, setIsEarlyAccess] = useState(false);
-  const [earlyDocType, setEarlyDocType] = useState<"cpf" | "cnpj">("cpf");
 
-  // Datas da promoção de acesso antecipado
-  const EARLY_ACCESS_RELEASE = new Date("2026-04-15T00:00:00");
-  const plansUnlocked = new Date() >= EARLY_ACCESS_RELEASE;
-  
   // Estado para armazenar os benefícios dinâmicos vindos do banco de dados
   const [planFeaturesDb, setPlanFeaturesDb] = useState<Record<string, string[]>>({});
 
@@ -174,12 +169,10 @@ const Subscriptions = () => {
       setProStatusLoaded(false);
       const { data: pro } = await supabase
         .from("professionals")
-        .select("profile_status, early_access, doc_type")
+        .select("profile_status")
         .eq("user_id", user.id)
         .maybeSingle();
       setProStatus(pro?.profile_status ?? null);
-      setIsEarlyAccess(!!(pro as any)?.early_access);
-      setEarlyDocType((pro as any)?.doc_type === "cnpj" ? "cnpj" : "cpf");
 
       const { data: plansData } = await supabase.from("plans").select("id, features");
       if (plansData) {
@@ -224,77 +217,6 @@ const Subscriptions = () => {
 
   const isProOrCompany =
     profile && (profile.user_type === "professional" || profile.user_type === "company");
-
-  // Tela de bloqueio para profissionais com acesso antecipado (antes de 15/04)
-  if (isProOrCompany && proStatusLoaded && isEarlyAccess && !plansUnlocked) {
-    return (
-      <AppLayout>
-        <main className="max-w-screen-lg mx-auto px-4 py-8 flex flex-col items-center">
-          <Link to="/home" className="self-start inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6">
-            <ArrowLeft className="w-4 h-4" /> Voltar
-          </Link>
-
-          {/* Card de bloqueio premium */}
-          <div className="w-full max-w-md rounded-3xl overflow-hidden shadow-xl border border-violet-200 dark:border-violet-800">
-            {/* Header gradiente */}
-            <div className="relative bg-gradient-to-br from-violet-600 via-purple-700 to-orange-500 px-6 py-8 text-white text-center overflow-hidden">
-              <div className="absolute top-4 left-6 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
-              <div className="absolute bottom-2 right-6 w-24 h-24 bg-orange-400/20 rounded-full blur-2xl" />
-              <div className="relative">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/15 border-2 border-white/30 mb-3 mx-auto">
-                  <Crown className="w-8 h-8 text-yellow-300" />
-                </div>
-                <h1 className="text-xl font-black mb-1">{earlyDocType === "cnpj" ? "Você é Business!" : "Você é VIP!"}</h1>
-                <p className="text-white/85 text-sm">Seu acesso antecipado está ativo</p>
-              </div>
-            </div>
-
-            {/* Conteúdo */}
-            <div className="bg-card px-6 py-6 text-center space-y-4">
-              {/* Countdown visual */}
-              <div className="bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 rounded-2xl p-5">
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <Clock className="w-5 h-5 text-violet-500" />
-                  <span className="font-bold text-violet-700 dark:text-violet-400 text-sm">Planos disponíveis em</span>
-                </div>
-                <p className="text-4xl font-black text-violet-600 dark:text-violet-400">15/04</p>
-                <p className="text-xs text-muted-foreground mt-1">A partir de 15 de abril de 2026</p>
-              </div>
-
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Você está aproveitando os seus{" "}
-                <strong className="text-foreground">3 meses grátis de {earlyDocType === "cnpj" ? "Business" : "VIP"}</strong>{" "}
-                (de 15/04 a 15/07/2026).{" "}
-                A aba de planos ficará disponível a partir de <strong className="text-violet-600">15/04/2026</strong>,
-                quando você poderá escolher seu plano preferido para continuar crescendo. 🚀
-              </p>
-
-              {/* Benefícios ativos */}
-              <div className="text-left space-y-1.5 bg-muted/40 rounded-2xl p-4">
-                <p className="text-xs font-bold text-muted-foreground uppercase mb-2">Ativo agora no seu {earlyDocType === "cnpj" ? "Business" : "VIP"}</p>
-                {(earlyDocType === "cnpj"
-                  ? ["Chamadas ilimitadas de clientes","Destaque na página inicial","Fotos de serviços no perfil","Suporte 24h","Vagas de emprego","Catálogo de produtos","Agenda integrada"]
-                  : ["Chamadas ilimitadas de clientes","Destaque na página inicial","Fotos de serviços no perfil","Suporte prioritário","Selo de verificado"]
-                ).map((item) => (
-                  <div key={item} className="flex items-center gap-2 text-sm">
-                    <CheckCircle className="w-3.5 h-3.5 text-primary shrink-0" />
-                    <span className="text-foreground">{item}</span>
-                  </div>
-                ))}
-              </div>
-
-              <Link
-                to="/home"
-                className="block w-full py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-orange-500 text-white font-bold text-sm text-center hover:opacity-90 transition-opacity"
-              >
-                Voltar ao início
-              </Link>
-            </div>
-          </div>
-        </main>
-      </AppLayout>
-    );
-  }
 
   if (isProOrCompany && !proStatusLoaded) {
     return (
@@ -712,38 +634,14 @@ const Subscriptions = () => {
     return digits;
   };
 
-  const getDisplayMonthly = (p: { price_monthly: number; price_annual: number | null; price_semester: number | null }) => {
-    if (billingPeriod === "annual" && p.price_annual) return p.price_annual / 12;
-    if (billingPeriod === "semester" && p.price_semester) return p.price_semester / 6;
-    return p.price_monthly;
-  };
+  const getDisplayMonthly = (p: { price_monthly: number }) => p.price_monthly;
 
-  const getTotalCharge = (p: { price_monthly: number; price_annual: number | null; price_semester: number | null }) => {
-    if (billingPeriod === "annual" && p.price_annual) return p.price_annual;
-    if (billingPeriod === "semester" && p.price_semester) return p.price_semester;
-    return p.price_monthly;
-  };
-
-  const getSavingsPct = (p: { price_monthly: number; price_annual: number | null; price_semester: number | null }) => {
-    if (billingPeriod === "annual" && p.price_annual) {
-      const saved = ((p.price_monthly * 12 - p.price_annual) / (p.price_monthly * 12)) * 100;
-      return saved > 0 ? Math.round(saved) : 0;
-    }
-    if (billingPeriod === "semester" && p.price_semester) {
-      const saved = ((p.price_monthly * 6 - p.price_semester) / (p.price_monthly * 6)) * 100;
-      return saved > 0 ? Math.round(saved) : 0;
-    }
-    return 0;
-  };
+  const getTotalCharge = (p: { price_monthly: number }) => p.price_monthly;
 
   const formatPrice = (price: number) => {
     if (price === 0) return "Grátis";
     return `R$ ${price.toFixed(2).replace(".", ",")}/mês`;
   };
-
-  // Detecta se algum plano pago tem preço annual/semestral configurado
-  const hasAnnualPrices = plans.some(p => p.id !== "free" && p.price_annual);
-  const hasSemesterPrices = plans.some(p => p.id !== "free" && p.price_semester);
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId);
 
@@ -801,34 +699,6 @@ const Subscriptions = () => {
           </div>
         ) : (
           <>
-            {/* Seletor de período — só aparece se algum plano tem preço anual ou semestral */}
-            {(hasAnnualPrices || hasSemesterPrices) && (
-              <div className="flex items-center justify-center gap-1 bg-muted rounded-xl p-1 mb-2">
-                <button
-                  onClick={() => setBillingPeriod("monthly")}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${billingPeriod === "monthly" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  Mensal
-                </button>
-                {hasSemesterPrices && (
-                  <button
-                    onClick={() => setBillingPeriod("semester")}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${billingPeriod === "semester" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    Semestral
-                  </button>
-                )}
-                {hasAnnualPrices && (
-                  <button
-                    onClick={() => setBillingPeriod("annual")}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${billingPeriod === "annual" ? "bg-primary shadow text-white" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    Anual 🏷️
-                  </button>
-                )}
-              </div>
-            )}
-
             <div className="flex flex-col gap-4">
               {plansVisiveis.map((p) => {
                 const details = planDetails[p.id];
@@ -848,7 +718,6 @@ const Subscriptions = () => {
                   ? dbFeats.map(f => ({ text: f, inherited: f.startsWith("Tudo do") }))
                   : details.features;
 
-                const savingsPct = getSavingsPct(p);
                 const monthlyDisplay = getDisplayMonthly(p);
 
                 return (
@@ -903,19 +772,7 @@ const Subscriptions = () => {
                             }`}>
                               {p.price_monthly === 0 ? "Grátis" : `R$ ${monthlyDisplay.toFixed(2).replace(".", ",")}/mês`}
                             </p>
-                            {savingsPct > 0 && (
-                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">
-                                -{savingsPct}%
-                              </span>
-                            )}
                           </div>
-                          {billingPeriod !== "monthly" && p.price_monthly > 0 && (
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {billingPeriod === "annual"
-                                ? `R$ ${(p.price_annual ?? p.price_monthly * 12).toFixed(2).replace(".", ",")} /ano`
-                                : `R$ ${(p.price_semester ?? p.price_monthly * 6).toFixed(2).replace(".", ",")} /semestre`}
-                            </p>
-                          )}
                         </div>
                       </div>
                       {isCurrent && !isBusinessPremium && (
@@ -1027,30 +884,22 @@ const Subscriptions = () => {
                   {useIAPOnIOS && isIAPAvailable && (() => {
                     const iapProductId = getProductIdForPlan(selectedPlanId!, billingPeriod);
                     const iapProduct = products.find(p => iapProductId === p.identifier);
-                    const periodSuffix = billingPeriod === "annual" ? "/ano" : "/mês";
                     return iapProduct ? (
-                      <p className="text-xl font-bold text-foreground">{iapProduct.priceString}<span className="text-sm font-normal text-muted-foreground">{periodSuffix}</span></p>
+                      <p className="text-xl font-bold text-foreground">{iapProduct.priceString}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
                     ) : loadingProducts ? (
                       <p className="text-sm text-muted-foreground">Carregando preço...</p>
                     ) : (
                       <p className="text-xl font-bold text-foreground">
-                        R$ {(billingPeriod === "annual" ? getTotalCharge(selectedPlan) : getDisplayMonthly(selectedPlan)).toFixed(2).replace(".", ",")}
-                        <span className="text-sm font-normal text-muted-foreground">{periodSuffix}</span>
+                        R$ {getDisplayMonthly(selectedPlan).toFixed(2).replace(".", ",")}
+                        <span className="text-sm font-normal text-muted-foreground">/mês</span>
                       </p>
                     );
                   })()}
                   {(!useIAPOnIOS || !isIAPAvailable) && (
                     <>
                       <p className="text-xl font-bold text-foreground">R$ {getDisplayMonthly(selectedPlan).toFixed(2).replace(".", ",")}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
-                      {billingPeriod !== "monthly" && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Total: R$ {getTotalCharge(selectedPlan).toFixed(2).replace(".", ",")} / {billingPeriod === "annual" ? "ano" : "semestre"}
-                        </p>
-                      )}
-                      <span className={`inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                        billingPeriod === "annual" ? "bg-primary/10 text-primary" : billingPeriod === "semester" ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"
-                      }`}>
-                        {billingPeriod === "annual" ? "Cobrança anual" : billingPeriod === "semester" ? "Cobrança semestral" : "Cobrança mensal"}
+                      <span className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                        Cobrança mensal
                       </span>
                     </>
                   )}
@@ -1127,11 +976,7 @@ const Subscriptions = () => {
                       </div>
                     )}
                     <p className="text-[10px] text-muted-foreground text-center">
-                      {billingPeriod === "annual"
-                        ? "Assinatura anual, renovação automática."
-                        : billingPeriod === "semester"
-                        ? "Assinatura semestral, renovação automática."
-                        : "Assinatura mensal, renovação automática."}{" "}
+                      Assinatura mensal, renovação automática.{" "}
                       <Link to="/terms-of-use" className="text-primary hover:underline">Termos de Uso (EULA)</Link>
                       {" · "}
                       <Link to="/privacy" className="text-primary hover:underline">Política de Privacidade</Link>
@@ -1147,7 +992,7 @@ const Subscriptions = () => {
                                 Este produto ainda não está disponível na App Store.
                               </p>
                               <p className="text-[10px] text-muted-foreground mt-1">
-                                Os planos semestral e anual estarão ativos após aprovação da Apple.
+                                Confirme no App Store Connect que o produto mensal está associado a esta versão do app.
                               </p>
                             </div>
                           )}

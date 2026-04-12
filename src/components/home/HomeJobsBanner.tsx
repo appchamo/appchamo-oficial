@@ -1,34 +1,46 @@
 import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
+import { JobBriefcase3DIcon } from "./JobBriefcase3DIcon";
 
-/** Maleta/briefcase 100% preenchida (sem contorno vazado) */
-const BriefcaseFilled = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
-    <path d="M20 6h-4V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zM10 4h4v2h-4V4zm10 15H4V8h16v11z" />
-  </svg>
-);
+function sanitizeJobsTitle(raw: string): string {
+  return raw
+    .replace(/🔥/g, "")
+    .replace(/\{count\}/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 interface HomeJobsBannerProps {
   jobCount: number;
   section?: { title?: string; subtitle?: string };
 }
 
+const DEFAULT_JOBS_BANNER_TITLE = "Vagas de emprego";
+const DEFAULT_JOBS_BANNER_SUBTITLE = "Confira as vagas de emprego disponíveis";
+
 const HomeJobsBanner = ({ jobCount, section }: HomeJobsBannerProps) => {
   if (jobCount <= 0) return null;
 
-  const title = (section?.title || "{count} vaga(s) de emprego disponíveis")
-    .replace("{count}", String(jobCount));
-  const subtitle = section?.subtitle || "Confira as oportunidades disponíveis";
+  const rawTitle = (section?.title || DEFAULT_JOBS_BANNER_TITLE).replace("{count}", String(jobCount));
+  const title = sanitizeJobsTitle(rawTitle) || DEFAULT_JOBS_BANNER_TITLE;
+  const subtitle = (section?.subtitle || DEFAULT_JOBS_BANNER_SUBTITLE).trim();
 
   return (
-    <Link to="/jobs" className="flex items-center gap-3 bg-accent border border-primary/20 rounded-xl p-3.5 hover:border-primary/40 transition-all">
-      <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center flex-shrink-0">
-        <BriefcaseFilled className="w-5 h-5 text-primary-foreground" />
+    <Link
+      to="/jobs"
+      className="group flex items-center gap-3.5 rounded-2xl bg-gradient-to-br from-primary via-primary to-orange-600 px-4 py-3.5 text-left shadow-lg shadow-primary/30 ring-1 ring-white/25 transition-all hover:brightness-[1.06] active:scale-[0.99] dark:ring-white/15 dark:to-orange-700"
+    >
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/15 p-1.5 ring-1 ring-white/30 backdrop-blur-[1px]">
+        <JobBriefcase3DIcon className="h-9 w-9 drop-shadow-md" />
       </div>
-      <div className="flex-1">
-        <p className="text-sm font-semibold text-foreground">{title}</p>
-        <p className="text-xs text-muted-foreground">{subtitle}</p>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold leading-snug text-white">{title}</p>
+        <p className="mt-0.5 text-xs leading-snug text-white/85">{subtitle}</p>
       </div>
-      <span className="text-xs font-semibold text-primary">Ver →</span>
+      <span className="flex shrink-0 items-center gap-0.5 text-sm font-bold text-white">
+        Ver
+        <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2.5} />
+      </span>
     </Link>
   );
 };

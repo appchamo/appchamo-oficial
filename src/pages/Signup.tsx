@@ -197,6 +197,7 @@ const Signup = () => {
   const didAdvanceFromOAuth = useRef(false);
   /** Evita duplo envio de complete-signup (duplo toque em Finalizar / corrida de estado). */
   const signupSubmitLockRef = useRef(false);
+  const signupDraftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Evita avançar no formulário antes de resolver getSession + perfil (corrida com sessão antiga → /login). */
   const [signupBootstrapReady, setSignupBootstrapReady] = useState(false);
   /** Evita um frame do wizard antes do router ir para /login (perfil já completo). */
@@ -450,35 +451,45 @@ const Signup = () => {
     setStep("basic");
   }, [session, profile, authLoading, step, navigate]);
 
-  // Mantém tipo de conta + passo no sessionStorage (evita voltar a "cliente" após remount/reload).
+  // Mantém tipo de conta + passo no sessionStorage (debounce: JSON.stringify a cada tecla travava o WebView).
   useEffect(() => {
     if (step === "method-choice") return;
-    try {
-      const hadDocuments = docFiles.length > 0;
-      if (createdUserId) {
-        const draft: SignupDraftOAuthV1 = {
-          v: 1,
-          userId: createdUserId,
-          accountType,
-          step,
-          basicData,
-          hadDocuments,
-        };
-        sessionStorage.setItem(SIGNUP_DRAFT_OAUTH_KEY, JSON.stringify(draft));
-      } else if (basicData?.email) {
-        const draft: SignupDraftEmailV1 = {
-          v: 1,
-          email: basicData.email,
-          accountType,
-          step,
-          basicData,
-          hadDocuments,
-        };
-        sessionStorage.setItem(SIGNUP_DRAFT_EMAIL_KEY, JSON.stringify(draft));
+    if (signupDraftSaveTimerRef.current) clearTimeout(signupDraftSaveTimerRef.current);
+    signupDraftSaveTimerRef.current = setTimeout(() => {
+      signupDraftSaveTimerRef.current = null;
+      try {
+        const hadDocuments = docFiles.length > 0;
+        if (createdUserId) {
+          const draft: SignupDraftOAuthV1 = {
+            v: 1,
+            userId: createdUserId,
+            accountType,
+            step,
+            basicData,
+            hadDocuments,
+          };
+          sessionStorage.setItem(SIGNUP_DRAFT_OAUTH_KEY, JSON.stringify(draft));
+        } else if (basicData?.email) {
+          const draft: SignupDraftEmailV1 = {
+            v: 1,
+            email: basicData.email,
+            accountType,
+            step,
+            basicData,
+            hadDocuments,
+          };
+          sessionStorage.setItem(SIGNUP_DRAFT_EMAIL_KEY, JSON.stringify(draft));
+        }
+      } catch {
+        void 0;
       }
-    } catch {
-      void 0;
-    }
+    }, 400);
+    return () => {
+      if (signupDraftSaveTimerRef.current) {
+        clearTimeout(signupDraftSaveTimerRef.current);
+        signupDraftSaveTimerRef.current = null;
+      }
+    };
   }, [createdUserId, accountType, step, basicData, docFiles.length]);
 
   useEffect(() => {

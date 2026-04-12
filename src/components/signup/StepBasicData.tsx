@@ -88,6 +88,7 @@ interface Props {
 
 import { formatCpf, formatCnpj, formatPhone } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
+import { fetchMunicipioLabelsForUf, filterMunicipioLabels } from "@/lib/ibgeMunicipiosCache";
 import { cn } from "@/lib/utils";
 
 const TermsDialogFromAdmin = lazy(() =>
@@ -200,6 +201,37 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   // ✅ Identifica se é login social para esconder senhas
   const isSocialSignup = !!initialData?.email;
 
+  const passwordStrengthMeter = useMemo(() => {
+    if (password.length === 0) return null;
+    const len = password.length;
+    const hasNum = /\d/.test(password);
+    const hasUpper = /[A-Z]/.test(password);
+    let pct = 0;
+    if (len >= 1 && len < 6) pct = Math.round((len / 6) * 60);
+    if (len >= 6) pct = 70;
+    if (len >= 6 && hasNum) pct += 15;
+    if (len >= 6 && hasUpper) pct += 15;
+    pct = Math.min(100, pct);
+    const barColor =
+      pct < 35 ? "bg-red-500" :
+      pct < 70 ? "bg-orange-400" :
+      pct < 85 ? "bg-yellow-400" :
+      "bg-emerald-500";
+    return (
+      <div className="mt-2 px-0.5">
+        <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+          <div
+            className={cn("h-full rounded-full transition-all duration-300", barColor)}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          Certifique-se de ter uma senha segura (6+ caracteres, número e letra maiúscula).
+        </p>
+      </div>
+    );
+  }, [password]);
+
   const formatBirthBrInput = (raw: string) => {
     const d = raw.replace(/\D/g, "").slice(0, 8);
     if (d.length <= 2) return d;
@@ -256,8 +288,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   }, [clearFieldError]);
 
   /**
-   * Evita travar o app (especialmente iOS): a API do IBGE retorna ~5,5 mil municípios de uma vez.
-   * Usamos busca por UF quando o estado tem 2 letras + debounce; senão só cidade manual (CEP já preenche).
+   * Sugestões de cidade: lista por UF fica em cache (um fetch por estado); só filtramos em memória.
    */
   const fetchCitySuggestions = useCallback(async (query: string, uf: string) => {
     const u = (uf || "").trim().toUpperCase();
@@ -267,25 +298,23 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       return;
     }
     try {
-      const res = await fetch(
-        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${u}/municipios?orderBy=nome`
-      );
-      const data = await res.json();
-      if (!Array.isArray(data)) {
-        setCitySuggestions([]);
-        return;
-      }
-      const q = query.toLowerCase().trim();
-      const filtered = data
-        .map((c: { nome?: string }) => `${c.nome} - ${u}`)
-        .filter((name: string) => name.toLowerCase().includes(q))
-        .slice(0, 8);
+      const labels = await fetchMunicipioLabelsForUf(u);
+      const filtered = filterMunicipioLabels(labels, query, 8);
       setCitySuggestions(filtered);
       setShowCitySuggestions(filtered.length > 0);
     } catch {
       setCitySuggestions([]);
+      setShowCitySuggestions(false);
     }
   }, []);
+
+  /** Pré-carrega municípios quando a UF fica válida — evita espera na primeira letra da cidade. */
+  useEffect(() => {
+    if (accountType !== "professional") return;
+    const u = addressState.trim().toUpperCase();
+    if (u.length !== 2) return;
+    void fetchMunicipioLabelsForUf(u).catch(() => {});
+  }, [accountType, addressState]);
 
   // ✅ APENAS ESTA FUNÇÃO FOI AJUSTADA PARA APLICAR A MÁSCARA VISUAL 00000-000
   const handleCepChange = (val: string) => {
@@ -768,39 +797,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                   />
                 </div>
                 {/* Barra de força de senha */}
-                {password.length > 0 && (() => {
-                  const len = password.length;
-                  const hasNum = /\d/.test(password);
-                  const hasUpper = /[A-Z]/.test(password);
-                  // Score: cada critério vale pontos
-                  // 0 chars: 0 | 1-5: proporcional até 60% | 6+ chars: 70% | +num: +15% | +upper: +15%
-                  let pct = 0;
-                  if (len >= 1 && len < 6) pct = Math.round((len / 6) * 60); // até 50%
-                  if (len >= 6) pct = 70;
-                  if (len >= 6 && hasNum) pct += 15;
-                  if (len >= 6 && hasUpper) pct += 15;
-                  pct = Math.min(100, pct);
-
-                  const barColor =
-                    pct < 35 ? "bg-red-500" :
-                    pct < 70 ? "bg-orange-400" :
-                    pct < 85 ? "bg-yellow-400" :
-                    "bg-emerald-500";
-
-                  return (
-                    <div className="mt-2 px-0.5">
-                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={cn("h-full rounded-full transition-all duration-300", barColor)}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        Certifique-se de ter uma senha segura (6+ caracteres, número e letra maiúscula).
-                      </p>
-                    </div>
-                  );
-                })()}
+                {passwordStrengthMeter}
                 {fieldErrors.password && (
                   <p className="text-xs text-destructive font-medium mt-1.5 px-0.5">{fieldErrors.password}</p>
                 )}
@@ -943,7 +940,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                   type="text"
                   value={referralCode}
                   onChange={(e) => handleReferralCodeChange(e.target.value)}
-                  placeholder="Código de quem te indicou"
+                  placeholder="XXXX..."
                   className="flex-1 min-w-0 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground font-mono tracking-wide"
                   autoComplete="off"
                   spellCheck={false}
@@ -968,7 +965,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
               </button>
             </div>
             <p className="text-[10px] text-muted-foreground leading-relaxed px-0.5">
-              Se alguém do Chamô te convidou, digite o código e aplique para ganhar 2 cupons especiais para participar do nosso sorteio mensal.
+              Se alguém te convidou, utilize o código de convite e ganhe 2 cupons especiais
             </p>
             {fieldErrors.referral ? (
               <p className="text-xs text-destructive font-medium px-0.5">{fieldErrors.referral}</p>

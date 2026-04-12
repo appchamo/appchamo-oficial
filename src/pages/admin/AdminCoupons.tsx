@@ -45,12 +45,8 @@ const AdminCoupons = () => {
 
   // Chaves Globais
   const [globalSettings, setGlobalSettings] = useState({ auto_discount: true, auto_raffle: true, signup_coupon: true });
-  const [signupCouponPercent, setSignupCouponPercent] = useState("0");
   const [signupCouponMonthlyCap, setSignupCouponMonthlyCap] = useState("10000");
   const [savingSignupCoupon, setSavingSignupCoupon] = useState(false);
-  /** UUID do lote (coupon_campaigns) usado para gerar o cupom de desconto de quem indicou, após cadastro com código. */
-  const [referralReferrerCampaignId, setReferralReferrerCampaignId] = useState<string>("");
-  const [savingReferralCampaign, setSavingReferralCampaign] = useState(false);
 
   const fetchData = async () => {
     const [
@@ -65,9 +61,7 @@ const AdminCoupons = () => {
       supabase.from("platform_settings").select("*").in("key", [
         "auto_discount_active",
         "auto_raffle_active",
-        "referral_referrer_discount_campaign_id",
         "referral_signup_coupon_active",
-        "referral_signup_coupon_discount_percent",
         "referral_signup_coupon_monthly_cap",
       ]),
     ]);
@@ -88,20 +82,11 @@ const AdminCoupons = () => {
       const signupRow = settings.find((s) => s.key === "referral_signup_coupon_active");
       const signupActive = signupRow === undefined ? true : rawBool(signupRow.value);
       setGlobalSettings({ auto_discount: isDiscountActive, auto_raffle: isRaffleActive, signup_coupon: signupActive });
-      const pctRow = settings.find((s) => s.key === "referral_signup_coupon_discount_percent");
       const capRow = settings.find((s) => s.key === "referral_signup_coupon_monthly_cap");
-      if (pctRow !== undefined) {
-        const pctStr = pctRow.value == null ? "0" : String(pctRow.value).replace(/^"|"$/g, "");
-        setSignupCouponPercent(/^\d+(\.\d+)?$/.test(pctStr) ? pctStr : "0");
-      }
       if (capRow !== undefined) {
         const capStr = capRow.value == null ? "10000" : String(capRow.value).replace(/^"|"$/g, "");
         setSignupCouponMonthlyCap(/^\d+$/.test(capStr) ? capStr : "10000");
       }
-      const refCamp = settings.find((s) => s.key === "referral_referrer_discount_campaign_id")?.value;
-      let raw = refCamp == null ? "" : String(refCamp).trim();
-      if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) raw = raw.slice(1, -1);
-      setReferralReferrerCampaignId(/^[0-9a-f-]{36}$/i.test(raw) ? raw : "");
     }
 
     setLoading(false);
@@ -110,23 +95,6 @@ const AdminCoupons = () => {
   useEffect(() => { fetchData(); }, []);
 
   const drawnCount = raffles.filter(r => r.status === "drawn").length;
-
-  const saveReferralReferrerCampaign = async () => {
-    setSavingReferralCampaign(true);
-    try {
-      const v = referralReferrerCampaignId.trim();
-      const { error } = await supabase.from("platform_settings").upsert(
-        { key: "referral_referrer_discount_campaign_id", value: (v || "") as any },
-        { onConflict: "key" },
-      );
-      if (error) throw error;
-      toast({ title: "Configuração do Indique e ganhe salva!" });
-      await fetchData();
-    } catch (err: any) {
-      toast({ title: "Erro ao salvar", description: err?.message, variant: "destructive" });
-    }
-    setSavingReferralCampaign(false);
-  };
 
   const toggleGlobalSetting = async (key: string, currentValue: boolean) => {
     const newValue = !currentValue;
@@ -145,7 +113,6 @@ const AdminCoupons = () => {
   };
 
   const saveSignupCouponSettings = async () => {
-    const pct = Math.min(100, Math.max(0, parseFloat(signupCouponPercent.replace(",", ".")) || 0));
     const cap = Math.max(0, Math.floor(parseFloat(signupCouponMonthlyCap.replace(",", ".")) || 0));
     if (globalSettings.signup_coupon && cap < 1) {
       toast({ title: "Limite mensal inválido", description: "Use 1 ou mais cadastros premiados por mês, ou desative o cupom de cadastro.", variant: "destructive" });
@@ -153,17 +120,16 @@ const AdminCoupons = () => {
     }
     setSavingSignupCoupon(true);
     try {
-      const { error: e1 } = await supabase.from("platform_settings").upsert(
-        { key: "referral_signup_coupon_discount_percent", value: String(pct) as any },
+      const { error: e0 } = await supabase.from("platform_settings").upsert(
+        { key: "referral_signup_coupon_discount_percent", value: "0" as any },
         { onConflict: "key" },
       );
-      if (e1) throw e1;
+      if (e0) throw e0;
       const { error: e2 } = await supabase.from("platform_settings").upsert(
         { key: "referral_signup_coupon_monthly_cap", value: String(cap) as any },
         { onConflict: "key" },
       );
       if (e2) throw e2;
-      setSignupCouponPercent(String(pct));
       setSignupCouponMonthlyCap(String(cap));
       toast({ title: "Cupom de cadastro salvo!" });
       await fetchData();
@@ -449,7 +415,7 @@ const AdminCoupons = () => {
                   <div>
                     <p className="text-sm font-semibold text-foreground">🎁 Cupom de cadastro (código de convite)</p>
                     <p className="text-[10px] text-muted-foreground">
-                      Quem conclui o cadastro com código válido ganha 1 cupom extra de sorteio (até o limite mensal) e, se configurado, cupom de desconto com a % abaixo.
+                      Indicado: +1 cupom de sorteio ao usar código válido (até o limite mensal). Indicador: +1 cupom de sorteio. Sem cupom de desconto pelo programa de indicação.
                     </p>
                   </div>
                   <button
@@ -464,24 +430,10 @@ const AdminCoupons = () => {
                 {globalSettings.signup_coupon && (
                   <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-4 space-y-3">
                     <p className="text-[10px] text-muted-foreground leading-relaxed">
-                      <strong className="text-foreground">Indicado:</strong> pacote aplicado ao usar código válido (cadastro ou tornar-se profissional). A validade do desconto segue{" "}
-                      <span className="font-mono text-[9px]">discount_coupon_validity_days</span>. Limite mensal = máximo de pessoas que recebem o pacote por mês (UTC).
+                      <strong className="text-foreground">Limite mensal (UTC):</strong> máximo de <strong>indicados</strong> distintos que recebem o cupom extra de sorteio por mês. O indicador sempre recebe +1 sorteio quando o código é usado com sucesso.
                     </p>
                     <div>
-                      <label className="text-[10px] font-medium text-muted-foreground block mb-1">Percentual de desconto (indicado)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={0.5}
-                        value={signupCouponPercent}
-                        onChange={(e) => setSignupCouponPercent(e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
-                      />
-                      <p className="text-[9px] text-muted-foreground mt-0.5">Use 0 para entregar só o cupom extra de sorteio (sem desconto).</p>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-medium text-muted-foreground block mb-1">Máximo de cadastros premiados por mês</label>
+                      <label className="text-[10px] font-medium text-muted-foreground block mb-1">Máximo de indicados premiados por mês (cupom extra de sorteio)</label>
                       <input
                         type="number"
                         min={0}
@@ -503,36 +455,10 @@ const AdminCoupons = () => {
                 )}
 
                 <div className="p-3 bg-card border rounded-xl space-y-2 mt-3">
-                  <p className="text-sm font-semibold text-foreground">Indique e ganhe — recompensa de quem compartilha o código</p>
+                  <p className="text-sm font-semibold text-foreground">Indique e ganhe — quem compartilha o código</p>
                   <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    Quando um cadastro novo usa um código válido, quem indicou ganha <strong>1 cupom de sorteio</strong> e{" "}
-                    <strong>1 cupom de desconto</strong> (percentual do lote abaixo). O indicado ganha o cupom padrão do cadastro + pacote do{" "}
-                    <strong>Cupom de cadastro</strong> (sorteio extra e desconto conforme toggle acima). A validade do desconto segue a configuração global{" "}
-                    <span className="font-mono text-[9px]">discount_coupon_validity_days</span> (taxas / parcelamento no admin).
+                    Com código válido e cadastro concluído, <strong>indicador</strong> e <strong>indicado</strong> ganham cada um <strong>+1 cupom de sorteio</strong>. Não há cupom de desconto automático por indicação (comissão de assinatura continua separada, se aplicável).
                   </p>
-                  <label className="text-[10px] font-medium text-muted-foreground block">Lote de desconto para o indicador</label>
-                  <select
-                    value={referralReferrerCampaignId}
-                    onChange={(e) => setReferralReferrerCampaignId(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
-                  >
-                    <option value="">Nenhum — indicador só recebe cupom de sorteio</option>
-                    {campaigns
-                      .filter((c) => c.is_active !== false && c.used_quantity < c.total_quantity)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.discount_percent}% OFF — disponíveis {c.total_quantity - c.used_quantity} de {c.total_quantity}
-                        </option>
-                      ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={savingReferralCampaign}
-                    onClick={() => void saveReferralReferrerCampaign()}
-                    className="w-full py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-600/90 disabled:opacity-50"
-                  >
-                    {savingReferralCampaign ? "Salvando…" : "Salvar Indique e ganhe"}
-                  </button>
                 </div>
               </div>
             </div>

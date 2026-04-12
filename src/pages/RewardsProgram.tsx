@@ -4,7 +4,7 @@ import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { Gift, Copy, Loader2, Ticket, Percent, Sparkles, Share2, Trophy } from "lucide-react";
+import { Gift, Copy, Loader2, Ticket, Sparkles, Share2, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
@@ -100,8 +100,8 @@ function RewardsReferralTab() {
           </div>
           <h2 className="text-xl font-black tracking-tight text-foreground">Indique e ganhe</h2>
           <p className="mt-2 max-w-[280px] text-sm font-medium leading-snug text-muted-foreground">
-            Cada amigo no Chamô vira <span className="font-semibold text-primary">cupom no seu bolso</span>. Compartilhe e
-            multiplique suas chances no sorteio.
+            Quando alguém concluir o cadastro com seu código, <span className="font-semibold text-primary">vocês dois</span>{" "}
+            ganham <span className="font-semibold text-primary">+1 cupom</span> para o sorteio mensal.
           </p>
         </div>
       </div>
@@ -121,10 +121,10 @@ function RewardsReferralTab() {
             </h3>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="mx-auto flex max-w-[220px] justify-center">
             <div
               className={cn(
-                "group flex flex-col items-center rounded-2xl border border-primary/20 bg-background/80 px-3 py-4 text-center",
+                "group flex w-full flex-col items-center rounded-2xl border border-primary/20 bg-background/80 px-4 py-5 text-center",
                 "transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md active:scale-[0.98]",
               )}
             >
@@ -133,31 +133,17 @@ function RewardsReferralTab() {
               </div>
               <span className="text-2xl font-black tabular-nums text-primary">+1</span>
               <span className="mt-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground">Sorteio</span>
-              <span className="mt-1 text-[10px] leading-tight text-muted-foreground">Cupom extra no sorteio mensal</span>
-            </div>
-
-            <div
-              className={cn(
-                "group flex flex-col items-center rounded-2xl border border-emerald-500/25 bg-background/80 px-3 py-4 text-center",
-                "transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500/45 hover:shadow-md active:scale-[0.98]",
-              )}
-            >
-              <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 transition-transform group-hover:scale-110 dark:text-emerald-400">
-                <Percent className="h-6 w-6" strokeWidth={2.2} />
-              </div>
-              <span className="text-2xl font-black tabular-nums text-emerald-600 dark:text-emerald-400">+1</span>
-              <span className="mt-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground">Desconto</span>
-              <span className="mt-1 text-[10px] leading-tight text-muted-foreground">Para usar no app</span>
+              <span className="mt-1 text-[10px] leading-tight text-muted-foreground">Cupom para o sorteio mensal (para você e para quem usar o código)</span>
             </div>
           </div>
 
           <p className="mx-auto mt-4 max-w-[320px] text-center text-sm font-medium leading-relaxed text-foreground">
-            Sempre que alguém <strong className="text-primary">concluir o cadastro</strong> com seu código válido, você
-            recebe <strong>1 cupom extra para o sorteio</strong> e <strong>1 cupom de desconto</strong> para usar no
-            Chamô. Tudo em <strong>Meus cupons</strong>.
+            Sempre que alguém <strong className="text-primary">concluir o cadastro</strong> com seu código válido,{" "}
+            <strong>você</strong> e <strong>essa pessoa</strong> ganham cada um <strong>+1 cupom</strong> para o sorteio
+            mensal. Confira em <strong>Meus cupons</strong>.
           </p>
           <p className="mx-auto mt-2 max-w-[300px] text-center text-xs text-muted-foreground">
-            Quem entra com seu convite também aproveita benefícios na hora — todo mundo sai ganhando.
+            Não há cupom de desconto no Indique e ganhe — só cupons de sorteio para os dois.
           </p>
         </div>
       </section>

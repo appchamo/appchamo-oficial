@@ -930,7 +930,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
               </button>
             </div>
             <p className="text-[10px] text-muted-foreground leading-relaxed px-0.5">
-              Se alguém te convidou, utilize o código de convite e ganhe 2 cupons especiais
+              Com código válido aplicado, ao concluir o cadastro você e quem indicou ganham cada um +1 cupom para o sorteio mensal (além do cupom padrão do cadastro).
             </p>
             {fieldErrors.referral ? (
               <p className="text-xs text-destructive font-medium px-0.5">{fieldErrors.referral}</p>

@@ -2561,7 +2561,7 @@ const MessageThread = () => {
       return (
         <div className="text-center w-full">
           <div className="inline-block bg-muted/80 border rounded-xl px-4 py-2">
-            <p className="text-xs font-mono font-semibold text-foreground">{msg.content.split("\n")[0].replace("📋 ", "")}</p>
+            <p className="text-xs font-mono font-semibold text-foreground break-all">{msg.content.split("\n")[0].replace("📋 ", "")}</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">Guarde este número para referência</p>
           </div>
         </div>);
@@ -2571,7 +2571,7 @@ const MessageThread = () => {
       return (
         <div className="text-center w-full">
           <div className="inline-block bg-muted/80 border rounded-xl px-4 py-2">
-            <p className="text-xs font-semibold text-foreground">{msg.content}</p>
+            <p className="text-xs font-semibold text-foreground break-words [overflow-wrap:anywhere]">{msg.content}</p>
           </div>
         </div>);
     }
@@ -2589,7 +2589,7 @@ const MessageThread = () => {
           
           {billing.passFee && !isMine && <p className="text-[10px] font-medium text-destructive mt-0 mb-1">+ Taxas no pagamento</p>}
           
-          <p className="text-xs opacity-80">{billing.desc}</p>
+          <p className="text-xs opacity-80 break-words [overflow-wrap:anywhere]">{billing.desc}</p>
           
           {isMine ? (
              <button
@@ -2625,7 +2625,10 @@ const MessageThread = () => {
           {visibleLines.map((line, i) => {
             const isReceive = line.startsWith("Recebe:");
             return (
-              <p key={i} className={`text-xs ${isReceive ? "font-bold text-emerald-300 mt-1" : "opacity-80"}`}>
+              <p
+                key={i}
+                className={`text-xs break-words [overflow-wrap:anywhere] ${isReceive ? "font-bold text-emerald-300 mt-1" : "opacity-80"}`}
+              >
                 {isReceive ? `💰 ${line}` : line}
               </p>
             );
@@ -2643,7 +2646,12 @@ const MessageThread = () => {
             <CheckCircle2 className="w-4 h-4" /> Comprovante enviado
           </p>
           {fileMatch && (
-            <a href={fileMatch[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] underline opacity-70">
+            <a
+              href={fileMatch[1]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] underline opacity-70 break-all block"
+            >
               Visualizar arquivo: {fileMatch[2]}
             </a>
           )}
@@ -2667,7 +2675,9 @@ const MessageThread = () => {
               />
             ))}
           </div>
-          {msg.content && !hideCaption && <p className="text-sm">{msg.content}</p>}
+          {msg.content && !hideCaption && (
+            <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.content}</p>
+          )}
         </div>
       );
     }
@@ -2699,12 +2709,18 @@ const MessageThread = () => {
 
             }
             if (line.startsWith("Fotos:")) return null;
-            return line.trim() ? <p key={i}>{line}</p> : null;
+            return line.trim() ? (
+              <p key={i} className="break-words [overflow-wrap:anywhere]">
+                {line}
+              </p>
+            ) : null;
           })}
         </div>);
     }
 
-    return <p className="whitespace-pre-wrap">{msg.content}</p>;
+    return (
+      <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full">{msg.content}</p>
+    );
   };
 
   const otherInitials = (otherParty?.name ?? "Chat").split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
@@ -3125,7 +3141,7 @@ const MessageThread = () => {
                   </div>
                 )}
                 <div
-                  className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm select-none ${
+                  className={`min-w-0 max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm select-none ${
                     isMine
                       ? "bg-primary text-primary-foreground rounded-br-md shadow-sm"
                       : "bg-muted/60 border border-border/60 rounded-bl-md text-foreground shadow-sm"

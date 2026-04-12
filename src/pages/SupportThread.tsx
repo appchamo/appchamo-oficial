@@ -520,7 +520,9 @@ const SupportThread = () => {
               </button>
             ))}
           </div>
-          {msg.content ? <p className="whitespace-pre-wrap">{msg.content}</p> : null}
+          {msg.content ? (
+            <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.content}</p>
+          ) : null}
         </div>
       );
     }
@@ -576,7 +578,7 @@ const SupportThread = () => {
       );
     }
 
-    return <p className="whitespace-pre-wrap">{msg.content}</p>;
+    return <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full">{msg.content}</p>;
   };
 
   if (!ticketId) {
@@ -668,7 +670,7 @@ const SupportThread = () => {
               )}
 
               {/* Bolha da mensagem */}
-              <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
+              <div className={`min-w-0 max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
                 showOnRight && isBot
                   ? "bg-violet-500/15 border border-violet-400/30 rounded-br-md text-foreground"   // IA no admin: roxo
                   : showOnRight && isMine

@@ -20,6 +20,6 @@ export function buildInviteShareMessage(inviteCode: string): string {
     `Profissional: ${linkPro}\n` +
     `Cliente: ${linkCliente}\n\n` +
     `Código de convite (se pedir no cadastro): ${code}\n` +
-    `Quem se cadastra com o código ganha benefícios na hora. Quem compartilha ganha 1 cupom extra de sorteio e 1 cupom de desconto para usar no app quando alguém conclui o cadastro com o código.`
+    `Quem se cadastra com o código e quem compartilha ganham cada um +1 cupom para o sorteio mensal do Chamô, quando o cadastro for concluído com o código válido.`
   );
 }

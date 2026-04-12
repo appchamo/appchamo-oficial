@@ -519,7 +519,9 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
               </button>
             ))}
           </div>
-          {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
+          {msg.content && (
+            <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.content}</p>
+          )}
         </div>
       );
     }
@@ -573,7 +575,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
         </button>
       );
     }
-    return <p className="whitespace-pre-wrap">{msg.content}</p>;
+    return <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full">{msg.content}</p>;
   };
 
   const threadIsClosed = selected ? (selected.status === "closed" || messages.some(m => m.content === "[CLOSED]")) : false;
@@ -651,7 +653,7 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                   </div>
                 )}
 
-                <div className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
+                <div className={`min-w-0 max-w-[75%] px-3.5 py-2.5 rounded-2xl text-sm ${
                   isAdmin
                     ? "bg-primary text-primary-foreground rounded-br-md"          // Admin: laranja/primário
                     : isBot
@@ -1107,10 +1109,10 @@ const SupportCentralContent = ({ renderLayout }: SupportCentralContentProps) => 
                 return (
                   <div key={msg.id} className={`flex flex-col ${isFirstSender ? "items-start" : "items-end"}`}>
                     <span className="text-[10px] text-muted-foreground mb-1 px-1 font-medium">{msg.sender_name}</span>
-                    <div className={`max-w-[85%] px-3 py-2 rounded-xl text-sm ${
+                    <div className={`min-w-0 max-w-[85%] px-3 py-2 rounded-xl text-sm ${
                       isFirstSender ? "bg-card border text-foreground rounded-tl-sm" : "bg-primary text-primary-foreground rounded-tr-sm"
                     }`}>
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full">{msg.content}</p>
                     </div>
                     <span className="text-[9px] text-muted-foreground mt-1 px-1">
                       {new Date(msg.created_at).toLocaleString("pt-BR", { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}

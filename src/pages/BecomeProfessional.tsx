@@ -421,7 +421,7 @@ const BecomeProfessional = () => {
                     spellCheck={false}
                   />
                   <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    Se alguém do Chamô te convidou, informe o código. Ao concluir com um código válido, você e quem indicou ganham cupons pelo Indique e ganhe (sorteio e, para quem indicou, desconto quando houver lote na plataforma). Se depois você assinar um plano pago, quem indicou pode receber também a comissão de 5% na primeira cobrança (uma vez).
+                    Se alguém do Chamô te convidou, informe o código. Ao concluir com um código válido, você e quem indicou ganham cada um +1 cupom para o sorteio mensal (Indique e ganhe). Se depois você assinar um plano pago, quem indicou pode receber também a comissão de 5% na primeira cobrança (uma vez).
                   </p>
                 </div>
               </div>

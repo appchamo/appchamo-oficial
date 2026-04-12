@@ -133,35 +133,26 @@ const friendlyError = (msg: string, status?: number) => {
   return "Erro ao criar conta. Tente novamente.";
 };
 
-/** Retorno de apply_referral_code: bônus do indicado só quando o backend concedeu cupons. */
-function parseReferralInviteeRewards(refData: unknown): { extraRaffle: boolean; signupDiscount: boolean } {
-  if (!refData || typeof refData !== "object") return { extraRaffle: false, signupDiscount: false };
+/** Retorno de apply_referral_code: cupom extra de sorteio do indicado quando o backend concedeu. */
+function parseReferralInviteeRewards(refData: unknown): { extraRaffle: boolean } {
+  if (!refData || typeof refData !== "object") return { extraRaffle: false };
   const r = refData as Record<string, unknown>;
-  if (r.ok !== true) return { extraRaffle: false, signupDiscount: false };
-  if (r.skipped === "already_applied") return { extraRaffle: false, signupDiscount: false };
-  if (typeof r.error === "string" && r.error.length > 0) return { extraRaffle: false, signupDiscount: false };
-  return {
-    extraRaffle: r.invitee_extra_raffle === true,
-    signupDiscount: r.invitee_signup_discount === true,
-  };
+  if (r.ok !== true) return { extraRaffle: false };
+  if (r.skipped === "already_applied") return { extraRaffle: false };
+  if (typeof r.error === "string" && r.error.length > 0) return { extraRaffle: false };
+  return { extraRaffle: r.invitee_extra_raffle === true };
 }
 
-function signupRewardSummary(extraRaffle: boolean, signupDiscount: boolean): string {
-  if (extraRaffle && signupDiscount) {
-    return "Você ganhou 2 cupons para o sorteio mensal (1 pelo cadastro + 1 pelo código de convite) e 1 cupom de desconto pelo código. Confira em Meus cupons!";
-  }
+function signupRewardSummary(extraRaffle: boolean): string {
   if (extraRaffle) {
-    return "Você ganhou 2 cupons para o sorteio mensal: 1 pelo cadastro e +1 pelo código de convite. Confira em Meus cupons!";
+    return "Você ganhou 2 cupons para o sorteio mensal: 1 pelo cadastro e +1 pelo código de convite. Quem te indicou também ganhou +1 cupom de sorteio. Confira em Meus cupons!";
   }
   return "Você ganhou 1 cupom para o sorteio mensal do Chamô. Confira em Meus cupons!";
 }
 
-function signupRewardSummaryEmail(extraRaffle: boolean, signupDiscount: boolean): string {
-  if (extraRaffle && signupDiscount) {
-    return "Você ganhou 2 cupons para o sorteio mensal (1 pelo cadastro + 1 pelo código) e 1 cupom de desconto pelo código de convite.";
-  }
+function signupRewardSummaryEmail(extraRaffle: boolean): string {
   if (extraRaffle) {
-    return "Você ganhou 2 cupons para o sorteio mensal: 1 pelo cadastro + 1 pelo código de convite.";
+    return "Você ganhou 2 cupons para o sorteio mensal: 1 pelo cadastro + 1 pelo código. Quem te indicou também ganhou +1 cupom de sorteio.";
   }
   return "Você ganhou 1 cupom para o sorteio mensal do Chamô.";
 }
@@ -191,7 +182,6 @@ const Signup = () => {
   const [couponPopup, setCouponPopup] = useState(false);
   /** Cupom extra de sorteio por ter usado código de convite válido no cadastro (se ativo no admin). */
   const [referralExtraRaffle, setReferralExtraRaffle] = useState(false);
-  const [referralSignupDiscount, setReferralSignupDiscount] = useState(false);
   const [showVerifyEmailModal, setShowVerifyEmailModal] = useState(false);
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
@@ -824,7 +814,6 @@ const Signup = () => {
 
       const refCode = basicData.referralCode?.trim() ?? "";
       let extraRaffle = false;
-      let signupDisc = false;
       if (refCode.length >= 6) {
         const { data: refData, error: refErr } = await supabase.rpc("apply_referral_code", { p_raw_code: refCode });
         if (refErr) {
@@ -841,13 +830,10 @@ const Signup = () => {
             toast({ title: "Código inválido", description: "Você não pode usar o próprio código.", variant: "destructive" });
           }
         } else {
-          const rw = parseReferralInviteeRewards(refData);
-          extraRaffle = rw.extraRaffle;
-          signupDisc = rw.signupDiscount;
+          extraRaffle = parseReferralInviteeRewards(refData).extraRaffle;
         }
       }
       setReferralExtraRaffle(extraRaffle);
-      setReferralSignupDiscount(signupDisc);
       setLoading(false);
       localStorage.removeItem("signup_in_progress");
       clearSignupDrafts();
@@ -1043,7 +1029,7 @@ const Signup = () => {
             <p className="text-sm font-medium text-foreground">
               Verifique seu e-mail e faça login para ativar sua conta.
             </p>
-            <p className="text-xs text-muted-foreground">{signupRewardSummaryEmail(referralExtraRaffle, referralSignupDiscount)}</p>
+            <p className="text-xs text-muted-foreground">{signupRewardSummaryEmail(referralExtraRaffle)}</p>
           </div>
           <button
             onClick={forceExitToLogin}
@@ -1059,7 +1045,7 @@ const Signup = () => {
           <DialogHeader><DialogTitle className="text-center">🎉 Parabéns!</DialogTitle></DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4">
             <Ticket className="w-16 h-16 text-primary" />
-            <p className="text-sm font-medium text-foreground">{signupRewardSummary(referralExtraRaffle, referralSignupDiscount)}</p>
+            <p className="text-sm font-medium text-foreground">{signupRewardSummary(referralExtraRaffle)}</p>
           </div>
           <button onClick={handleCouponClose} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors">
             Entendi!

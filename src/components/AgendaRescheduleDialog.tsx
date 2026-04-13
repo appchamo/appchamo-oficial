@@ -141,10 +141,13 @@ export default function AgendaRescheduleDialog({
         existingQ = existingQ.eq("atendente_id", atendenteId);
       }
       const { data: existing } = await existingQ;
-      const existingRanges = (existing || []).map((r: { start_time: string; end_time: string }) => ({
-        start: timeToMinutes(r.start_time),
-        end: timeToMinutes((r.end_time || "").slice(0, 5) || r.end_time),
-      }));
+      const turnaroundBufferMinutes =
+        dayRules.length === 0 ? 0 : Math.max(...dayRules.map((r) => Math.max(0, r.slot_interval_minutes || 0)));
+      const existingRanges = (existing || []).map((r: { start_time: string; end_time: string }) => {
+        const start = timeToMinutes(r.start_time);
+        const end = timeToMinutes((r.end_time || "").slice(0, 5) || r.end_time);
+        return { start, end: end + turnaroundBufferMinutes };
+      });
       const available: string[] = [];
       for (const [slotTime, capacity] of slotSet.entries()) {
         const slotMin = timeToMinutes(slotTime);

@@ -258,10 +258,18 @@ export default function AgendaBookingDialog({
       }
       const existing = (rpcRows || []) as { start_time: string; end_time: string }[];
 
-      const existingRanges = existing.map((r: { start_time: string; end_time: string }) => ({
-        start: timeToMinutes(String(r.start_time).slice(0, 5)),
-        end: timeToMinutes(String(r.end_time).slice(0, 5) || String(r.end_time)),
-      }));
+      /** Mesmo valor da configuração: espaçamento da grelha + folga obrigatória após cada atendimento. */
+      const turnaroundBufferMinutes =
+        dayRules.length === 0 ? 0 : Math.max(...dayRules.map((r) => Math.max(0, r.slot_interval_minutes || 0)));
+
+      const existingRanges = existing.map((r: { start_time: string; end_time: string }) => {
+        const start = timeToMinutes(String(r.start_time).slice(0, 5));
+        const end = timeToMinutes(String(r.end_time).slice(0, 5) || String(r.end_time));
+        return {
+          start,
+          end: end + turnaroundBufferMinutes,
+        };
+      });
 
       const available: string[] = [];
       const occupied: string[] = [];

@@ -181,7 +181,10 @@ const MessageThread = () => {
 
   // Payment state
   const [confirmServiceModal, setConfirmServiceModal] = useState<Message | null>(null);
-  const [showPaymentPolicy, setShowPaymentPolicy] = useState(false);
+  /** Mensagem do pagamento em espera enquanto o cliente lê e aceita as políticas */
+  const [paymentPolicyBeforePayMsg, setPaymentPolicyBeforePayMsg] = useState<Message | null>(null);
+  const paymentPolicyPendingRef = useRef<Message | null>(null);
+  const paymentPolicyAckSkipRestoreRef = useRef(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentData, setPaymentData] = useState<{amount: string;desc: string;msgId: string; installments: string; anticipation: boolean} | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
@@ -3843,8 +3846,14 @@ const MessageThread = () => {
             <Button
               className="flex-1"
               onClick={() => {
-                if (confirmServiceModal) {
-                  openPayment(confirmServiceModal);
+                const msg = confirmServiceModal;
+                if (!msg) return;
+                if (feeSettings.payment_policy?.trim()) {
+                  paymentPolicyPendingRef.current = msg;
+                  setPaymentPolicyBeforePayMsg(msg);
+                  setConfirmServiceModal(null);
+                } else {
+                  openPayment(msg);
                   setConfirmServiceModal(null);
                 }
               }}
@@ -3852,31 +3861,66 @@ const MessageThread = () => {
               Sim, foi prestado
             </Button>
           </div>
-          {feeSettings.payment_policy && (
-            <button
-              onClick={() => setShowPaymentPolicy(true)}
-              className="w-full mt-2 text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
-            >
-              📄 Ler políticas de pagamento
-            </button>
-          )}
         </DialogContent>
       </Dialog>
 
-      {/* Modal: Políticas de Pagamento */}
-      <Dialog open={showPaymentPolicy} onOpenChange={setShowPaymentPolicy}>
+      {/* Modal: políticas completas antes de abrir o pagamento (após "Sim, foi prestado") */}
+      <Dialog
+        open={!!paymentPolicyBeforePayMsg}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (paymentPolicyAckSkipRestoreRef.current) {
+              paymentPolicyAckSkipRestoreRef.current = false;
+              paymentPolicyPendingRef.current = null;
+              setPaymentPolicyBeforePayMsg(null);
+              return;
+            }
+            const pending = paymentPolicyPendingRef.current;
+            paymentPolicyPendingRef.current = null;
+            setPaymentPolicyBeforePayMsg(null);
+            if (pending) setConfirmServiceModal(pending);
+          }
+        }}
+      >
         <DialogContent className="max-w-sm max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>{feeSettings.payment_policy_title || "Políticas de Pagamento"}</DialogTitle>
           </DialogHeader>
-          <div className="overflow-y-auto flex-1 pr-1">
+          <div className="overflow-y-auto flex-1 pr-1 min-h-0">
             <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
               {feeSettings.payment_policy || "Nenhuma política cadastrada."}
             </p>
           </div>
-          <Button variant="outline" className="mt-4 w-full" onClick={() => setShowPaymentPolicy(false)}>
-            Fechar
-          </Button>
+          <div className="flex gap-3 mt-4 shrink-0">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                const pending = paymentPolicyPendingRef.current;
+                paymentPolicyPendingRef.current = null;
+                setPaymentPolicyBeforePayMsg(null);
+                if (pending) setConfirmServiceModal(pending);
+              }}
+            >
+              VOLTAR
+            </Button>
+            <Button
+              className="flex-1"
+              onClick={() => {
+                const pending = paymentPolicyPendingRef.current;
+                if (!pending) return;
+                paymentPolicyAckSkipRestoreRef.current = true;
+                paymentPolicyPendingRef.current = null;
+                setPaymentPolicyBeforePayMsg(null);
+                openPayment(pending);
+              }}
+            >
+              CONFIRMAR
+            </Button>
+          </div>
+          <p className="text-[10px] text-center text-muted-foreground mt-3 shrink-0">
+            Ao clicar em confirmar você concorda com as políticas acima
+          </p>
         </DialogContent>
       </Dialog>
 

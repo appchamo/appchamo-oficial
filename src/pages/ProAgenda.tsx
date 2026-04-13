@@ -535,157 +535,310 @@ export default function ProAgenda() {
             </span>
             Serviços (duração)
           </h2>
-          {services.map((s, idx) => (
-            <div key={s.id || idx} className="flex flex-wrap items-end gap-2 mb-3 p-3 rounded-xl bg-muted/30">
-              <div className="flex-1 min-w-[120px]">
-                <Label className="text-xs">Nome</Label>
-                <Input value={s.name} onChange={(e) => updateService(idx, "name", e.target.value)} placeholder="Ex: Consulta" className="rounded-lg mt-0.5" />
-              </div>
-              <div className="w-28">
-                <Label className="text-xs">Duração</Label>
-                <div className="flex rounded-lg border bg-background overflow-hidden mt-0.5">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder={s.duration_unit === "h" ? "Ex: 1,5" : "Ex: 30"}
-                    value={s.duration_display ?? String(s.duration_minutes)}
-                    onChange={(e) => updateService(idx, "duration_display", e.target.value)}
-                    className="rounded-r-none border-0 w-14 text-center"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const min = parseDurationMinutes(s);
-                      const unit = s.duration_unit ?? "min";
-                      if (unit === "min") {
-                        updateService(idx, "duration_unit", "h");
-                        updateService(idx, "duration_display", min ? String(Math.round((min / 60) * 10) / 10) : "");
-                      } else {
-                        updateService(idx, "duration_unit", "min");
-                        updateService(idx, "duration_display", min ? String(min) : "");
-                      }
-                    }}
-                    className="px-2 py-1.5 text-[11px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 border-l shrink-0"
-                    title="Clique para alternar entre Min e Horas"
+          <div className="space-y-3">
+            {services.map((s, idx) => (
+              <div
+                key={s.id || idx}
+                className="rounded-xl border border-border/70 bg-muted/15 p-4 space-y-3 shadow-sm"
+              >
+                <div className="grid gap-3 sm:grid-cols-[1fr_9.5rem] sm:items-end">
+                  <div className="min-w-0 space-y-1">
+                    <Label className="text-xs font-medium text-muted-foreground">Nome do serviço</Label>
+                    <Input
+                      value={s.name}
+                      onChange={(e) => updateService(idx, "name", e.target.value)}
+                      placeholder="Ex: Consulta"
+                      className="h-9 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-muted-foreground">Duração</Label>
+                    <div className="flex h-9 rounded-lg border border-input bg-background overflow-hidden">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder={s.duration_unit === "h" ? "1,5" : "30"}
+                        value={s.duration_display ?? String(s.duration_minutes)}
+                        onChange={(e) => updateService(idx, "duration_display", e.target.value)}
+                        className="h-9 rounded-none border-0 text-sm text-center min-w-0 flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const min = parseDurationMinutes(s);
+                          const unit = s.duration_unit ?? "min";
+                          if (unit === "min") {
+                            updateService(idx, "duration_unit", "h");
+                            updateService(idx, "duration_display", min ? String(Math.round((min / 60) * 10) / 10) : "");
+                          } else {
+                            updateService(idx, "duration_unit", "min");
+                            updateService(idx, "duration_display", min ? String(min) : "");
+                          }
+                        }}
+                        className="px-2.5 text-[11px] font-semibold bg-muted/80 text-muted-foreground hover:bg-muted border-l shrink-0"
+                        title="Alternar entre minutos e horas"
+                      >
+                        {s.duration_unit === "h" ? "h" : "min"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/40">
+                  <Button size="sm" variant="default" onClick={() => saveService(idx)} disabled={saving} className="rounded-lg h-9">
+                    Salvar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive border-destructive/25 hover:bg-destructive/10 rounded-lg h-9"
+                    onClick={() => deleteService(s.id, idx)}
                   >
-                    {s.duration_unit === "h" ? "h" : "min"}
-                  </button>
+                    <Trash2 className="w-4 h-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Excluir</span>
+                  </Button>
                 </div>
               </div>
-              <Button size="sm" variant="outline" onClick={() => saveService(idx)} disabled={saving} className="rounded-lg">Salvar</Button>
-              <Button size="sm" variant="ghost" className="text-destructive rounded-lg" onClick={() => deleteService(s.id, idx)}><Trash2 className="w-4 h-4" /></Button>
-            </div>
-          ))}
-          <Button variant="outline" size="sm" onClick={addService} className="rounded-xl gap-1"><Plus className="w-4 h-4" /> Adicionar serviço</Button>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" onClick={addService} className="rounded-xl gap-1 mt-4 w-full sm:w-auto border-primary/30">
+            <Plus className="w-4 h-4" /> Adicionar serviço
+          </Button>
         </section>
 
         {/* Horários semanais */}
         <section className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 mb-6 shadow-sm">
-          <h2 className="text-base font-bold text-foreground flex items-center gap-2.5 mb-4">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2.5 mb-1">
             <span className="rounded-lg bg-amber-500/15 p-2">
               <CalendarCheck className="w-4 h-4 text-amber-700 dark:text-amber-400" />
             </span>
             Dias e horários de funcionamento
           </h2>
-          {rules.map((r, idx) => (
-            <div key={r.id || idx} className="flex flex-wrap items-end gap-2 mb-3 p-3 rounded-xl bg-muted/30">
-              <div className="w-32">
-                <Label className="text-xs">Dia</Label>
-                <select value={r.weekday} onChange={(e) => updateRule(idx, "weekday", parseInt(e.target.value, 10))} className="w-full border rounded-lg h-9 px-2 text-sm mt-0.5 bg-background">
-                  {WEEKDAYS.map((d) => (
-                    <option key={d.value} value={d.value}>{d.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="w-24">
-                <Label className="text-xs">Início</Label>
-                <Input type="time" value={r.start_time} onChange={(e) => updateRule(idx, "start_time", e.target.value)} className="rounded-lg mt-0.5" />
-              </div>
-              <div className="w-24">
-                <Label className="text-xs">Fim</Label>
-                <Input type="time" value={r.end_time} onChange={(e) => updateRule(idx, "end_time", e.target.value)} className="rounded-lg mt-0.5" />
-              </div>
-              <div className="w-28">
-                <Label className="text-xs">Intervalo</Label>
-                <div className="flex rounded-lg border bg-background overflow-hidden mt-0.5">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder={r.slot_unit === "h" ? "0,5" : "30"}
-                    value={r.slot_display ?? String(r.slot_interval_minutes)}
-                    onChange={(e) => updateRule(idx, "slot_display", e.target.value)}
-                    className="rounded-r-none border-0 w-14 text-center"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const min = parseSlotIntervalMinutes(r);
-                      const unit = r.slot_unit ?? "min";
-                      if (unit === "min") {
-                        updateRule(idx, "slot_unit", "h");
-                        updateRule(idx, "slot_display", min ? String(Math.round((min / 60) * 10) / 10) : "");
-                      } else {
-                        updateRule(idx, "slot_unit", "min");
-                        updateRule(idx, "slot_display", min ? String(min) : "");
-                      }
-                    }}
-                    className="px-2 py-1.5 text-[11px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 border-l shrink-0"
-                    title="Clique para alternar entre Min e Horas"
+          <p className="text-xs text-muted-foreground mb-4 pl-0 sm:pl-11 max-w-xl leading-relaxed">
+            Escolha o dia, o período de atendimento e o intervalo entre horários oferecidos. Esse mesmo intervalo é reservado
+            como folga após cada atendimento (ex.: consulta 30 min + 30 min de intervalo → o próximo horário livre só depois
+            desse tempo). A pausa no expediente (ex.: almoço) é opcional.
+          </p>
+          <div className="space-y-3">
+            {rules.map((r, idx) => (
+              <div
+                key={r.id || idx}
+                className="rounded-xl border border-border/70 bg-gradient-to-b from-muted/20 to-muted/5 p-4 space-y-4 shadow-sm"
+              >
+                {/* Linha 1: dia + horário compacto (mesma altura em todos os campos) */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Período de atendimento</p>
+                  <div className="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-[minmax(0,1.2fr)_repeat(2,minmax(0,5.75rem))] sm:items-end sm:gap-3">
+                    <div className="min-w-0 space-y-1 sm:col-span-1">
+                      <Label className="text-xs font-medium text-foreground">Dia da semana</Label>
+                      <select
+                        value={r.weekday}
+                        onChange={(e) => updateRule(idx, "weekday", parseInt(e.target.value, 10))}
+                        className="flex h-9 w-full rounded-lg border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        {WEEKDAYS.map((d) => (
+                          <option key={d.value} value={d.value}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 sm:contents">
+                      <div className="space-y-1 min-w-0">
+                        <Label className="text-xs font-medium text-foreground">Abre às</Label>
+                        <Input
+                          type="time"
+                          value={r.start_time}
+                          onChange={(e) => updateRule(idx, "start_time", e.target.value)}
+                          className="h-9 w-full rounded-lg text-sm tabular-nums"
+                        />
+                      </div>
+                      <div className="space-y-1 min-w-0">
+                        <Label className="text-xs font-medium text-foreground">Fecha às</Label>
+                        <Input
+                          type="time"
+                          value={r.end_time}
+                          onChange={(e) => updateRule(idx, "end_time", e.target.value)}
+                          className="h-9 w-full rounded-lg text-sm tabular-nums"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Linha 2: intervalo entre slots + vagas */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_5.5rem] sm:items-end sm:gap-4">
+                  <div className="space-y-1 min-w-0">
+                    <Label className="text-xs font-medium text-muted-foreground">
+                      Intervalo na grelha e folga entre atendimentos
+                    </Label>
+                    <div className="flex h-9 rounded-lg border border-input bg-background overflow-hidden max-w-full sm:max-w-[11rem]">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder={r.slot_unit === "h" ? "0,5" : "30"}
+                        value={r.slot_display ?? String(r.slot_interval_minutes)}
+                        onChange={(e) => updateRule(idx, "slot_display", e.target.value)}
+                        className="h-9 rounded-none border-0 text-sm text-center min-w-0 flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const min = parseSlotIntervalMinutes(r);
+                          const unit = r.slot_unit ?? "min";
+                          if (unit === "min") {
+                            updateRule(idx, "slot_unit", "h");
+                            updateRule(idx, "slot_display", min ? String(Math.round((min / 60) * 10) / 10) : "");
+                          } else {
+                            updateRule(idx, "slot_unit", "min");
+                            updateRule(idx, "slot_display", min ? String(min) : "");
+                          }
+                        }}
+                        className="px-2.5 text-[11px] font-semibold bg-muted/80 text-muted-foreground hover:bg-muted border-l shrink-0"
+                        title="Alternar entre minutos e horas"
+                      >
+                        {r.slot_unit === "h" ? "h" : "min"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-muted-foreground" title="Vagas por horário">
+                      Vagas
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={r.capacity}
+                      onChange={(e) => updateRule(idx, "capacity", parseInt(e.target.value, 10) || 1)}
+                      className="h-9 rounded-lg text-sm w-full sm:w-20"
+                    />
+                  </div>
+                </div>
+
+                {/* Pausa opcional — bloco visual separado */}
+                <div className="rounded-lg border border-dashed border-border/80 bg-background/50 px-3 py-3 space-y-2">
+                  <p className="text-xs font-medium text-foreground">Pausa no expediente <span className="font-normal text-muted-foreground">(opcional)</span></p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">Ex.: almoço — nenhum horário é oferecido entre esses dois momentos.</p>
+                  <div className="grid grid-cols-2 gap-3 max-w-md">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Pausa das</Label>
+                      <Input
+                        type="time"
+                        value={(r.break_start_time ?? "").toString().slice(0, 5)}
+                        onChange={(e) => updateRule(idx, "break_start_time", e.target.value || null)}
+                        className="h-9 w-full rounded-lg text-sm tabular-nums"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Pausa até</Label>
+                      <Input
+                        type="time"
+                        value={(r.break_end_time ?? "").toString().slice(0, 5)}
+                        onChange={(e) => updateRule(idx, "break_end_time", e.target.value || null)}
+                        className="h-9 w-full rounded-lg text-sm tabular-nums"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/40">
+                  <Button size="sm" variant="default" onClick={() => saveRule(idx)} disabled={saving} className="rounded-lg h-9 gap-1.5">
+                    <Save className="w-3.5 h-3.5 opacity-90" />
+                    Salvar horário
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive border-destructive/25 hover:bg-destructive/10 rounded-lg h-9"
+                    onClick={() => deleteRule(r.id, idx)}
                   >
-                    {r.slot_unit === "h" ? "h" : "min"}
-                  </button>
+                    <Trash2 className="w-4 h-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Excluir</span>
+                  </Button>
                 </div>
               </div>
-              <div className="w-16">
-                <Label className="text-xs" title="Número de vagas por horário">Vagas</Label>
-                <Input type="number" min={1} max={50} value={r.capacity} onChange={(e) => updateRule(idx, "capacity", parseInt(e.target.value, 10) || 1)} className="rounded-lg mt-0.5" />
-              </div>
-              <div className="w-24">
-                <Label className="text-xs" title="Ex.: horário de almoço">Fechar (início)</Label>
-                <Input type="time" value={(r.break_start_time ?? "").toString().slice(0, 5)} onChange={(e) => updateRule(idx, "break_start_time", e.target.value || null)} className="rounded-lg mt-0.5" />
-              </div>
-              <div className="w-24">
-                <Label className="text-xs">Fechar (fim)</Label>
-                <Input type="time" value={(r.break_end_time ?? "").toString().slice(0, 5)} onChange={(e) => updateRule(idx, "break_end_time", e.target.value || null)} className="rounded-lg mt-0.5" />
-              </div>
-              <Button size="sm" variant="outline" onClick={() => saveRule(idx)} disabled={saving} className="rounded-lg"><Save className="w-3 h-3" /></Button>
-              <Button size="sm" variant="ghost" className="text-destructive rounded-lg" onClick={() => deleteRule(r.id, idx)}><Trash2 className="w-4 h-4" /></Button>
-            </div>
-          ))}
-          <Button variant="outline" size="sm" onClick={addRule} className="rounded-xl gap-1"><Plus className="w-4 h-4" /> Adicionar horário</Button>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" onClick={addRule} className="rounded-xl gap-1 mt-4 w-full sm:w-auto border-primary/30">
+            <Plus className="w-4 h-4" /> Adicionar horário
+          </Button>
         </section>
 
         {/* Bloqueios */}
         <section className="bg-card border border-border/80 rounded-2xl p-4 sm:p-5 shadow-sm">
-          <h2 className="text-base font-bold text-foreground flex items-center gap-2.5 mb-4">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2.5 mb-1">
             <span className="rounded-lg bg-muted p-2">
               <Lock className="w-4 h-4 text-muted-foreground" />
             </span>
             Bloqueios (indisponibilidade)
           </h2>
-          {blocks.map((b, idx) => (
-            <div key={b.id || idx} className="flex flex-wrap items-end gap-2 mb-3 p-3 rounded-xl bg-muted/30">
-              <div className="w-36">
-                <Label className="text-xs">Data</Label>
-                <Input type="date" value={b.block_date} onChange={(e) => updateBlock(idx, "block_date", e.target.value)} className="rounded-lg mt-0.5" />
+          <p className="text-xs text-muted-foreground mb-4 pl-0 sm:pl-11 max-w-xl leading-relaxed">
+            Marque dias ou períodos em que não aceita agendamentos.
+          </p>
+          <div className="space-y-3">
+            {blocks.map((b, idx) => (
+              <div key={b.id || idx} className="rounded-xl border border-border/70 bg-muted/15 p-4 space-y-3 shadow-sm">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,11rem)_repeat(2,minmax(0,1fr))] sm:items-end">
+                  <div className="space-y-1 min-w-0">
+                    <Label className="text-xs font-medium text-muted-foreground">Data</Label>
+                    <Input
+                      type="date"
+                      value={b.block_date}
+                      onChange={(e) => updateBlock(idx, "block_date", e.target.value)}
+                      className="h-9 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:contents">
+                    <div className="space-y-1 min-w-0">
+                      <Label className="text-xs font-medium text-muted-foreground">Das</Label>
+                      <Input
+                        type="time"
+                        value={b.start_time}
+                        onChange={(e) => updateBlock(idx, "start_time", e.target.value)}
+                        className="h-9 w-full rounded-lg text-sm tabular-nums"
+                      />
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <Label className="text-xs font-medium text-muted-foreground">Às</Label>
+                      <Input
+                        type="time"
+                        value={b.end_time}
+                        onChange={(e) => updateBlock(idx, "end_time", e.target.value)}
+                        className="h-9 w-full rounded-lg text-sm tabular-nums"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-muted-foreground">Motivo (opcional)</Label>
+                  <Input
+                    value={b.reason || ""}
+                    onChange={(e) => updateBlock(idx, "reason", e.target.value || null)}
+                    placeholder="Ex.: Reunião, feriado"
+                    className="h-9 rounded-lg text-sm"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/40">
+                  <Button size="sm" variant="default" onClick={() => saveBlock(idx)} disabled={saving} className="rounded-lg h-9 gap-1.5">
+                    <Save className="w-3.5 h-3.5 opacity-90" />
+                    Salvar bloqueio
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive border-destructive/25 hover:bg-destructive/10 rounded-lg h-9"
+                    onClick={() => deleteBlock(b.id, idx)}
+                  >
+                    <Trash2 className="w-4 h-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Excluir</span>
+                  </Button>
+                </div>
               </div>
-              <div className="w-24">
-                <Label className="text-xs">Início</Label>
-                <Input type="time" value={b.start_time} onChange={(e) => updateBlock(idx, "start_time", e.target.value)} className="rounded-lg mt-0.5" />
-              </div>
-              <div className="w-24">
-                <Label className="text-xs">Fim</Label>
-                <Input type="time" value={b.end_time} onChange={(e) => updateBlock(idx, "end_time", e.target.value)} className="rounded-lg mt-0.5" />
-              </div>
-              <div className="flex-1 min-w-[120px]">
-                <Label className="text-xs">Motivo (opcional)</Label>
-                <Input value={b.reason || ""} onChange={(e) => updateBlock(idx, "reason", e.target.value || null)} placeholder="Ex: Reunião" className="rounded-lg mt-0.5" />
-              </div>
-              <Button size="sm" variant="outline" onClick={() => saveBlock(idx)} disabled={saving} className="rounded-lg"><Save className="w-3 h-3" /></Button>
-              <Button size="sm" variant="ghost" className="text-destructive rounded-lg" onClick={() => deleteBlock(b.id, idx)}><Trash2 className="w-4 h-4" /></Button>
-            </div>
-          ))}
-          <Button variant="outline" size="sm" onClick={addBlock} className="rounded-xl gap-1"><Plus className="w-4 h-4" /> Adicionar bloqueio</Button>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" onClick={addBlock} className="rounded-xl gap-1 mt-4 w-full sm:w-auto border-primary/30">
+            <Plus className="w-4 h-4" /> Adicionar bloqueio
+          </Button>
         </section>
 
         <Dialog open={atendenteDialogOpen} onOpenChange={setAtendenteDialogOpen}>

@@ -1,10 +1,11 @@
 import AdminLayout from "@/components/AdminLayout";
 import { Search, MessageSquare, Headphones, User, Calendar, Loader2 } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 function escapeIlike(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -32,14 +33,25 @@ type SupportHit = {
   message: string;
   created_at: string;
   user_id: string;
+  admin_reply?: string | null;
 };
+
+const CALLS_PAGE_SIZE = 500;
+
+function mergeCallsById(prev: ServiceHit[], incoming: ServiceHit[]): ServiceHit[] {
+  const map = new Map<string, ServiceHit>();
+  for (const r of prev) map.set(r.id, r);
+  for (const r of incoming) map.set(r.id, r);
+  return Array.from(map.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
 
 const AdminProtocols = () => {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
-  const [serviceHits, setServiceHits] = useState<ServiceHit[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [allCalls, setAllCalls] = useState<ServiceHit[]>([]);
   const [supportHits, setSupportHits] = useState<SupportHit[]>([]);
-  const [searched, setSearched] = useState(false);
+  const [supportSearched, setSupportSearched] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -56,14 +68,55 @@ const AdminProtocols = () => {
     messages: { id: string; content: string; created_at: string; sender_id: string; user_id: string; is_system: boolean; senderLabel: string }[];
   } | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setListLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("service_requests")
+          .select("id, protocol, status, created_at, client_id, professional_id, description")
+          .order("created_at", { ascending: false })
+          .limit(CALLS_PAGE_SIZE);
+        if (error) throw error;
+        if (!cancelled) setAllCalls((data || []) as ServiceHit[]);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          toast({
+            title: "Erro ao carregar chamadas",
+            description: translateError(e instanceof Error ? e.message : "Falha ao carregar"),
+            variant: "destructive",
+          });
+          setAllCalls([]);
+        }
+      } finally {
+        if (!cancelled) setListLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const displayedCalls = useMemo(() => {
+    const term = normalizeProtocolInput(q).toLowerCase();
+    if (term.length < 2) return allCalls;
+    return allCalls.filter((row) => (row.protocol || "").toLowerCase().includes(term));
+  }, [allCalls, q]);
+
   const search = useCallback(async () => {
     const term = normalizeProtocolInput(q);
     if (term.length < 3) {
-      toast({ title: "Digite ao menos 3 caracteres", description: "Ex.: CHM- ou SUP- ou parte do número.", variant: "destructive" });
+      toast({
+        title: "Digite ao menos 3 caracteres",
+        description: "Use Buscar para achar protocolo de suporte (SUP-…) ou chamadas fora desta lista.",
+        variant: "destructive",
+      });
       return;
     }
     setLoading(true);
-    setSearched(true);
+    setSupportSearched(true);
     const pattern = `%${escapeIlike(term)}%`;
     try {
       const [srRes, stRes] = await Promise.all([
@@ -72,21 +125,25 @@ const AdminProtocols = () => {
           .select("id, protocol, status, created_at, client_id, professional_id, description")
           .ilike("protocol", pattern)
           .order("created_at", { ascending: false })
-          .limit(25),
+          .limit(80),
         supabase
           .from("support_tickets")
-          .select("id, protocol, status, subject, message, created_at, user_id")
+          .select("id, protocol, status, subject, message, created_at, user_id, admin_reply")
           .ilike("protocol", pattern)
           .order("created_at", { ascending: false })
           .limit(25),
       ]);
       if (srRes.error) throw srRes.error;
       if (stRes.error) throw stRes.error;
-      setServiceHits((srRes.data || []) as ServiceHit[]);
+      const found = (srRes.data || []) as ServiceHit[];
+      setAllCalls((prev) => mergeCallsById(prev, found));
       setSupportHits((stRes.data || []) as SupportHit[]);
-    } catch (e: any) {
-      toast({ title: "Erro na busca", description: translateError(e?.message || "Falha ao buscar"), variant: "destructive" });
-      setServiceHits([]);
+    } catch (e: unknown) {
+      toast({
+        title: "Erro na busca",
+        description: translateError(e instanceof Error ? e.message : "Falha ao buscar"),
+        variant: "destructive",
+      });
       setSupportHits([]);
     }
     setLoading(false);
@@ -122,11 +179,17 @@ const AdminProtocols = () => {
       const senderMap = await loadNameMap(senderIds);
       const messages = (msgs || []).map((m) => ({
         ...m,
-        senderLabel: senderMap.get(m.sender_id) || (m.sender_id === row.client_id ? clientName : m.sender_id === proUserId ? proName : "Usuário"),
+        senderLabel:
+          senderMap.get(m.sender_id) ||
+          (m.sender_id === row.client_id ? clientName : m.sender_id === proUserId ? proName : "Usuário"),
       }));
       setCallDetail({ request: row, clientName, proName, messages });
-    } catch (e: any) {
-      toast({ title: "Erro ao carregar chamada", description: translateError(e?.message), variant: "destructive" });
+    } catch (e: unknown) {
+      toast({
+        title: "Erro ao carregar chamada",
+        description: translateError(e instanceof Error ? e.message : ""),
+        variant: "destructive",
+      });
       setDetailOpen(false);
     }
     setDetailLoading(false);
@@ -159,39 +222,62 @@ const AdminProtocols = () => {
         return { ...m, senderLabel };
       });
       setSupportDetail({ ticket: row, userName, messages });
-    } catch (e: any) {
-      toast({ title: "Erro ao carregar suporte", description: translateError(e?.message), variant: "destructive" });
+    } catch (e: unknown) {
+      toast({
+        title: "Erro ao carregar suporte",
+        description: translateError(e instanceof Error ? e.message : ""),
+        variant: "destructive",
+      });
       setDetailOpen(false);
     }
     setDetailLoading(false);
   };
 
-  const statusLabel: Record<string, string> = {
+  const callStatusLabel: Record<string, string> = {
     pending: "Pendente",
     accepted: "Aceita",
-    completed: "Encerrada",
-    cancelled: "Cancelada",
-    closed: "Fechada",
+    completed: "Concluída",
+    cancelled: "Recusada / cancelada",
+    rejected: "Recusada",
+    closed: "Encerrada",
+  };
+
+  const callStatusClass = (status: string) => {
+    if (status === "pending") return "bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-500/30";
+    if (status === "accepted") return "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border-emerald-500/30";
+    if (status === "completed") return "bg-sky-500/15 text-sky-800 dark:text-sky-200 border-sky-500/30";
+    if (status === "cancelled" || status === "rejected") return "bg-red-500/12 text-red-800 dark:text-red-200 border-red-500/25";
+    return "bg-muted text-muted-foreground border-border";
+  };
+
+  const statusLabel: Record<string, string> = {
+    ...callStatusLabel,
     open: "Aberto",
     in_progress: "Em andamento",
     resolved: "Resolvido",
   };
 
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const formatTime = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
   return (
-    <AdminLayout title="Protocolos">
-      <p className="text-sm text-muted-foreground mb-4 max-w-xl">
-        Busque por protocolo de <strong>chamada</strong> (ex.: <code className="text-xs bg-muted px-1 rounded">CHM-…</code>) ou de{" "}
-        <strong>suporte</strong> (ex.: <code className="text-xs bg-muted px-1 rounded">SUP-…</code>). Abra o resultado para ver o histórico completo.
+    <AdminLayout title="Chamadas">
+      <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
+        Lista das últimas <strong>{CALLS_PAGE_SIZE}</strong> chamadas. Filtre pelo protocolo no campo abaixo ou use{" "}
+        <strong>Buscar</strong> (mín. 3 caracteres) para incluir chamadas fora da lista e tickets de{" "}
+        <strong>suporte</strong> (<code className="text-xs bg-muted px-1 rounded">SUP-…</code>). Toque numa linha para ver
+        o histórico de mensagens.
       </p>
 
-      <div className="flex flex-col sm:flex-row gap-2 mb-6">
+      <div className="flex flex-col sm:flex-row gap-2 mb-4">
         <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
           <Search className="w-4 h-4 text-muted-foreground shrink-0" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && search()}
-            placeholder="Ex.: CHM-20260324-12345 ou SUP-…"
+            onKeyDown={(e) => e.key === "Enter" && void search()}
+            placeholder="Filtrar por protocolo (CHM-…) ou buscar SUP-…"
             className="flex-1 bg-transparent text-sm outline-none font-mono placeholder:font-sans placeholder:text-muted-foreground"
           />
         </div>
@@ -206,102 +292,114 @@ const AdminProtocols = () => {
         </button>
       </div>
 
-      {loading && (
-        <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 text-primary animate-spin" />
-        </div>
-      )}
-
-      {!loading && searched && serviceHits.length === 0 && supportHits.length === 0 && (
-        <div className="text-center py-12 text-muted-foreground text-sm border border-dashed rounded-xl">
-          Nenhum protocolo encontrado com esse termo.
-        </div>
-      )}
-
-      {!loading && (serviceHits.length > 0 || supportHits.length > 0) && (
-        <div className="space-y-6">
-          {serviceHits.length > 0 && (
-            <section>
-              <h2 className="text-sm font-bold text-foreground flex items-center gap-2 mb-2">
-                <MessageSquare className="w-4 h-4 text-primary" /> Chamadas ({serviceHits.length})
-              </h2>
-              <div className="bg-card border rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="text-left p-3 font-medium text-muted-foreground">Protocolo</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground hidden sm:table-cell">Status</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Data</th>
-                      <th className="p-3 w-28"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {serviceHits.map((row) => (
-                      <tr key={row.id} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="p-3 font-mono text-xs text-primary font-semibold">{row.protocol || "—"}</td>
-                        <td className="p-3 hidden sm:table-cell">
-                          <span className="text-xs">{statusLabel[row.status] || row.status}</span>
-                        </td>
-                        <td className="p-3 text-xs text-muted-foreground hidden md:table-cell">
-                          {new Date(row.created_at).toLocaleString("pt-BR")}
-                        </td>
-                        <td className="p-3">
-                          <button
-                            type="button"
-                            onClick={() => void openCallDetail(row)}
-                            className="text-xs font-semibold text-primary hover:underline"
-                          >
-                            Ver conversa
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+      <section className="mb-8">
+        <h2 className="text-sm font-bold text-foreground flex items-center gap-2 mb-2">
+          <MessageSquare className="w-4 h-4 text-primary" />
+          Chamadas
+          {!listLoading && (
+            <span className="text-xs font-normal text-muted-foreground">
+              ({displayedCalls.length}
+              {q.trim().length >= 2 && allCalls.length !== displayedCalls.length ? ` de ${allCalls.length}` : ""})
+            </span>
           )}
-
-          {supportHits.length > 0 && (
-            <section>
-              <h2 className="text-sm font-bold text-foreground flex items-center gap-2 mb-2">
-                <Headphones className="w-4 h-4 text-violet-500" /> Suporte ({supportHits.length})
-              </h2>
-              <div className="bg-card border rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="text-left p-3 font-medium text-muted-foreground">Protocolo</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground hidden sm:table-cell">Assunto</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Data</th>
-                      <th className="p-3 w-28"></th>
+        </h2>
+        <div className="bg-card border rounded-xl overflow-hidden">
+          {listLoading ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            </div>
+          ) : displayedCalls.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground text-sm border-t border-dashed">
+              Nenhuma chamada encontrada{q.trim().length >= 2 ? " com esse filtro." : "."}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left p-3 font-medium text-muted-foreground">Protocolo</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Data</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Horário</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedCalls.map((row) => (
+                    <tr
+                      key={row.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => void openCallDetail(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          void openCallDetail(row);
+                        }
+                      }}
+                      className="border-b last:border-0 hover:bg-muted/40 cursor-pointer transition-colors"
+                    >
+                      <td className="p-3 font-mono text-xs text-primary font-semibold">{row.protocol || "—"}</td>
+                      <td className="p-3 text-xs text-foreground tabular-nums">{formatDate(row.created_at)}</td>
+                      <td className="p-3 text-xs text-muted-foreground tabular-nums">{formatTime(row.created_at)}</td>
+                      <td className="p-3">
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-lg border px-2 py-0.5 text-[11px] font-semibold",
+                            callStatusClass(row.status),
+                          )}
+                        >
+                          {callStatusLabel[row.status] || row.status}
+                        </span>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {supportHits.map((row) => (
-                      <tr key={row.id} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="p-3 font-mono text-xs text-violet-600 font-semibold">{row.protocol || "—"}</td>
-                        <td className="p-3 text-xs max-w-[200px] truncate hidden sm:table-cell">{row.subject}</td>
-                        <td className="p-3 text-xs text-muted-foreground hidden md:table-cell">
-                          {new Date(row.created_at).toLocaleString("pt-BR")}
-                        </td>
-                        <td className="p-3">
-                          <button
-                            type="button"
-                            onClick={() => void openSupportDetail(row)}
-                            className="text-xs font-semibold text-violet-600 hover:underline"
-                          >
-                            Ver conversa
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
+      </section>
+
+      {supportSearched && supportHits.length > 0 && (
+        <section>
+          <h2 className="text-sm font-bold text-foreground flex items-center gap-2 mb-2">
+            <Headphones className="w-4 h-4 text-violet-500" /> Suporte ({supportHits.length})
+          </h2>
+          <div className="bg-card border rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left p-3 font-medium text-muted-foreground">Protocolo</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground hidden sm:table-cell">Assunto</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Data</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Horário</th>
+                </tr>
+              </thead>
+              <tbody>
+                {supportHits.map((row) => (
+                  <tr
+                    key={row.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => void openSupportDetail(row)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        void openSupportDetail(row);
+                      }
+                    }}
+                    className="border-b last:border-0 hover:bg-muted/40 cursor-pointer transition-colors"
+                  >
+                    <td className="p-3 font-mono text-xs text-violet-600 font-semibold">{row.protocol || "—"}</td>
+                    <td className="p-3 text-xs max-w-[220px] truncate hidden sm:table-cell">{row.subject}</td>
+                    <td className="p-3 text-xs tabular-nums">{formatDate(row.created_at)}</td>
+                    <td className="p-3 text-xs text-muted-foreground tabular-nums">{formatTime(row.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       <Dialog open={detailOpen} onOpenChange={(o) => !o && setDetailOpen(false)}>
@@ -344,7 +442,7 @@ const AdminProtocols = () => {
                   </span>
                 </div>
                 <p className="text-xs">
-                  Status: <strong>{statusLabel[callDetail.request.status] || callDetail.request.status}</strong>
+                  Status: <strong>{callStatusLabel[callDetail.request.status] || callDetail.request.status}</strong>
                 </p>
                 {callDetail.request.description && (
                   <p className="text-xs text-muted-foreground border-t pt-2 mt-1">{callDetail.request.description}</p>

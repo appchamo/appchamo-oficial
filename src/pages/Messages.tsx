@@ -75,6 +75,16 @@ const labelColorSwatchClass = (c: ThreadLabelColor) =>
     red: "border-2 border-red-500/50 bg-red-500/10 text-red-800 dark:text-red-200 hover:bg-red-500/20",
   })[c];
 
+/** Prévia curta na lista (mensagens de cobrança guardam metadados em [COBRAR:...]). */
+function formatBillingListPreview(content: string): string | null {
+  if (!content.includes("[COBRAR:")) return null;
+  const m = content.match(/\[COBRAR:([0-9.]+)/);
+  if (!m) return null;
+  const num = parseFloat(m[1]);
+  if (Number.isNaN(num)) return null;
+  return `Cobrança no valor de R$${num.toFixed(2).replace(".", ",")}`;
+}
+
 // Cache em memória — lista aparece instantaneamente ao voltar para a tela
 let _threadsCache: Thread[] = [];
 
@@ -350,9 +360,10 @@ const Messages = () => {
     if (!msg?.request_id || !msg.created_at) return;
 
     const uid = userIdRef.current;
-    const preview =
+    const rawPreview =
       (msg.content && String(msg.content).trim()) ||
       (Array.isArray(msg.image_urls) && msg.image_urls.length > 0 ? "📷 Foto" : "Nova mensagem");
+    const preview = formatBillingListPreview(rawPreview) ?? rawPreview;
 
     setThreads((prev) => {
       const idx = prev.findIndex((t) => t.id === msg.request_id);
@@ -738,6 +749,8 @@ const Messages = () => {
 
   const renderLastMessage = (msg: string | null) => {
     if (!msg) return <span className="text-muted-foreground/70">Nova conversa</span>;
+    const billingPv = formatBillingListPreview(msg);
+    if (billingPv) return <span className="truncate">{billingPv}</span>;
     if (msg.startsWith("[AUDIO:")) return <span className="flex items-center gap-1 text-muted-foreground"><Mic className="w-3 h-3" /> Áudio</span>;
     if (msg === "📷 Foto" || msg.startsWith("📷 ")) return <span className="flex items-center gap-1 text-muted-foreground">📷 Foto</span>;
     if (msg.includes("[PRODUCT:")) return <span className="flex items-center gap-1 text-emerald-600 font-medium"><Package className="w-3 h-3" /> Produto</span>;

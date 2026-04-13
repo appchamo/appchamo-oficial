@@ -1714,11 +1714,8 @@ const MessageThread = () => {
     const amount = parseFloat(billingAmount);
     if (isNaN(amount) || amount <= 0) {toast({ title: "Valor inválido", variant: "destructive" });return;}
 
-    const methodLabel = billingMethod === "pix" ? "PIX" : `Cartão`;
-    const feeText = passFeeToClient ? "\nTaxa: Por conta do cliente" : "";
-    const antText = (billingAnticipation && billingMethod === "card") ? "\nAntecipação: Sim (~7 dias úteis)" : "";
-    
-    const billingContent = `💰 COBRANÇA\nValor base: R$ ${amount.toFixed(2).replace(".", ",")}\n${billingDesc ? `Descrição: ${billingDesc}\n` : ""}Forma: ${methodLabel}${feeText}${antText}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}:${passFeeToClient ? "true" : "false"}:${(billingAnticipation && billingMethod === "card") ? "true" : "false"}]`;
+    const brl = amount.toFixed(2).replace(".", ",");
+    const billingContent = `💰 Cobrança no valor de R$${brl}\n\n[COBRAR:${amount}:${billingDesc || "Serviço"}:${billingMethod}:${billingInstallments}:${passFeeToClient ? "true" : "false"}:${(billingAnticipation && billingMethod === "card") ? "true" : "false"}]`;
 
     const { error } = await supabase.from("chat_messages").insert({
       request_id: threadId,
@@ -2436,7 +2433,6 @@ const MessageThread = () => {
     const billing = parseBilling(msg.content);
     const product = parseProduct(msg.content);
     const isMine = msg.sender_id === userId;
-    const isBilling = msg.content.includes("💰 COBRANÇA");
     const isPaymentConfirm = msg.content.includes("✅ PAGAMENTO CONFIRMADO");
     const isRating = msg.content.includes("⭐ AVALIAÇÃO");
     const isProtocol = msg.content.startsWith("📋 PROTOCOLO:");
@@ -2579,7 +2575,7 @@ const MessageThread = () => {
         </div>);
     }
 
-    if (isBilling && billing) {
+    if (billing) {
       const alreadyPaid = messages.some(m => m.content.includes("✅ PAGAMENTO CONFIRMADO") || m.content.includes("🤝 Pagamento presencial"));
 
       return (

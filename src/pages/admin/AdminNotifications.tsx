@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { toast } from "@/hooks/use-toast";
+import { NOTIFICATION_MENU_DESTINATIONS } from "@/lib/appNotificationDestinations";
 
 type TargetType = "all" | "clients" | "professionals" | "companies" | "category" | "individual";
 
@@ -31,6 +32,7 @@ const AdminNotifications = () => {
   const [categoryId, setCategoryId] = useState("");
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [sending, setSending] = useState(false);
+  const [destinationPath, setDestinationPath] = useState("");
   const [sentCount, setSentCount] = useState<number | null>(null);
   const [markingAllRead, setMarkingAllRead] = useState(false);
 
@@ -163,11 +165,13 @@ const AdminNotifications = () => {
 
       const batchSize = 100;
       for (let i = 0; i < userIds.length; i += batchSize) {
-        const batch = userIds.slice(i, i + batchSize).map(uid => ({
+        const link = destinationPath.trim() || null;
+        const batch = userIds.slice(i, i + batchSize).map((uid) => ({
           user_id: uid,
           title: title.trim(),
           message: message.trim(),
           type: "info",
+          ...(link ? { link } : {}),
         }));
         await supabase.from("notifications").insert(batch);
       }
@@ -176,6 +180,7 @@ const AdminNotifications = () => {
       toast({ title: `Notificação enviada para ${userIds.length} usuário(s)!` });
       setTitle("");
       setMessage("");
+      setDestinationPath("");
       setSelectedUser(null);
       setUserSearch("");
     } catch (e: any) {
@@ -355,6 +360,25 @@ const AdminNotifications = () => {
                 rows={3}
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none"
               />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Página de destino</label>
+              <p className="text-[10px] text-muted-foreground mb-1.5">
+                Ao tocar na notificação no app, o utilizador é enviado para esta página (mesmas rotas do menu lateral).
+              </p>
+              <select
+                value={destinationPath}
+                onChange={(e) => setDestinationPath(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">Só mensagem (sem abrir página)</option>
+                {NOTIFICATION_MENU_DESTINATIONS.map((d) => (
+                  <option key={d.path} value={d.path}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <button

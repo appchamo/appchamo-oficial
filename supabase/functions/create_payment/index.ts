@@ -420,6 +420,7 @@ serve(async (req) => {
         payment_fee: paymentFee,
         professional_net: professionalNet,
         anticipation_enabled: anticipationChosen,
+        installment_count: Math.max(1, Math.floor(Number(installmentCount) || 1)),
         asaas_payment_id: asaasPayment.id,
         status: confirmed ? "completed" : "pending",
       });

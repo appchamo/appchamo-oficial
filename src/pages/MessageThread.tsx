@@ -3688,7 +3688,7 @@ const MessageThread = () => {
                           // ── COM JUROS: taxas embutidas no valor cobrado do cliente ──
                           <>
                             <div className="flex justify-between text-blue-600 dark:text-blue-400">
-                              <span>(+) Comissão da plataforma ({feeSettings.commission_pct || "10"}%)</span>
+                              <span>(+) Taxa da plataforma ({feeSettings.commission_pct || "10"}%)</span>
                               <span>+ {fmt(b.commissionFee)}</span>
                             </div>
                             {b.paymentFee > 0 && (
@@ -3719,7 +3719,7 @@ const MessageThread = () => {
                           // ── SEM JUROS: taxas descontadas do profissional ──
                           <>
                             <div className="flex justify-between text-red-500">
-                              <span>(-) Comissão da plataforma ({feeSettings.commission_pct || "10"}%)</span>
+                              <span>(-) Taxa da plataforma ({feeSettings.commission_pct || "10"}%)</span>
                               <span>- {fmt(b.commissionFee)}</span>
                             </div>
                             {b.paymentFee > 0 && (
@@ -3791,7 +3791,7 @@ const MessageThread = () => {
                     <span>{fmtR(bd.amount)}</span>
                   </div>
                   <div className="flex justify-between text-red-500 text-xs">
-                    <span>(-) Comissão da plataforma ({bd.commissionPct}%)</span>
+                    <span>(-) Taxa da plataforma ({bd.commissionPct}%)</span>
                     <span>- {fmtR(bd.commissionFee)}</span>
                   </div>
                   {bd.gatewayFee > 0 && (

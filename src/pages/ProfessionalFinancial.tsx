@@ -10,6 +10,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
 import { formatCpf, formatCnpj, formatCep, validateCpf, validateCnpj } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
+import { RequestAnticipationDialog } from "@/components/wallet/RequestAnticipationDialog";
+import {
+  WALLET_LIST_SELECT,
+  parseAnticipationSettingsFromRows,
+  parseSettingNumber,
+  walletTxGrossOriginal,
+  type WalletAnticipationPlatformSettings,
+} from "@/lib/walletAnticipation";
+import { Button } from "@/components/ui/button";
 
 type Period = "day" | "month";
 type DateRange = "7d" | "30d" | "custom";
@@ -425,7 +434,7 @@ const FeePreferencesTab = ({ proId }: { proId: string }) => {
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
             <p className="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-1.5">
               <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span>As taxas de parcelamento serão descontadas do valor que você recebe. Comissão da plataforma: {commissionPct}%.</span>
+              <span>As taxas de parcelamento serão descontadas do valor que você recebe. Taxa da plataforma: {commissionPct}%.</span>
             </p>
           </div>
         )}
@@ -691,9 +700,26 @@ const TransactionsTab = ({ proId }: { proId: string }) => {
 
 // === Wallet Tab ===
 interface WalletTxItem {
-  id: string; amount: number; description: string; status: string;
-  created_at: string; transferred_at: string | null;
-  available_at: string | null; payment_method: string | null; anticipation_enabled: boolean;
+  id: string;
+  amount: number;
+  description: string;
+  status: string;
+  created_at: string;
+  transferred_at: string | null;
+  available_at: string | null;
+  payment_method: string | null;
+  anticipation_enabled: boolean;
+  gross_amount?: number | null;
+  platform_fee_amount?: number | null;
+  payment_fee_amount?: number | null;
+  installment_count?: number | null;
+}
+
+function canRequestCardAnticipation(tx: WalletTxItem): boolean {
+  if (tx.status !== "pending") return false;
+  if ((tx.payment_method || "").toLowerCase() !== "card") return false;
+  if (tx.anticipation_enabled) return false;
+  return walletTxGrossOriginal(tx) > 0;
 }
 
 interface FeeInvoiceRow {
@@ -748,15 +774,26 @@ const WalletTab = ({ proId }: { proId: string }) => {
   const [pixKeyType, setPixKeyType] = useState<string | null>(null);
   const [walletTab, setWalletTab] = useState<"pending" | "transferred">("pending");
   const [periodSettings, setPeriodSettings] = useState<Record<string, number>>({});
+  const [anticipationSettings, setAnticipationSettings] = useState<WalletAnticipationPlatformSettings>(() =>
+    parseAnticipationSettingsFromRows([]),
+  );
+  const [anticipDialogTx, setAnticipDialogTx] = useState<WalletTxItem | null>(null);
 
   const loadWallet = async () => {
+    const settingsKeys = [
+      "transfer_period_pix_hours",
+      "transfer_period_card_days",
+      "transfer_period_card_anticipated_days",
+      "anticipation_mode",
+      "anticipation_monthly_rate",
+      "anticipation_fee_pct",
+    ];
     const [{ data: fiscal }, { data: walletData }, { data: settingsData }, { data: invData }] = await Promise.all([
       supabase.from("professional_fiscal_data").select("pix_key, pix_key_type").eq("professional_id", proId).maybeSingle(),
       supabase.from("wallet_transactions")
-        .select("id, amount, description, status, created_at, transferred_at, available_at, payment_method, anticipation_enabled")
+        .select(WALLET_LIST_SELECT)
         .eq("professional_id", proId).order("created_at", { ascending: false }),
-      supabase.from("platform_settings").select("key, value")
-        .in("key", ["transfer_period_pix_hours", "transfer_period_card_days", "transfer_period_card_anticipated_days"]),
+      supabase.from("platform_settings").select("key, value").in("key", settingsKeys),
       supabase.from("platform_fee_invoices")
         .select("id, created_at, invoice_value, pdf_url, nf_number, status, email_sent_at")
         .eq("professional_id", proId)
@@ -765,14 +802,24 @@ const WalletTab = ({ proId }: { proId: string }) => {
     setPixKey(fiscal?.pix_key || null);
     setPixKeyType(fiscal?.pix_key_type || null);
     const sMap: Record<string, number> = {};
-    (settingsData || []).forEach((s: any) => { sMap[s.key] = parseFloat(s.value) || 0; });
+    (settingsData || []).forEach((s: { key: string; value: unknown }) => {
+      sMap[s.key] = parseSettingNumber(s.value);
+    });
     setPeriodSettings(sMap);
-    setTxs((walletData || []).map(t => ({
+    setAnticipationSettings(parseAnticipationSettingsFromRows(settingsData || []));
+    setTxs((walletData || []).map((t) => ({
       ...t,
       amount: Number(t.amount),
-      available_at: (t as any).available_at || null,
-      payment_method: (t as any).payment_method || null,
-      anticipation_enabled: (t as any).anticipation_enabled || false,
+      available_at: (t as WalletTxItem).available_at || null,
+      payment_method: (t as WalletTxItem).payment_method || null,
+      anticipation_enabled: Boolean((t as WalletTxItem).anticipation_enabled),
+      gross_amount: (t as WalletTxItem).gross_amount != null ? Number((t as WalletTxItem).gross_amount) : null,
+      platform_fee_amount:
+        (t as WalletTxItem).platform_fee_amount != null ? Number((t as WalletTxItem).platform_fee_amount) : null,
+      payment_fee_amount:
+        (t as WalletTxItem).payment_fee_amount != null ? Number((t as WalletTxItem).payment_fee_amount) : null,
+      installment_count:
+        (t as WalletTxItem).installment_count != null ? Number((t as WalletTxItem).installment_count) : null,
     })));
     setFeeInvoices((invData as FeeInvoiceRow[]) || []);
     setLoading(false);
@@ -858,43 +905,71 @@ const WalletTab = ({ proId }: { proId: string }) => {
       ) : (
         <div className="space-y-2">
           {displayed.map(tx => (
-            <div key={tx.id} className="flex items-start justify-between border rounded-xl px-4 py-3 bg-white gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">{tx.description}</p>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(tx.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
-                  {tx.transferred_at && ` · Recebido ${new Date(tx.transferred_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`}
-                </p>
-                {tx.status === "pending" && (() => {
-                  const effectiveAt = tx.available_at || calcAvailableAt(tx, periodSettings);
-                  const label = timeUntilAvailable(effectiveAt);
-                  if (!label) return null;
-                  const isReady = label === "Disponível agora";
-                  return (
-                    <p className={`text-[10px] mt-0.5 font-medium flex items-center gap-1 ${isReady ? "text-emerald-600" : "text-amber-600"}`}>
-                      ⏱ {label}
-                    </p>
-                  );
-                })()}
+            <div key={tx.id} className="border rounded-xl px-4 py-3 bg-white">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{tx.description}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(tx.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+                    {tx.transferred_at && ` · Recebido ${new Date(tx.transferred_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`}
+                  </p>
+                  {tx.status === "pending" && (() => {
+                    const effectiveAt = tx.available_at || calcAvailableAt(tx, periodSettings);
+                    const label = timeUntilAvailable(effectiveAt);
+                    if (!label) return null;
+                    const isReady = label === "Disponível agora";
+                    return (
+                      <p className={`text-[10px] mt-0.5 font-medium flex items-center gap-1 ${isReady ? "text-emerald-600" : "text-amber-600"}`}>
+                        ⏱ {label}
+                      </p>
+                    );
+                  })()}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`font-bold ${tx.status === "pending" ? "text-amber-700" : "text-emerald-700"}`}>{fmtBRL(tx.amount)}</span>
+                  {tx.status === "pending"
+                    ? <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pendente</span>
+                    : <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Recebido</span>}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className={`font-bold ${tx.status === "pending" ? "text-amber-700" : "text-emerald-700"}`}>{fmtBRL(tx.amount)}</span>
-                {tx.status === "pending"
-                  ? <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pendente</span>
-                  : <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Recebido</span>}
-              </div>
+              {canRequestCardAnticipation(tx) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full mt-3 text-[11px] font-semibold uppercase tracking-wide border-primary/40 text-primary hover:bg-primary/5"
+                  onClick={() => setAnticipDialogTx(tx)}
+                >
+                  Solicitar antecipação
+                </Button>
+              )}
             </div>
           ))}
         </div>
       )}
 
+      {anticipDialogTx && (
+        <RequestAnticipationDialog
+          open={!!anticipDialogTx}
+          onOpenChange={(o) => !o && setAnticipDialogTx(null)}
+          walletTransactionId={anticipDialogTx.id}
+          grossOriginal={walletTxGrossOriginal(anticipDialogTx)}
+          currentNet={anticipDialogTx.amount}
+          installments={Math.max(1, Math.floor(anticipDialogTx.installment_count ?? 1))}
+          anticipation={anticipationSettings}
+          cardDaysWithoutAnticipation={Math.max(1, Math.round(periodSettings["transfer_period_card_days"] || 32))}
+          cardDaysWithAnticipation={Math.max(1, Math.round(periodSettings["transfer_period_card_anticipated_days"] || 4))}
+          onSuccess={loadWallet}
+        />
+      )}
+
       <div className="rounded-xl border bg-card p-4 mt-6">
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-2">
           <FileText className="w-4 h-4 text-primary" />
-          Notas fiscais (comissão Chamô)
+          Notas fiscais (taxa da plataforma)
         </h3>
         <p className="text-[11px] text-muted-foreground mb-3">
-          NFS-e referente à taxa de intermediação da plataforma sobre seus repasses. O mesmo PDF pode ser enviado ao seu e-mail fiscal.
+          NFS-e referente à taxa da plataforma (intermediação) sobre seus repasses. O mesmo PDF pode ser enviado ao seu e-mail fiscal.
         </p>
         {feeInvoices.length === 0 ? (
           <p className="text-xs text-muted-foreground">Nenhuma nota emitida ainda.</p>

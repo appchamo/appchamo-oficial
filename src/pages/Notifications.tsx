@@ -61,6 +61,8 @@ const resolveAction = (n: Notification): "navigate" | "modal" => {
   if (n.title.toLowerCase().includes("suporte") && n.link) return "navigate";
   if (t.includes("plano") && n.link) return "navigate";
   if ((t.includes("repasse") || t.includes("transferi")) && n.link) return "navigate";
+  // Notificação manual do admin (ou outro aviso) com destino explícito
+  if (n.type === "info" && n.link) return "navigate";
   // Pagamento e qualquer coisa sem destino claro → modal
   return "modal";
 };

@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { RequestAnticipationDialog } from "@/components/wallet/RequestAnticipationDialog";
+import {
+  WALLET_LIST_SELECT,
+  parseAnticipationSettingsFromRows,
+  parseSettingNumber,
+  walletTxGrossOriginal,
+  type WalletAnticipationPlatformSettings,
+} from "@/lib/walletAnticipation";
 
 interface WalletTx {
   id: string;
@@ -15,6 +24,17 @@ interface WalletTx {
   available_at: string | null;
   payment_method: string | null;
   anticipation_enabled: boolean;
+  gross_amount?: number | null;
+  platform_fee_amount?: number | null;
+  payment_fee_amount?: number | null;
+  installment_count?: number | null;
+}
+
+function canRequestCardAnticipation(tx: WalletTx): boolean {
+  if (tx.status !== "pending") return false;
+  if ((tx.payment_method || "").toLowerCase() !== "card") return false;
+  if (tx.anticipation_enabled) return false;
+  return walletTxGrossOriginal(tx) > 0;
 }
 
 /** Retorna texto legível do tempo restante até available_at */
@@ -63,6 +83,52 @@ const ProWallet = () => {
   const [pixKeyType, setPixKeyType] = useState<string | null>(null);
   const [tab, setTab] = useState<"pending" | "transferred">("pending");
   const [periodSettings, setPeriodSettings] = useState<Record<string, number>>({});
+  const [anticipationSettings, setAnticipationSettings] = useState<WalletAnticipationPlatformSettings>(() =>
+    parseAnticipationSettingsFromRows([]),
+  );
+  const [anticipDialogTx, setAnticipDialogTx] = useState<WalletTx | null>(null);
+  const [proId, setProId] = useState<string | null>(null);
+
+  const loadWalletForPro = async (professionalId: string) => {
+    const settingsKeys = [
+      "transfer_period_pix_hours",
+      "transfer_period_card_days",
+      "transfer_period_card_anticipated_days",
+      "anticipation_mode",
+      "anticipation_monthly_rate",
+      "anticipation_fee_pct",
+    ];
+    const [{ data: settings }, { data: txs }] = await Promise.all([
+      supabase.from("platform_settings").select("key, value").in("key", settingsKeys),
+      supabase
+        .from("wallet_transactions")
+        .select(WALLET_LIST_SELECT)
+        .eq("professional_id", professionalId)
+        .order("created_at", { ascending: false }),
+    ]);
+    const sMap: Record<string, number> = {};
+    (settings || []).forEach((s: { key: string; value: unknown }) => {
+      sMap[s.key] = parseSettingNumber(s.value);
+    });
+    setPeriodSettings(sMap);
+    setAnticipationSettings(parseAnticipationSettingsFromRows(settings || []));
+    setTransactions(
+      (txs || []).map((t) => ({
+        ...t,
+        amount: Number(t.amount),
+        available_at: (t as WalletTx).available_at || null,
+        payment_method: (t as WalletTx).payment_method || null,
+        anticipation_enabled: Boolean((t as WalletTx).anticipation_enabled),
+        gross_amount: (t as WalletTx).gross_amount != null ? Number((t as WalletTx).gross_amount) : null,
+        platform_fee_amount:
+          (t as WalletTx).platform_fee_amount != null ? Number((t as WalletTx).platform_fee_amount) : null,
+        payment_fee_amount:
+          (t as WalletTx).payment_fee_amount != null ? Number((t as WalletTx).payment_fee_amount) : null,
+        installment_count:
+          (t as WalletTx).installment_count != null ? Number((t as WalletTx).installment_count) : null,
+      })),
+    );
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -74,7 +140,12 @@ const ProWallet = () => {
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (!pro) { setLoading(false); return; }
+      if (!pro) {
+        setLoading(false);
+        setProId(null);
+        return;
+      }
+      setProId(pro.id);
 
       // Busca chave PIX
       const { data: fiscal } = await supabase
@@ -85,33 +156,7 @@ const ProWallet = () => {
       setPixKey(fiscal?.pix_key || null);
       setPixKeyType(fiscal?.pix_key_type || null);
 
-      // Busca configurações de período de repasse da plataforma
-      const { data: settings } = await supabase
-        .from("platform_settings")
-        .select("key, value")
-        .in("key", [
-          "transfer_period_pix_hours",
-          "transfer_period_card_days",
-          "transfer_period_card_anticipated_days",
-        ]);
-      const sMap: Record<string, number> = {};
-      (settings || []).forEach((s: any) => { sMap[s.key] = parseFloat(s.value) || 0; });
-      setPeriodSettings(sMap);
-
-      // Busca transações da carteira
-      const { data: txs } = await supabase
-        .from("wallet_transactions")
-        .select("id, amount, description, status, created_at, transferred_at, available_at, payment_method, anticipation_enabled")
-        .eq("professional_id", pro.id)
-        .order("created_at", { ascending: false });
-
-      setTransactions((txs || []).map(t => ({
-        ...t,
-        amount: Number(t.amount),
-        available_at: (t as any).available_at || null,
-        payment_method: (t as any).payment_method || null,
-        anticipation_enabled: (t as any).anticipation_enabled || false,
-      })));
+      await loadWalletForPro(pro.id);
       setLoading(false);
     };
     load();
@@ -119,27 +164,21 @@ const ProWallet = () => {
 
   // Realtime
   useEffect(() => {
-    if (!user) return;
+    if (!user || !proId) return;
     const channel = supabase
-      .channel("pro_wallet_rt")
-      .on("postgres_changes", { event: "*", schema: "public", table: "wallet_transactions" }, () => {
-        // Recarrega ao detectar mudança
-        supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle().then(({ data: pro }) => {
-          if (!pro) return;
-          supabase.from("wallet_transactions").select("id, amount, description, status, created_at, transferred_at, available_at, payment_method, anticipation_enabled")
-            .eq("professional_id", pro.id).order("created_at", { ascending: false })
-            .then(({ data: txs }) => setTransactions((txs || []).map(t => ({
-              ...t,
-              amount: Number(t.amount),
-              available_at: (t as any).available_at || null,
-              payment_method: (t as any).payment_method || null,
-              anticipation_enabled: (t as any).anticipation_enabled || false,
-            }))));
-        });
-      })
+      .channel(`pro_wallet_rt_${proId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "wallet_transactions", filter: `professional_id=eq.${proId}` },
+        () => {
+          loadWalletForPro(proId);
+        },
+      )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [user]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, proId]);
 
   const pending = transactions.filter(t => t.status === "pending");
   const transferred = transactions.filter(t => t.status === "transferred");
@@ -226,38 +265,66 @@ const ProWallet = () => {
         ) : (
           <div className="space-y-2">
             {displayed.map(tx => (
-              <div key={tx.id} className="flex items-start justify-between border rounded-xl px-4 py-3 bg-white gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{tx.description}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(tx.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
-                    {tx.transferred_at && ` · Recebido em ${new Date(tx.transferred_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`}
-                  </p>
-                  {tx.status === "pending" && (() => {
-                    const effectiveAt = tx.available_at || calcAvailableAt(tx, periodSettings);
-                    const label = timeUntilAvailable(effectiveAt);
-                    if (!label) return null;
-                    const isReady = label === "Disponível agora";
-                    return (
-                      <p className={`text-[10px] mt-0.5 flex items-center gap-1 font-medium ${isReady ? "text-emerald-600" : "text-amber-600"}`}>
-                        <Timer className="w-3 h-3" /> {label}
-                      </p>
-                    );
-                  })()}
+              <div key={tx.id} className="border rounded-xl px-4 py-3 bg-white">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{tx.description}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(tx.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+                      {tx.transferred_at && ` · Recebido em ${new Date(tx.transferred_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`}
+                    </p>
+                    {tx.status === "pending" && (() => {
+                      const effectiveAt = tx.available_at || calcAvailableAt(tx, periodSettings);
+                      const label = timeUntilAvailable(effectiveAt);
+                      if (!label) return null;
+                      const isReady = label === "Disponível agora";
+                      return (
+                        <p className={`text-[10px] mt-0.5 flex items-center gap-1 font-medium ${isReady ? "text-emerald-600" : "text-amber-600"}`}>
+                          <Timer className="w-3 h-3" /> {label}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <span className={`font-bold ${tx.status === "pending" ? "text-amber-700" : "text-emerald-700"}`}>{fmt(tx.amount)}</span>
+                    {tx.status === "pending" ? (
+                      <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pendente</span>
+                    ) : (
+                      <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Recebido</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <span className={`font-bold ${tx.status === "pending" ? "text-amber-700" : "text-emerald-700"}`}>{fmt(tx.amount)}</span>
-                  {tx.status === "pending" ? (
-                    <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pendente</span>
-                  ) : (
-                    <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Recebido</span>
-                  )}
-                </div>
+                {canRequestCardAnticipation(tx) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-3 text-[11px] font-semibold uppercase tracking-wide border-primary/40 text-primary hover:bg-primary/5"
+                    onClick={() => setAnticipDialogTx(tx)}
+                  >
+                    Solicitar antecipação
+                  </Button>
+                )}
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {anticipDialogTx && (
+        <RequestAnticipationDialog
+          open={!!anticipDialogTx}
+          onOpenChange={(o) => !o && setAnticipDialogTx(null)}
+          walletTransactionId={anticipDialogTx.id}
+          grossOriginal={walletTxGrossOriginal(anticipDialogTx)}
+          currentNet={anticipDialogTx.amount}
+          installments={Math.max(1, Math.floor(anticipDialogTx.installment_count ?? 1))}
+          anticipation={anticipationSettings}
+          cardDaysWithoutAnticipation={Math.max(1, Math.round(periodSettings["transfer_period_card_days"] || 32))}
+          cardDaysWithAnticipation={Math.max(1, Math.round(periodSettings["transfer_period_card_anticipated_days"] || 4))}
+          onSuccess={() => proId && loadWalletForPro(proId)}
+        />
+      )}
     </AppLayout>
   );
 };

@@ -80,7 +80,7 @@ serve(async (req) => {
           if (tx.client_id) {
             const { data: txFull } = await supabase
               .from("transactions")
-              .select("professional_id, professional_net, original_amount, anticipation_enabled")
+              .select("professional_id, professional_net, original_amount, anticipation_enabled, installment_count")
               .eq("id", tx.id)
               .maybeSingle();
 
@@ -238,15 +238,16 @@ serve(async (req) => {
               const paymentFeeCalc    = Number((grossAmount * paymentFeePct / 100 + paymentFeeFixed).toFixed(2));
               const professionalNet   = Number((grossAmount - commissionFeeCalc - paymentFeeCalc).toFixed(2));
 
+              const installmentCount = Math.max(1, Math.floor(Number((txFull as { installment_count?: number })?.installment_count) || 1));
+
               let anticipationFeeAmount = 0;
               if (anticipationEnabled && paymentMethod !== "pix") {
                 // Antecipação calculada sobre o valor BRUTO (igual ao formulário de cobrança do app)
                 const antMode = settingsStr["anticipation_mode"] || "simple";
                 if (antMode === "monthly") {
                   const monthlyRate = settingsMap["anticipation_monthly_rate"] || 1.15;
-                  // Para parcelamento: número de parcelas armazenado não está disponível aqui, usa 1
-                  anticipationFeeAmount = Number((grossAmount * monthlyRate / 100).toFixed(2));
-                  console.log(`Antecipação mensal: ${monthlyRate}%/mês sobre R$${grossAmount} = R$${anticipationFeeAmount}`);
+                  anticipationFeeAmount = Number((grossAmount * monthlyRate * installmentCount / 100).toFixed(2));
+                  console.log(`Antecipação mensal: ${monthlyRate}%/mês × ${installmentCount} parcelas sobre R$${grossAmount} = R$${anticipationFeeAmount}`);
                 } else {
                   const anticipationFeePct = settingsMap["anticipation_fee_pct"] ?? 0;
                   anticipationFeeAmount = Number((grossAmount * anticipationFeePct / 100).toFixed(2));
@@ -281,6 +282,7 @@ serve(async (req) => {
                 amount: netAmount,
                 payment_method: paymentMethod,
                 anticipation_enabled: anticipationEnabled,
+                installment_count: installmentCount,
                 description: `Serviço recebido via ${paymentMethod === "pix" ? "PIX" : "Cartão"}`,
                 status: "pending",
                 available_at: availableAt.toISOString(),

@@ -1,4 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
+import AudioPlayer from "@/components/AudioPlayer";
 import { Search, MessageSquare, Headphones, User, Calendar, Loader2 } from "lucide-react";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,6 +38,23 @@ type SupportHit = {
 };
 
 const CALLS_PAGE_SIZE = 500;
+
+/** Mesmo formato que `MessageThread` / `chat_messages` (`[AUDIO:url:segundos]`). */
+function parseAudioMessage(content: string): { url: string; duration: number } | null {
+  const match = content.trim().match(/\[AUDIO:(.+):(\d+)\]$/);
+  if (!match) return null;
+  const duration = parseInt(match[2], 10);
+  if (Number.isNaN(duration)) return null;
+  return { url: match[1], duration };
+}
+
+function AdminChatMessageBody({ content }: { content: string }) {
+  const audio = parseAudioMessage(content);
+  if (audio) {
+    return <AudioPlayer src={audio.url} duration={audio.duration} isMine={false} />;
+  }
+  return <pre className="text-xs whitespace-pre-wrap break-words font-sans text-foreground">{content}</pre>;
+}
 
 function mergeCallsById(prev: ServiceHit[], incoming: ServiceHit[]): ServiceHit[] {
   const map = new Map<string, ServiceHit>();
@@ -459,7 +477,7 @@ const AdminProtocols = () => {
                         <span className="text-xs font-semibold text-foreground">{m.senderLabel}</span>
                         <span className="text-[10px] text-muted-foreground">{new Date(m.created_at).toLocaleString("pt-BR")}</span>
                       </div>
-                      <pre className="text-xs whitespace-pre-wrap break-words font-sans text-foreground">{m.content}</pre>
+                      <AdminChatMessageBody content={m.content} />
                     </div>
                   ))
                 )}
@@ -506,7 +524,7 @@ const AdminProtocols = () => {
                         <span className="text-xs font-semibold text-foreground">{m.senderLabel}</span>
                         <span className="text-[10px] text-muted-foreground">{new Date(m.created_at).toLocaleString("pt-BR")}</span>
                       </div>
-                      <pre className="text-xs whitespace-pre-wrap break-words font-sans text-foreground">{m.content}</pre>
+                      <AdminChatMessageBody content={m.content} />
                     </div>
                   ))
                 )}

@@ -30,17 +30,17 @@ const FEATURED_DISPLAY_COUNT = 12;
 /** Se a lista regional vier menor que isto, funde profissionais de todo o mesmo estado. */
 const MIN_MERGE_STATE_POOL = 28;
 
-type FeaturedSortMode = "random" | "rating" | "name" | "verified";
+type FeaturedSortMode = "random" | "rating" | "name" | "response_time";
 
 const FEATURED_SORT_OPTIONS: { value: FeaturedSortMode; label: string }[] = [
   { value: "random", label: "Ordem aleatória" },
   { value: "rating", label: "Avaliação" },
   { value: "name", label: "Nome" },
-  { value: "verified", label: "Verificado" },
+  { value: "response_time", label: "Tempo de resposta" },
 ];
 
 const featuredProSelect =
-  "id, rating, total_services, verified, user_id, category_id, categories(name), profession_id, professions(name), created_at";
+  "id, rating, total_services, verified, avg_response_seconds, user_id, category_id, categories(name), profession_id, professions(name), created_at";
 
 function baseFeaturedProsQuery() {
   return supabase
@@ -58,6 +58,8 @@ interface Pro {
   rating: number;
   total_services: number;
   verified: boolean;
+  /** Tempo médio de resposta em segundos (null = sem amostra ainda) */
+  avg_response_seconds: number | null;
   user_id: string;
   profession_name: string;
   full_name: string;
@@ -104,10 +106,21 @@ function pickFeaturedDisplay(pool: Pro[], mode: FeaturedSortMode): Pro[] {
         .slice(0, n);
     case "name":
       return [...pool].sort(compareFeaturedNamesAsc).slice(0, n);
-    case "verified":
+    case "response_time": {
+      const sec = (p: Pro) =>
+        p.avg_response_seconds != null && p.avg_response_seconds >= 0 ? p.avg_response_seconds : null;
       return [...pool]
-        .sort((a, b) => (a.verified === b.verified ? 0 : a.verified ? -1 : 1) || b.rating - a.rating)
+        .sort((a, b) => {
+          const sa = sec(a);
+          const sb = sec(b);
+          if (sa === null && sb === null) return b.rating - a.rating || b.total_services - a.total_services;
+          if (sa === null) return 1;
+          if (sb === null) return -1;
+          if (sa !== sb) return sa - sb;
+          return b.rating - a.rating || b.total_services - a.total_services;
+        })
         .slice(0, n);
+    }
     default:
       return pool.slice(0, n);
   }
@@ -510,6 +523,10 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           rating: p.rating,
           total_services: p.total_services,
           verified: p.verified,
+          avg_response_seconds:
+            typeof p.avg_response_seconds === "number" && Number.isFinite(p.avg_response_seconds)
+              ? p.avg_response_seconds
+              : null,
           user_id: p.user_id,
           profession_name: (p.professions as any)?.name || (p.categories as any)?.name || "—",
           full_name: profileMap.get(p.user_id)?.full_name || "Profissional",

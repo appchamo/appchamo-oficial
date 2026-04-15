@@ -629,34 +629,6 @@ const Signup = () => {
     doSignup(data, "free");
   };
 
-  // ─── Early access: cadastros antes de 15/04 ganham VIP (CPF) ou Business (CNPJ) por 3 meses ───
-  const EARLY_ACCESS_CUTOFF = new Date("2026-04-15T00:00:00");
-  const EARLY_ACCESS_EXPIRES = new Date("2026-07-15T00:00:00");
-
-  const applyEarlyAccessIfEligible = async (uid: string, documentType: "cpf" | "cnpj") => {
-    if (new Date() >= EARLY_ACCESS_CUTOFF) return;
-    const planId = documentType === "cnpj" ? "business" : "vip";
-    try {
-      const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", uid).maybeSingle();
-      if (pro?.id) {
-        await supabase
-          .from("professionals")
-          .update({ doc_type: documentType, early_access: true } as any)
-          .eq("id", pro.id);
-      }
-      await supabase.from("subscriptions").upsert(
-        { user_id: uid, plan_id: planId, status: "ACTIVE", expires_at: EARLY_ACCESS_EXPIRES.toISOString() },
-        { onConflict: "user_id" },
-      );
-      if (documentType === "cnpj") {
-        await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", uid);
-      }
-      try { localStorage.setItem(`early_access_modal_${uid}`, "pending"); } catch { void 0; }
-    } catch (e) {
-      console.warn("[earlyAccess] falha ao aplicar:", e);
-    }
-  };
-
   const doSignup = async (pData: any, planId: string) => {
     if (!basicData) {
       toast({
@@ -804,12 +776,6 @@ const Signup = () => {
         });
         setLoading(false);
         return;
-      }
-
-      // Acesso antecipado: aplica VIP ou Business antes do lançamento
-      if (accountType === "professional" && userId) {
-        const docType = (basicData.documentType as "cpf" | "cnpj") ?? "cpf";
-        await applyEarlyAccessIfEligible(userId, docType);
       }
 
       const refCode = basicData.referralCode?.trim() ?? "";

@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, ChevronDown } from "lucide-react";
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, ChevronDown, Clock } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,6 +10,7 @@ import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 import { incrementProfessionalAnalytics, searchQueryMatchesDisplayName } from "@/lib/proAnalytics";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
+import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -41,10 +42,12 @@ interface Pro {
   user_type: string;
   city: string | null;
   state: string | null;
+  avg_response_seconds: number | null;
 }
 
 function SearchProCard({ pro }: { pro: Pro }) {
   const impressionRef = useProProfileImpression(pro.user_id);
+  const responseLabel = formatAvgResponseSeconds(pro.avg_response_seconds);
   return (
     <div ref={impressionRef} className="min-w-0">
       <Link
@@ -62,10 +65,18 @@ function SearchProCard({ pro }: { pro: Pro }) {
           <p className="text-xs text-muted-foreground truncate font-medium">
             {pro.category_name} · {pro.profession_name}
           </p>
-          <div className="flex items-center justify-between mt-1">
-            <div className="flex items-center gap-1">
-              <Star className="w-3.5 h-3.5 fill-primary text-primary" />
-              <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
+          <div className="flex items-center justify-between mt-1 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {responseLabel && (
+                <span className="flex items-center gap-0.5 shrink-0" title="Tempo médio de resposta">
+                  <Clock className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden />
+                  <span className="text-[10px] font-semibold text-muted-foreground whitespace-nowrap">{responseLabel}</span>
+                </span>
+              )}
+              <div className="flex items-center gap-1 shrink-0">
+                <Star className="w-3.5 h-3.5 fill-primary text-primary" />
+                <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
+              </div>
             </div>
             {(pro.city || pro.state) && (
               <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-0.5 max-w-[48%] truncate justify-end">
@@ -204,7 +215,7 @@ const Search = () => {
     const [prosRes, catsRes] = await Promise.all([
       supabase
         .from("professionals")
-        .select("id, rating, total_services, verified, user_id, availability_status, category_id, profession_id, categories(name), professions:profession_id(name)")
+        .select("id, rating, total_services, verified, avg_response_seconds, user_id, availability_status, category_id, profession_id, categories(name), professions:profession_id(name)")
         .eq("active", true)
         .eq("profile_status", "approved")
         .neq("availability_status", "unavailable")
@@ -238,6 +249,8 @@ const Search = () => {
 
     const mappedPros = prosVisible.map((p) => {
       const loc = locationMap.get(p.user_id);
+      const s = (p as { avg_response_seconds?: number | null }).avg_response_seconds;
+      const avg_response_seconds = typeof s === "number" && Number.isFinite(s) ? s : null;
 
       return {
         id: p.id,
@@ -245,6 +258,7 @@ const Search = () => {
         rating: p.rating,
         total_services: p.total_services,
         verified: p.verified,
+        avg_response_seconds,
         full_name: profileMap.get(p.user_id)?.full_name || "Profissional",
         avatar_url: profileMap.get(p.user_id)?.avatar_url || null,
         category_name: (p.categories as any)?.name || "—",

@@ -286,7 +286,7 @@ function authorServiceBadges(m: AuthorProMetaEntry | undefined): { key: string; 
       },
     ];
   }
-  if (m.totalReviews < 5 && m.totalServices < 6 && daysSince < 120) {
+  if (m.totalReviews < 5 && m.totalServices < 6 && daysSince < 3) {
     return [
       {
         key: "novo",
@@ -354,7 +354,7 @@ export default function CommunityFeed({
   const [commentAuthors, setCommentAuthors] = useState<Record<string, AuthorRow>>({});
 
   const [composerText, setComposerText] = useState("");
-  const [composerImageFile, setComposerImageFile] = useState<File | null>(null);
+  const [composerPhoto, setComposerPhoto] = useState<File | null>(null);
   const [composerPreview, setComposerPreview] = useState<string | null>(null);
   const [composerModalOpen, setComposerModalOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -831,14 +831,14 @@ export default function CommunityFeed({
   }, [user, highlightPostId, loading, posts, isSinglePostMode]);
 
   useEffect(() => {
-    if (!composerImageFile) {
+    if (!composerPhoto) {
       setComposerPreview(null);
       return;
     }
-    const url = URL.createObjectURL(composerImageFile);
+    const url = URL.createObjectURL(composerPhoto);
     setComposerPreview(url);
     return () => URL.revokeObjectURL(url);
-  }, [composerImageFile]);
+  }, [composerPhoto]);
 
   const hasPostsFromSeguindo = useMemo(
     () => posts.some((p) => favoritedAuthorUserIds.has(p.author_id)),
@@ -1057,15 +1057,15 @@ export default function CommunityFeed({
   const publishPost = async () => {
     if (!user || !canPost) return;
     const text = composerText.trim();
-    if (!text && !composerImageFile) {
-      toast({ title: "Escreva algo ou adicione uma foto", variant: "destructive" });
+    if (!text && !composerPhoto) {
+      toast({ title: "Escreva algo ou anexe uma foto", variant: "destructive" });
       return;
     }
     setPublishing(true);
     try {
       let imageUrl: string | null = null;
-      if (composerImageFile) {
-        const blob = await compressImageForChat(composerImageFile, {
+      if (composerPhoto) {
+        const blob = await compressImageForChat(composerPhoto, {
           maxEdge: 1600,
           webpQuality: 0.82,
           jpegQuality: 0.85,
@@ -1089,7 +1089,7 @@ export default function CommunityFeed({
       });
       if (insErr) throw insErr;
       setComposerText("");
-      setComposerImageFile(null);
+      setComposerPhoto(null);
       setComposerModalOpen(false);
       toast({ title: "Publicado na Comunidade" });
       if (isSinglePostMode) await loadSinglePostFeed();
@@ -1675,14 +1675,19 @@ export default function CommunityFeed({
                   <Link
                     to={cTo}
                     className={cn(
-                      "font-bold text-foreground hover:text-primary transition-colors",
-                      ctx.isReply ? "text-[13px]" : "text-[14px]",
+                      "font-bold text-foreground hover:text-primary transition-colors break-words",
+                      ctx.isReply ? "text-[12px] leading-snug" : "text-[13px] leading-snug",
                     )}
                   >
                     {authorLabel(ca)}
                   </Link>
                 ) : (
-                  <span className={cn("font-bold", ctx.isReply ? "text-[13px]" : "text-[14px]")}>
+                  <span
+                    className={cn(
+                      "font-bold break-words",
+                      ctx.isReply ? "text-[12px] leading-snug" : "text-[13px] leading-snug",
+                    )}
+                  >
                     {authorLabel(ca)}
                   </span>
                 )}
@@ -1696,24 +1701,25 @@ export default function CommunityFeed({
                     <Megaphone className={cn("shrink-0", ctx.isReply ? "w-2.5 h-2.5" : "w-3 h-3")} aria-hidden />
                     Patrocinador
                   </span>
-                ) : cMeta?.verified ? (
-                  <BadgeCheck
-                    className={cn(
-                      "shrink-0 text-sky-500",
-                      ctx.isReply ? "w-3 h-3" : "w-3.5 h-3.5",
-                    )}
-                    aria-label="Verificado"
-                  />
                 ) : null}
               </div>
-              {cMeta?.professionTitle ? (
+              {cMeta?.professionTitle || (cMeta?.verified && cMeta?.kind !== "sponsor") ? (
                 <p
                   className={cn(
-                    "text-muted-foreground leading-tight mt-0.5",
+                    "text-muted-foreground leading-tight mt-0.5 flex flex-wrap items-center gap-1 min-w-0",
                     ctx.isReply ? "text-[10px]" : "text-[11px]",
                   )}
                 >
-                  {cMeta.professionTitle}
+                  {cMeta?.verified && cMeta?.kind !== "sponsor" ? (
+                    <BadgeCheck
+                      className={cn("shrink-0 text-sky-500", ctx.isReply ? "w-3 h-3" : "w-3.5 h-3.5")}
+                      strokeWidth={2.5}
+                      aria-label="Verificado"
+                    />
+                  ) : null}
+                  {cMeta?.professionTitle ? (
+                    <span className="min-w-0 break-words">{cMeta.professionTitle}</span>
+                  ) : null}
                 </p>
               ) : null}
             </div>
@@ -2006,7 +2012,7 @@ export default function CommunityFeed({
                 onClick={() => setComposerModalOpen(true)}
                 className="flex-1 min-h-[76px] rounded-2xl bg-zinc-100/90 dark:bg-zinc-800/60 px-4 py-3.5 text-left text-[15px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/90 active:scale-[0.99] transition-all border border-transparent hover:border-black/[0.04]"
               >
-                {!composerText.trim() && !composerImageFile ? (
+                {!composerText.trim() && !composerPhoto ? (
                   "No que você está pensando?"
                 ) : (
                   <span className="text-foreground line-clamp-4 block whitespace-pre-wrap break-words">
@@ -2014,7 +2020,7 @@ export default function CommunityFeed({
                       composerText.trim() &&
                         composerText.trim().slice(0, 280) +
                           (composerText.trim().length > 280 ? "…" : ""),
-                      composerImageFile && "Foto anexada",
+                      composerPhoto ? "Foto anexada" : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -2058,34 +2064,40 @@ export default function CommunityFeed({
                   Comunidade.
                 </p>
                 <div>
-                  <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
-                    Foto
-                  </p>
+                  <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">Foto</p>
                   <label className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-4 py-2.5 text-sm font-semibold text-foreground cursor-pointer hover:bg-muted/50">
                     <ImagePlus className="w-5 h-5 text-primary" />
-                    Escolher imagem
+                    Galeria
                     <input
                       type="file"
-                      accept="image/jpeg,image/png,image/webp"
+                      accept="image/*"
                       className="hidden"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
-                        if (f) setComposerImageFile(f);
+                        if (f) {
+                          if (f.type.startsWith("image/")) {
+                            setComposerPhoto(f);
+                          } else {
+                            toast({
+                              title: "Formato não suportado",
+                              description: "Escolha uma imagem (JPG, PNG ou WEBP).",
+                              variant: "destructive",
+                            });
+                          }
+                        }
                         e.target.value = "";
                       }}
                     />
                   </label>
-                  <p className="text-[11px] text-muted-foreground mt-2">
-                    A imagem é comprimida automaticamente antes de enviar.
-                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-2">Opcional — até ~1600 px no maior lado.</p>
                 </div>
-                {composerPreview && composerImageFile ? (
-                  <div className="relative rounded-xl overflow-hidden border border-border/60 bg-black">
+                {composerPreview && composerPhoto ? (
+                  <div className="relative rounded-xl overflow-hidden border border-border/60 bg-zinc-100 dark:bg-zinc-900">
                     <img src={composerPreview} alt="" className="w-full max-h-64 object-cover" />
                     <button
                       type="button"
                       className="absolute top-2 right-2 w-9 h-9 rounded-full bg-black/65 text-white flex items-center justify-center"
-                      onClick={() => setComposerImageFile(null)}
+                      onClick={() => setComposerPhoto(null)}
                       aria-label="Remover foto"
                     >
                       <X className="w-4 h-4" />
@@ -2097,7 +2109,7 @@ export default function CommunityFeed({
                 <Button
                   type="button"
                   className="w-full rounded-xl h-12 text-base font-bold"
-                  disabled={publishing || (!composerText.trim() && !composerImageFile)}
+                  disabled={publishing || (!composerText.trim() && !composerPhoto)}
                   onClick={publishPost}
                 >
                   {publishing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publicar"}
@@ -2197,7 +2209,7 @@ export default function CommunityFeed({
 
             const authorProfileTo = proPathByUserId[post.author_id];
             const avatarShell =
-              "w-[52px] h-[52px] rounded-full bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.06] dark:ring-white/10 shadow-sm shadow-black/[0.04]";
+              "w-12 h-12 rounded-full bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-black/[0.06] dark:ring-white/10 shadow-sm shadow-black/[0.04]";
             return (
               <article
                 key={post.id}
@@ -2211,7 +2223,7 @@ export default function CommunityFeed({
                         {author?.avatar_url ? (
                           <img src={author.avatar_url} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-[15px] font-bold text-primary tracking-tight">
+                          <span className="text-[13px] font-bold text-primary tracking-tight">
                             {authorLabel(author).slice(0, 2).toUpperCase()}
                           </span>
                         )}
@@ -2221,7 +2233,7 @@ export default function CommunityFeed({
                         {author?.avatar_url ? (
                           <img src={author.avatar_url} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-[15px] font-bold text-primary tracking-tight">
+                          <span className="text-[13px] font-bold text-primary tracking-tight">
                             {authorLabel(author).slice(0, 2).toUpperCase()}
                           </span>
                         )}
@@ -2233,12 +2245,12 @@ export default function CommunityFeed({
                           {authorProfileTo ? (
                             <Link
                               to={authorProfileTo}
-                              className="text-[17px] font-bold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50 hover:text-primary transition-colors truncate max-w-full"
+                              className="text-[13px] font-bold leading-snug text-zinc-900 dark:text-zinc-50 hover:text-primary transition-colors break-words"
                             >
                               {authorLabel(author)}
                             </Link>
                           ) : (
-                            <span className="text-[17px] font-bold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50 truncate">
+                            <span className="text-[13px] font-bold leading-snug text-zinc-900 dark:text-zinc-50 break-words">
                               {authorLabel(author)}
                             </span>
                           )}
@@ -2247,16 +2259,20 @@ export default function CommunityFeed({
                               <Megaphone className="w-3 h-3 shrink-0" aria-hidden />
                               Patrocinador
                             </span>
-                          ) : proMeta?.verified ? (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border border-sky-500/20">
-                              <BadgeCheck className="w-3 h-3 shrink-0" aria-hidden />
-                              Verificado
-                            </span>
                           ) : null}
                         </div>
-                        {proMeta?.professionTitle ? (
-                          <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 leading-snug">
-                            {proMeta.professionTitle}
+                        {proMeta?.professionTitle || (proMeta?.verified && proMeta?.kind !== "sponsor") ? (
+                          <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 leading-snug flex flex-wrap items-center gap-1 min-w-0">
+                            {proMeta?.verified && proMeta?.kind !== "sponsor" ? (
+                              <BadgeCheck
+                                className="w-3.5 h-3.5 shrink-0 text-sky-500"
+                                strokeWidth={2.5}
+                                aria-label="Verificado"
+                              />
+                            ) : null}
+                            {proMeta?.professionTitle ? (
+                              <span className="min-w-0 break-words">{proMeta.professionTitle}</span>
+                            ) : null}
                           </p>
                         ) : null}
                         {serviceBadges.length > 0 ? (
@@ -2374,6 +2390,16 @@ export default function CommunityFeed({
                         className="w-full max-h-[min(440px,72vh)] object-cover bg-zinc-100 dark:bg-zinc-800 pointer-events-none"
                       />
                     </button>
+                  ) : null}
+                  {post.video_url ? (
+                    <div className="mt-4 rounded-[18px] overflow-hidden ring-1 ring-black/[0.07] dark:ring-white/10 shadow-md shadow-black/[0.08] bg-black">
+                      <video
+                        src={post.video_url}
+                        controls
+                        playsInline
+                        className="w-full max-h-[min(440px,72vh)] object-contain bg-black"
+                      />
+                    </div>
                   ) : null}
                 </div>
 
@@ -3049,7 +3075,14 @@ export default function CommunityFeed({
                 >
                   <ArrowLeft className="w-6 h-6" />
                 </button>
-                {fullscreenPost.image_url ? (
+                {fullscreenPost.video_url ? (
+                  <video
+                    src={fullscreenPost.video_url}
+                    controls
+                    playsInline
+                    className="max-h-full max-w-full object-contain"
+                  />
+                ) : fullscreenPost.image_url ? (
                   <img
                     src={fullscreenPost.image_url}
                     alt=""

@@ -20,7 +20,8 @@ function resolveSupabaseUrl(): string {
   );
 }
 
-const SUPABASE_URL = resolveSupabaseUrl();
+/** URL do projeto (igual à usada pelo cliente) — útil para chamadas `fetch` a Edge Functions. */
+export const SUPABASE_URL = resolveSupabaseUrl();
 
 /** Mesma chave do createClient — usar em fetch manual às Edge Functions (header `apikey`). */
 export const SUPABASE_PUBLIC_API_KEY = (

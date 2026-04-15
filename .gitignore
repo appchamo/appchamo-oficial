@@ -9,6 +9,9 @@ lerna-debug.log*
 
 node_modules
 dist
+
+# Gerado por scripts/copy-ffmpeg-core.mjs (postinstall) — binários grandes
+public/ffmpeg/
 dist-ssr
 *.local
 

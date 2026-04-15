@@ -156,7 +156,7 @@ const MessageThread = () => {
   const [peerClientProId, setPeerClientProId] = useState<string | null>(null);
   const [clientPreviewFollowing, setClientPreviewFollowing] = useState(false);
   const [clientPreviewSocialBusy, setClientPreviewSocialBusy] = useState(false);
-  type CommunityPostEmbed = { body: string; image_url: string | null; author_name: string };
+  type CommunityPostEmbed = { body: string; image_url: string | null; video_url: string | null; author_name: string };
   const [communityPostEmbeds, setCommunityPostEmbeds] = useState<Record<string, CommunityPostEmbed>>({});
   /** user_id do destinatário (quem recebe a mensagem) — usado para push de nova mensagem */
   const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
@@ -667,13 +667,14 @@ const MessageThread = () => {
     void (async () => {
       const { data: rows } = await supabase
         .from("community_posts" as any)
-        .select("id, body, image_url, author_id")
+        .select("id, body, image_url, video_url, author_id")
         .in("id", ids);
       if (cancelled || !rows?.length) return;
       const rlist = rows as {
         id: string;
         body?: string;
         image_url?: string | null;
+        video_url?: string | null;
         author_id: string;
       }[];
       const authorIds = [...new Set(rlist.map((r) => r.author_id))];
@@ -694,6 +695,7 @@ const MessageThread = () => {
           n[r.id] = {
             body: String(r.body || "").trim(),
             image_url: r.image_url || null,
+            video_url: r.video_url || null,
             author_name: nameMap.get(r.author_id) || "Profissional",
           };
         }
@@ -2467,6 +2469,15 @@ const MessageThread = () => {
                 alt=""
                 className="absolute inset-0 h-full w-full object-cover"
                 loading="lazy"
+              />
+            ) : emb?.video_url ? (
+              <video
+                src={emb.video_url}
+                className="absolute inset-0 h-full w-full object-cover"
+                muted
+                playsInline
+                preload="metadata"
+                aria-hidden
               />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-violet-500/20 to-primary/10">

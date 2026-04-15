@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
+import { uploadProfessionalDocument } from "@/lib/uploadProfessionalDocument";
 import { cn } from "@/lib/utils";
 import DocumentCamera from "@/components/signup/DocumentCamera";
 
@@ -163,24 +163,11 @@ const ProfileSettingsSecurity = () => {
     setMissingSlotKeys([]);
     setUploading(true);
     try {
-      const accessToken = await getAccessTokenForEdgeFunctions();
-      if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
-      const uploadUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-document`;
-
       for (const doc of docs) {
-        const formData = new FormData();
-        formData.append("file", doc.file);
-        formData.append("userId", user.id);
-        const res = await fetch(uploadUrl, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}` },
-          body: formData,
-        });
-        const result = await res.json();
-        if (!res.ok || !result.path) throw new Error(result.error || "Falha ao enviar documento.");
+        const { path } = await uploadProfessionalDocument(doc.file, user.id);
         await supabase.from("professional_documents").insert({
           professional_id: proId,
-          file_url: result.path,
+          file_url: path,
           type: "identity",
           status: "pending",
         });

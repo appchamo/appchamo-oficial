@@ -6,6 +6,13 @@ export const formatCpf = (v: string) => {
   return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
 };
 
+/** Máscara dinâmica: até 11 dígitos como CPF, a partir do 12º como CNPJ (tornar-se profissional). */
+export const formatCpfOuCnpj = (v: string) => {
+  const d = v.replace(/\D/g, "").slice(0, 14);
+  if (d.length <= 11) return formatCpf(d);
+  return formatCnpj(d);
+};
+
 export const formatCnpj = (v: string) => {
   const d = v.replace(/\D/g, "").slice(0, 14);
   if (d.length <= 2) return d;

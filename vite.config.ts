@@ -1,7 +1,26 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import fs from "fs";
+import { execSync } from "child_process";
 import { componentTagger } from "lovable-tagger";
+
+function copyFfmpegCoreToPublic(root: string) {
+  try {
+    execSync("node scripts/copy-ffmpeg-core.mjs", { cwd: root, stdio: "inherit" });
+  } catch {
+    /* postinstall já deve ter copiado; build falha só se ficheiros em falta */
+  }
+}
+
+function assertFfmpegCorePresent(root: string) {
+  const wasm = path.join(root, "public", "ffmpeg", "ffmpeg-core.wasm");
+  if (!fs.existsSync(wasm)) {
+    throw new Error(
+      "[vite] Falta public/ffmpeg/ffmpeg-core.wasm. Executa: node scripts/copy-ffmpeg-core.mjs (ou npm install).",
+    );
+  }
+}
 
 export default defineConfig(({ mode, command }) => {
   const root = path.resolve(__dirname);
@@ -34,6 +53,16 @@ export default defineConfig(({ mode, command }) => {
     },
 
     plugins: [
+      {
+        name: "copy-ffmpeg-core",
+        configureServer() {
+          copyFfmpegCoreToPublic(root);
+        },
+        buildStart() {
+          copyFfmpegCoreToPublic(root);
+          assertFfmpegCorePresent(root);
+        },
+      },
       react(),
       mode === "development" && componentTagger(),
     ].filter(Boolean),

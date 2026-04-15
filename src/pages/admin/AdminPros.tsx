@@ -305,29 +305,7 @@ const AdminPros = () => {
     await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", detailPro.id);
     await logAction("approve_professional", "professional", detailPro.id);
 
-    // 2. Se tem early_access, conceder o plano agora (pré-ativo até 15/07/2026)
-    if (detailPro.early_access) {
-      const docType = detailPro.doc_type ?? "cpf";
-      const planId = docType === "cnpj" ? "business" : "vip";
-      const userTypeForPlan = docType === "cnpj" ? "company" : "professional";
-      const EARLY_ACCESS_EXPIRES = "2026-07-15T00:00:00.000Z";
-
-      await supabase.from("subscriptions").upsert({
-        user_id: detailPro.user_id,
-        plan_id: planId,
-        status: "ACTIVE",
-        expires_at: EARLY_ACCESS_EXPIRES,
-      }, { onConflict: "user_id" });
-
-      if (userTypeForPlan === "company") {
-        await supabase.from("profiles").update({ user_type: "company" }).eq("user_id", detailPro.user_id);
-      }
-
-      // Marca modal para aparecer quando profissional abrir o app
-      // (já pode ter sido marcado no cadastro, mas garantimos aqui)
-    }
-
-    // 3. Notificar o profissional
+    // 2. Notificar o profissional
     await supabase.from("notifications").insert({
       user_id: detailPro.user_id,
       title: "Cadastro aprovado! 🎉",

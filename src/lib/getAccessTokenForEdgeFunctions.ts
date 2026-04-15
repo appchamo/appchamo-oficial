@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 const EXPIRY_SKEW_SEC = 180;
 
 /**
- * Retorna access_token válido para Edge Functions (complete-signup, upload-document, etc.).
+ * Retorna access_token válido para Edge Functions (complete-signup, etc.).
  * Não use o token do React context — pode estar expirado após vários minutos no formulário.
  */
 export async function getAccessTokenForEdgeFunctions(): Promise<string | null> {

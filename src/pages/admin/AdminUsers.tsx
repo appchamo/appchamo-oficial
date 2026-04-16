@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact } from "lucide-react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -71,6 +71,21 @@ interface Profile {
   address_state?: string | null;
   address_zip?: string | null;
   address_country?: string | null;
+}
+
+async function copyText(value: string | null | undefined, successTitle: string) {
+  const text = (value ?? "").trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast({ title: successTitle });
+  } catch {
+    toast({
+      title: "Não foi possível copiar",
+      description: "Permita acesso à área de transferência ou copie manualmente.",
+      variant: "destructive",
+    });
+  }
 }
 
 const AdminUsers = () => {
@@ -424,13 +439,42 @@ const AdminUsers = () => {
             <div className="space-y-4 text-sm">
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">E-mail</p>
-                <p className="text-foreground mt-0.5 break-all">{detailsUser.email || "—"}</p>
+                <div className="mt-0.5 flex items-start justify-between gap-2">
+                  <p className="text-foreground break-all min-w-0 flex-1">{detailsUser.email || "—"}</p>
+                  {detailsUser.email?.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => copyText(detailsUser.email, "E-mail copiado")}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/35 bg-primary/8 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-primary hover:bg-primary/15 transition-colors"
+                    >
+                      <Copy className="w-3 h-3" aria-hidden />
+                      Copiar
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Telefone</p>
-                <p className="text-foreground mt-0.5">
-                  {formatBrazilPhone(detailsUser.phone ?? null) || "—"}
-                </p>
+                <div className="mt-0.5 flex items-start justify-between gap-2">
+                  <p className="text-foreground min-w-0 flex-1">
+                    {formatBrazilPhone(detailsUser.phone ?? null) || "—"}
+                  </p>
+                  {detailsUser.phone?.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        copyText(
+                          formatBrazilPhone(detailsUser.phone) || detailsUser.phone!.replace(/\s/g, ""),
+                          "Telefone copiado"
+                        )
+                      }
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/35 bg-primary/8 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-primary hover:bg-primary/15 transition-colors"
+                    >
+                      <Copy className="w-3 h-3" aria-hidden />
+                      Copiar
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Endereço</p>

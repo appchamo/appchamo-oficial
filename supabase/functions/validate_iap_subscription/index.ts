@@ -33,6 +33,8 @@ const json = (data: object, status = 200) =>
 interface VerifyResult {
   ok: boolean;
   userMessage?: string;
+  originalTransactionId?: string;
+  environment?: "Sandbox" | "Production";
 }
 
 /**
@@ -99,6 +101,7 @@ async function verifyAppleReceipt(
   // Procura a transação mais recente e ativa entre TODOS os produtos do grupo
   let maxExpiry = 0;
   let activeProductId: string | undefined;
+  let originalTransactionId: string | undefined;
 
   for (const t of [...latest, ...inApp]) {
     // Aceita qualquer produto do grupo Chamô
@@ -107,23 +110,31 @@ async function verifyAppleReceipt(
     if (exp > maxExpiry) {
       maxExpiry = exp;
       activeProductId = t.product_id;
+      originalTransactionId = t.original_transaction_id ?? t.transaction_id;
     }
   }
+
+  const environment = (data.environment as "Sandbox" | "Production" | undefined) ?? "Production";
 
   // Aceita se: (a) o produto esperado está ativo, OU (b) qualquer produto do
   // grupo está ativo — cobre upgrades onde a Apple ainda não atualizou o recibo
   if (maxExpiry > now) {
-    return { ok: true, activeProductId };
+    return { ok: true, activeProductId, originalTransactionId, environment };
   }
 
   // Em sandbox, assinaturas expiram em minutos — aceitar se o recibo é válido
   // e o produto esperado aparece em qualquer transação (mesmo expirada por ser sandbox)
-  const hasSandboxTransaction = [...latest, ...inApp].some(
+  const sandboxTx = [...latest, ...inApp].find(
     (t) => t.product_id === expectedProductId
   );
-  if (hasSandboxTransaction) {
+  if (sandboxTx) {
     console.warn("Sandbox: recibo válido mas expirado — aceitando para testes.");
-    return { ok: true, activeProductId: expectedProductId };
+    return {
+      ok: true,
+      activeProductId: expectedProductId,
+      originalTransactionId: sandboxTx.original_transaction_id ?? sandboxTx.transaction_id,
+      environment,
+    };
   }
 
   return {
@@ -198,6 +209,9 @@ serve(async (req) => {
       return json({ error: "Plano inválido para IAP." }, 400);
     }
 
+    let appleOriginalTxId: string | undefined;
+    let appleEnvironment: "Sandbox" | "Production" | undefined;
+
     if (platform === "ios") {
       if (
         !receipt ||
@@ -216,6 +230,8 @@ serve(async (req) => {
       if (!v.ok) {
         return json({ error: v.userMessage || "Recibo inválido." }, 400);
       }
+      appleOriginalTxId = v.originalTransactionId;
+      appleEnvironment = v.environment;
     }
 
     // Determina o billing_period a partir do productIdentifier
@@ -230,23 +246,78 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { error: upsertError } = await supabase.from("subscriptions").upsert(
-      {
-        user_id: userId,
-        plan_id: planId,
-        status: "ACTIVE",
-        billing_period: billingPeriod,
-        cancel_at_period_end: false,
-        period_ends_at: null,
-        started_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
+    const { data: subRow, error: upsertError } = await supabase
+      .from("subscriptions")
+      .upsert(
+        {
+          user_id: userId,
+          plan_id: planId,
+          status: "active",
+          source: platform === "ios" ? "apple_iap" : "google_iap",
+          billing_period: billingPeriod,
+          cancel_at_period_end: false,
+          period_ends_at: null,
+          started_at: new Date().toISOString(),
+          last_payment_status: "paid",
+          last_payment_at: new Date().toISOString(),
+          apple_original_transaction_id: appleOriginalTxId ?? null,
+          apple_environment: appleEnvironment ?? null,
+          apple_product_id: platform === "ios" ? productIdentifier : null,
+          google_purchase_token: platform === "android" ? transactionId : null,
+        },
+        { onConflict: "user_id" }
+      )
+      .select("id")
+      .maybeSingle();
 
     if (upsertError) {
       console.error("validate_iap_subscription upsert:", upsertError);
       return json({ error: "Erro ao ativar assinatura." }, 500);
     }
+
+    // Busca preço do plano para registrar no log de cobranças
+    let chargeAmount = 0;
+    try {
+      const { data: planRow } = await supabase
+        .from("plans")
+        .select("price_monthly, price_semester, price_annual")
+        .eq("id", planId)
+        .maybeSingle();
+      const pm = Number((planRow as { price_monthly?: number })?.price_monthly ?? 0);
+      if (billingPeriod === "annual") {
+        const pa = Number((planRow as { price_annual?: number | null })?.price_annual ?? 0);
+        chargeAmount = pa > 0 ? pa : pm * 12;
+      } else if (billingPeriod === "semester") {
+        const ps = Number((planRow as { price_semester?: number | null })?.price_semester ?? 0);
+        chargeAmount = ps > 0 ? ps : pm * 6;
+      } else {
+        chargeAmount = pm;
+      }
+    } catch (priceErr) {
+      console.error("validate_iap_subscription price lookup:", priceErr);
+    }
+
+    // Loga cobrança como "pending" para iOS — Apple só confirma a cobrança
+    // 2-3 dias depois via Apple Server Notifications V2 (DID_RENEW / EXPIRED).
+    // Para Android assumimos paid (Google Play já cobrou no momento da compra).
+    await supabase.from("subscription_payments").upsert(
+      {
+        user_id: userId,
+        subscription_id: subRow?.id ?? null,
+        plan_id: planId,
+        source: platform === "ios" ? "apple_iap" : "google_iap",
+        status: platform === "ios" ? "pending" : "paid",
+        amount: chargeAmount,
+        currency: "BRL",
+        external_id: transactionId,
+        reason: platform === "ios"
+          ? "Aguardando confirmação de cobrança da Apple"
+          : null,
+        raw: { productIdentifier, platform, billingPeriod },
+        occurred_at: new Date().toISOString(),
+      },
+      { onConflict: "source,external_id", ignoreDuplicates: true }
+    );
 
     // Comissão Indique e ganhe (5%) — base no valor do plano/período cobrado
     try {

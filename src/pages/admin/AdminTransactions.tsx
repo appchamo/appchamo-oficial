@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { DollarSign, TrendingUp, Users, Search, Crown, Calendar, CreditCard, ChevronDown, ChevronUp, Settings2, Save, Loader2, X, FileText, Landmark, Check, Plus, Trash2, Info, Package, List } from "lucide-react";
+import { DollarSign, TrendingUp, Users, Search, Crown, Calendar, CreditCard, ChevronDown, ChevronUp, Settings2, Save, Loader2, X, FileText, Landmark, Check, Plus, Trash2, Info, Package, List, Gift, Filter, Apple, Smartphone, Wallet, AlertTriangle, Clock, XCircle, Receipt } from "lucide-react";
 
 interface InstallmentPackage {
   id: string;
@@ -8,7 +8,7 @@ interface InstallmentPackage {
   to: number;
   rate: string;
 }
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -32,16 +32,86 @@ interface Subscriber {
   user_id: string;
   plan_id: string;
   status: string;
+  source: string | null;
   started_at: string;
   expires_at: string | null;
+  last_payment_status: string | null;
+  last_payment_at: string | null;
+  courtesy: boolean | null;
   full_name: string;
   email: string;
 }
+
+interface SubscriptionPayment {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  source: string;
+  status: string;
+  amount: number;
+  currency: string;
+  external_id: string | null;
+  reason: string | null;
+  occurred_at: string;
+  created_at: string;
+  full_name?: string;
+  email?: string;
+}
+
+// ─── Helpers de formatação ──────────────────────────────────────────────────
+const fmtBRL = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtDateTime = (iso: string) =>
+  new Date(iso).toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("pt-BR");
 
 const statusMap: Record<string, { label: string; cls: string }> = {
   completed: { label: "Concluída", cls: "bg-primary/10 text-primary" },
   pending: { label: "Pendente", cls: "bg-muted text-muted-foreground" },
   cancelled: { label: "Cancelada", cls: "bg-destructive/10 text-destructive" },
+};
+
+// ─── Status de assinatura: a "voz" do sistema ───────────────────────────────
+// pending  → cartão sendo processado (Asaas/Apple ainda não confirmou)
+// active   → pagamento aprovado pelo gateway
+// refused  → cartão recusado / cobrança falhou
+// cancelled→ usuário cancelou ou período de teste/expirou
+// courtesy → liberado manualmente pelo admin (sem cartão)
+const subStatusMap: Record<string, { label: string; cls: string; Icon: typeof Check }> = {
+  active:    { label: "Ativo",     cls: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400", Icon: Check },
+  pending:   { label: "Pendente",  cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", Icon: Clock },
+  refused:   { label: "Recusado",  cls: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",         Icon: XCircle },
+  cancelled: { label: "Cancelado", cls: "bg-muted text-muted-foreground",                                       Icon: X },
+  courtesy:  { label: "Cortesia",  cls: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400", Icon: Gift },
+};
+
+// Normaliza status legados (ACTIVE, CANCELED, etc)
+const normalizeSubStatus = (s: string | null | undefined): string => {
+  const v = String(s ?? "").toLowerCase();
+  if (v === "canceled") return "cancelled";
+  return v || "pending";
+};
+
+const sourceMap: Record<string, { label: string; cls: string; Icon: typeof Apple }> = {
+  asaas_card:      { label: "Cartão",    cls: "bg-primary/10 text-primary",                                                     Icon: CreditCard },
+  asaas_pix:       { label: "PIX",       cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",   Icon: Wallet },
+  apple_iap:       { label: "Apple",     cls: "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900",                     Icon: Apple },
+  google_iap:      { label: "Google",    cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",               Icon: Smartphone },
+  manual_courtesy: { label: "Cortesia",  cls: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400",       Icon: Gift },
+};
+
+// Status das cobranças individuais (subscription_payments)
+const paymentStatusMap: Record<string, { label: string; cls: string }> = {
+  paid:      { label: "Paga",       cls: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
+  pending:   { label: "Pendente",   cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+  refused:   { label: "Recusada",   cls: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  refunded:  { label: "Reembolsada",cls: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
+  cancelled: { label: "Cancelada",  cls: "bg-muted text-muted-foreground" },
+  courtesy:  { label: "Cortesia",   cls: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
 };
 
 const planLabel: Record<string, string> = { free: "Grátis", pro: "Pro", vip: "VIP", business: "Empresarial" };
@@ -111,29 +181,48 @@ const TransactionDetail = ({ tx, onClose }: { tx: Transaction; onClose: () => vo
 };
 
 // Detail modal for subscriber
-const SubscriberDetail = ({ sub, onClose }: { sub: Subscriber; onClose: () => void }) => {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+const SubscriberDetail = ({ sub, onClose, onChanged }: { sub: Subscriber; onClose: () => void; onChanged: () => void }) => {
+  const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [revoking, setRevoking] = useState(false);
 
   useEffect(() => {
-    const fetch = async () => {
-      const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", sub.user_id).maybeSingle();
-      if (pro) {
-        const { data } = await supabase.from("transactions")
-          .select("*")
-          .eq("professional_id", pro.id)
-          .order("created_at", { ascending: false })
-          .limit(20);
-        setTransactions(data || []);
-      }
+    const load = async () => {
+      const { data } = await (supabase as any)
+        .from("subscription_payments")
+        .select("*")
+        .eq("user_id", sub.user_id)
+        .order("occurred_at", { ascending: false })
+        .limit(30);
+      setPayments((data || []) as SubscriptionPayment[]);
       setLoading(false);
     };
-    fetch();
+    load();
   }, [sub]);
+
+  const status = normalizeSubStatus(sub.status);
+  const statusInfo = subStatusMap[status] || subStatusMap.pending;
+  const sourceInfo = sub.source ? sourceMap[sub.source] : null;
+
+  const handleRevoke = async () => {
+    if (!confirm(`Revogar cortesia de ${sub.full_name}? O usuário voltará para o plano grátis.`)) return;
+    setRevoking(true);
+    const { error } = await supabase.functions.invoke("admin-manage", {
+      body: { action: "revoke_courtesy", userId: sub.user_id },
+    });
+    if (error) {
+      toast({ title: "Erro ao revogar", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Cortesia revogada" });
+      onChanged();
+      onClose();
+    }
+    setRevoking(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card border rounded-xl p-5 w-full max-w-lg max-h-[80vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
+      <div className="bg-card border rounded-xl p-5 w-full max-w-lg max-h-[85vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-foreground">Detalhes do Assinante</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -145,30 +234,174 @@ const SubscriberDetail = ({ sub, onClose }: { sub: Subscriber; onClose: () => vo
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${planCls[sub.plan_id] || planCls.free}`}>{planLabel[sub.plan_id] || sub.plan_id}</span>
           </div>
           <div><p className="text-[10px] text-muted-foreground">Status</p>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${sub.status === "active" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-muted text-muted-foreground"}`}>{sub.status === "active" ? "Ativo" : sub.status}</span>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusInfo.cls}`}>
+              <statusInfo.Icon className="w-3 h-3" /> {statusInfo.label}
+            </span>
           </div>
-          <div><p className="text-[10px] text-muted-foreground">Início</p><p className="font-medium text-foreground">{new Date(sub.started_at).toLocaleDateString("pt-BR")}</p></div>
-          <div><p className="text-[10px] text-muted-foreground">Expira</p><p className="font-medium text-foreground">{sub.expires_at ? new Date(sub.expires_at).toLocaleDateString("pt-BR") : "—"}</p></div>
+          <div><p className="text-[10px] text-muted-foreground">Origem</p>
+            {sourceInfo ? (
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${sourceInfo.cls}`}>
+                <sourceInfo.Icon className="w-3 h-3" /> {sourceInfo.label}
+              </span>
+            ) : <span className="text-xs text-muted-foreground">—</span>}
+          </div>
+          <div><p className="text-[10px] text-muted-foreground">Última cobrança</p>
+            <p className="font-medium text-foreground text-xs">
+              {sub.last_payment_status
+                ? `${(paymentStatusMap[sub.last_payment_status] || { label: sub.last_payment_status }).label}${sub.last_payment_at ? ` · ${fmtDateTime(sub.last_payment_at)}` : ""}`
+                : "—"}
+            </p>
+          </div>
+          <div><p className="text-[10px] text-muted-foreground">Início</p><p className="font-medium text-foreground text-xs">{fmtDateTime(sub.started_at)}</p></div>
+          <div><p className="text-[10px] text-muted-foreground">Expira</p><p className="font-medium text-foreground text-xs">{sub.expires_at ? fmtDateTime(sub.expires_at) : "—"}</p></div>
         </div>
 
-        <h4 className="font-semibold text-sm text-foreground pt-3 border-t">Histórico de Pagamentos</h4>
+        {sub.courtesy && (
+          <button onClick={handleRevoke} disabled={revoking}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors disabled:opacity-50">
+            {revoking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+            Revogar cortesia
+          </button>
+        )}
+
+        <h4 className="font-semibold text-sm text-foreground pt-3 border-t flex items-center gap-1.5">
+          <Receipt className="w-3.5 h-3.5" /> Histórico de cobranças do plano
+        </h4>
         {loading ? (
           <div className="flex justify-center py-4"><div className="animate-spin w-5 h-5 border-3 border-primary border-t-transparent rounded-full" /></div>
-        ) : transactions.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-4">Nenhum pagamento encontrado</p>
+        ) : payments.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">Nenhuma cobrança registrada</p>
         ) : (
           <div className="space-y-2">
-            {transactions.map(t => (
-              <div key={t.id} className="flex items-center justify-between border rounded-lg p-2.5 text-xs">
-                <div>
-                  <p className="font-medium text-foreground">R$ {Number(t.total_amount).toLocaleString("pt-BR")}</p>
-                  <p className="text-[10px] text-muted-foreground">{new Date(t.created_at).toLocaleString("pt-BR")}</p>
+            {payments.map(p => {
+              const ps = paymentStatusMap[p.status] || { label: p.status, cls: "bg-muted text-muted-foreground" };
+              const src = sourceMap[p.source];
+              return (
+                <div key={p.id} className="flex items-center justify-between border rounded-lg p-2.5 text-xs gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-medium text-foreground">{fmtBRL(Number(p.amount))}</p>
+                      {src && <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${src.cls}`}>
+                        <src.Icon className="w-2.5 h-2.5" /> {src.label}
+                      </span>}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">{fmtDateTime(p.occurred_at)}</p>
+                    {p.reason && <p className="text-[10px] text-muted-foreground italic mt-0.5">{p.reason}</p>}
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${ps.cls}`}>{ps.label}</span>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${(statusMap[t.status] || statusMap.pending).cls}`}>{(statusMap[t.status] || statusMap.pending).label}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Modal: Conceder Cortesia ──────────────────────────────────────────────
+const GrantCourtesyModal = ({ onClose, onGranted }: { onClose: () => void; onGranted: () => void }) => {
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<{ user_id: string; full_name: string; email: string }[]>([]);
+  const [selected, setSelected] = useState<{ user_id: string; full_name: string; email: string } | null>(null);
+  const [planId, setPlanId] = useState<"pro" | "vip" | "business">("vip");
+  const [reason, setReason] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      if (search.trim().length < 2) { setResults([]); return; }
+      setSearching(true);
+      const { data } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, email")
+        .or(`full_name.ilike.%${search}%,email.ilike.%${search}%`)
+        .limit(10);
+      setResults((data || []) as any);
+      setSearching(false);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const handleSubmit = async () => {
+    if (!selected) {
+      toast({ title: "Selecione um usuário", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    const { error } = await supabase.functions.invoke("admin-manage", {
+      body: { action: "grant_courtesy", userId: selected.user_id, planId, reason: reason || null },
+    });
+    if (error) {
+      toast({ title: "Erro ao conceder cortesia", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Cortesia concedida com sucesso!" });
+      onGranted();
+      onClose();
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border rounded-xl p-5 w-full max-w-md space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-foreground flex items-center gap-2"><Gift className="w-4 h-4 text-violet-500" /> Conceder Cortesia</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Buscar usuário (nome ou email)</label>
+          <div className="flex items-center gap-2 border rounded-xl px-3 py-2 bg-background focus-within:ring-2 focus-within:ring-primary/30">
+            <Search className="w-4 h-4 text-muted-foreground" />
+            <input
+              autoFocus
+              value={selected ? `${selected.full_name} · ${selected.email}` : search}
+              onChange={(e) => { setSearch(e.target.value); setSelected(null); }}
+              placeholder="Digite ao menos 2 caracteres..."
+              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+            />
+            {selected && <button onClick={() => { setSelected(null); setSearch(""); }} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>}
+          </div>
+          {!selected && results.length > 0 && (
+            <div className="mt-2 border rounded-xl divide-y max-h-40 overflow-y-auto">
+              {results.map(r => (
+                <button key={r.user_id} onClick={() => { setSelected(r); setResults([]); }}
+                  className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors">
+                  <p className="text-sm font-medium text-foreground">{r.full_name}</p>
+                  <p className="text-[11px] text-muted-foreground">{r.email}</p>
+                </button>
+              ))}
+            </div>
+          )}
+          {searching && <p className="text-[11px] text-muted-foreground mt-1">Buscando...</p>}
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Plano</label>
+          <div className="grid grid-cols-3 gap-2">
+            {(["pro", "vip", "business"] as const).map(p => (
+              <button key={p} onClick={() => setPlanId(p)}
+                className={`p-2.5 rounded-xl border text-xs font-semibold transition-colors ${planId === p ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
+                {planLabel[p]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Motivo (opcional)</label>
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+            placeholder="Ex.: parceria, indicação, compensação..."
+            className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+        </div>
+
+        <button onClick={handleSubmit} disabled={submitting || !selected}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gift className="w-4 h-4" />}
+          {submitting ? "Concedendo..." : "Conceder cortesia"}
+        </button>
       </div>
     </div>
   );
@@ -782,13 +1015,23 @@ const AdminTransactions = () => {
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [subsLoading, setSubsLoading] = useState(true);
   const [subsSearch, setSubsSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("transactions");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "pending" | "refused" | "cancelled" | "courtesy">("all");
+  const [activeTab, setActiveTab] = useState("subscribers");
 
-  const [subStats, setSubStats] = useState({ pro: 0, vip: 0, business: 0, total: 0 });
+  const [subStats, setSubStats] = useState({ pro: 0, vip: 0, business: 0, total: 0, courtesy: 0, pending: 0, refused: 0 });
+
+  // Subscription payments (cobranças de assinatura)
+  const [subPayments, setSubPayments] = useState<SubscriptionPayment[]>([]);
+  const [subPaymentsLoading, setSubPaymentsLoading] = useState(true);
+  const [subPaymentsSearch, setSubPaymentsSearch] = useState("");
+  const [subPaymentsStatusFilter, setSubPaymentsStatusFilter] = useState<"all" | "paid" | "pending" | "refused" | "courtesy" | "refunded">("all");
 
   // Detail modals
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [selectedSub, setSelectedSub] = useState<Subscriber | null>(null);
+  const [showCourtesyModal, setShowCourtesyModal] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const triggerReload = () => setReloadKey(k => k + 1);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -799,7 +1042,7 @@ const AdminTransactions = () => {
       setTotalCount(Number(s?.transaction_count || 0));
 
       const { data } = await supabase.from("transactions").select("*").order("created_at", { ascending: false }).range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-      setTransactions(data || []);
+      setTransactions((data || []) as any);
       setLoading(false);
     };
     fetchAll();
@@ -807,17 +1050,17 @@ const AdminTransactions = () => {
 
   useEffect(() => {
     const fetchSubs = async () => {
-      // Busca apenas assinaturas ativas (ACTIVE ou active) e planos pagos
+      setSubsLoading(true);
+      // Busca todas as assinaturas pagas (todos os status) — filtramos no client
       const { data: subs } = await supabase
         .from("subscriptions")
         .select("*")
         .neq("plan_id", "free")
-        .in("status", ["ACTIVE", "active"])
         .order("started_at", { ascending: false });
 
       if (!subs || subs.length === 0) {
         setSubscribers([]);
-        setSubStats({ pro: 0, vip: 0, business: 0, total: 0 });
+        setSubStats({ pro: 0, vip: 0, business: 0, total: 0, courtesy: 0, pending: 0, refused: 0 });
         setSubsLoading(false);
         return;
       }
@@ -830,48 +1073,112 @@ const AdminTransactions = () => {
 
       const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
 
-      // Filtra fora usuários deletados (sem perfil correspondente)
       const mapped: Subscriber[] = subs
         .filter(s => profileMap.has(s.user_id))
         .map(s => ({
-          ...s,
+          ...(s as any),
+          status: normalizeSubStatus((s as any).status),
           full_name: profileMap.get(s.user_id)?.full_name || "—",
           email: profileMap.get(s.user_id)?.email || "—",
         }));
 
       setSubscribers(mapped);
+      const activeOrCourtesy = mapped.filter(s => ["active", "courtesy"].includes(s.status));
       setSubStats({
-        pro: mapped.filter(s => s.plan_id === "pro").length,
-        vip: mapped.filter(s => s.plan_id === "vip").length,
-        business: mapped.filter(s => s.plan_id === "business").length,
-        total: mapped.length,
+        pro: activeOrCourtesy.filter(s => s.plan_id === "pro").length,
+        vip: activeOrCourtesy.filter(s => s.plan_id === "vip").length,
+        business: activeOrCourtesy.filter(s => s.plan_id === "business").length,
+        total: activeOrCourtesy.length,
+        courtesy: mapped.filter(s => s.status === "courtesy").length,
+        pending: mapped.filter(s => s.status === "pending").length,
+        refused: mapped.filter(s => s.status === "refused").length,
       });
       setSubsLoading(false);
     };
     fetchSubs();
-  }, []);
+  }, [reloadKey]);
+
+  // Carrega cobranças de assinatura (subscription_payments)
+  useEffect(() => {
+    const fetchPayments = async () => {
+      setSubPaymentsLoading(true);
+      const { data } = await (supabase as any)
+        .from("subscription_payments")
+        .select("*")
+        .order("occurred_at", { ascending: false })
+        .limit(200);
+
+      if (!data || data.length === 0) {
+        setSubPayments([]);
+        setSubPaymentsLoading(false);
+        return;
+      }
+
+      const userIds = Array.from(new Set(data.map((p: any) => p.user_id))) as string[];
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, email")
+        .in("user_id", userIds);
+      const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
+
+      setSubPayments(data.map((p: any) => ({
+        ...p,
+        full_name: profileMap.get(p.user_id)?.full_name || "—",
+        email: profileMap.get(p.user_id)?.email || "—",
+      })) as SubscriptionPayment[]);
+      setSubPaymentsLoading(false);
+    };
+    fetchPayments();
+  }, [reloadKey]);
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-  const filteredSubs = subscribers.filter(s => {
-    if (!subsSearch) return true;
-    const q = subsSearch.toLowerCase();
-    return s.full_name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q) || s.plan_id.toLowerCase().includes(q);
-  });
+
+  const filteredSubs = useMemo(() => {
+    return subscribers.filter(s => {
+      if (statusFilter !== "all" && s.status !== statusFilter) return false;
+      if (!subsSearch) return true;
+      const q = subsSearch.toLowerCase();
+      return s.full_name.toLowerCase().includes(q)
+        || s.email.toLowerCase().includes(q)
+        || s.plan_id.toLowerCase().includes(q);
+    });
+  }, [subscribers, subsSearch, statusFilter]);
+
+  const filteredSubPayments = useMemo(() => {
+    return subPayments.filter(p => {
+      if (subPaymentsStatusFilter !== "all" && p.status !== subPaymentsStatusFilter) return false;
+      if (!subPaymentsSearch) return true;
+      const q = subPaymentsSearch.toLowerCase();
+      return (p.full_name || "").toLowerCase().includes(q)
+        || (p.email || "").toLowerCase().includes(q)
+        || p.plan_id.toLowerCase().includes(q);
+    });
+  }, [subPayments, subPaymentsSearch, subPaymentsStatusFilter]);
+
+  const statusCounts = useMemo(() => ({
+    all: subscribers.length,
+    active: subscribers.filter(s => s.status === "active").length,
+    pending: subStats.pending,
+    refused: subStats.refused,
+    cancelled: subscribers.filter(s => s.status === "cancelled").length,
+    courtesy: subStats.courtesy,
+  }), [subscribers, subStats]);
 
   return (
     <AdminLayout title="Financeiro">
       {selectedTx && <TransactionDetail tx={selectedTx} onClose={() => setSelectedTx(null)} />}
-      {selectedSub && <SubscriberDetail sub={selectedSub} onClose={() => setSelectedSub(null)} />}
+      {selectedSub && <SubscriberDetail sub={selectedSub} onClose={() => setSelectedSub(null)} onChanged={triggerReload} />}
+      {showCourtesyModal && <GrantCourtesyModal onClose={() => setShowCourtesyModal(false)} onGranted={triggerReload} />}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div className="bg-card border rounded-xl p-3 md:p-4">
           <DollarSign className="w-5 h-5 text-primary mb-1" />
-          <p className="text-lg md:text-xl font-bold text-foreground">R$ {totalVolume.toLocaleString("pt-BR")}</p>
+          <p className="text-lg md:text-xl font-bold text-foreground">{fmtBRL(totalVolume)}</p>
           <p className="text-[11px] text-muted-foreground">Volume total</p>
         </div>
         <div className="bg-card border rounded-xl p-3 md:p-4">
           <TrendingUp className="w-5 h-5 text-primary mb-1" />
-          <p className="text-lg md:text-xl font-bold text-foreground">R$ {totalFees.toLocaleString("pt-BR")}</p>
+          <p className="text-lg md:text-xl font-bold text-foreground">{fmtBRL(totalFees)}</p>
           <p className="text-[11px] text-muted-foreground">Comissões</p>
         </div>
         <div className="bg-card border rounded-xl p-3 md:p-4">
@@ -891,12 +1198,56 @@ const AdminTransactions = () => {
         </div>
       </div>
 
+      {/* Alertas rápidos */}
+      {(subStats.pending > 0 || subStats.refused > 0 || subStats.courtesy > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-6">
+          {subStats.pending > 0 && (
+            <button onClick={() => { setActiveTab("subscribers"); setStatusFilter("pending"); }}
+              className="flex items-center gap-2 p-2.5 rounded-xl border bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition-colors text-left">
+              <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-amber-700 dark:text-amber-400">{subStats.pending} pendente(s)</p>
+                <p className="text-[10px] text-amber-600 dark:text-amber-500">Aguardando confirmação do gateway</p>
+              </div>
+            </button>
+          )}
+          {subStats.refused > 0 && (
+            <button onClick={() => { setActiveTab("subscribers"); setStatusFilter("refused"); }}
+              className="flex items-center gap-2 p-2.5 rounded-xl border bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 hover:bg-red-100 transition-colors text-left">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-red-700 dark:text-red-400">{subStats.refused} recusada(s)</p>
+                <p className="text-[10px] text-red-600 dark:text-red-500">Cobrança falhou — plano não ativo</p>
+              </div>
+            </button>
+          )}
+          {subStats.courtesy > 0 && (
+            <button onClick={() => { setActiveTab("subscribers"); setStatusFilter("courtesy"); }}
+              className="flex items-center gap-2 p-2.5 rounded-xl border bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800 hover:bg-violet-100 transition-colors text-left">
+              <Gift className="w-4 h-4 text-violet-600 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-violet-700 dark:text-violet-400">{subStats.courtesy} cortesia(s)</p>
+                <p className="text-[10px] text-violet-600 dark:text-violet-500">Liberadas manualmente</p>
+              </div>
+            </button>
+          )}
+        </div>
+      )}
+
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-4 flex flex-wrap w-full gap-1 h-auto min-h-10">
-          <TabsTrigger value="transactions" className="shrink-0">Transações</TabsTrigger>
           <TabsTrigger value="subscribers" className="relative shrink-0">
+            <Crown className="w-3.5 h-3.5 mr-1" />
             Assinantes
             {subStats.total > 0 && <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold">{subStats.total}</span>}
+          </TabsTrigger>
+          <TabsTrigger value="sub-payments" className="shrink-0">
+            <Receipt className="w-3.5 h-3.5 mr-1" />
+            Cobranças do plano
+          </TabsTrigger>
+          <TabsTrigger value="transactions" className="shrink-0">
+            <CreditCard className="w-3.5 h-3.5 mr-1" />
+            Transações
           </TabsTrigger>
           <TabsTrigger value="fiscal" className="shrink-0"><FileText className="w-3.5 h-3.5 mr-1" />Dados Fiscais</TabsTrigger>
           <TabsTrigger value="config" className="shrink-0"><Settings2 className="w-3.5 h-3.5 mr-1" />Configurações</TabsTrigger>
@@ -929,7 +1280,7 @@ const AdminTransactions = () => {
                           <td className="p-3 hidden md:table-cell text-xs text-orange-600">R$ {Number(t.payment_fee || 0).toLocaleString("pt-BR")}</td>
                           <td className="p-3 hidden md:table-cell text-xs">R$ {Number(t.professional_net).toLocaleString("pt-BR")}</td>
                           <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${(statusMap[t.status] || statusMap.pending).cls}`}>{(statusMap[t.status] || statusMap.pending).label}</span></td>
-                          <td className="p-3 text-[11px] text-muted-foreground">{new Date(t.created_at).toLocaleDateString("pt-BR")}</td>
+                          <td className="p-3 text-[11px] text-muted-foreground whitespace-nowrap">{fmtDateTime(t.created_at)}</td>
                           <td className="p-3"><button onClick={() => setSelectedTx(t)} className="text-[11px] text-primary font-medium hover:underline">Ver mais</button></td>
                         </tr>
                       ))}
@@ -949,43 +1300,165 @@ const AdminTransactions = () => {
         </TabsContent>
 
         <TabsContent value="subscribers">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex flex-col md:flex-row md:items-center gap-2 mb-4">
             <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
               <Search className="w-4 h-4 text-muted-foreground" />
               <input type="text" value={subsSearch} onChange={(e) => setSubsSearch(e.target.value)} placeholder="Buscar assinante..."
                 className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
             </div>
+            <button onClick={() => setShowCourtesyModal(true)}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-violet-500 text-white text-sm font-semibold hover:bg-violet-600 transition-colors shrink-0">
+              <Gift className="w-4 h-4" /> Conceder Cortesia
+            </button>
           </div>
+
+          {/* Filtros de status */}
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {([
+              { id: "all",       label: "Todos",      cls: "bg-muted text-foreground hover:bg-muted/80" },
+              { id: "active",    label: "Ativos",     cls: "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400" },
+              { id: "pending",   label: "Pendentes",  cls: "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400" },
+              { id: "refused",   label: "Recusados",  cls: "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400" },
+              { id: "courtesy",  label: "Cortesia",   cls: "bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400" },
+              { id: "cancelled", label: "Cancelados", cls: "bg-muted text-muted-foreground hover:bg-muted/80" },
+            ] as const).map(opt => {
+              const count = (statusCounts as Record<string, number>)[opt.id] ?? 0;
+              const isActive = statusFilter === opt.id;
+              return (
+                <button key={opt.id} onClick={() => setStatusFilter(opt.id as any)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${opt.cls} ${isActive ? "ring-2 ring-primary/40 ring-offset-1 ring-offset-background" : ""}`}>
+                  {opt.label} <span className="opacity-70">({count})</span>
+                </button>
+              );
+            })}
+          </div>
+
           {subsLoading ? (
             <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
           ) : filteredSubs.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma assinante encontrado</div>
+            <div className="text-center py-12 text-muted-foreground text-sm">Nenhum assinante encontrado para este filtro</div>
           ) : (
             <div className="bg-card border rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="border-b bg-muted/50">
-                    <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Email</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Profissional</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground hidden lg:table-cell">Email</th>
                     <th className="text-left p-3 font-medium text-muted-foreground">Plano</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Origem</th>
                     <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
                     <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Início</th>
                     <th className="text-left p-3 font-medium text-muted-foreground"></th>
                   </tr></thead>
                   <tbody>
-                    {filteredSubs.map((s) => (
-                      <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                        <td className="p-3">
-                          <p className="font-medium text-foreground text-xs md:text-sm">{s.full_name}</p>
-                          <p className="text-[10px] text-muted-foreground md:hidden">{s.email}</p>
-                        </td>
-                        <td className="p-3 text-xs text-muted-foreground hidden md:table-cell">{s.email}</td>
-                        <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${planCls[s.plan_id] || planCls.free}`}>{planLabel[s.plan_id] || s.plan_id}</span></td>
-                        <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${s.status === "active" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-muted text-muted-foreground"}`}>{s.status === "active" ? "Ativo" : s.status}</span></td>
-                        <td className="p-3 text-[11px] text-muted-foreground hidden md:table-cell"><span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(s.started_at).toLocaleDateString("pt-BR")}</span></td>
-                        <td className="p-3"><button onClick={() => setSelectedSub(s)} className="text-[11px] text-primary font-medium hover:underline">Ver mais</button></td>
-                      </tr>
-                    ))}
+                    {filteredSubs.map((s) => {
+                      const st = subStatusMap[s.status] || subStatusMap.pending;
+                      const src = s.source ? sourceMap[s.source] : null;
+                      return (
+                        <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="p-3">
+                            <p className="font-medium text-foreground text-xs md:text-sm">{s.full_name}</p>
+                            <p className="text-[10px] text-muted-foreground lg:hidden">{s.email}</p>
+                          </td>
+                          <td className="p-3 text-xs text-muted-foreground hidden lg:table-cell">{s.email}</td>
+                          <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${planCls[s.plan_id] || planCls.free}`}>{planLabel[s.plan_id] || s.plan_id}</span></td>
+                          <td className="p-3 hidden md:table-cell">
+                            {src ? (
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${src.cls}`}>
+                                <src.Icon className="w-3 h-3" /> {src.label}
+                              </span>
+                            ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                          </td>
+                          <td className="p-3">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.cls}`}>
+                              <st.Icon className="w-3 h-3" /> {st.label}
+                            </span>
+                          </td>
+                          <td className="p-3 text-[11px] text-muted-foreground hidden md:table-cell whitespace-nowrap">
+                            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDateTime(s.started_at)}</span>
+                          </td>
+                          <td className="p-3"><button onClick={() => setSelectedSub(s)} className="text-[11px] text-primary font-medium hover:underline">Ver mais</button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="sub-payments">
+          <div className="flex flex-col md:flex-row md:items-center gap-2 mb-4">
+            <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
+              <Search className="w-4 h-4 text-muted-foreground" />
+              <input type="text" value={subPaymentsSearch} onChange={(e) => setSubPaymentsSearch(e.target.value)} placeholder="Buscar profissional..."
+                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {([
+              { id: "all",      label: "Todas",       cls: "bg-muted text-foreground hover:bg-muted/80" },
+              { id: "paid",     label: "Pagas",       cls: "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400" },
+              { id: "pending",  label: "Pendentes",   cls: "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400" },
+              { id: "refused",  label: "Recusadas",   cls: "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400" },
+              { id: "refunded", label: "Reembolsadas",cls: "bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400" },
+              { id: "courtesy", label: "Cortesia",    cls: "bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400" },
+            ] as const).map(opt => {
+              const isActive = subPaymentsStatusFilter === opt.id;
+              const count = opt.id === "all"
+                ? subPayments.length
+                : subPayments.filter(p => p.status === opt.id).length;
+              return (
+                <button key={opt.id} onClick={() => setSubPaymentsStatusFilter(opt.id as any)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${opt.cls} ${isActive ? "ring-2 ring-primary/40 ring-offset-1 ring-offset-background" : ""}`}>
+                  {opt.label} <span className="opacity-70">({count})</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {subPaymentsLoading ? (
+            <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
+          ) : filteredSubPayments.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground text-sm">Nenhuma cobrança encontrada</div>
+          ) : (
+            <div className="bg-card border rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b bg-muted/50">
+                    <th className="text-left p-3 font-medium text-muted-foreground">Profissional</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Plano</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Origem</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Valor</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Data / Hora</th>
+                  </tr></thead>
+                  <tbody>
+                    {filteredSubPayments.map(p => {
+                      const ps = paymentStatusMap[p.status] || { label: p.status, cls: "bg-muted text-muted-foreground" };
+                      const src = sourceMap[p.source];
+                      return (
+                        <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="p-3">
+                            <p className="font-medium text-foreground text-xs md:text-sm">{p.full_name}</p>
+                            <p className="text-[10px] text-muted-foreground md:hidden">{fmtDateTime(p.occurred_at)}</p>
+                          </td>
+                          <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${planCls[p.plan_id] || planCls.free}`}>{planLabel[p.plan_id] || p.plan_id}</span></td>
+                          <td className="p-3">
+                            {src ? (
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${src.cls}`}>
+                                <src.Icon className="w-3 h-3" /> {src.label}
+                              </span>
+                            ) : <span className="text-[10px] text-muted-foreground">{p.source}</span>}
+                          </td>
+                          <td className="p-3 text-xs md:text-sm font-semibold text-foreground">{fmtBRL(Number(p.amount))}</td>
+                          <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${ps.cls}`}>{ps.label}</span></td>
+                          <td className="p-3 text-[11px] text-muted-foreground hidden md:table-cell whitespace-nowrap">{fmtDateTime(p.occurred_at)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

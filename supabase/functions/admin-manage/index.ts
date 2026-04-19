@@ -457,14 +457,77 @@ serve(async (req) => {
 
       await supabase
         .from("subscriptions")
-        .update({ status: "CANCELED", plan_id: "free" })
+        .update({ status: "cancelled", plan_id: "free", source: "asaas_card" })
         .eq("user_id", userId);
-        
+
       await supabase.from("admin_logs").insert({
         admin_user_id: caller.id, action: "reject_subscription", target_type: "user", target_id: userId, details: { reason }
       });
 
       return new Response(JSON.stringify({ success: true, message: "Assinatura cancelada!" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ==========================================
+    // 🎁 AÇÃO: CONCEDER CORTESIA (assinatura manual)
+    // ==========================================
+    if (action === "grant_courtesy") {
+      const caller = await verifyAdmin();
+      const { userId, planId, reason } = body;
+      if (!userId || !planId) throw new Error("userId e planId são obrigatórios.");
+      if (!["pro", "vip", "business"].includes(planId)) {
+        throw new Error("planId inválido.");
+      }
+
+      const { error: rpcErr } = await supabase.rpc("admin_grant_courtesy_subscription", {
+        p_user_id: userId,
+        p_plan_id: planId,
+        p_reason: reason ?? null,
+      });
+      if (rpcErr) throw new Error(rpcErr.message);
+
+      const planLabel = planId === "business" ? "Empresarial" : planId === "vip" ? "VIP" : "Pro";
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        title: "🎁 Plano cortesia ativado",
+        message: `Você ganhou o plano ${planLabel} como cortesia.${reason ? ` Motivo: ${reason}` : ""}`,
+        type: "success",
+        link: "/subscriptions",
+      });
+
+      return new Response(JSON.stringify({ success: true, message: "Cortesia concedida!" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ==========================================
+    // ❌ AÇÃO: REVOGAR CORTESIA
+    // ==========================================
+    if (action === "revoke_courtesy") {
+      const caller = await verifyAdmin();
+      const { userId } = body;
+      if (!userId) throw new Error("userId é obrigatório.");
+
+      await supabase
+        .from("subscriptions")
+        .update({
+          plan_id: "free",
+          status: "cancelled",
+          courtesy: false,
+          courtesy_reason: null,
+          source: "manual_courtesy",
+        })
+        .eq("user_id", userId);
+
+      await supabase.from("admin_logs").insert({
+        admin_user_id: caller.id,
+        action: "revoke_courtesy",
+        target_type: "user",
+        target_id: userId,
+      });
+
+      return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

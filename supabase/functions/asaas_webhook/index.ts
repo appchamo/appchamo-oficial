@@ -336,12 +336,14 @@ serve(async (req) => {
 
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
-          .select("user_id, plan_id, status")
+          .select("id, user_id, plan_id, status")
           .eq("asaas_subscription_id", asaasSubscriptionId)
           .single();
 
         if (!subError && subData) {
           const userId = subData.user_id;
+          const isCardPayment = String(payment.billingType || "").toUpperCase().includes("CARD");
+          const paymentSource = isCardPayment ? "asaas_card" : "asaas_pix";
 
           // Resolve carência caso existisse
           await supabase
@@ -350,10 +352,32 @@ serve(async (req) => {
             .eq("asaas_subscription_id", asaasSubscriptionId)
             .eq("status", "active");
 
-          if (subData.status !== "ACTIVE") {
+          // Registra cobrança paga (idempotente)
+          await supabase.from("subscription_payments").upsert(
+            {
+              user_id: userId,
+              subscription_id: subData.id,
+              plan_id: subData.plan_id,
+              source: paymentSource,
+              status: "paid",
+              amount: Number(payment.value || 0),
+              currency: "BRL",
+              external_id: payment.id,
+              raw: payment,
+              occurred_at: new Date().toISOString(),
+            },
+            { onConflict: "source,external_id", ignoreDuplicates: false }
+          );
+
+          if (subData.status !== "active" && subData.status !== "ACTIVE") {
             await supabase
               .from("subscriptions")
-              .update({ status: "ACTIVE" })
+              .update({
+                status: "active",
+                source: paymentSource,
+                last_payment_status: "paid",
+                last_payment_at: new Date().toISOString(),
+              })
               .eq("user_id", userId);
 
             const newUserType = subData.plan_id === "business" ? "company" : "professional";
@@ -385,6 +409,13 @@ serve(async (req) => {
 
             console.log(`✅ Assinatura ${asaasSubscriptionId} ativada para ${userId}`);
           } else {
+            await supabase
+              .from("subscriptions")
+              .update({
+                last_payment_status: "paid",
+                last_payment_at: new Date().toISOString(),
+              })
+              .eq("user_id", userId);
             // Renovação bem-sucedida de plano já ativo
             await supabase.from("notifications").insert({
               user_id: userId,
@@ -412,12 +443,38 @@ serve(async (req) => {
 
         const { data: subData } = await supabase
           .from("subscriptions")
-          .select("user_id, plan_id")
+          .select("id, user_id, plan_id")
           .eq("asaas_subscription_id", asaasSubscriptionId)
           .maybeSingle();
 
         if (subData?.user_id) {
           const userId = subData.user_id;
+
+          // Loga cobrança recusada (idempotente)
+          await supabase.from("subscription_payments").upsert(
+            {
+              user_id: userId,
+              subscription_id: subData.id,
+              plan_id: subData.plan_id,
+              source: "asaas_card",
+              status: "refused",
+              amount: Number(payment.value || 0),
+              currency: "BRL",
+              external_id: payment.id,
+              reason: "Pagamento vencido sem confirmação",
+              raw: payment,
+              occurred_at: new Date().toISOString(),
+            },
+            { onConflict: "source,external_id", ignoreDuplicates: false }
+          );
+
+          await supabase
+            .from("subscriptions")
+            .update({
+              last_payment_status: "refused",
+              last_payment_at: new Date().toISOString(),
+            })
+            .eq("user_id", userId);
 
           // Verifica se já existe carência ativa para esta assinatura
           const { data: existing } = await supabase

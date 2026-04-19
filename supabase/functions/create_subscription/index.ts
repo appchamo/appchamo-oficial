@@ -204,8 +204,7 @@ serve(async (req) => {
     // ===============================
     // Aprovação manual removida: todos os planos são cobrados e ativados na hora.
     const nextDueDate = new Date().toISOString().split("T")[0];
-    const initialStatus = "ACTIVE";
-    
+
     console.log("CUSTOMER ID ENVIADO:", customerId);
     
     const subscriptionResponse = await fetch(
@@ -255,26 +254,49 @@ serve(async (req) => {
     // ===============================
     // 3️⃣ Salvar assinatura no banco e atualizar tipo de usuário
     // ===============================
-    const { error: saveError } = await supabase
+    const { data: savedSub, error: saveError } = await supabase
       .from("subscriptions")
       .upsert(
         {
           user_id: userId,
           plan_id: planId,
-          status: initialStatus,
+          status: "pending", // Asaas confirma via webhook → vira "active"
+          source: "asaas_card",
           billing_period: "monthly",
           cancel_at_period_end: false,
           period_ends_at: null,
           asaas_subscription_id: subscriptionData.id,
           asaas_customer_id: customerId,
           started_at: new Date().toISOString(),
+          last_payment_status: "pending",
+          last_payment_at: new Date().toISOString(),
         },
         { onConflict: "user_id" }
-      );
+      )
+      .select("id")
+      .maybeSingle();
 
     if (saveError) {
       console.log("SAVE ERROR:", saveError);
     }
+
+    // Loga cobrança como pending — webhook PAYMENT_CONFIRMED a marca como paid
+    await supabase.from("subscription_payments").upsert(
+      {
+        user_id: userId,
+        subscription_id: savedSub?.id ?? null,
+        plan_id: planId,
+        source: "asaas_card",
+        status: "pending",
+        amount: Number(value) || 0,
+        currency: "BRL",
+        external_id: subscriptionData.id,
+        reason: "Aguardando confirmação do cartão (Asaas)",
+        raw: { asaas_subscription_id: subscriptionData.id, customerId },
+        occurred_at: new Date().toISOString(),
+      },
+      { onConflict: "source,external_id", ignoreDuplicates: true }
+    );
 
     // Atualiza user_type: business → company; pro/vip → professional
     const newUserType = planId === "business" ? "company" : "professional";

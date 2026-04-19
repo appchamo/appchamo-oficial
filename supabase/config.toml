@@ -487,3 +487,11 @@ entrypoint = "./functions/professional-og/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/qr-login/index.ts"
+
+# Apple App Store Server Notifications V2 — webhook PÚBLICO chamado pela Apple.
+# A Apple não envia Bearer token; a autenticidade é garantida pela verificação
+# criptográfica do JWS dentro da função (cadeia x5c → Apple Root CA G3).
+[functions.apple_server_notifications]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/apple_server_notifications/index.ts"

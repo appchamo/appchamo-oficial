@@ -7,12 +7,44 @@
 // A Apple envia notificações assinadas (JWS) em:
 //   https://developer.apple.com/documentation/appstoreservernotifications
 //
+// SEGURANÇA — verificação criptográfica do JWS:
+//   Implementação 100% WebCrypto (sem dependência de node:crypto), porque o
+//   Edge Runtime do Supabase (Deno) tem lacunas na compatibilidade Node:
+//     - crypto.X509Certificate.prototype.toString → ERR_NOT_IMPLEMENTED
+//   Usamos:
+//     • @peculiar/x509  → parsing X.509 + validação de cadeia (WebCrypto puro)
+//     • jose            → verificação ECDSA P-256 do JWS via WebCrypto
+//
+//   O que validamos:
+//     1. Cadeia x5c (leaf → intermediate → ...) com cada cert assinado pelo
+//        próximo, terminando no Apple Root CA - G3 (configurado em env).
+//     2. Assinatura ECDSA P-256 do JWS com a public key do leaf cert.
+//     3. bundleId e appAppleId do payload (defesa contra replay de outro app).
+//     4. JWS aninhados (signedTransactionInfo, signedRenewalInfo) recebem a
+//        mesma validação completa.
+//
+// NOTA: Não fazemos OCSP (revogação online). A Apple só revoga certs em casos
+// muito raros e a validade dos certs é curta. Se precisar OCSP no futuro, dá
+// pra adicionar fetch ao endpoint OCSP do extension AIA do cert.
+//
+// Variáveis de ambiente exigidas (defina via `supabase secrets set`):
+//   APPLE_ROOT_CA_G3_B64   – base64 do Apple Root CA - G3 em DER
+//                            (https://www.apple.com/certificateauthority/AppleRootCA-G3.cer)
+//   APPLE_BUNDLE_ID        – ex.: com.chamo.app
+//   APPLE_APP_ID           – numeric appAppleId (App Store Connect → App → App Info)
+//
 // IMPORTANTE: Configurar no App Store Connect → App → App Information →
-// "App Store Server Notifications" apontando para esta URL (Production e
+// "App Store Server Notifications V2" apontando para esta URL (Production e
 // Sandbox URLs separadas).
 // =============================================================================
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as x509 from "npm:@peculiar/x509@1.12.3";
+import { compactVerify, importX509 } from "npm:jose@5.9.6";
+
+// @peculiar/x509 precisa que registremos o WebCrypto subjacente. Deno expõe
+// `crypto` global compatível com a Web Crypto API.
+x509.cryptoProvider.set(crypto as Crypto);
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -20,19 +52,137 @@ const json = (data: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-// Decodifica payload JWS sem verificar assinatura (assinatura pode ser validada
-// futuramente com x5c chain → Apple Root CA). Para confiança total em produção
-// recomenda-se verificar a cadeia certificada que vem em `header.x5c`.
-function decodeJwsPayload<T = Record<string, unknown>>(jws: string): T | null {
+// ─── Configuração (resolvida sob demanda na primeira request) ────────────────
+let appleRootCert: x509.X509Certificate | null = null;
+let configBundleId: string | null = null;
+let configAppAppleId: number | null = null;
+let configError: string | null = null;
+
+function ensureConfig(): boolean {
+  if (appleRootCert) return true;
+  if (configError) return false;
+
+  const rootCertB64 = Deno.env.get("APPLE_ROOT_CA_G3_B64");
+  const bundleId = Deno.env.get("APPLE_BUNDLE_ID");
+  const appAppleIdRaw = Deno.env.get("APPLE_APP_ID");
+
+  if (!rootCertB64 || !bundleId) {
+    configError =
+      "APPLE_ROOT_CA_G3_B64 ou APPLE_BUNDLE_ID ausentes — verificação JWS desativada (modo dev).";
+    console.warn("[Apple ASSN]", configError);
+    return false;
+  }
+
+  try {
+    const rootDer = Uint8Array.from(atob(rootCertB64), (c) => c.charCodeAt(0));
+    appleRootCert = new x509.X509Certificate(rootDer);
+    configBundleId = bundleId;
+    configAppAppleId = appAppleIdRaw ? Number(appAppleIdRaw) : null;
+    return true;
+  } catch (e) {
+    configError = `Falha ao parsear Apple Root CA G3: ${(e as Error).message}`;
+    console.error("[Apple ASSN]", configError);
+    return false;
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function b64urlBytes(b64url: string): Uint8Array {
+  const padded = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  const b64 = padded + "=".repeat((4 - (padded.length % 4)) % 4);
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+function b64urlJson<T>(b64url: string): T {
+  return JSON.parse(new TextDecoder().decode(b64urlBytes(b64url))) as T;
+}
+
+// Decode JWS sem verificar assinatura — APENAS para fallback de modo dev.
+function decodeJwsUnsafe<T>(jws: string): T | null {
   try {
     const parts = jws.split(".");
     if (parts.length !== 3) return null;
-    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const b64 = padded + "=".repeat((4 - (padded.length % 4)) % 4);
-    const decoded = atob(b64);
-    return JSON.parse(decoded) as T;
+    return b64urlJson<T>(parts[1]);
   } catch (e) {
-    console.error("decodeJwsPayload error:", e);
+    console.error("decodeJwsUnsafe error:", e);
+    return null;
+  }
+}
+
+// ─── Verificação JWS Apple (cadeia x5c → root + assinatura ECDSA) ────────────
+async function verifyAppleJws<T>(jws: string): Promise<T | null> {
+  if (!ensureConfig() || !appleRootCert) return null;
+
+  const parts = jws.split(".");
+  if (parts.length !== 3) {
+    console.error("[Apple ASSN] JWS malformado (não tem 3 partes)");
+    return null;
+  }
+
+  let header: { alg?: string; x5c?: string[] };
+  try {
+    header = b64urlJson(parts[0]);
+  } catch {
+    console.error("[Apple ASSN] header JWS inválido");
+    return null;
+  }
+
+  if (!header.x5c || header.x5c.length < 1) {
+    console.error("[Apple ASSN] x5c ausente no header JWS");
+    return null;
+  }
+
+  // x5c traz certs em base64 padrão (NÃO base64url) por especificação.
+  let certs: x509.X509Certificate[];
+  try {
+    certs = header.x5c.map(
+      (c) =>
+        new x509.X509Certificate(
+          Uint8Array.from(atob(c), (ch) => ch.charCodeAt(0)),
+        ),
+    );
+  } catch (e) {
+    console.error("[Apple ASSN] x5c contém cert inválido:", e);
+    return null;
+  }
+
+  // 1) Cada cert deve ter sido assinado pelo próximo na cadeia.
+  for (let i = 0; i < certs.length - 1; i++) {
+    const valid = await certs[i].verify({
+      publicKey: certs[i + 1].publicKey,
+      signatureOnly: true,
+    });
+    if (!valid) {
+      console.error(
+        `[Apple ASSN] cadeia x5c inválida no índice ${i} (subject=${certs[i].subject})`,
+      );
+      return null;
+    }
+  }
+
+  // 2) Último cert da cadeia deve ser o Apple Root CA G3 ou ser assinado por ele.
+  const lastCert = certs[certs.length - 1];
+  if (lastCert.thumbprint !== appleRootCert.thumbprint) {
+    const valid = await lastCert.verify({
+      publicKey: appleRootCert.publicKey,
+      signatureOnly: true,
+    });
+    if (!valid) {
+      console.error(
+        "[Apple ASSN] cadeia x5c não termina em Apple Root CA G3",
+      );
+      return null;
+    }
+  }
+
+  // 3) Verifica assinatura JWS com a public key do leaf cert via jose.
+  try {
+    const leafPem = certs[0].toString("pem");
+    const leafKey = await importX509(leafPem, header.alg ?? "ES256");
+    const result = await compactVerify(jws, leafKey);
+    return JSON.parse(new TextDecoder().decode(result.payload)) as T;
+  } catch (e) {
+    console.error("[Apple ASSN] assinatura JWS inválida:", e);
     return null;
   }
 }
@@ -76,6 +226,79 @@ interface RenewalInfo {
   recentSubscriptionStartDate?: number;
 }
 
+// Verifica + decodifica a notificação completa.
+async function verifyAndDecode(signedPayload: string): Promise<{
+  payload: NotificationPayload | null;
+  txInfo: TransactionInfo | null;
+  renewalInfo: RenewalInfo | null;
+  verified: boolean;
+}> {
+  // Sem env vars → modo dev: decodifica sem verificar (com warning).
+  if (!ensureConfig()) {
+    console.warn("[Apple ASSN] aceitando payload SEM verificação (dev mode).");
+    const peek = decodeJwsUnsafe<NotificationPayload>(signedPayload);
+    const txInfo = peek?.data?.signedTransactionInfo
+      ? decodeJwsUnsafe<TransactionInfo>(peek.data.signedTransactionInfo)
+      : null;
+    const renewalInfo = peek?.data?.signedRenewalInfo
+      ? decodeJwsUnsafe<RenewalInfo>(peek.data.signedRenewalInfo)
+      : null;
+    return { payload: peek, txInfo, renewalInfo, verified: false };
+  }
+
+  const payload = await verifyAppleJws<NotificationPayload>(signedPayload);
+  if (!payload) {
+    return { payload: null, txInfo: null, renewalInfo: null, verified: false };
+  }
+
+  // Confere bundleId (defesa contra payloads forjados de outro app)
+  if (payload.data?.bundleId && payload.data.bundleId !== configBundleId) {
+    console.error(
+      `[Apple ASSN] bundleId mismatch: esperado=${configBundleId} recebido=${payload.data.bundleId}`,
+    );
+    return { payload: null, txInfo: null, renewalInfo: null, verified: false };
+  }
+  if (
+    configAppAppleId &&
+    payload.data?.appAppleId &&
+    payload.data.appAppleId !== configAppAppleId
+  ) {
+    console.error(
+      `[Apple ASSN] appAppleId mismatch: esperado=${configAppAppleId} recebido=${payload.data.appAppleId}`,
+    );
+    return { payload: null, txInfo: null, renewalInfo: null, verified: false };
+  }
+
+  // JWS aninhados — mesma verificação completa
+  let txInfo: TransactionInfo | null = null;
+  if (payload.data?.signedTransactionInfo) {
+    txInfo = await verifyAppleJws<TransactionInfo>(
+      payload.data.signedTransactionInfo,
+    );
+    if (!txInfo) {
+      console.error(
+        "[Apple ASSN] signedTransactionInfo aninhado falhou verificação",
+      );
+      return { payload: null, txInfo: null, renewalInfo: null, verified: false };
+    }
+  }
+
+  let renewalInfo: RenewalInfo | null = null;
+  if (payload.data?.signedRenewalInfo) {
+    renewalInfo = await verifyAppleJws<RenewalInfo>(
+      payload.data.signedRenewalInfo,
+    );
+    if (!renewalInfo) {
+      console.error(
+        "[Apple ASSN] signedRenewalInfo aninhado falhou verificação",
+      );
+      return { payload: null, txInfo: null, renewalInfo: null, verified: false };
+    }
+  }
+
+  return { payload, txInfo, renewalInfo, verified: true };
+}
+
 // Mapeia productId Apple → planId interno
 function planFromProductId(productId: string): "pro" | "vip" | "business" | null {
   if (productId.startsWith("com.chamo.app.pro.")) return "pro";
@@ -94,20 +317,25 @@ serve(async (req) => {
       return json({ error: "signedPayload ausente" }, 400);
     }
 
-    const payload = decodeJwsPayload<NotificationPayload>(signedPayload);
-    if (!payload) return json({ error: "payload inválido" }, 400);
+    const { payload, txInfo, renewalInfo, verified } =
+      await verifyAndDecode(signedPayload);
+
+    // Em produção (config presente) recusamos qualquer payload que falhar a
+    // verificação criptográfica. `configError` distingue "não configurado"
+    // (dev — payload chega decodificado mesmo assim) de "configurado mas
+    // falhou na verificação" (payload null → 401).
+    if (!payload) {
+      const reason = configError ?? "JWS inválido / assinatura não confere";
+      return json({ error: "verificação JWS falhou", reason }, 401);
+    }
 
     console.log(
-      "[Apple ASSN]", payload.notificationType, payload.subtype ?? "",
+      "[Apple ASSN]",
+      payload.notificationType,
+      payload.subtype ?? "",
       "uuid=", payload.notificationUUID,
+      "verified=", verified,
     );
-
-    const txInfo = payload.data?.signedTransactionInfo
-      ? decodeJwsPayload<TransactionInfo>(payload.data.signedTransactionInfo)
-      : null;
-    const renewalInfo = payload.data?.signedRenewalInfo
-      ? decodeJwsPayload<RenewalInfo>(payload.data.signedRenewalInfo)
-      : null;
 
     if (!txInfo) {
       console.warn("[Apple ASSN] sem transaction info — ignorando");

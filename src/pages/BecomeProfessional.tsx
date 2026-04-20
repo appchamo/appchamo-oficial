@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, ShieldCheck, Clock, Star, ChevronRight } from "lucide-react";
+import { FileText, ShieldCheck, Clock, Star, ChevronRight, User, Building2, MapPin, Loader2, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,6 +25,14 @@ function profileHasCompleteCnpj(profile: { cnpj?: string | null } | null | undef
   return digitsOnly(profile?.cnpj ?? "").length === 14;
 }
 
+/** Máscara de CEP: 00000-000 */
+function formatCep(v: string): string {
+  return v
+    .replace(/\D/g, "")
+    .slice(0, 8)
+    .replace(/(\d{5})(\d)/, "$1-$2");
+}
+
 const BecomeProfessional = () => {
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
@@ -34,9 +42,25 @@ const BecomeProfessional = () => {
   const [loading, setLoading] = useState(false);
   const [docIdValue, setDocIdValue] = useState("");
   const [docSaving, setDocSaving] = useState(false);
-  /** Pulou a tela de CPF/CNPJ porque o perfil já tinha documento salvo. */
-  const [skippedIdentifierStep, setSkippedIdentifierStep] = useState(false);
+  /**
+   * Após preencher CPF/CNPJ válido aparecem os campos de nome de exibição
+   * (ou nome fantasia, no caso de CNPJ) e CEP. CEP busca cidade no ViaCEP.
+   */
+  const [displayNameValue, setDisplayNameValue] = useState("");
+  const [cepValue, setCepValue] = useState("");
+  const [cepLoading, setCepLoading] = useState(false);
+  /** Dados retornados pelo ViaCEP (auxiliam exibição da cidade carregada). */
+  const [cepInfo, setCepInfo] = useState<{
+    city: string;
+    state: string;
+    neighborhood: string;
+    street: string;
+  } | null>(null);
+  /** Trava o input de CPF/CNPJ quando o profile já tem documento salvo. */
+  const [docLocked, setDocLocked] = useState(false);
   const profileSubmitLockRef = useRef(false);
+  /** Evita re-aplicar pré-preenchimento toda vez que profile/state mudar. */
+  const docIdPrefilledRef = useRef(false);
 
   const persistAvatarToProfile = useCallback(
     async (publicUrl: string) => {
@@ -63,21 +87,109 @@ const BecomeProfessional = () => {
   }, [profile, navigate, step]);
 
   const handleIntroContinue = () => {
-    if (profileHasCompleteCpf(profile)) {
-      setDocType("cpf");
-      setSkippedIdentifierStep(true);
-      setStep("doc-notice");
-      return;
-    }
-    if (profileHasCompleteCnpj(profile)) {
-      setDocType("cnpj");
-      setSkippedIdentifierStep(true);
-      setStep("doc-notice");
-      return;
-    }
-    setSkippedIdentifierStep(false);
+    // Sempre passamos pela Etapa 1, mesmo que o profile já tenha CPF/CNPJ:
+    // precisamos de nome de exibição + CEP (cidade) para virar profissional.
+    docIdPrefilledRef.current = false;
     setStep("doc-id");
   };
+
+  // Pré-preenche os campos da Etapa 1 quando ela aparece pela primeira vez,
+  // usando o que já existe no profile (CPF/CNPJ, display_name, CEP).
+  useEffect(() => {
+    if (step !== "doc-id" || !profile || docIdPrefilledRef.current) return;
+    docIdPrefilledRef.current = true;
+
+    const cpfDigits = digitsOnly(profile.cpf ?? "");
+    const cnpjDigits = digitsOnly(profile.cnpj ?? "");
+
+    if (cnpjDigits.length === 14) {
+      setDocType("cnpj");
+      setDocIdValue(formatCpfOuCnpj(cnpjDigits));
+      setDocLocked(true);
+    } else if (cpfDigits.length === 11) {
+      setDocType("cpf");
+      setDocIdValue(formatCpfOuCnpj(cpfDigits));
+      setDocLocked(true);
+    } else {
+      setDocLocked(false);
+    }
+
+    if (profile.display_name) setDisplayNameValue(profile.display_name);
+    else if (profile.full_name) setDisplayNameValue(profile.full_name);
+
+    if (profile.address_zip) {
+      const formattedCep = formatCep(profile.address_zip);
+      setCepValue(formattedCep);
+      if (profile.address_city && profile.address_state) {
+        setCepInfo({
+          city: profile.address_city,
+          state: profile.address_state,
+          neighborhood: profile.address_neighborhood ?? "",
+          street: "",
+        });
+      }
+    }
+  }, [step, profile]);
+
+  // Busca o endereço no ViaCEP quando o usuário completa os 8 dígitos do CEP.
+  useEffect(() => {
+    const cepDigits = digitsOnly(cepValue);
+    if (cepDigits.length !== 8) {
+      setCepInfo(null);
+      return;
+    }
+    // Se já carregamos esse mesmo CEP (vindo do profile), não refaz a chamada.
+    const profileCepDigits = digitsOnly(profile?.address_zip ?? "");
+    if (
+      cepInfo &&
+      cepDigits === profileCepDigits &&
+      profile?.address_city === cepInfo.city
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    setCepLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`https://viacep.com.br/ws/${cepDigits}/json/`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.erro) {
+          setCepInfo(null);
+          toast({
+            title: "CEP não encontrado",
+            description: "Verifique o número digitado e tente novamente.",
+            variant: "destructive",
+          });
+          return;
+        }
+        setCepInfo({
+          city: data.localidade ?? "",
+          state: data.uf ?? "",
+          neighborhood: data.bairro ?? "",
+          street: data.logradouro ?? "",
+        });
+      } catch {
+        if (!cancelled) {
+          setCepInfo(null);
+          toast({
+            title: "Erro ao consultar CEP",
+            description: "Verifique sua conexão e tente novamente.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (!cancelled) setCepLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // profile/cepInfo só são lidos para evitar refetch redundante; não devem disparar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cepValue]);
 
   const handleDocIdNext = async () => {
     const raw = digitsOnly(docIdValue);
@@ -89,7 +201,7 @@ const BecomeProfessional = () => {
       });
       return;
     }
-    if (raw.length < 11) {
+    if (raw.length < 11 || (raw.length >= 12 && raw.length <= 13) || raw.length > 14) {
       toast({
         title: "Documento incompleto",
         description: "Digite os 11 dígitos do CPF ou os 14 dígitos do CNPJ.",
@@ -97,50 +209,100 @@ const BecomeProfessional = () => {
       });
       return;
     }
-    if (raw.length >= 12 && raw.length <= 13) {
+
+    const isCpf = raw.length === 11;
+    if (isCpf && !validateCpf(docIdValue)) {
+      toast({ title: "CPF inválido", description: "Confira o número digitado.", variant: "destructive" });
+      return;
+    }
+    if (!isCpf && !validateCnpj(docIdValue)) {
+      toast({ title: "CNPJ inválido", description: "Confira o número digitado.", variant: "destructive" });
+      return;
+    }
+
+    const trimmedName = displayNameValue.trim();
+    if (trimmedName.length < 2) {
       toast({
-        title: "Quantidade de dígitos inválida",
-        description: "Só aceitamos CPF completo (11 dígitos) ou CNPJ completo (14 dígitos).",
+        title: isCpf ? "Informe seu nome de exibição" : "Informe o nome fantasia",
+        description: "Esse é o nome que vai aparecer no app.",
         variant: "destructive",
       });
       return;
     }
-    if (raw.length > 14) {
-      toast({ title: "Documento inválido", description: "Verifique o número digitado.", variant: "destructive" });
+
+    const cepDigits = digitsOnly(cepValue);
+    if (cepDigits.length !== 8) {
+      toast({
+        title: "CEP incompleto",
+        description: "Digite os 8 dígitos do CEP para carregar a cidade.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!cepInfo?.city || !cepInfo?.state) {
+      toast({
+        title: "Cidade não carregada",
+        description: "Aguarde a busca do CEP terminar antes de continuar.",
+        variant: "destructive",
+      });
       return;
     }
 
     setDocSaving(true);
     try {
-      if (raw.length === 11) {
-        if (!validateCpf(docIdValue)) {
-          toast({ title: "CPF inválido", description: "Informe um CPF com 11 dígitos.", variant: "destructive" });
-          return;
-        }
-        const { data: existing } = await supabase.from("profiles").select("id").eq("cpf", raw).limit(1);
+      // Só checamos duplicidade se o documento mudou em relação ao já salvo.
+      const profileCpf = digitsOnly(profile?.cpf ?? "");
+      const profileCnpj = digitsOnly(profile?.cnpj ?? "");
+
+      if (isCpf && raw !== profileCpf) {
+        const { data: existing } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("cpf", raw)
+          .neq("user_id", user!.id)
+          .limit(1);
         if (existing?.length) {
           toast({ title: "Este CPF já está cadastrado.", variant: "destructive" });
           return;
         }
-        const { error } = await supabase.from("profiles").update({ cpf: raw }).eq("user_id", user!.id);
-        if (error) throw error;
-        setDocType("cpf");
-      } else {
-        if (!validateCnpj(docIdValue)) {
-          toast({ title: "CNPJ inválido", description: "Informe um CNPJ com 14 dígitos.", variant: "destructive" });
-          return;
-        }
-        const { data: existing } = await supabase.from("profiles").select("id").eq("cnpj", raw).limit(1);
+      }
+      if (!isCpf && raw !== profileCnpj) {
+        const { data: existing } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("cnpj", raw)
+          .neq("user_id", user!.id)
+          .limit(1);
         if (existing?.length) {
           toast({ title: "Este CNPJ já está cadastrado.", variant: "destructive" });
           return;
         }
-        const { error } = await supabase.from("profiles").update({ cnpj: raw }).eq("user_id", user!.id);
-        if (error) throw error;
-        setDocType("cnpj");
       }
+
+      const updatePayload: Record<string, unknown> = {
+        display_name: trimmedName,
+        address_zip: cepDigits,
+        address_city: cepInfo.city,
+        address_state: cepInfo.state,
+      };
+      // Só sobrescreve bairro/rua se o ViaCEP retornou — não apaga o que o usuário
+      // já preencheu antes em outro fluxo (ex.: cadastro inicial).
+      if (cepInfo.neighborhood) updatePayload.address_neighborhood = cepInfo.neighborhood;
+      if (cepInfo.street) updatePayload.address_street = cepInfo.street;
+
+      // Salvamos só o documento escolhido. Não limpamos o oposto: se um dia o
+      // usuário tiver os dois (pessoa física + empresa), preservamos os dados.
+      if (isCpf) updatePayload.cpf = raw;
+      else updatePayload.cnpj = raw;
+
+      const { error } = await supabase
+        .from("profiles")
+        .update(updatePayload as never)
+        .eq("user_id", user!.id);
+      if (error) throw error;
+
+      setDocType(isCpf ? "cpf" : "cnpj");
       await refreshProfile();
-      setSkippedIdentifierStep(false);
       setStep("doc-notice");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Não foi possível salvar.";
@@ -398,56 +560,152 @@ const BecomeProfessional = () => {
         </div>
       )}
 
-      {step === "doc-id" && (
-        <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
-          <div className="w-full max-w-sm">
-            <div className="text-center mb-4">
-              <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
-              <p className="text-sm text-muted-foreground">Tornar-se profissional</p>
-              <button type="button" onClick={() => setStep("intro")} className="text-xs text-primary mt-1 hover:underline">
-                ← Voltar
-              </button>
-            </div>
+      {step === "doc-id" && (() => {
+        const isCpfTyped = docIdLen === 11;
+        const isCnpjTyped = docIdLen === 14;
+        const docComplete = isCpfTyped || isCnpjTyped;
+        const cepDigits = digitsOnly(cepValue).length;
+        const nameLabel = isCnpjTyped ? "Nome fantasia" : "Nome de exibição";
+        const nameHelper = isCnpjTyped
+          ? "Nome fantasia da empresa (como aparecerá no app)."
+          : "Como seu nome aparecerá para os clientes no app.";
+        const NameIcon = isCnpjTyped ? Building2 : User;
+        const canContinue =
+          docComplete &&
+          displayNameValue.trim().length >= 2 &&
+          cepDigits === 8 &&
+          !!cepInfo?.city &&
+          !cepLoading &&
+          !docSaving;
 
-            <div className="bg-card border rounded-2xl p-5 shadow-card space-y-5">
-              <h2 className="text-base font-bold text-foreground">Digite seu CPF ou CNPJ</h2>
-
-              <div>
-                <label className="sr-only">CPF ou CNPJ (obrigatório)</label>
-                <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
-                  <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" aria-hidden />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    value={docIdValue}
-                    onChange={(e) => setDocIdValue(formatCpfOuCnpj(e.target.value))}
-                    placeholder="000.000.000-00 ou CNPJ"
-                    maxLength={18}
-                    aria-label="Digite seu CPF ou CNPJ"
-                    className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-                  />
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1.5">Digite seu CPF ou CNPJ</p>
-                {docIdLen >= 12 && docIdLen <= 13 ? (
-                  <p className="text-[11px] text-destructive font-medium mt-1">
-                    Quantidade inválida: complete até 11 dígitos (CPF) ou até 14 (CNPJ).
-                  </p>
-                ) : null}
+        return (
+          <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
+            <div className="w-full max-w-sm">
+              <div className="text-center mb-4">
+                <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
+                <p className="text-sm text-muted-foreground">
+                  Etapa 1 de 3 · <strong>Identificação</strong>
+                </p>
+                <button type="button" onClick={() => setStep("intro")} className="text-xs text-primary mt-1 hover:underline">
+                  ← Voltar
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => void handleDocIdNext()}
-                disabled={docSaving || (docIdLen >= 12 && docIdLen <= 13)}
-                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 disabled:opacity-50"
-              >
-                {docSaving ? "Salvando…" : "Continuar"}
-              </button>
+              <div className="bg-card border border-primary/10 rounded-2xl p-5 shadow-card space-y-4 ring-1 ring-primary/5">
+                <p className="text-xs text-muted-foreground leading-relaxed text-center px-1">
+                  Para começar, informe seu <strong className="text-foreground font-semibold">CPF ou CNPJ</strong>,
+                  o nome que aparecerá no app e seu CEP.
+                </p>
+
+                <div>
+                  <label className="text-[11px] uppercase font-bold text-muted-foreground ml-1">
+                    CPF ou CNPJ
+                  </label>
+                  <div
+                    className={`mt-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30 ${
+                      docLocked ? "bg-muted/40" : ""
+                    }`}
+                  >
+                    <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" aria-hidden />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={docIdValue}
+                      onChange={(e) => setDocIdValue(formatCpfOuCnpj(e.target.value))}
+                      placeholder="000.000.000-00 ou CNPJ"
+                      maxLength={18}
+                      readOnly={docLocked}
+                      aria-label="Digite seu CPF ou CNPJ"
+                      className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  {docLocked ? (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      {profileHasCompleteCnpj(profile) ? "CNPJ" : "CPF"} já cadastrado na sua conta.
+                    </p>
+                  ) : docIdLen >= 12 && docIdLen <= 13 ? (
+                    <p className="text-[11px] text-destructive font-medium mt-1">
+                      Complete até 11 dígitos (CPF) ou 14 (CNPJ).
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Digite o CPF (11 dígitos) ou CNPJ (14 dígitos).
+                    </p>
+                  )}
+                </div>
+
+                {docComplete && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div>
+                      <label className="text-[11px] uppercase font-bold text-muted-foreground ml-1">
+                        {nameLabel}
+                      </label>
+                      <div className="mt-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+                        <NameIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" aria-hidden />
+                        <input
+                          type="text"
+                          autoComplete="off"
+                          value={displayNameValue}
+                          onChange={(e) => setDisplayNameValue(e.target.value)}
+                          placeholder={isCnpjTyped ? "Ex.: Padaria do Zé" : "Ex.: João Silva"}
+                          maxLength={80}
+                          aria-label={nameLabel}
+                          className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-1">{nameHelper}</p>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] uppercase font-bold text-muted-foreground ml-1">
+                        CEP
+                      </label>
+                      <div className="mt-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+                        <MapPin className="w-4 h-4 text-muted-foreground flex-shrink-0" aria-hidden />
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          value={cepValue}
+                          onChange={(e) => setCepValue(formatCep(e.target.value))}
+                          placeholder="00000-000"
+                          maxLength={9}
+                          aria-label="CEP"
+                          className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                        />
+                        {cepLoading && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
+                      </div>
+                      {cepInfo?.city && cepInfo?.state ? (
+                        <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/10">
+                          <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                          <p className="text-xs text-foreground">
+                            <strong>{cepInfo.city}</strong> · {cepInfo.state}
+                            {cepInfo.neighborhood ? ` — ${cepInfo.neighborhood}` : ""}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          A cidade será sua localização inicial no app.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => void handleDocIdNext()}
+                  disabled={!canContinue}
+                  className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {docSaving ? "Salvando…" : "Continuar"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {step === "doc-notice" && (
         <div className="min-h-screen bg-background flex flex-col items-center justify-start px-4 py-8">
@@ -461,10 +719,7 @@ const BecomeProfessional = () => {
           <DocumentsNoticeModal
             open
             onContinue={() => setStep("documents")}
-            onBack={() => {
-              if (skippedIdentifierStep) setStep("intro");
-              else setStep("doc-id");
-            }}
+            onBack={() => setStep("doc-id")}
           />
         </div>
       )}

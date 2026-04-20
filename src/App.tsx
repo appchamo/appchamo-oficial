@@ -54,6 +54,7 @@ const ProOpenRequests = lazy(() => import("./pages/ProOpenRequests"));
 const ClientDashboard = lazy(() => import("./pages/ClientDashboard"));
 const ProfessionalDashboard = lazy(() => import("./pages/ProfessionalDashboard"));
 const ProfessionalFinancial = lazy(() => import("./pages/ProfessionalFinancial"));
+const ProMarketing = lazy(() => import("./pages/ProMarketing"));
 const ProfessionalProfile = lazy(() => import("./pages/ProfessionalProfile"));
 const ProAgenda = lazy(() => import("./pages/ProAgenda"));
 const ProAgendaCalendar = lazy(() => import("./pages/ProAgendaCalendar"));
@@ -562,6 +563,7 @@ const AppContent = () => {
         <Route path="/pro" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro-dashboard" element={<ProtectedRoute><ProfessionalDashboard /></ProtectedRoute>} />
         <Route path="/pro/financeiro" element={<ProtectedRoute><ProfessionalFinancial /></ProtectedRoute>} />
+        <Route path="/pro/marketing" element={<ProtectedRoute><ProMarketing /></ProtectedRoute>} />
         <Route path="/pro/carteira" element={<ProtectedRoute><ProWallet /></ProtectedRoute>} />
         <Route path="/pro/agenda" element={<ProtectedRoute><ProAgenda /></ProtectedRoute>} />
         <Route path="/pro/agenda/calendario" element={<ProtectedRoute><ProAgendaCalendar /></ProtectedRoute>} />

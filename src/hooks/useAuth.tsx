@@ -31,6 +31,8 @@ interface Profile {
   phone: string | null;
   cpf: string | null;
   cnpj: string | null;
+  /** Nome público exibido no app (nome de exibição/fantasia). Fallback: full_name. */
+  display_name?: string | null;
   avatar_url: string | null;
   user_type: string;
   is_blocked: boolean;
@@ -117,7 +119,7 @@ async function fetchProfileWithStatus(userId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, cpf, cnpj, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_zip, address_neighborhood, address_city, address_state, invite_code, accepted_terms_version, signup_completed_at")
+    .select("id, user_id, full_name, email, phone, cpf, cnpj, display_name, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_zip, address_neighborhood, address_city, address_state, invite_code, accepted_terms_version, signup_completed_at")
     .eq("user_id", userId)
     .maybeSingle();
 

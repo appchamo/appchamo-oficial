@@ -2,9 +2,6 @@ import {
   X,
   Home,
   Search,
-  Grid3X3,
-  FileText,
-  MessageSquare,
   Ticket,
   User,
   Briefcase,
@@ -23,6 +20,7 @@ import {
   UsersRound,
   Radio,
   Handshake,
+  Megaphone,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -45,12 +43,13 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
   const isBusiness = plan?.id === "business";
   const canPostJobs = profile?.user_type === "company" || profile?.job_posting_enabled === true;
 
+  const isProOrCompany = profile?.user_type === "professional" || profile?.user_type === "company";
+
   const sections = [
     {
       items: [
         { icon: Home, label: "Início", path: "/home" },
         { icon: Search, label: "Buscar Profissionais", path: "/search" },
-        { icon: Grid3X3, label: "Categorias", path: "/categories" },
         { icon: Briefcase, label: "Vagas de Emprego", path: "/jobs" },
         { icon: Gift, label: "Programa de recompensas", path: "/rewards" },
       ],
@@ -58,11 +57,14 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
     {
       title: "Meus Acessos",
       items: [
-        ...(profile?.user_type === "professional" || profile?.user_type === "company"
+        ...(isProOrCompany
           ? [
-              { icon: Wallet, label: "Carteira", path: "/pro/financeiro" },
+              // Carteira / Cupons / Marketing recebem destaque visual via `highlight` (laranja).
+              // Marketing tem seu próprio destaque diferenciado (rosa/violeta).
+              { icon: Wallet, label: "Carteira", path: "/pro/financeiro", highlight: "primary" as const },
+              { icon: Ticket, label: "Meus Cupons", path: "/coupons", highlight: "primary" as const },
+              { icon: Megaphone, label: "Marketing", path: "/pro/marketing", highlight: "marketing" as const },
               { icon: Handshake, label: "Pedidos na região", path: "/pro/pedidos-abertos" },
-              { icon: UsersRound, label: "Comunidade", path: "/home?feed=comunidade" },
               ...(profile?.user_type === "company"
                 ? [
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },
@@ -88,9 +90,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
         ...(profile?.user_type === "client" && canPostJobs
           ? [{ icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" }]
           : []),
-        ...(menuLinkedSponsor &&
-        profile?.user_type !== "professional" &&
-        profile?.user_type !== "company"
+        ...(menuLinkedSponsor && !isProOrCompany
           ? [{ icon: UsersRound, label: "Comunidade", path: "/home?feed=comunidade" }]
           : []),
       ],
@@ -98,15 +98,13 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
     {
       title: "Cliente",
       items: [
-        { icon: FileText, label: "Minhas Solicitações", path: "/client/requests" },
         { icon: Radio, label: "Pedidos abertos", path: "/client/pedidos-abertos" },
         { icon: CalendarCheck, label: "Meus agendamentos", path: "/meus-agendamentos" },
-        { icon: MessageSquare, label: "Mensagens", path: "/messages" },
-        { icon: Ticket, label: "Meus Cupons", path: "/coupons" },
+        // Em "Cliente" (perfil cliente), Cupons aparece aqui.
+        // Para profissional, Cupons já aparece em destaque acima em "Meus Acessos".
+        ...(!isProOrCompany ? [{ icon: Ticket, label: "Meus Cupons", path: "/coupons" }] : []),
         { icon: User, label: "Meu Perfil", path: "/profile" },
-        ...(profile?.user_type === "professional" || profile?.user_type === "company"
-          ? [{ icon: Crown, label: "Planos", path: "/subscriptions" }]
-          : []),
+        ...(isProOrCompany ? [{ icon: Crown, label: "Planos", path: "/subscriptions" }] : []),
         ...(profile?.user_type === "client"
           ? [{ icon: UserPlus, label: "Tornar-se Profissional", path: "/signup-pro" }]
           : []),
@@ -134,13 +132,20 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
               </p>
             )}
             {section.items.map((item) => {
+              const itemWithHighlight = item as typeof item & {
+                highlight?: "primary" | "marketing";
+              };
               const isComunidadeHome = item.path === "/home?feed=comunidade";
               const isActive = isComunidadeHome
                 ? location.pathname === "/home" &&
                   new URLSearchParams(location.search).get("feed") === "comunidade"
                 : location.pathname === item.path;
               const isTornarSePro = item.path === "/signup-pro";
-              const isFinanceiro = item.path === "/pro/financeiro";
+              const highlight = itemWithHighlight.highlight;
+              // Carteira/Cupons → laranja sólido (cor primária da marca).
+              // Marketing → gradiente rosa→violeta (categoria diferenciada).
+              const isPrimaryHighlight = highlight === "primary";
+              const isMarketingHighlight = highlight === "marketing";
               return (
                 <Link
                   key={item.path + item.label}
@@ -148,15 +153,24 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
                   onClick={onNavigate}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium lg:px-4 lg:py-3 lg:text-[15px] lg:rounded-xl",
-                    isActive && !isFinanceiro && "bg-accent text-accent-foreground",
-                    !isActive && !isFinanceiro && "text-foreground hover:bg-muted",
-                    isFinanceiro &&
-                      "border-2 border-primary/60 bg-primary/12 text-primary font-semibold shadow-sm hover:bg-primary/18",
-                    isFinanceiro && isActive && "ring-2 ring-primary/30",
+                    !highlight && isActive && "bg-accent text-accent-foreground",
+                    !highlight && !isActive && "text-foreground hover:bg-muted",
+                    isPrimaryHighlight &&
+                      "bg-primary text-primary-foreground font-semibold shadow-sm hover:bg-primary/90",
+                    isPrimaryHighlight && isActive && "ring-2 ring-primary/30",
+                    isMarketingHighlight &&
+                      "bg-gradient-to-r from-pink-500 to-violet-500 text-white font-semibold shadow-sm hover:from-pink-600 hover:to-violet-600",
+                    isMarketingHighlight && isActive && "ring-2 ring-violet-300",
                   )}
                   {...(isTornarSePro ? { "data-onboarding": "tornar-se-pro" } : {})}
                 >
-                  <item.icon className={cn("w-4 h-4 shrink-0 lg:w-[18px] lg:h-[18px]", isFinanceiro && "text-primary")} />
+                  <item.icon
+                    className={cn(
+                      "w-4 h-4 shrink-0 lg:w-[18px] lg:h-[18px]",
+                      isPrimaryHighlight && "text-primary-foreground",
+                      isMarketingHighlight && "text-white",
+                    )}
+                  />
                   {item.label}
                 </Link>
               );

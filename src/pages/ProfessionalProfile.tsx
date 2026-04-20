@@ -23,6 +23,7 @@ import {
   MessageSquare,
   UserPlus,
   UserCheck,
+  Ticket,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import ImageCropUpload from "@/components/ImageCropUpload";
@@ -117,6 +118,8 @@ const ProfessionalProfile = () => {
   const [sealsModalOpen, setSealsModalOpen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [isMutual, setIsMutual] = useState(false);
+  /** True se o profissional tem ao menos um cupom ativo (não expirado e com usos disponíveis). */
+  const [hasActiveCoupon, setHasActiveCoupon] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
   const [dmOpening, setDmOpening] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
@@ -277,6 +280,35 @@ const ProfessionalProfile = () => {
     if (!pro || isOwner) return;
     incrementProfessionalAnalytics(pro.user_id, "profile_click");
   }, [pro?.user_id, isOwner]);
+
+  // Carrega flag "tem cupom ativo?" sempre que o perfil mudar (incluindo o owner,
+  // para ele ver o badge no preview do próprio perfil).
+  useEffect(() => {
+    let cancelled = false;
+    if (!pro?.id) {
+      setHasActiveCoupon(false);
+      return;
+    }
+    (async () => {
+      // RPC nova; ainda não está nos types gerados do Supabase.
+      const { data, error } = await (supabase.rpc as unknown as (
+        fn: string,
+        args: Record<string, unknown>,
+      ) => Promise<{ data: boolean | null; error: { message: string } | null }>)(
+        "professional_has_active_coupon",
+        { p_professional_id: pro.id },
+      );
+      if (cancelled) return;
+      if (error) {
+        setHasActiveCoupon(false);
+        return;
+      }
+      setHasActiveCoupon(Boolean(data));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pro?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -690,6 +722,14 @@ const ProfessionalProfile = () => {
 
             {/* Badges — TODOS na mesma linha */}
             <div className="flex flex-wrap items-center gap-2 mb-2">
+              {hasActiveCoupon && (
+                <span
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 text-white text-xs font-bold shadow-sm animate-pulse"
+                  title="Este profissional tem cupom de desconto ativo"
+                >
+                  <Ticket className="w-3.5 h-3.5" /> Contrate com desconto
+                </span>
+              )}
               {pro.verified && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
                   <BadgeCheck className="w-3.5 h-3.5 fill-emerald-100" /> Verificado

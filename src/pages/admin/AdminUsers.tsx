@@ -622,7 +622,12 @@ const AdminUsers = () => {
                           <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: "hsl(var(--success))" }}><CheckCircle className="w-3 h-3" /> Ativo</span>
                         )}
                       </td>
-                      <td className="p-3 text-muted-foreground text-xs">{new Date(user.created_at).toLocaleDateString("pt-BR")}</td>
+                      <td className="p-3 text-muted-foreground text-xs whitespace-nowrap">
+                        {new Date(user.created_at).toLocaleDateString("pt-BR")}
+                        <span className="ml-1.5 opacity-70">
+                          {new Date(user.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </td>
                       <td className="p-3">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

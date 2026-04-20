@@ -1,6 +1,18 @@
 import AdminLayout from "@/components/AdminLayout";
 import AudioPlayer from "@/components/AudioPlayer";
-import { Search, MessageSquare, Headphones, User, Calendar, Loader2 } from "lucide-react";
+import {
+  Search,
+  MessageSquare,
+  Headphones,
+  User,
+  Calendar,
+  Loader2,
+  Briefcase,
+  UserRound,
+  MapPin,
+  Smartphone,
+  Ticket,
+} from "lucide-react";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -39,6 +51,190 @@ type SupportHit = {
 
 const CALLS_PAGE_SIZE = 500;
 
+type CallsTab = "calls" | "professional" | "client";
+
+type ProfileAddr = {
+  user_id: string;
+  full_name: string | null;
+  address_street: string | null;
+  address_number: string | null;
+  address_neighborhood: string | null;
+  address_city: string | null;
+  address_state: string | null;
+};
+
+type DeviceRow = {
+  user_id: string;
+  device_name: string | null;
+  platform: string | null;
+  push_token: string | null;
+  last_active: string | null;
+};
+
+type ProCouponRow = {
+  id: string;
+  code: string;
+  professional_id: string;
+  discount_type: "amount" | "percent";
+  discount_value: number;
+  min_purchase: number | null;
+  max_purchase: number | null;
+  max_uses: number | null;
+  used_count: number;
+  expires_at: string | null;
+};
+
+type ClientCouponRow = {
+  id: string;
+  user_id: string;
+  source: string;
+  used: boolean;
+  discount_percent: number;
+  expires_at: string | null;
+  coupon_type: string;
+};
+
+type ProEnrich = {
+  pro_user_id: string | null;
+  pro_name: string;
+  addressFull: string;
+  addressShort: string;
+  deviceLabel: string;
+  coupon: { code: string; short: string; detail: string } | null;
+};
+
+type ClientEnrich = {
+  client_name: string;
+  addressFull: string;
+  addressShort: string;
+  deviceLabel: string;
+  coupon: { code: string; short: string; detail: string } | null;
+};
+
+/** Formata endereço completo (ou retorna "—" se vazio). */
+function buildAddress(p: ProfileAddr | undefined | null): { full: string; short: string } {
+  if (!p) return { full: "—", short: "—" };
+  const streetPart = [p.address_street, p.address_number].filter(Boolean).join(", ");
+  const cityPart = [p.address_city, p.address_state].filter(Boolean).join("/");
+  const short =
+    p.address_neighborhood ||
+    p.address_city ||
+    streetPart ||
+    "—";
+  const parts = [streetPart, p.address_neighborhood, cityPart].filter(Boolean) as string[];
+  const full = parts.length ? parts.join(" — ") : short;
+  return { full, short };
+}
+
+/** Mesma lógica usada no painel de Relatórios > Dispositivos. */
+function deviceBucketForRow(d: DeviceRow): "iphone" | "android" | "desktop" | "outro" {
+  const plat = (d.platform || "").toLowerCase();
+  if (plat === "ios") return "iphone";
+  if (plat === "android") return "android";
+  if (plat === "web") return "desktop";
+  const n = (d.device_name || "").toLowerCase();
+  if (n.includes("iphone") || n.includes("ios") || n.includes("ipad") || n.includes("apple")) return "iphone";
+  if (n.includes("android")) return "android";
+  if (
+    n.includes("samsung") || n.includes("galaxy") || /\bsm-/.test(n) || n.includes("pixel") ||
+    n.includes("xiaomi") || n.includes("redmi") || n.includes("poco") || n.includes("motorola") ||
+    n.includes("moto ") || n.includes("oneplus") || n.includes("oppo") || n.includes("realme")
+  ) return "android";
+  if (n.includes("web") || n.includes("desktop") || n.includes("pwa") || n.includes("chrome")) return "desktop";
+  const t = (d.push_token || "").trim();
+  if (t.length === 64 && /^[a-f0-9]+$/i.test(t)) return "iphone";
+  if (t && (t.includes(":") || (t.length > 80 && !/^[a-f0-9]+$/i.test(t)))) return "android";
+  return "outro";
+}
+
+function pickPrimaryDeviceLabel(devices: DeviceRow[]): string {
+  if (!devices.length) return "—";
+  const sorted = [...devices].sort(
+    (a, b) => new Date(b.last_active || 0).getTime() - new Date(a.last_active || 0).getTime(),
+  );
+  for (const d of sorted) {
+    const b = deviceBucketForRow(d);
+    if (b === "iphone") return "iPhone";
+    if (b === "android") return "Android";
+    if (b === "desktop") return "Web";
+  }
+  return sorted[0].device_name?.trim() || "Outro";
+}
+
+const formatBRL = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 });
+
+/** Rótulo curto (ex.: "10% OFF", "R$ 20 OFF"). */
+function formatProCouponShort(c: ProCouponRow): string {
+  if (c.discount_type === "percent") {
+    const n = Math.round(Number(c.discount_value) * 10) / 10;
+    return `${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1)}% OFF`;
+  }
+  return `${formatBRL(Number(c.discount_value))} OFF`;
+}
+
+function formatProCouponDetail(c: ProCouponRow): string {
+  const bits: string[] = [];
+  bits.push(`código ${c.code}`);
+  if (c.min_purchase != null) bits.push(`mín. ${formatBRL(Number(c.min_purchase))}`);
+  if (c.max_purchase != null) bits.push(`teto ${formatBRL(Number(c.max_purchase))}`);
+  if (c.max_uses == null) {
+    bits.push("ilimitado");
+  } else {
+    const rem = Math.max(0, c.max_uses - (c.used_count ?? 0));
+    bits.push(rem > 0 ? `${rem}/${c.max_uses} usos` : "esgotado");
+  }
+  if (c.expires_at) bits.push(`até ${new Date(c.expires_at).toLocaleDateString("pt-BR")}`);
+  return bits.join(" · ");
+}
+
+function pickBestProCoupon(list: ProCouponRow[]): ProCouponRow | null {
+  const active = list.filter((c) => {
+    if (c.expires_at && new Date(c.expires_at).getTime() <= Date.now()) return false;
+    if (c.max_uses != null && (c.used_count ?? 0) >= c.max_uses) return false;
+    return true;
+  });
+  if (!active.length) return null;
+  const sorted = [...active].sort((a, b) => {
+    const ap = a.discount_type === "percent" ? Number(a.discount_value) : 0;
+    const bp = b.discount_type === "percent" ? Number(b.discount_value) : 0;
+    if (ap !== bp) return bp - ap;
+    const av = a.discount_type === "amount" ? Number(a.discount_value) : 0;
+    const bv = b.discount_type === "amount" ? Number(b.discount_value) : 0;
+    return bv - av;
+  });
+  return sorted[0];
+}
+
+function pickBestClientCoupon(list: ClientCouponRow[]): ClientCouponRow | null {
+  const active = list.filter((c) => {
+    if (c.used) return false;
+    if (c.expires_at && new Date(c.expires_at).getTime() <= Date.now()) return false;
+    return true;
+  });
+  if (!active.length) return null;
+  return [...active].sort((a, b) => Number(b.discount_percent) - Number(a.discount_percent))[0];
+}
+
+function formatClientCouponShort(c: ClientCouponRow): string {
+  const n = Math.round(Number(c.discount_percent) * 10) / 10;
+  return `${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1)}% OFF`;
+}
+
+function formatClientCouponDetail(c: ClientCouponRow): string {
+  const bits: string[] = [];
+  const srcMap: Record<string, string> = {
+    registration: "cadastro",
+    payment: "pagamento",
+    bonus: "bônus",
+    admin: "admin",
+  };
+  bits.push(`origem ${srcMap[c.source] || c.source}`);
+  if (c.coupon_type) bits.push(c.coupon_type);
+  if (c.expires_at) bits.push(`até ${new Date(c.expires_at).toLocaleDateString("pt-BR")}`);
+  return bits.join(" · ");
+}
+
 /** Mesmo formato que `MessageThread` / `chat_messages` (`[AUDIO:url:segundos]`). */
 function parseAudioMessage(content: string): { url: string; duration: number } | null {
   const match = content.trim().match(/\[AUDIO:(.+):(\d+)\]$/);
@@ -70,6 +266,12 @@ const AdminProtocols = () => {
   const [allCalls, setAllCalls] = useState<ServiceHit[]>([]);
   const [supportHits, setSupportHits] = useState<SupportHit[]>([]);
   const [supportSearched, setSupportSearched] = useState(false);
+  const [tab, setTab] = useState<CallsTab>("calls");
+
+  /** Mapas de enriquecimento — carregados sob demanda ao trocar de aba. */
+  const [proEnrich, setProEnrich] = useState<Map<string, ProEnrich>>(new Map());
+  const [clientEnrich, setClientEnrich] = useState<Map<string, ClientEnrich>>(new Map());
+  const [enrichLoading, setEnrichLoading] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -122,6 +324,165 @@ const AdminProtocols = () => {
     if (term.length < 2) return allCalls;
     return allCalls.filter((row) => (row.protocol || "").toLowerCase().includes(term));
   }, [allCalls, q]);
+
+  /** Carrega enriquecimento (endereço/dispositivo/cupom) conforme aba ativa. */
+  useEffect(() => {
+    if (tab === "calls") return;
+    if (displayedCalls.length === 0) return;
+    let cancelled = false;
+
+    const run = async () => {
+      setEnrichLoading(true);
+      try {
+        if (tab === "professional") {
+          const proIds = [...new Set(displayedCalls.map((c) => c.professional_id).filter(Boolean))];
+          if (!proIds.length) {
+            if (!cancelled) setProEnrich(new Map());
+            return;
+          }
+
+          const { data: proRows } = await supabase
+            .from("professionals")
+            .select("id, user_id")
+            .in("id", proIds);
+          const proUserMap = new Map<string, string>();
+          for (const row of (proRows || []) as { id: string; user_id: string }[]) {
+            if (row.user_id) proUserMap.set(row.id, row.user_id);
+          }
+          const userIds = [...new Set(proUserMap.values())];
+
+          const [{ data: profs }, { data: devs }, { data: coupons }] = await Promise.all([
+            userIds.length
+              ? supabase
+                  .from("profiles")
+                  .select(
+                    "user_id, full_name, address_street, address_number, address_neighborhood, address_city, address_state",
+                  )
+                  .in("user_id", userIds)
+              : Promise.resolve({ data: [] as ProfileAddr[] }),
+            userIds.length
+              ? (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
+                  .from("user_devices")
+                  .select("user_id, device_name, platform, push_token, last_active")
+                  .in("user_id", userIds)
+              : Promise.resolve({ data: [] as DeviceRow[] }),
+            supabase
+              .from("professional_coupons")
+              .select(
+                "id, code, professional_id, discount_type, discount_value, min_purchase, max_purchase, max_uses, used_count, expires_at, active",
+              )
+              .in("professional_id", proIds)
+              .eq("active", true),
+          ]);
+
+          const profMap = new Map<string, ProfileAddr>();
+          for (const p of (profs || []) as ProfileAddr[]) profMap.set(p.user_id, p);
+          const devByUser = new Map<string, DeviceRow[]>();
+          for (const d of (devs || []) as DeviceRow[]) {
+            const arr = devByUser.get(d.user_id) || [];
+            arr.push(d);
+            devByUser.set(d.user_id, arr);
+          }
+          const couponsByPro = new Map<string, ProCouponRow[]>();
+          for (const c of (coupons || []) as ProCouponRow[]) {
+            const arr = couponsByPro.get(c.professional_id) || [];
+            arr.push(c);
+            couponsByPro.set(c.professional_id, arr);
+          }
+
+          const map = new Map<string, ProEnrich>();
+          for (const pid of proIds) {
+            const uid = proUserMap.get(pid) || null;
+            const prof = uid ? profMap.get(uid) : null;
+            const addr = buildAddress(prof);
+            const devices = uid ? devByUser.get(uid) || [] : [];
+            const best = pickBestProCoupon(couponsByPro.get(pid) || []);
+            map.set(pid, {
+              pro_user_id: uid,
+              pro_name: prof?.full_name || "—",
+              addressFull: addr.full,
+              addressShort: addr.short,
+              deviceLabel: pickPrimaryDeviceLabel(devices),
+              coupon: best
+                ? { code: best.code, short: formatProCouponShort(best), detail: formatProCouponDetail(best) }
+                : null,
+            });
+          }
+          if (!cancelled) setProEnrich(map);
+        } else {
+          const clientIds = [...new Set(displayedCalls.map((c) => c.client_id).filter(Boolean))];
+          if (!clientIds.length) {
+            if (!cancelled) setClientEnrich(new Map());
+            return;
+          }
+
+          const [{ data: profs }, { data: devs }, { data: coupons }] = await Promise.all([
+            supabase
+              .from("profiles")
+              .select(
+                "user_id, full_name, address_street, address_number, address_neighborhood, address_city, address_state",
+              )
+              .in("user_id", clientIds),
+            (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
+              .from("user_devices")
+              .select("user_id, device_name, platform, push_token, last_active")
+              .in("user_id", clientIds),
+            supabase
+              .from("coupons")
+              .select("id, user_id, source, used, discount_percent, expires_at, coupon_type")
+              .in("user_id", clientIds)
+              .eq("used", false),
+          ]);
+
+          const profMap = new Map<string, ProfileAddr>();
+          for (const p of (profs || []) as ProfileAddr[]) profMap.set(p.user_id, p);
+          const devByUser = new Map<string, DeviceRow[]>();
+          for (const d of (devs || []) as DeviceRow[]) {
+            const arr = devByUser.get(d.user_id) || [];
+            arr.push(d);
+            devByUser.set(d.user_id, arr);
+          }
+          const couponsByUser = new Map<string, ClientCouponRow[]>();
+          for (const c of (coupons || []) as ClientCouponRow[]) {
+            const arr = couponsByUser.get(c.user_id) || [];
+            arr.push(c);
+            couponsByUser.set(c.user_id, arr);
+          }
+
+          const map = new Map<string, ClientEnrich>();
+          for (const uid of clientIds) {
+            const prof = profMap.get(uid);
+            const addr = buildAddress(prof);
+            const devices = devByUser.get(uid) || [];
+            const best = pickBestClientCoupon(couponsByUser.get(uid) || []);
+            map.set(uid, {
+              client_name: prof?.full_name || "—",
+              addressFull: addr.full,
+              addressShort: addr.short,
+              deviceLabel: pickPrimaryDeviceLabel(devices),
+              coupon: best
+                ? {
+                    code: "—",
+                    short: formatClientCouponShort(best),
+                    detail: formatClientCouponDetail(best),
+                  }
+                : null,
+            });
+          }
+          if (!cancelled) setClientEnrich(map);
+        }
+      } catch (e) {
+        console.warn("[AdminProtocols] enrich failed:", e);
+      } finally {
+        if (!cancelled) setEnrichLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, displayedCalls]);
 
   const search = useCallback(async () => {
     const term = normalizeProtocolInput(q);
@@ -311,16 +672,39 @@ const AdminProtocols = () => {
       </div>
 
       <section className="mb-8">
-        <h2 className="text-sm font-bold text-foreground flex items-center gap-2 mb-2">
-          <MessageSquare className="w-4 h-4 text-primary" />
-          Chamadas
+        <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-hide -mx-0.5 px-0.5">
+          {(
+            [
+              { id: "calls", label: "Chamadas", icon: MessageSquare },
+              { id: "professional", label: "Profissional", icon: Briefcase },
+              { id: "client", label: "Cliente", icon: UserRound },
+            ] as { id: CallsTab; label: string; icon: typeof MessageSquare }[]
+          ).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors border",
+                tab === id
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-card text-muted-foreground border-border hover:text-foreground hover:bg-muted/60",
+              )}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          ))}
           {!listLoading && (
-            <span className="text-xs font-normal text-muted-foreground">
-              ({displayedCalls.length}
-              {q.trim().length >= 2 && allCalls.length !== displayedCalls.length ? ` de ${allCalls.length}` : ""})
+            <span className="ml-auto text-xs text-muted-foreground">
+              {displayedCalls.length}
+              {q.trim().length >= 2 && allCalls.length !== displayedCalls.length ? ` de ${allCalls.length}` : ""}{" "}
+              {displayedCalls.length === 1 ? "chamada" : "chamadas"}
+              {tab !== "calls" && enrichLoading ? " · carregando…" : ""}
             </span>
           )}
-        </h2>
+        </div>
+
         <div className="bg-card border rounded-xl overflow-hidden">
           {listLoading ? (
             <div className="flex justify-center py-16">
@@ -330,7 +714,7 @@ const AdminProtocols = () => {
             <div className="text-center py-12 text-muted-foreground text-sm border-t border-dashed">
               Nenhuma chamada encontrada{q.trim().length >= 2 ? " com esse filtro." : "."}
             </div>
-          ) : (
+          ) : tab === "calls" ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[640px]">
                 <thead>
@@ -371,6 +755,170 @@ const AdminProtocols = () => {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          ) : tab === "professional" ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[920px]">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left p-3 font-medium text-muted-foreground">Protocolo</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Profissional</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Endereço</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Dispositivo</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Cupom do profissional</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedCalls.map((row) => {
+                    const info = proEnrich.get(row.professional_id);
+                    return (
+                      <tr
+                        key={row.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => void openCallDetail(row)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            void openCallDetail(row);
+                          }
+                        }}
+                        className="border-b last:border-0 hover:bg-muted/40 cursor-pointer transition-colors align-top"
+                      >
+                        <td className="p-3 font-mono text-xs text-primary font-semibold whitespace-nowrap">
+                          {row.protocol || "—"}
+                          <div className="mt-0.5 text-[10px] text-muted-foreground font-sans font-normal tabular-nums">
+                            {formatDate(row.created_at)} · {formatTime(row.created_at)}
+                          </div>
+                        </td>
+                        <td className="p-3 text-xs">
+                          <p className="font-medium text-foreground">{info?.pro_name || "—"}</p>
+                        </td>
+                        <td className="p-3 text-xs text-muted-foreground max-w-[220px]">
+                          <div className="flex items-start gap-1">
+                            <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0 text-primary/70" />
+                            <span title={info?.addressFull} className="leading-tight">
+                              {info?.addressFull || "—"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-xs">
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <Smartphone className="w-3 h-3 text-primary/70" />
+                            {info?.deviceLabel || "—"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-xs">
+                          {info?.coupon ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 text-primary px-1.5 py-0.5 text-[11px] font-bold w-fit">
+                                <Ticket className="w-3 h-3" />
+                                {info.coupon.short}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">{info.coupon.detail}</span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/60 italic text-[11px]">sem cupom</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-lg border px-2 py-0.5 text-[11px] font-semibold",
+                              callStatusClass(row.status),
+                            )}
+                          >
+                            {callStatusLabel[row.status] || row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[920px]">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left p-3 font-medium text-muted-foreground">Protocolo</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Cliente</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Endereço</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Dispositivo</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Cupom do cliente</th>
+                    <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedCalls.map((row) => {
+                    const info = clientEnrich.get(row.client_id);
+                    return (
+                      <tr
+                        key={row.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => void openCallDetail(row)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            void openCallDetail(row);
+                          }
+                        }}
+                        className="border-b last:border-0 hover:bg-muted/40 cursor-pointer transition-colors align-top"
+                      >
+                        <td className="p-3 font-mono text-xs text-primary font-semibold whitespace-nowrap">
+                          {row.protocol || "—"}
+                          <div className="mt-0.5 text-[10px] text-muted-foreground font-sans font-normal tabular-nums">
+                            {formatDate(row.created_at)} · {formatTime(row.created_at)}
+                          </div>
+                        </td>
+                        <td className="p-3 text-xs">
+                          <p className="font-medium text-foreground">{info?.client_name || "—"}</p>
+                        </td>
+                        <td className="p-3 text-xs text-muted-foreground max-w-[220px]">
+                          <div className="flex items-start gap-1">
+                            <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0 text-primary/70" />
+                            <span title={info?.addressFull} className="leading-tight">
+                              {info?.addressFull || "—"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-xs">
+                          <span className="inline-flex items-center gap-1 text-foreground">
+                            <Smartphone className="w-3 h-3 text-primary/70" />
+                            {info?.deviceLabel || "—"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-xs">
+                          {info?.coupon ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[11px] font-bold w-fit">
+                                <Ticket className="w-3 h-3" />
+                                {info.coupon.short}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">{info.coupon.detail}</span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/60 italic text-[11px]">sem cupom</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-lg border px-2 py-0.5 text-[11px] font-semibold",
+                              callStatusClass(row.status),
+                            )}
+                          >
+                            {callStatusLabel[row.status] || row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -472,15 +472,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await Browser.close().catch(() => {}); // Safari já fechado → "No active window" é esperado, ignorar
         const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        // Algumas vezes o exchange retorna ok sem session (ex.: storage native ainda persistindo).
+        // Antes de assumir falha, tenta getSession() por ~2s — se já existir, consideramos sucesso.
+        let liveSession = exchangeData?.session ?? null;
+        if (!exchangeError && !liveSession) {
+          for (let i = 0; i < 10; i++) {
+            const { data } = await supabase.auth.getSession();
+            if (data?.session) { liveSession = data.session; break; }
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        }
         if (exchangeError) {
           console.error("[OAuth] exchange error:", exchangeError.message);
           lastProcessedCode = null;
           if (Capacitor.isNativePlatform()) {
             await Preferences.set({ key: OAUTH_FAILED_KEY, value: JSON.stringify({ code: normalizeOAuthCode(code) ?? code, ts: Date.now() }) }).catch(() => {});
           }
-        } else if (exchangeData?.session) {
+        } else if (liveSession) {
           exchangeOk = true;
           await Preferences.remove({ key: OAUTH_FAILED_KEY }).catch(() => {});
+          // Se veio de cadastro OAuth (Signup), limpa a flag assim que a troca foi bem sucedida para evitar
+          // que o PostLoginGate force /signup → signOut em contas com profile já completo (race condition).
+          try {
+            const hadFlag = localStorage.getItem("signup_in_progress") === "true";
+            if (hadFlag) {
+              // Mantemos a flag apenas se o user realmente for "pending_signup". O PostLoginGate lida com isso
+              // consultando o profile; aqui a removemos para que users existentes (login via botão do Signup)
+              // não sejam jogados pra /signup indevidamente.
+              const { data: row } = await supabase
+                .from("profiles")
+                .select("user_type")
+                .eq("user_id", liveSession.user.id)
+                .maybeSingle();
+              const ut = (row as { user_type?: string } | null)?.user_type;
+              if (ut && ut !== "pending_signup") {
+                localStorage.removeItem("signup_in_progress");
+              }
+            }
+          } catch { /* best-effort */ }
           const isEmailConfirmLink = /email-confirm/i.test(urlStr);
           if (isEmailConfirmLink) {
             // Confirmação de e-mail (PKCE com ?code=): não usar flags de OAuth + reload da Home (evita +5s).

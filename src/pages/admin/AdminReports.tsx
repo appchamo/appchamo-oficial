@@ -173,7 +173,7 @@ type ProRow = {
 
 type ProSortKey =
   | "name_searches"
-  | "profile_views"
+  | "profile_clicks"
   | "requests"
   | "services"
   | "rating"
@@ -181,7 +181,7 @@ type ProSortKey =
 
 const ProfessionalsTab = () => {
   const [data, setData] = useState<ProRow[]>([]);
-  const [sortBy, setSortBy] = useState<ProSortKey>("name_searches");
+  const [sortBy, setSortBy] = useState<ProSortKey>("profile_clicks");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -265,7 +265,7 @@ const ProfessionalsTab = () => {
 
   const sortOptions: { key: ProSortKey; label: string }[] = [
     { key: "name_searches", label: "Mais pesquisados" },
-    { key: "profile_views", label: "Mais visitas" },
+    { key: "profile_clicks", label: "Mais visitas" },
     { key: "requests", label: "Mais chamadas" },
     { key: "services", label: "Mais atendimentos" },
     { key: "rating", label: "Melhores avaliações" },
@@ -275,8 +275,9 @@ const ProfessionalsTab = () => {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        <strong>Pesquisados</strong> e <strong>visitas</strong> vêm dos eventos do app (quando alguém abre o perfil ou pesquisa pelo nome).{" "}
-        <strong>Chamadas</strong> são pedidos de serviço criados (<code className="text-[10px]">service_requests</code>).
+        <strong>Pesquisados</strong> = buscas pelo nome do pro.{" "}
+        <strong>Visitas</strong> = quando alguém abre a página pública do perfil (<code className="text-[10px]">profile_clicks</code>; impressões de card no carrossel ficam em <code className="text-[10px]">profile_views</code> e não aparecem aqui).{" "}
+        <strong>Chamadas</strong> = pedidos de serviço criados (<code className="text-[10px]">service_requests</code>).
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -316,7 +317,7 @@ const ProfessionalsTab = () => {
                   <td className="p-3 text-xs text-muted-foreground">{i + 1}</td>
                   <td className="p-3 font-medium text-foreground text-xs md:text-sm">{p.name}</td>
                   <td className="p-3 text-xs tabular-nums">{p.name_searches}</td>
-                  <td className="p-3 text-xs tabular-nums">{p.profile_views}</td>
+                  <td className="p-3 text-xs tabular-nums">{p.profile_clicks}</td>
                   <td className="p-3 text-xs tabular-nums">{p.requests}</td>
                   <td className="p-3 text-xs tabular-nums">{p.services}</td>
                   <td className="p-3 text-xs">⭐ {p.rating.toFixed(1)}</td>

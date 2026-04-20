@@ -20,6 +20,7 @@ import HomeJobsBanner from "@/components/home/HomeJobsBanner";
 import HomeWelcome from "@/components/home/HomeWelcome";
 import HomeAlertCarousel from "@/components/home/HomeAlertCarousel";
 import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
+import CouponProfessionals from "@/components/home/CouponProfessionals";
 import HomeProCarousel from "@/components/home/HomeProCarousel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
@@ -968,7 +969,8 @@ const Home = () => {
                 ) : null}
                 {bannerAfter[section.id] && <HomeBanners position={bannerAfter[section.id]} />}
                 {section.id === "categories" && (
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-col gap-4">
+                    <CouponProfessionals />
                     <QuickProfessionalsList />
                   </div>
                 )}

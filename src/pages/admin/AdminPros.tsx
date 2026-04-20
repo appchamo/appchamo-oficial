@@ -248,8 +248,13 @@ const AdminPros = () => {
 
   const filtered = pros
     .filter((p) => {
-      const q = search.toLowerCase();
-      const matchesSearch = p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q);
+      const q = search.toLowerCase().trim();
+      const matchesSearch =
+        q.length === 0 ||
+        p.full_name.toLowerCase().includes(q) ||
+        p.email.toLowerCase().includes(q) ||
+        p.profession_name.toLowerCase().includes(q) ||
+        p.category_name.toLowerCase().includes(q);
       const matchesTab = tab === "all" || (tab !== "seals" && p.profile_status === tab);
       const matchesDoc =
         docFilter === "all" ||
@@ -716,7 +721,7 @@ const AdminPros = () => {
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
-              <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Categoria</th>
+              <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Categoria / Profissão</th>
               <th className="text-left p-3 font-medium text-muted-foreground hidden md:table-cell">Plano</th>
               <th className="text-left p-3 font-medium text-muted-foreground">Chamadas</th>
               <th className="text-left p-3 font-medium text-muted-foreground">Verificado</th>
@@ -733,9 +738,24 @@ const AdminPros = () => {
                 <tr key={pro.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                   <td className="p-3">
                     <p className="font-medium text-foreground text-xs md:text-sm">{pro.full_name}</p>
-                    <p className="text-[10px] text-muted-foreground md:hidden">{pro.category_name}</p>
+                    <p className="text-[10px] text-muted-foreground md:hidden leading-tight">
+                      {pro.category_name}
+                      {pro.profession_name && pro.profession_name !== "—" ? (
+                        <>
+                          <span className="mx-1 opacity-50">·</span>
+                          <span className="text-primary/80 font-medium">{pro.profession_name}</span>
+                        </>
+                      ) : null}
+                    </p>
                   </td>
-                  <td className="p-3 text-muted-foreground hidden md:table-cell text-xs">{pro.category_name}</td>
+                  <td className="p-3 hidden md:table-cell text-xs leading-tight">
+                    <p className="text-muted-foreground">{pro.category_name}</p>
+                    {pro.profession_name && pro.profession_name !== "—" ? (
+                      <p className="text-primary font-medium text-[11px] mt-0.5">{pro.profession_name}</p>
+                    ) : (
+                      <p className="text-muted-foreground/60 italic text-[10px] mt-0.5">sem profissão</p>
+                    )}
+                  </td>
                   <td className="p-3 hidden md:table-cell">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                       pro.plan_id === "free" ? "bg-muted text-muted-foreground" :
@@ -835,7 +855,7 @@ const AdminPros = () => {
         <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
           <Search className="w-4 h-4 text-muted-foreground" />
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar profissional..."
+            placeholder="Buscar por nome, e-mail, profissão ou categoria…"
             className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
         </div>
         <select

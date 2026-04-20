@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -11,6 +11,9 @@ export default function PostLoginGate() {
   const navigate = useNavigate();
   const { session, profile, loading, refreshProfile, refreshRoles } = useAuth();
   const [checking, setChecking] = useState(true);
+  /** user resolvido via polling direto em getSession() — usa quando o contexto ainda não atualizou (corrida pós-OAuth). */
+  const [fallbackUserId, setFallbackUserId] = useState<string | null>(null);
+  const didDecideRef = useRef(false);
 
   const firstName = useMemo(() => {
     const full = (session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name) as string | undefined;
@@ -20,6 +23,7 @@ export default function PostLoginGate() {
   useEffect(() => {
     if (loading) return;
     if (session?.user) return;
+    if (fallbackUserId) return;
 
     let cancelled = false;
     (async () => {
@@ -27,7 +31,13 @@ export default function PostLoginGate() {
       const maxWait = Capacitor.isNativePlatform() ? 24 : 4;
       for (let i = 0; i < maxWait && !cancelled; i++) {
         const { data: { session: live } } = await supabase.auth.getSession();
-        if (live?.user) return;
+        if (live?.user) {
+          // Contexto do React ainda pode estar nulo (SIGNED_IN atrasado): destravamos usando o userId do polling.
+          setFallbackUserId(live.user.id);
+          void refreshProfile(live.user.id).catch(() => {});
+          void refreshRoles(live.user.id).catch(() => {});
+          return;
+        }
         await new Promise((r) => setTimeout(r, 150));
       }
       if (!cancelled) navigate("/login", { replace: true });
@@ -36,13 +46,14 @@ export default function PostLoginGate() {
     return () => {
       cancelled = true;
     };
-  }, [loading, session?.user?.id, navigate]);
+  }, [loading, session?.user?.id, fallbackUserId, navigate, refreshProfile, refreshRoles]);
 
   useEffect(() => {
     if (loading) return;
-    if (!session?.user) return;
-
-    const userId = session.user.id;
+    const userId = session?.user?.id ?? fallbackUserId;
+    if (!userId) return;
+    if (didDecideRef.current) return;
+    didDecideRef.current = true;
 
     // Enquanto o perfil está carregando, faz retry curto (corrida pós-OAuth) antes de assumir travamento.
     if (!profile) {
@@ -271,7 +282,7 @@ export default function PostLoginGate() {
       return;
     }
     navigate("/home", { replace: true });
-  }, [loading, session?.user?.id, profile?.user_id, navigate, refreshProfile, refreshRoles]);
+  }, [loading, session?.user?.id, fallbackUserId, profile?.user_id, navigate, refreshProfile, refreshRoles]);
 
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-background px-4">

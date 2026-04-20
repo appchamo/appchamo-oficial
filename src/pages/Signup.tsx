@@ -21,6 +21,8 @@ import StepProfile from "@/components/signup/StepProfile";
 import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
+import { Preferences } from "@capacitor/preferences";
+import { OAUTH_FAILED_KEY } from "@/hooks/useAuth";
 import { tryChamoSignupOverlayBack } from "@/lib/chamoSignupBack";
 import type { Session } from "@supabase/supabase-js";
 import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
@@ -298,8 +300,18 @@ const Signup = () => {
           }
           const isComplete = profileRow && isProfileSignupComplete(profileRow);
           if (isComplete) {
-            setAuthKickPending(true);
+            // Conta já existe e tem perfil completo.
+            // Antes: forçava signOut + /login sempre — mas isso causava loop pós-OAuth quando
+            // o usuário logava via Google/Apple (o flag signup_in_progress antigo ainda estava no storage).
+            // Agora: se o login foi "de verdade" (não veio do fluxo de cadastro), mandamos direto pra /home.
+            const cameFromSignupFlow = localStorage.getItem("signup_in_progress") === "true";
             localStorage.removeItem("signup_in_progress");
+            if (!cameFromSignupFlow) {
+              toast({ title: "Bem-vindo(a) de volta!" });
+              navigate("/home", { replace: true });
+              return;
+            }
+            setAuthKickPending(true);
             await supabase.auth.signOut();
             toast({
               title: "Já tem cadastro",
@@ -508,6 +520,8 @@ const Signup = () => {
   const handleSocialSignup = async (provider: "google" | "apple") => {
     localStorage.setItem("signup_in_progress", "true");
     localStorage.removeItem("manual_login_intent");
+    // Nova tentativa manual: limpa travamento por código anterior que falhou.
+    try { await Preferences.remove({ key: OAUTH_FAILED_KEY }).catch(() => {}); } catch {}
 
     try {
       if (Capacitor.isNativePlatform()) {

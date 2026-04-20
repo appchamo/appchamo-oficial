@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Sparkles, ArrowRight } from "lucide-react";
+import { User, ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 interface ProRecordLite {
@@ -75,8 +75,8 @@ const ProProfileProgress = ({ userId }: ProProfileProgressProps) => {
       aria-label="Melhore seu perfil profissional"
     >
       <div className="flex items-center gap-2.5">
-        <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-pink-500 to-violet-500 flex items-center justify-center">
-          <Sparkles className="w-4 h-4 text-white" />
+        <div className="shrink-0 w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center ring-1 ring-primary/20">
+          <User className="w-[18px] h-[18px] text-primary" strokeWidth={2} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">

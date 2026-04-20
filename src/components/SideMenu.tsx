@@ -64,7 +64,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
               // Carteira / Cupons / Marketing recebem destaque visual via `highlight` (laranja).
               // Marketing tem seu próprio destaque diferenciado (rosa/violeta).
               { icon: Wallet, label: "Carteira", path: "/pro/financeiro", highlight: "primary" as const },
-              { icon: Ticket, label: "Meus Cupons", path: "/coupons", highlight: "primary" as const },
+              { icon: Ticket, label: "Meus Cupons", path: "/coupons" },
               { icon: Megaphone, label: "Marketing", path: "/pro/marketing", highlight: "marketing" as const },
               { icon: Handshake, label: "Pedidos na região", path: "/pro/pedidos-abertos" },
               ...(profile?.user_type === "company"

@@ -1,5 +1,6 @@
 import AppLayout from "@/components/AppLayout";
 import BenefitsPanel, { CHAMO_HOME_SILENT_TICKER } from "@/components/BenefitsPanel";
+import ProProfileProgress from "@/components/ProProfileProgress";
 import SponsorCarousel from "@/components/SponsorCarousel";
 import FeaturedProfessionals from "@/components/FeaturedProfessionals";
 import CategoriesGrid from "@/components/CategoriesGrid";
@@ -644,7 +645,12 @@ const Home = () => {
     ),
     featured: <FeaturedProfessionals key={`featured-${contentSeed}`} section={getSection("featured")} />,
     categories: <CategoriesGrid key={`categories-${contentSeed}`} section={getSection("categories")} />,
-    benefits: <BenefitsPanel key="benefits" section={getSection("benefits")} />,
+    benefits: (
+      <div key="benefits-wrapper" className="flex flex-col gap-2.5">
+        {isPro && user?.id ? <ProProfileProgress userId={user.id} /> : null}
+        <BenefitsPanel key="benefits" section={getSection("benefits")} />
+      </div>
+    ),
     tutorials: <TutorialsSection key="tutorials" />
   };
 

@@ -241,6 +241,7 @@ const Notifications = () => {
       .from("notifications")
       .select("id, title, message, type, read, link, created_at, metadata, image_url")
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .neq("type", "chat")
       .order("created_at", { ascending: false })
       .range(from, to + 1);
@@ -298,7 +299,12 @@ const Notifications = () => {
   const handleDelete = useCallback(async (id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
     setOpenSwipeId(null);
-    await supabase.from("notifications").delete().eq("id", id);
+    // Soft-delete: marca deleted_at em vez de remover a linha. Mantém histórico
+    // para o painel admin ("o usuário recebeu e excluiu sem ler").
+    await supabase
+      .from("notifications")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id);
   }, []);
 
   const handleClick = (n: Notification) => {

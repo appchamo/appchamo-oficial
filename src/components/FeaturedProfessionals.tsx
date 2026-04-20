@@ -42,16 +42,30 @@ const FEATURED_SORT_OPTIONS: { value: FeaturedSortMode; label: string }[] = [
 const featuredProSelect =
   "id, rating, total_services, verified, avg_response_seconds, user_id, category_id, categories(name), profession_id, professions(name), created_at";
 
+/**
+ * Regra de elegibilidade para destaques (definida com produto):
+ *   - Profissional ativo, perfil aprovado, disponibilidade != 'unavailable'
+ *   - **Verificado** (selo)
+ *   - Plano **VIP** ou **Business** com assinatura ativa ou cortesia
+ *
+ * O filtro de plano é aplicado em separado (via `.in("user_id", paidIds)`)
+ * porque PostgREST não permite join condicional aqui.
+ */
 function baseFeaturedProsQuery() {
   return supabase
     .from("professionals")
     .select(featuredProSelect)
     .eq("active", true)
     .eq("profile_status", "approved")
+    .eq("verified", true)
     .neq("availability_status", "unavailable")
-    .order("verified", { ascending: false })
     .order("rating", { ascending: false });
 }
+
+/** Planos que dão direito a aparecer nos destaques. */
+const FEATURED_PAID_PLANS = ["vip", "business"] as const;
+/** Status de assinatura considerados "vigentes" para destaques (alinhado ao painel admin). */
+const FEATURED_PAID_STATUSES = ["active", "courtesy"] as const;
 
 interface Pro {
   id: string;
@@ -334,6 +348,33 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
     try {
       diagLog("info", "featured", "pros fetch start", { city: userCity, state: userState });
 
+      // ── Passo 0: user_ids com plano VIP/Business ativo (ou cortesia) ────────
+      // Sem isso, profissionais no plano free apareciam nos destaques.
+      const { data: paidSubs, error: paidErr } = await supabase
+        .from("subscriptions")
+        .select("user_id")
+        .in("plan_id", FEATURED_PAID_PLANS as unknown as string[])
+        .in("status", FEATURED_PAID_STATUSES as unknown as string[]);
+      if (paidErr) {
+        diagLog("warn", "featured", "paid subs fetch error", { message: paidErr.message });
+      }
+      const paidUserIds = Array.from(
+        new Set(((paidSubs || []) as { user_id: string }[]).map((s) => s.user_id)),
+      );
+      const paidUserIdSet = new Set(paidUserIds);
+      diagLog("info", "featured", "paid pros pool", { count: paidUserIds.length });
+
+      // Sem nenhum assinante pagante: destaque vazio (não faz fallback global de free).
+      if (paidUserIds.length === 0) {
+        clearTimeout(watchdog);
+        if (loadGenRef.current !== gen) return;
+        hangRetryRef.current = 0;
+        setRawPool([]);
+        setProfessionals([]);
+        setProsLoaded(true);
+        return;
+      }
+
       // ── Passo 1: user_ids em profiles que batem com a região do cliente ─────
       // Com cidade definida: só essa cidade (normalizada), sem fallback para estado/país
       // (evita mostrar SP quando o cliente escolheu Patrocínio e não há match na query exata).
@@ -407,18 +448,18 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         diagLog("info", "featured", "strict city, no state fallback — empty regional ids");
         finalPros = [];
       } else {
-        let prosQuery = baseFeaturedProsQuery();
+        // Universo elegível = (regional ∩ pagantes) ou (todos pagantes) se sem regional.
+        const eligibleIds =
+          locationUserIds !== null
+            ? locationUserIds.filter((id) => paidUserIdSet.has(id))
+            : paidUserIds;
 
-        if (locationUserIds !== null) {
-          if (locationUserIds.length > 0) {
-            prosQuery = prosQuery.in("user_id", locationUserIds);
-          } else {
-            finalPros = [];
-          }
-        }
-
-        if (finalPros === null) {
-          const { data: pros, error: qErr } = await prosQuery.limit(FEATURED_FETCH_LIMIT);
+        if (eligibleIds.length === 0) {
+          finalPros = [];
+        } else {
+          const { data: pros, error: qErr } = await baseFeaturedProsQuery()
+            .in("user_id", eligibleIds)
+            .limit(FEATURED_FETCH_LIMIT);
           if (qErr) prosErr = qErr;
           else finalPros = pros || [];
         }
@@ -436,7 +477,7 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
           const stMatched = (stCand || []).filter((row) =>
             matchesFeaturedRegion(null, userState, row.address_city, row.address_state),
           );
-          const stIds = stMatched.map((p) => p.user_id);
+          const stIds = stMatched.map((p) => p.user_id).filter((id) => paidUserIdSet.has(id));
           if (stIds.length > 0) {
             const { data: morePros, error: mErr } = await baseFeaturedProsQuery()
               .in("user_id", stIds)
@@ -453,10 +494,12 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         }
       }
 
-      // Sem nenhum resultado regional: lista global (prioriza verificado + rating na query).
+      // Sem nenhum resultado regional: lista global de pagantes verificados.
       if (!prosErr && finalPros && finalPros.length === 0) {
         diagLog("info", "featured", "empty regional — global list");
-        const { data: allPros, error: gErr } = await baseFeaturedProsQuery().limit(FEATURED_FETCH_LIMIT);
+        const { data: allPros, error: gErr } = await baseFeaturedProsQuery()
+          .in("user_id", paidUserIds)
+          .limit(FEATURED_FETCH_LIMIT);
         if (gErr) prosErr = gErr;
         else finalPros = allPros || [];
       }
@@ -861,8 +904,11 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
       <div
         ref={scrollRef}
         data-tab-swipe-ignore
-        className="flex overflow-x-auto overflow-y-hidden gap-3 lg:gap-5 pb-2 scrollbar-hide px-2 lg:px-4 box-border overscroll-x-contain touch-pan-x"
-        style={{ WebkitOverflowScrolling: "touch" }}
+        className="flex overflow-x-auto overflow-y-hidden gap-3 lg:gap-5 pb-2 scrollbar-hide px-2 lg:px-4 box-border overscroll-x-contain"
+        // touch-action: pan-x pan-y → o browser decide pelo ângulo inicial do gesto.
+        // Drag horizontal scrolla o carrossel; drag vertical propaga pro scroll da página
+        // (sem isso, "touch-pan-x" travava o swipe vertical em cima dos cards).
+        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" }}
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
         onTouchStart={() => setIsPaused(true)}

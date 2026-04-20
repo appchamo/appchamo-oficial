@@ -24,6 +24,7 @@ import {
   Award,
   Sparkles,
   Megaphone,
+  Info,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -427,7 +428,9 @@ export default function CommunityFeed({
   const singlePostIdTrim = (singlePostId ?? "").trim();
   const isSinglePostMode = singlePostIdTrim.length > 0;
 
-  const canPost = !!user;
+  // Apenas profissional/empresa pode publicar (cliente é bloqueado).
+  // Espelha a RLS `community_posts_insert` no banco — se mudar lá, mudar aqui também.
+  const canPost = !!user && (profile?.user_type === "professional" || profile?.user_type === "company");
 
   const applyHydrationForPosts = useCallback(async (mergedList: PostRow[]) => {
     if (!mergedList.length) {
@@ -2118,6 +2121,25 @@ export default function CommunityFeed({
             </DialogContent>
           </Dialog>
         </>
+      )}
+
+      {/* Cliente logado: explica por que não vê o composer (UX — sem isso parece bug). */}
+      {!canPost && !!user && !isSinglePostMode && (
+        <div className="rounded-[22px] bg-white/95 dark:bg-zinc-900/85 p-4 mb-5 border border-black/[0.06] dark:border-white/10 shadow-lg shadow-black/[0.06]">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Info className="w-5 h-5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground leading-snug">
+                Apenas profissionais publicam aqui
+              </p>
+              <p className="text-[13px] text-muted-foreground mt-0.5 leading-snug">
+                Você pode curtir, comentar e seguir profissionais normalmente.
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {loading ? (

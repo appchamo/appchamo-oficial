@@ -84,7 +84,7 @@ interface Props {
   initialReferralCode?: string;
 }
 
-import { formatCpf, formatCnpj, formatPhone } from "@/lib/formatters";
+import { formatCpf, formatCnpj, formatPhone, validateCpf, validateCnpj } from "@/lib/formatters";
 import { fetchViaCep } from "@/lib/viacep";
 import { fetchMunicipioLabelsForUf, filterMunicipioLabels } from "@/lib/ibgeMunicipiosCache";
 import { cn } from "@/lib/utils";
@@ -438,8 +438,19 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       else if (password.length >= 6 && password !== confirmPassword) errs.confirmPassword = "As senhas não conferem.";
     }
 
+    // CPF/CNPJ: obrigatório para todos. Profissional pode usar CNPJ; cliente só CPF.
+    if (!docClean) {
+      errs.document =
+        accountType === "professional"
+          ? "CPF ou CNPJ é obrigatório."
+          : "CPF é obrigatório.";
+    } else if (documentType === "cpf" && !validateCpf(docClean)) {
+      errs.document = "CPF inválido. Confira os números digitados.";
+    } else if (documentType === "cnpj" && !validateCnpj(docClean)) {
+      errs.document = "CNPJ inválido. Confira os números digitados.";
+    }
+
     if (accountType === "professional") {
-      if (!docClean) errs.document = "CPF ou CNPJ é obrigatório para profissionais.";
       if (!addressCity?.trim()) errs.addressCity = "Informe a cidade.";
       if (!addressState?.trim()) errs.addressState = "Informe o estado (UF).";
       if (!addressNumber?.trim()) errs.addressNumber = "Informe o número do endereço.";
@@ -493,79 +504,67 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             addressCountry: "Brasil",
           };
 
-    // Validate uniqueness of CPF/CNPJ (+ Asaas só para profissional)
-    if (docClean) {
-      setValidating(true);
-      try {
-        const field = documentType === "cpf" ? "cpf" : "cnpj";
-        const { data: existing } = await supabase.from("profiles").select("id").eq(field, docClean).limit(1);
-        if (existing && existing.length > 0) {
-          const msg = `Este ${documentType.toUpperCase()} já está cadastrado.`;
-          setFieldErrors({ document: msg });
-          toast({ title: msg, variant: "destructive" });
-          scrollToFirstBasicFieldError({ document: msg });
-          return;
-        }
-
-        if (accountType === "professional") {
-          const invokePromise = supabase.functions.invoke("validate-cpf-signup", {
-            body: { name: name.trim(), cpfCnpj: docClean },
-          });
-          const timeoutMs = 32000;
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("validate_timeout")), timeoutMs)
-          );
-          let validation: { valid?: boolean; message?: string; asaas_customer_id?: string } | null = null;
-          try {
-            const result = await Promise.race([invokePromise, timeoutPromise]);
-            if (result.error) {
-              toast({
-                title: "Não foi possível validar o documento",
-                description: "Verifique sua conexão e tente novamente.",
-                variant: "destructive",
-              });
-              return;
-            }
-            validation = result.data as typeof validation;
-          } catch (err: unknown) {
-            const isTimeout = err instanceof Error && err.message === "validate_timeout";
-            toast({
-              title: isTimeout ? "Tempo esgotado" : "Erro na validação",
-              description: isTimeout
-                ? "A validação do documento demorou demais. Tente de novo."
-                : "Não foi possível concluir a validação. Tente novamente.",
-              variant: "destructive",
-            });
-            return;
-          }
-
-          if (validation?.valid !== true) {
-            const msg = validation?.message || "CPF/CNPJ inválido ou não confere com o nome.";
-            setFieldErrors({ document: msg });
-            toast({ title: msg, variant: "destructive" });
-            scrollToFirstBasicFieldError({ document: msg });
-            return;
-          }
-
-          onNext({
-            name: name.trim(),
-            displayName,
-            email,
-            phone: phone.replace(/\D/g, ""),
-            document: docClean,
-            documentType,
-            password,
-            birthDate: birthIso,
-            gender,
-            ...addressPayload,
-            asaas_customer_id: validation.asaas_customer_id,
-            referralCode: referralToSubmit,
-          });
-          return;
-        }
-      } finally {
-        setValidating(false);
+    // CPF/CNPJ: 1) duplicidade no nosso banco, 2) Asaas valida dígitos + duplicidade externa.
+    // Vale para todos os tipos de conta (cliente e profissional).
+    let asaasCustomerId: string | undefined;
+    setValidating(true);
+    try {
+      const field = documentType === "cpf" ? "cpf" : "cnpj";
+      const { data: existing } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq(field, docClean)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        const msg = `Este ${documentType.toUpperCase()} já está cadastrado.`;
+        setFieldErrors({ document: msg });
+        toast({ title: msg, variant: "destructive" });
+        scrollToFirstBasicFieldError({ document: msg });
+        return;
       }
+
+      const invokePromise = supabase.functions.invoke("validate-cpf-signup", {
+        body: { name: name.trim(), cpfCnpj: docClean },
+      });
+      const timeoutMs = 32000;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("validate_timeout")), timeoutMs)
+      );
+      let validation: { valid?: boolean; message?: string; asaas_customer_id?: string } | null = null;
+      try {
+        const result = await Promise.race([invokePromise, timeoutPromise]);
+        if (result.error) {
+          toast({
+            title: "Não foi possível validar o documento",
+            description: "Verifique sua conexão e tente novamente.",
+            variant: "destructive",
+          });
+          return;
+        }
+        validation = result.data as typeof validation;
+      } catch (err: unknown) {
+        const isTimeout = err instanceof Error && err.message === "validate_timeout";
+        toast({
+          title: isTimeout ? "Tempo esgotado" : "Erro na validação",
+          description: isTimeout
+            ? "A validação do documento demorou demais. Tente de novo."
+            : "Não foi possível concluir a validação. Tente novamente.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (validation?.valid !== true) {
+        const msg = validation?.message || "CPF/CNPJ inválido ou não confere com o nome.";
+        setFieldErrors({ document: msg });
+        toast({ title: msg, variant: "destructive" });
+        scrollToFirstBasicFieldError({ document: msg });
+        return;
+      }
+
+      asaasCustomerId = validation.asaas_customer_id;
+    } finally {
+      setValidating(false);
     }
 
     onNext({
@@ -579,6 +578,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       birthDate: birthIso,
       gender,
       ...addressPayload,
+      asaas_customer_id: asaasCustomerId,
       referralCode: referralToSubmit,
     });
   };
@@ -669,7 +669,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                 ? documentType === "cpf"
                   ? "CPF *"
                   : "CNPJ *"
-                : "CPF (opcional)"}
+                : "CPF *"}
             </label>
 
             {accountType === "professional" && (

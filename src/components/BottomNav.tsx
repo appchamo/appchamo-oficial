@@ -39,6 +39,7 @@ const BottomNav = () => {
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
         .eq("read", false)
+        .is("deleted_at", null)
         .neq("type", "chat");
 
       // 2. Unread chat messages count

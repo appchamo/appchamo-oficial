@@ -7,6 +7,32 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function isValidCpf(d: string): boolean {
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const digits = d.split("").map(Number);
+  for (const k of [9, 10] as const) {
+    let sum = 0;
+    for (let i = 0; i < k; i++) sum += digits[i] * (k + 1 - i);
+    if ((sum * 10) % 11 % 10 !== digits[k]) return false;
+  }
+  return true;
+}
+
+function isValidCnpj(d: string): boolean {
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+  const digits = d.split("").map(Number);
+  const calc = (slice: number[], weights: number[]) => {
+    const sum = slice.reduce((acc, n, i) => acc + n * weights[i], 0);
+    const r = sum % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  const w1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  const w2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  if (calc(digits.slice(0, 12), w1) !== digits[12]) return false;
+  if (calc(digits.slice(0, 13), w2) !== digits[13]) return false;
+  return true;
+}
+
 Deno.serve(async (req) => {
   // ✅ 1. Resposta para o Preflight do navegador (CORS)
   if (req.method === "OPTIONS") {
@@ -40,6 +66,33 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Missing required fields" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // CPF/CNPJ obrigatório para todos. Defesa contra clientes que chamem a função
+    // ignorando o passo de UI ou enviando payload manipulado.
+    {
+      const docDigits = String(basicData.document ?? "").replace(/\D/g, "");
+      const docType = basicData.documentType === "cnpj" ? "cnpj" : "cpf";
+      if (!docDigits) {
+        return new Response(
+          JSON.stringify({ error: "CPF é obrigatório." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (docType === "cpf" && !isValidCpf(docDigits)) {
+        return new Response(
+          JSON.stringify({ error: "CPF inválido." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (docType === "cnpj" && !isValidCnpj(docDigits)) {
+        return new Response(
+          JSON.stringify({ error: "CNPJ inválido." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      basicData.document = docDigits;
+      basicData.documentType = docType;
     }
 
     // Validação do JWT (verify_jwt desligado no gateway por causa do ES256)

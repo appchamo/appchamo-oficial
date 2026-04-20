@@ -701,6 +701,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [isSignOutInProgress, exitSessionToLanding]);
 
+  // ─── Force-logout em tempo real ─────────────────────────────────────────────
+  // Quando um admin executa "Excluir usuário" no painel, o backend já chama
+  // auth.admin.signOut + auth.admin.deleteUser e remove a linha em `profiles`.
+  // Aqui o app escuta o DELETE do próprio profile via Realtime e desloga
+  // imediatamente, sem precisar esperar o foreground/refresh de token.
+  // Requer REPLICA IDENTITY FULL em public.profiles (migration realtime_profile_kick).
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    const channel = supabase
+      .channel(`profile-kick-${uid}`)
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "profiles", filter: `user_id=eq.${uid}` },
+        async () => {
+          console.log("🛑 Profile deleted remotely → force logout");
+          await exitSessionToLanding();
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, exitSessionToLanding]);
+
   const signOut = async () => {
     setIsSignOutInProgress(true);
     resetOAuthGuardsAfterSignOut();

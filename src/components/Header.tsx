@@ -154,6 +154,7 @@ const Header = () => {
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
         .eq("read", false)
+        .is("deleted_at", null)
         .neq("type", "chat");
       const newCount = count || 0;
 

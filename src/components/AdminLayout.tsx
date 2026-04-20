@@ -54,7 +54,8 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
         .from("notifications")
         .select("*", { count: "exact", head: true })
         .eq("user_id", adminUser.id)
-        .eq("read", false);
+        .eq("read", false)
+        .is("deleted_at", null);
       setUnreadCount(count ?? 0);
     };
     fetchUnread();

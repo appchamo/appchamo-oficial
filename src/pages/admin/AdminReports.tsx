@@ -158,63 +158,169 @@ const ClicksTab = () => {
 };
 
 // ─── Professionals Tab ───
+type ProRow = {
+  user_id: string;
+  name: string;
+  services: number;
+  rating: number;
+  reviews: number;
+  profile_views: number;
+  profile_clicks: number;
+  call_clicks: number;
+  name_searches: number;
+  requests: number;
+};
+
+type ProSortKey =
+  | "name_searches"
+  | "profile_views"
+  | "requests"
+  | "services"
+  | "rating"
+  | "reviews";
+
 const ProfessionalsTab = () => {
-  const [data, setData] = useState<{ name: string; services: number; rating: number; reviews: number }[]>([]);
-  const [sortBy, setSortBy] = useState<"services" | "rating" | "reviews">("services");
+  const [data, setData] = useState<ProRow[]>([]);
+  const [sortBy, setSortBy] = useState<ProSortKey>("name_searches");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetch = async () => {
-      const { data: pros } = await supabase.from("professionals").select("user_id, total_services, rating, total_reviews").eq("active", true);
+      const { data: pros } = await supabase
+        .from("professionals")
+        .select("user_id, total_services, rating, total_reviews")
+        .eq("active", true);
       if (!pros) { setLoading(false); return; }
-      const userIds = pros.map(p => p.user_id);
-      const { data: profiles } = await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds);
-      const nameMap = new Map((profiles || []).map(p => [p.user_id, p.full_name]));
+      const userIds = pros.map((p) => p.user_id);
+
+      const [profilesRes, countersRes, reqsRes] = await Promise.all([
+        supabase.from("profiles").select("user_id, full_name").in("user_id", userIds),
+        (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
+          .from("professional_analytics_counters")
+          .select("user_id, profile_views, profile_clicks, call_clicks, name_searches")
+          .in("user_id", userIds),
+        supabase.from("service_requests").select("professional_id"),
+      ]);
+
+      const nameMap = new Map((profilesRes.data || []).map((p) => [p.user_id, p.full_name]));
+
+      type CounterRow = {
+        user_id: string;
+        profile_views: number | null;
+        profile_clicks: number | null;
+        call_clicks: number | null;
+        name_searches: number | null;
+      };
+      const countersMap = new Map<string, CounterRow>();
+      for (const c of (countersRes.data as CounterRow[] | null) || []) {
+        countersMap.set(c.user_id, c);
+      }
+
+      // service_requests é contado pelo professional_id (PK na tabela professionals).
+      // Precisamos mapear user_id ↔ professional_id.
+      const { data: proIdRows } = await supabase
+        .from("professionals")
+        .select("id, user_id")
+        .in("user_id", userIds);
+      const proIdByUserId = new Map<string, string>();
+      for (const row of proIdRows || []) proIdByUserId.set(row.user_id, row.id);
+
+      const reqCountsByProId: Record<string, number> = {};
+      for (const r of (reqsRes.data || []) as { professional_id: string }[]) {
+        reqCountsByProId[r.professional_id] = (reqCountsByProId[r.professional_id] || 0) + 1;
+      }
+
       setData(
-        pros.map((p) => ({
-          name: nameMap.get(p.user_id) || "—",
-          services: Number(p.total_services ?? 0),
-          rating: Number(p.rating ?? 0),
-          reviews: Number(p.total_reviews ?? 0),
-        })),
+        pros.map((p) => {
+          const c = countersMap.get(p.user_id);
+          const proId = proIdByUserId.get(p.user_id);
+          return {
+            user_id: p.user_id,
+            name: nameMap.get(p.user_id) || "—",
+            services: Number(p.total_services ?? 0),
+            rating: Number(p.rating ?? 0),
+            reviews: Number(p.total_reviews ?? 0),
+            profile_views: Number(c?.profile_views ?? 0),
+            profile_clicks: Number(c?.profile_clicks ?? 0),
+            call_clicks: Number(c?.call_clicks ?? 0),
+            name_searches: Number(c?.name_searches ?? 0),
+            requests: Number((proId && reqCountsByProId[proId]) || 0),
+          };
+        }),
       );
       setLoading(false);
     };
     fetch();
   }, []);
 
-  const sorted = [...data].sort((a, b) => b[sortBy] - a[sortBy]);
+  const sorted = [...data].sort((a, b) => Number(b[sortBy] ?? 0) - Number(a[sortBy] ?? 0));
 
-  if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>;
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  const sortOptions: { key: ProSortKey; label: string }[] = [
+    { key: "name_searches", label: "Mais pesquisados" },
+    { key: "profile_views", label: "Mais visitas" },
+    { key: "requests", label: "Mais chamadas" },
+    { key: "services", label: "Mais atendimentos" },
+    { key: "rating", label: "Melhores avaliações" },
+    { key: "reviews", label: "Mais reviews" },
+  ];
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        <strong>Pesquisados</strong> e <strong>visitas</strong> vêm dos eventos do app (quando alguém abre o perfil ou pesquisa pelo nome).{" "}
+        <strong>Chamadas</strong> são pedidos de serviço criados (<code className="text-[10px]">service_requests</code>).
+      </p>
+
       <div className="flex flex-wrap gap-2">
-        {(["services", "rating", "reviews"] as const).map(key => (
-          <button key={key} onClick={() => setSortBy(key)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${sortBy === key ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>
-            {key === "services" ? "Mais atendimentos" : key === "rating" ? "Melhores avaliações" : "Mais avaliações"}
+        {sortOptions.map((opt) => (
+          <button
+            key={opt.key}
+            onClick={() => setSortBy(opt.key)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              sortBy === opt.key
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+          >
+            {opt.label}
           </button>
         ))}
       </div>
+
       <div className="bg-card border rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="border-b bg-muted/50">
-              <th className="text-left p-3 font-medium text-muted-foreground">#</th>
-              <th className="text-left p-3 font-medium text-muted-foreground">Profissional</th>
-              <th className="text-left p-3 font-medium text-muted-foreground">Atendimentos</th>
-              <th className="text-left p-3 font-medium text-muted-foreground">Avaliação</th>
-              <th className="text-left p-3 font-medium text-muted-foreground">Reviews</th>
-            </tr></thead>
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left p-3 font-medium text-muted-foreground">#</th>
+                <th className="text-left p-3 font-medium text-muted-foreground">Profissional</th>
+                <th className="text-left p-3 font-medium text-muted-foreground">Pesquisas</th>
+                <th className="text-left p-3 font-medium text-muted-foreground">Visitas</th>
+                <th className="text-left p-3 font-medium text-muted-foreground">Chamadas</th>
+                <th className="text-left p-3 font-medium text-muted-foreground">Atend.</th>
+                <th className="text-left p-3 font-medium text-muted-foreground">Avaliação</th>
+                <th className="text-left p-3 font-medium text-muted-foreground">Reviews</th>
+              </tr>
+            </thead>
             <tbody>
               {sorted.slice(0, 30).map((p, i) => (
-                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <tr key={p.user_id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                   <td className="p-3 text-xs text-muted-foreground">{i + 1}</td>
                   <td className="p-3 font-medium text-foreground text-xs md:text-sm">{p.name}</td>
-                  <td className="p-3 text-xs">{p.services}</td>
+                  <td className="p-3 text-xs tabular-nums">{p.name_searches}</td>
+                  <td className="p-3 text-xs tabular-nums">{p.profile_views}</td>
+                  <td className="p-3 text-xs tabular-nums">{p.requests}</td>
+                  <td className="p-3 text-xs tabular-nums">{p.services}</td>
                   <td className="p-3 text-xs">⭐ {p.rating.toFixed(1)}</td>
-                  <td className="p-3 text-xs">{p.reviews}</td>
+                  <td className="p-3 text-xs tabular-nums">{p.reviews}</td>
                 </tr>
               ))}
             </tbody>
@@ -236,6 +342,7 @@ type UserDeviceRow = {
   device_name: string | null;
   last_active: string | null;
   push_token: string | null;
+  platform: string | null;
 };
 
 type PrimaryDeviceBucket = "none" | "iphone" | "android" | "desktop" | "outro";
@@ -294,7 +401,7 @@ async function paginateUserDevices(): Promise<UserDeviceRow[]> {
   for (;;) {
     const { data, error } = await client
       .from("user_devices")
-      .select("user_id, device_id, device_name, last_active, push_token")
+      .select("user_id, device_id, device_name, last_active, push_token, platform")
       .range(from, from + FETCH_PAGE - 1);
     if (error) {
       console.error("[AdminReports] user_devices", error);
@@ -360,10 +467,30 @@ function inferIosFromPushToken(token: string | null | undefined): boolean {
   return t.length === 64 && /^[a-f0-9]+$/i.test(t);
 }
 
+/** Tokens FCM: contêm ':' e são longos (~163 chars). Indicam Android. */
+function inferAndroidFromPushToken(token: string | null | undefined): boolean {
+  const t = (token || "").trim();
+  if (!t) return false;
+  if (t.includes(":")) return true;
+  // token longo, claramente não é APNs (64 hex): provavelmente FCM → Android.
+  if (t.length > 80 && !/^[a-f0-9]+$/i.test(t)) return true;
+  return false;
+}
+
 function deviceBucketForRow(d: UserDeviceRow): "iphone" | "android" | "desktop" | "outro" {
+  // 1) coluna `platform` explícita escrita pelo cliente nativo.
+  const plat = (d.platform || "").toLowerCase();
+  if (plat === "ios") return "iphone";
+  if (plat === "android") return "android";
+  if (plat === "web") return "desktop";
+
+  // 2) fallback por device_name.
   const fromName = bucketFromDeviceName(d.device_name);
   if (fromName !== "outro") return fromName;
+
+  // 3) fallback por formato do push token.
   if (inferIosFromPushToken(d.push_token)) return "iphone";
+  if (inferAndroidFromPushToken(d.push_token)) return "android";
   return "outro";
 }
 

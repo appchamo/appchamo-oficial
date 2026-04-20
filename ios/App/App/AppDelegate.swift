@@ -4,6 +4,8 @@ import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
 import MediaPlayer // Para limpar Now Playing quando o app abre (evita player "Chamô" na tela de bloqueio)
+import FBSDKCoreKit
+import AppTrackingTransparency
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate { // ✅ Adicionado o Delegate aqui
@@ -16,7 +18,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
         // ✅ Inicializa o Firebase
         FirebaseApp.configure()
-        
+
+        // ✅ Inicializa o Meta SDK (Facebook) — necessário para a Meta atribuir
+        // installs/eventos das campanhas de Tráfego para Aplicativo.
+        // O SDK auto-loga "fb_mobile_activate_app" a cada abertura do app.
+        ApplicationDelegate.shared.application(
+            application,
+            didFinishLaunchingWithOptions: launchOptions
+        )
+
         // ✅ Configura o Delegate para mostrar notificações em primeiro plano
         UNUserNotificationCenter.current().delegate = self
         
@@ -48,11 +58,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Limpa o Now Playing para o player "Chamô" sumir da tela de bloqueio ao abrir o app
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+
+        // Pede permissão de App Tracking Transparency (iOS 14.5+) para habilitar
+        // atribuição de installs com IDFA. Se o usuário negar, o Meta ainda usa
+        // SKAdNetwork (limitado, mas funciona).
+        if #available(iOS 14.5, *) {
+            // Pequeno delay para o iOS aceitar a chamada (não pode ser durante launch)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                ATTrackingManager.requestTrackingAuthorization { _ in
+                    // Após a resposta, dispara o activateApp para registrar o evento
+                    // de abertura no Meta com o consentimento já definido.
+                    AppEvents.shared.activateApp()
+                }
+            }
+        } else {
+            AppEvents.shared.activateApp()
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {}
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+        // Deixa o SDK do Facebook processar deep links de campanhas (deferred deep linking)
+        ApplicationDelegate.shared.application(app, open: url, options: options)
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 

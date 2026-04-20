@@ -151,6 +151,42 @@ serve(async (req) => {
       }
     };
 
+    /**
+     * Guarda um snapshot mínimo do utilizador na tabela `deleted_users_archive`
+     * antes de o cascade delete apagar tudo. Só os campos visíveis pelo admin:
+     * nome, email, tipo, contacto, documento e um snapshot JSON do profile inteiro.
+     * Erros aqui nunca devem bloquear a exclusão do utilizador.
+     */
+    const archiveUserBeforeDelete = async (user_id: string, deleted_by: string | null) => {
+      try {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("user_id", user_id)
+          .maybeSingle();
+
+        const p: any = prof ?? {};
+
+        await supabase.from("deleted_users_archive").insert({
+          original_user_id: user_id,
+          full_name: p.full_name ?? null,
+          email: p.email ?? null,
+          user_type: p.user_type ?? null,
+          phone: p.phone ?? null,
+          cpf: p.cpf ?? null,
+          cnpj: p.cnpj ?? null,
+          avatar_url: p.avatar_url ?? null,
+          address_city: p.address_city ?? null,
+          address_state: p.address_state ?? null,
+          profile_created_at: p.created_at ?? null,
+          snapshot: prof ?? {},
+          deleted_by,
+        });
+      } catch (e: any) {
+        console.warn(`[archiveUserBeforeDelete] skipped: ${e?.message || e}`);
+      }
+    };
+
     // Shared function to cascade-delete a user
     const cascadeDeleteUser = async (user_id: string) => {
       console.log(`[cascadeDeleteUser] Starting deletion for user: ${user_id}`);
@@ -309,6 +345,7 @@ serve(async (req) => {
       if (!user_id) throw new Error("user_id required");
       if (user_id === caller.id) throw new Error("Cannot delete yourself");
 
+      await archiveUserBeforeDelete(user_id, caller.id);
       await cascadeDeleteUser(user_id);
 
       await supabase.from("admin_logs").insert({
@@ -322,7 +359,32 @@ serve(async (req) => {
 
     if (action === "delete_own_account") {
       const caller = await getCaller();
+      await archiveUserBeforeDelete(caller.id, null);
       await cascadeDeleteUser(caller.id);
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Purga 100% dos dados restantes do utilizador arquivado (antes dos 30 dias automáticos).
+    if (action === "purge_archived_user") {
+      const caller = await verifyAdmin();
+      const { archive_id } = body;
+      if (!archive_id) throw new Error("archive_id required");
+
+      const { error } = await supabase
+        .from("deleted_users_archive")
+        .delete()
+        .eq("id", archive_id);
+      if (error) throw new Error(error.message);
+
+      await supabase.from("admin_logs").insert({
+        admin_user_id: caller.id,
+        action: "purge_archived_user",
+        target_type: "deleted_users_archive",
+        target_id: archive_id,
+      });
+
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

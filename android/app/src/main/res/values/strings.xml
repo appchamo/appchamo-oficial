@@ -4,4 +4,9 @@
     <string name="title_activity_main">Chamô</string>
     <string name="package_name">com.chamo.app</string>
     <string name="custom_url_scheme">com.chamo.app</string>
+
+    <!-- Meta SDK (Facebook) — tracking de installs/eventos -->
+    <string name="facebook_app_id">1468826291300680</string>
+    <string name="facebook_client_token">785c48b31e7514481dbba2daed50ec1e</string>
+    <string name="fb_login_protocol_scheme">fb1468826291300680</string>
 </resources>

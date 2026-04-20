@@ -22,6 +22,7 @@ import {
 import { subscribeThreadActivity, sendThreadActivity, type ThreadActivityKind } from "@/lib/threadActivityChannels";
 import { compressImageForChat } from "@/lib/compressChatImage";
 import { getCommunityPostInAppPath } from "@/lib/publicAppUrl";
+import ApplyCouponButton, { type AppliedCoupon } from "@/components/ApplyCouponButton";
 
 type ReactionAgg = { likes: number; dislikes: number; mine: "like" | "dislike" | null };
 
@@ -150,6 +151,8 @@ const MessageThread = () => {
   const isFirstScrollRef = useRef(true);
 
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
+  /** PK do profissional na tabela `professionals` — usado para buscar/aplicar cupons do profissional. */
+  const [chatProId, setChatProId] = useState<string | null>(null);
   /** Slug ou UUID do profissional — rota /professional/:key (cliente a ver o pro). */
   const [peerProfileNavKey, setPeerProfileNavKey] = useState<string | null>(null);
   const [peerClientPreviewOpen, setPeerClientPreviewOpen] = useState(false);
@@ -213,6 +216,9 @@ const MessageThread = () => {
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
   const [couponDiscount, setCouponDiscount] = useState<{type: string;value: number;} | null>(null);
+  /** Cupom criado pelo profissional (auto-aplicável no checkout). Quando aplicado,
+   *  também alimenta `couponDiscount` para reaproveitar o cálculo de `getDiscountedAmount`. */
+  const [proCoupon, setProCoupon] = useState<AppliedCoupon | null>(null);
   const [rewardCoupon, setRewardCoupon] = useState<{type: string;value: number;} | null>(null);
   const [rewardOpen, setRewardOpen] = useState(false);
 
@@ -244,6 +250,7 @@ const MessageThread = () => {
     threadId: string; userId: string; chatProUserId: string; finalAmount: number;
     originalAmount: number;
     couponDiscount: { type: string; value: number } | null; selectedCouponId: string | null;
+    proCouponId: string | null;
     paymentDataAmount: string;
   } | null>(null);
   /** Guard: evita que Realtime + polling confirmem o pagamento duas vezes. */
@@ -452,6 +459,7 @@ const MessageThread = () => {
           originalAmount: tx.total_amount,
           couponDiscount: null,
           selectedCouponId: null,
+          proCouponId: null,
           paymentDataAmount: String(tx.total_amount),
         };
         setPixOpen(true);
@@ -583,6 +591,7 @@ const MessageThread = () => {
         setAppointment(appRes.data ? (appRes.data as any) : null);
 
         if (pro) {
+          setChatProId((pro as { id: string }).id);
           if (isClient) {
             setProAvailabilityStatus((pro as any).availability_status || "available");
             const slug = (pro as { slug?: string | null }).slug;
@@ -916,6 +925,14 @@ const MessageThread = () => {
           });
           if (params.selectedCouponId) {
             await supabase.from("coupons").update({ used: true } as any).eq("id", params.selectedCouponId);
+          }
+          if (params.proCouponId) {
+            await (supabase.rpc as unknown as (
+              fn: string,
+              args: Record<string, unknown>,
+            ) => Promise<{ error: { message: string } | null }>)("increment_pro_coupon_usage", {
+              p_coupon_id: params.proCouponId,
+            });
           }
           await sendNotification(params.userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${params.finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
           if (params.chatProUserId) await sendNotification(params.chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNet.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`, null, profile?.avatar_url ?? null);
@@ -1769,6 +1786,7 @@ const MessageThread = () => {
     if (!billing.method) setInstallments("1");
     setSelectedCouponId(null);
     setCouponDiscount(null);
+    setProCoupon(null);
 
     // Sempre abrir na etapa "Dados para pagamento" (CPF + endereço) para o usuário poder corrigir ou tentar outro CPF (ex.: após "CPF já cadastrado")
     let initialBillingForm = { cpf: "", cep: "", street: "", neighborhood: "", number: "", city: "", state: "" };
@@ -1801,12 +1819,31 @@ const MessageThread = () => {
   const applyCoupon = (couponId: string) => {
     const coupon = availableCoupons.find((c) => c.id === couponId);
     if (!coupon) return;
+    // Cupom do cliente é exclusivo com o cupom do profissional.
+    setProCoupon(null);
     setSelectedCouponId(couponId);
     setCouponDiscount({ type: coupon.discount_percent > 0 ? "percentage" : "fixed", value: coupon.discount_percent });
   };
 
   const removeCoupon = () => {
     setSelectedCouponId(null);
+    setCouponDiscount(null);
+  };
+
+  /** Cupom do profissional: aplicar (auto-aplicável, sem código). */
+  const applyProCoupon = (c: AppliedCoupon) => {
+    // Cupom do profissional é exclusivo com o cupom do cliente.
+    setSelectedCouponId(null);
+    setProCoupon(c);
+    // Reaproveita o cálculo existente: convertendo "amount" → "fixed" (R$).
+    setCouponDiscount({
+      type: c.discount_type === "percent" ? "percentage" : "fixed",
+      value: c.discount_type === "percent" ? c.discount_value : c.effective_discount,
+    });
+  };
+
+  const removeProCoupon = () => {
+    setProCoupon(null);
     setCouponDiscount(null);
   };
 
@@ -2251,6 +2288,7 @@ const MessageThread = () => {
           originalAmount: parseFloat(paymentData.amount), // valor original sem desconto de cupom
           couponDiscount,
           selectedCouponId,
+          proCouponId: proCoupon?.id ?? null,
           paymentDataAmount: paymentData.amount,
         };
         setProcessingPayment(false);
@@ -2293,6 +2331,14 @@ const MessageThread = () => {
               if (selectedCouponId) {
                 await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
               }
+              if (proCoupon?.id) {
+                await (supabase.rpc as unknown as (
+                  fn: string,
+                  args: Record<string, unknown>,
+                ) => Promise<{ error: { message: string } | null }>)("increment_pro_coupon_usage", {
+                  p_coupon_id: proCoupon.id,
+                });
+              }
 
               await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
               if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetPoll.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`, null, profile?.avatar_url ?? null);
@@ -2330,6 +2376,14 @@ const MessageThread = () => {
 
       if (selectedCouponId) {
         await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
+      }
+      if (proCoupon?.id) {
+        await (supabase.rpc as unknown as (
+          fn: string,
+          args: Record<string, unknown>,
+        ) => Promise<{ error: { message: string } | null }>)("increment_pro_coupon_usage", {
+          p_coupon_id: proCoupon.id,
+        });
       }
 
       await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${originalAmtCard.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
@@ -2858,6 +2912,15 @@ const MessageThread = () => {
                 setRequestStatus("completed");
                 await markAppointmentDone();
                 await sendNotification(userId, "🎉 Serviço Finalizado!", "Parabéns, você concluiu mais um serviço com sucesso. Continue assim!");
+                if (recipientUserId) {
+                  await sendNotification(
+                    recipientUserId,
+                    "⭐ Avalie seu profissional",
+                    `${profile?.full_name || "O profissional"} encerrou o atendimento. Conte como foi sua experiência!`,
+                    `/messages/${threadId}`,
+                    profile?.avatar_url ?? null,
+                  );
+                }
                 setClosingCall(false);
                 toast({ title: "Chamada encerrada!" });
               }}
@@ -3208,14 +3271,43 @@ const MessageThread = () => {
       </main>
 
       {isChatFinished ?
-      (!isChatClosedByMessage &&
-      <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-4">
-          <p className="text-sm text-muted-foreground text-center max-w-screen-lg mx-auto">
-            {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" : 
-             requestStatus === "cancelled" ? "Solicitação cancelada — chat encerrado" : 
-             "Serviço finalizado — chat encerrado"}
-          </p>
-        </div>
+      (
+        // Cliente pode avaliar quando o chat foi finalizado normalmente (não cancelado/recusado)
+        (!isProfessional && !isFollowingDm && !hasRated &&
+          requestStatus !== "cancelled" && requestStatus !== "rejected") ? (
+          <div
+            className="sticky bottom-0 bg-background border-t px-4 py-3"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 16px) + 12px)" }}
+          >
+            <div className="max-w-screen-lg mx-auto flex items-center gap-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-3 py-2.5 dark:border-amber-900/40 dark:from-amber-900/20 dark:to-orange-900/20">
+              <div className="w-10 h-10 shrink-0 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center">
+                <Star className="w-5 h-5 text-amber-500 fill-amber-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-foreground leading-tight">Avalie {otherParty.name}</p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Conte como foi sua experiência. Sua avaliação conta como 1 serviço para o profissional.
+                </p>
+              </div>
+              <button
+                onClick={() => setRatingOpen(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-sm active:scale-95 transition-transform"
+              >
+                <Star className="w-3.5 h-3.5" />
+                Avaliar
+              </button>
+            </div>
+          </div>
+        ) : (!isChatClosedByMessage &&
+          <div className="sticky bottom-20 bg-muted/50 border-t px-4 py-4">
+            <p className="text-sm text-muted-foreground text-center max-w-screen-lg mx-auto">
+              {requestStatus === "rejected" ? "Chamada recusada — chat encerrado" :
+               requestStatus === "cancelled" ? "Solicitação cancelada — chat encerrado" :
+               !isProfessional && hasRated ? "Avaliação enviada · serviço finalizado" :
+               "Serviço finalizado — chat encerrado"}
+            </p>
+          </div>
+        )
       ) :
 
       <div 
@@ -4044,7 +4136,19 @@ const MessageThread = () => {
                 <p className="text-xs text-muted-foreground mt-2">{paymentData.desc}</p>
               </div>
 
-              {!selectedCouponId && availableCoupons.length > 0 && (
+              {/* Cupom auto-aplicável criado pelo PROFISSIONAL — só aparece se houver
+                   cupom ativo e nenhum cupom do cliente já estiver aplicado. */}
+              {chatProId && paymentData && !selectedCouponId && (
+                <ApplyCouponButton
+                  professionalId={chatProId}
+                  amount={parseFloat(paymentData.amount)}
+                  applied={proCoupon}
+                  onApply={applyProCoupon}
+                  onRemove={removeProCoupon}
+                />
+              )}
+
+              {!selectedCouponId && !proCoupon && availableCoupons.length > 0 && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <p className="text-xs font-bold text-emerald-600 uppercase flex items-center gap-1">
                     <Ticket className="w-3.5 h-3.5" /> Seus Cupons

@@ -1,6 +1,6 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy, Users as UsersIcon, Archive } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
@@ -17,6 +17,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 function maskCpf(value: string | null | undefined): string {
   if (!value) return "";
@@ -88,6 +89,253 @@ async function copyText(value: string | null | undefined, successTitle: string) 
   }
 }
 
+async function invokeAdminManageFn(body: Record<string, unknown>) {
+  await supabase.auth.refreshSession().catch(() => {});
+  const token = await getAccessTokenForEdgeFunctions();
+  if (!token) {
+    toast({ title: "Sessão expirada", description: "Faça login novamente no painel admin.", variant: "destructive" });
+    return { data: null, error: new Error("Sessão expirada") };
+  }
+  return supabase.functions.invoke("admin-manage", {
+    body,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: SUPABASE_PUBLIC_API_KEY,
+    },
+  });
+}
+
+interface DeletedUserRow {
+  id: string;
+  original_user_id: string;
+  full_name: string | null;
+  email: string | null;
+  user_type: string | null;
+  phone: string | null;
+  cpf: string | null;
+  cnpj: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  deleted_at: string;
+  purge_after: string;
+}
+
+function daysRemaining(purge_after: string): number {
+  const ms = new Date(purge_after).getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+}
+
+const DeletedUsersTab = () => {
+  const [rows, setRows] = useState<DeletedUserRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [purgeId, setPurgeId] = useState<string | null>(null);
+  const [detailsUser, setDetailsUser] = useState<DeletedUserRow | null>(null);
+
+  const fetchDeleted = useCallback(async () => {
+    setLoading(true);
+    // Purga automática dos expirados antes de listar.
+    try {
+      await (supabase as any).rpc("admin_purge_expired_deleted_users");
+    } catch {
+      /* noop */
+    }
+    const { data, error } = await (supabase as any)
+      .from("deleted_users_archive")
+      .select("id, original_user_id, full_name, email, user_type, phone, cpf, cnpj, address_city, address_state, deleted_at, purge_after")
+      .order("deleted_at", { ascending: false });
+    if (error) {
+      toast({ title: "Erro", description: translateError(error.message), variant: "destructive" });
+      setLoading(false);
+      return;
+    }
+    setRows((data as DeletedUserRow[]) || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { void fetchDeleted(); }, [fetchDeleted]);
+
+  const handlePurge = async () => {
+    if (!purgeId) return;
+    const { data, error } = await invokeAdminManageFn({
+      action: "purge_archived_user",
+      archive_id: purgeId,
+    });
+    const errMsg = await readEdgeFunctionInvokeError(data, error);
+    if (errMsg) {
+      toast({ title: "Erro", description: errMsg, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Dados apagados permanentemente" });
+    setPurgeId(null);
+    void fetchDeleted();
+  };
+
+  const filtered = rows.filter((r) => {
+    const q = search.toLowerCase();
+    if (!q) return true;
+    return (
+      (r.full_name || "").toLowerCase().includes(q) ||
+      (r.email || "").toLowerCase().includes(q)
+    );
+  });
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30 mb-3">
+        <Search className="w-4 h-4 text-muted-foreground" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nome ou email..."
+          className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+        />
+      </div>
+
+      <p className="text-xs text-muted-foreground mb-3">
+        Os dados ficam arquivados por <strong>30 dias</strong> a partir da data de exclusão e são apagados automaticamente depois disso. Clique em <strong>Excluir 100%</strong> para remover manualmente antes do prazo.
+      </p>
+
+      {loading ? (
+        <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
+      ) : (
+        <div className="bg-card border rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Email</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Tipo</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Excluído em</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Retenção</th>
+                  <th className="p-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => {
+                  const days = daysRemaining(r.purge_after);
+                  const safeType = r.user_type === "enterprise" ? "company" : r.user_type;
+                  const typeLabel =
+                    safeType === "client" ? "Cliente" :
+                    safeType === "professional" ? "Profissional" :
+                    safeType === "company" ? "Empresa" :
+                    safeType === "sponsor" ? "Patrocinador" :
+                    safeType || "—";
+                  return (
+                    <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="p-3 font-medium text-foreground">{r.full_name || "—"}</td>
+                      <td className="p-3 text-muted-foreground">{r.email || "—"}</td>
+                      <td className="p-3 text-xs">
+                        <span className="rounded-md bg-muted px-2 py-0.5 font-medium">{typeLabel}</span>
+                      </td>
+                      <td className="p-3 text-muted-foreground text-xs">
+                        {new Date(r.deleted_at).toLocaleString("pt-BR")}
+                      </td>
+                      <td className="p-3 text-xs">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium ${
+                            days <= 3
+                              ? "bg-destructive/10 text-destructive"
+                              : days <= 10
+                                ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400"
+                                : "bg-muted text-foreground"
+                          }`}
+                        >
+                          {days === 0 ? "Expira hoje" : `${days} dia${days === 1 ? "" : "s"}`}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                              <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setDetailsUser(r)}>
+                              <Contact className="w-3.5 h-3.5 mr-2" /> Ver detalhes
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setPurgeId(r.id)} className="text-destructive">
+                              <Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir 100%
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={6} className="p-8 text-center text-muted-foreground text-sm">Nenhum usuário excluído</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <AlertDialog open={!!purgeId} onOpenChange={(o) => !o && setPurgeId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar dados permanentemente?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Este snapshot será removido agora. Esta ação é irreversível.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePurge} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Excluir 100%</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={!!detailsUser} onOpenChange={(o) => !o && setDetailsUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Detalhes — {detailsUser?.full_name || "Usuário excluído"}</DialogTitle>
+            <DialogDescription className="sr-only">Dados arquivados do utilizador removido.</DialogDescription>
+          </DialogHeader>
+          {detailsUser ? (
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">E-mail</p>
+                <p className="text-foreground break-all">{detailsUser.email || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Telefone</p>
+                <p className="text-foreground">{formatBrazilPhone(detailsUser.phone) || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Cidade / UF</p>
+                <p className="text-foreground">
+                  {[detailsUser.address_city, detailsUser.address_state].filter(Boolean).join("/") || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CPF / CNPJ</p>
+                <div className="text-foreground space-y-0.5">
+                  {detailsUser.cpf?.trim() ? <p><span className="text-muted-foreground">CPF: </span>{maskCpf(detailsUser.cpf)}</p> : null}
+                  {detailsUser.cnpj?.trim() ? <p><span className="text-muted-foreground">CNPJ: </span>{maskCnpj(detailsUser.cnpj)}</p> : null}
+                  {!detailsUser.cpf?.trim() && !detailsUser.cnpj?.trim() ? <p>—</p> : null}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Excluído em</p>
+                <p className="text-foreground">{new Date(detailsUser.deleted_at).toLocaleString("pt-BR")}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Retenção até</p>
+                <p className="text-foreground">{new Date(detailsUser.purge_after).toLocaleString("pt-BR")}</p>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const AdminUsers = () => {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "client" | "professional" | "company">("all");
@@ -111,21 +359,7 @@ const AdminUsers = () => {
 
   useEffect(() => { fetchUsers(); }, []);
 
-  const invokeAdminManage = async (body: Record<string, unknown>) => {
-    await supabase.auth.refreshSession().catch(() => {});
-    const token = await getAccessTokenForEdgeFunctions();
-    if (!token) {
-      toast({ title: "Sessão expirada", description: "Faça login novamente no painel admin.", variant: "destructive" });
-      return { data: null, error: new Error("Sessão expirada") };
-    }
-    return supabase.functions.invoke("admin-manage", {
-      body,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: SUPABASE_PUBLIC_API_KEY,
-      },
-    });
-  };
+  const invokeAdminManage = invokeAdminManageFn;
 
   const filtered = users
     .filter((u) => {
@@ -296,6 +530,23 @@ const AdminUsers = () => {
 
   return (
     <AdminLayout title="Usuários">
+      <Tabs defaultValue="active">
+        <TabsList className="mb-4 flex flex-wrap w-full gap-1 h-auto min-h-10">
+          <TabsTrigger value="active" className="shrink-0">
+            <UsersIcon className="w-3.5 h-3.5 mr-1" />
+            Ativos
+          </TabsTrigger>
+          <TabsTrigger value="deleted" className="shrink-0">
+            <Archive className="w-3.5 h-3.5 mr-1" />
+            Excluídos
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="deleted">
+          <DeletedUsersTab />
+        </TabsContent>
+
+        <TabsContent value="active">
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
         <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
           <Search className="w-4 h-4 text-muted-foreground" />
@@ -572,6 +823,8 @@ const AdminUsers = () => {
           </div>
         </DialogContent>
       </Dialog>
+        </TabsContent>
+      </Tabs>
     </AdminLayout>
   );
 };

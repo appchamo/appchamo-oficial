@@ -2,6 +2,7 @@ import {
   X,
   Home,
   Search,
+  MessageSquare,
   Ticket,
   User,
   Briefcase,
@@ -50,6 +51,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
       items: [
         { icon: Home, label: "Início", path: "/home" },
         { icon: Search, label: "Buscar Profissionais", path: "/search" },
+        { icon: MessageSquare, label: "Mensagens", path: "/messages" },
         { icon: Briefcase, label: "Vagas de Emprego", path: "/jobs" },
         { icon: Gift, label: "Programa de recompensas", path: "/rewards" },
       ],

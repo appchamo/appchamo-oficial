@@ -53,6 +53,8 @@ export const usePush = (userId?: string) => {
             }
             const platform = Capacitor.getPlatform();
             const deviceName = platform === 'ios' ? 'iPhone App' : platform === 'android' ? 'Android App' : 'App';
+            const platformValue: 'ios' | 'android' | 'web' =
+              platform === 'ios' ? 'ios' : platform === 'android' ? 'android' : 'web';
 
             console.log('☁️ [Push] Tentando salvar token para o dispositivo:', deviceId);
 
@@ -68,8 +70,9 @@ export const usePush = (userId?: string) => {
                 device_id: deviceId,
                 push_token: token,
                 device_name: deviceName,
+                platform: platformValue,
                 last_active: new Date().toISOString()
-              },
+              } as never,
               { onConflict: 'user_id,device_id' }
             );
 

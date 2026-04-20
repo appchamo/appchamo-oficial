@@ -24,6 +24,7 @@ export async function registerNativeDevicePresence(userId: string): Promise<void
 
   const platform = Capacitor.getPlatform();
   const deviceName = platform === "ios" ? "iPhone App" : platform === "android" ? "Android App" : "App";
+  const platformValue = platform === "ios" || platform === "android" ? platform : "web";
   const last_active = new Date().toISOString();
 
   // `user_devices` pode não estar no types gerados do Supabase
@@ -47,7 +48,7 @@ export async function registerNativeDevicePresence(userId: string): Promise<void
   if (row?.id) {
     const { error: upErr } = await db
       .from("user_devices")
-      .update({ device_name: deviceName, last_active })
+      .update({ device_name: deviceName, platform: platformValue, last_active })
       .eq("user_id", userId)
       .eq("device_id", deviceId);
     if (upErr) console.warn("[registerNativeDevicePresence] update:", upErr);
@@ -58,13 +59,14 @@ export async function registerNativeDevicePresence(userId: string): Promise<void
     user_id: userId,
     device_id: deviceId,
     device_name: deviceName,
+    platform: platformValue,
     last_active,
   });
 
   if (insErr && (insErr as { code?: string }).code === "23505") {
     const { error: upErr2 } = await db
       .from("user_devices")
-      .update({ device_name: deviceName, last_active })
+      .update({ device_name: deviceName, platform: platformValue, last_active })
       .eq("user_id", userId)
       .eq("device_id", deviceId);
     if (upErr2) console.warn("[registerNativeDevicePresence] update after conflict:", upErr2);

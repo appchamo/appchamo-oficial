@@ -41,7 +41,8 @@ type DiscountType = "amount" | "percent";
 interface ProfessionalCoupon {
   id: string;
   professional_id: string;
-  code: string;
+  /** Rótulo opcional, só visível para o profissional. */
+  name: string | null;
   discount_type: DiscountType;
   discount_value: number;
   min_purchase: number | null;
@@ -245,7 +246,8 @@ const CouponsTab = ({ professionalId }: CouponsTabProps) => {
   };
 
   const removeCoupon = async (c: ProfessionalCoupon) => {
-    if (!window.confirm(`Excluir o cupom ${c.code}? Essa ação não pode ser desfeita.`)) return;
+    const label = c.name?.trim() || `de ${formatDiscount(c)}`;
+    if (!window.confirm(`Excluir o cupom ${label}? Essa ação não pode ser desfeita.`)) return;
     const { error } = await couponsTable().delete().eq("id", c.id);
     if (error) {
       toast({ title: "Erro ao excluir", description: error.message, variant: "destructive" });
@@ -263,10 +265,10 @@ const CouponsTab = ({ professionalId }: CouponsTabProps) => {
         <div className="flex-1">
           <p className="text-sm font-semibold text-foreground">Como funciona</p>
           <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-            Você cria cupons que <strong>seus clientes</strong> usam ao contratar. Quem banca o desconto é
-            você — o cupom aparece no seu perfil como destaque{" "}
-            <strong className="text-primary">"Contrate com desconto"</strong> sempre que houver pelo menos um
-            cupom ativo.
+            O cliente <strong>não digita código</strong>. Quando ele for pagar você, aparece um botão
+            <strong> "Aplicar cupom"</strong> com o melhor desconto que você criou. Quem banca é você. Seu
+            perfil ganha o destaque <strong className="text-primary">"Contrate com desconto"</strong>{" "}
+            sempre que houver pelo menos um cupom ativo.
           </p>
         </div>
       </div>
@@ -351,8 +353,13 @@ const CouponRow = ({ coupon, onToggleActive, onRemove }: CouponRowProps) => {
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-base font-bold text-foreground tracking-wider">
-            {coupon.code}
+          <span className="inline-flex items-center gap-1.5 text-base font-bold text-foreground">
+            {coupon.discount_type === "percent" ? (
+              <Percent className="w-4 h-4 text-primary" />
+            ) : (
+              <DollarSign className="w-4 h-4 text-primary" />
+            )}
+            {formatDiscount(coupon)} de desconto
           </span>
           <span
             className={cn(
@@ -375,14 +382,9 @@ const CouponRow = ({ coupon, onToggleActive, onRemove }: CouponRowProps) => {
                   : "Pausado"}
           </span>
         </div>
-        <div className="flex items-center gap-1.5 mt-1 text-sm text-foreground">
-          {coupon.discount_type === "percent" ? (
-            <Percent className="w-3.5 h-3.5 text-primary" />
-          ) : (
-            <DollarSign className="w-3.5 h-3.5 text-primary" />
-          )}
-          <strong>{formatDiscount(coupon)} de desconto</strong>
-        </div>
+        {coupon.name?.trim() && (
+          <p className="text-xs text-muted-foreground mt-0.5 italic">{coupon.name}</p>
+        )}
         <div className="text-[11px] text-muted-foreground mt-1 space-y-0.5">
           {(coupon.min_purchase != null || coupon.max_purchase != null) && (
             <p>
@@ -439,7 +441,7 @@ interface CouponFormProps {
 }
 
 const CouponForm = ({ professionalId, onCreated }: CouponFormProps) => {
-  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
   const [discountType, setDiscountType] = useState<DiscountType>("percent");
   const [discountValue, setDiscountValue] = useState("");
   const [minPurchase, setMinPurchase] = useState("");
@@ -451,15 +453,6 @@ const CouponForm = ({ professionalId, onCreated }: CouponFormProps) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const codeClean = code.trim().toUpperCase().replace(/\s+/g, "");
-    if (codeClean.length < 3) {
-      toast({
-        title: "Código muito curto",
-        description: "Use pelo menos 3 caracteres (ex.: PROMO10).",
-        variant: "destructive",
-      });
-      return;
-    }
     const value = Number(discountValue.replace(",", "."));
     if (!Number.isFinite(value) || value <= 0) {
       toast({
@@ -516,7 +509,7 @@ const CouponForm = ({ professionalId, onCreated }: CouponFormProps) => {
     try {
       const payload = {
         professional_id: professionalId,
-        code: codeClean,
+        name: name.trim() ? name.trim() : null,
         discount_type: discountType,
         discount_value: value,
         min_purchase: min,
@@ -527,20 +520,12 @@ const CouponForm = ({ professionalId, onCreated }: CouponFormProps) => {
       };
       const { error } = await couponsTable().insert(payload);
       if (error) {
-        if (error.code === "23505") {
-          toast({
-            title: "Código já existe",
-            description: "Você já tem um cupom com esse código. Escolha outro.",
-            variant: "destructive",
-          });
-        } else {
-          toast({ title: "Erro ao criar cupom", description: error.message, variant: "destructive" });
-        }
+        toast({ title: "Erro ao criar cupom", description: error.message, variant: "destructive" });
         return;
       }
       toast({
         title: "Cupom criado!",
-        description: `O cupom ${codeClean} já está ativo no seu perfil.`,
+        description: "Já está disponível para seus clientes aplicarem no checkout.",
       });
       onCreated();
     } finally {
@@ -555,17 +540,17 @@ const CouponForm = ({ professionalId, onCreated }: CouponFormProps) => {
   return (
     <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-4 space-y-4">
       <div>
-        <label className={labelCls}>Código do cupom</label>
+        <label className={labelCls}>Nome do cupom (opcional)</label>
         <input
           type="text"
-          value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
-          placeholder="Ex.: PROMO10"
-          maxLength={20}
-          className={cn(inputCls, "mt-1 font-mono tracking-wider")}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ex.: Promo de inverno"
+          maxLength={60}
+          className={cn(inputCls, "mt-1")}
         />
         <p className="text-[10px] text-muted-foreground mt-1 ml-1">
-          Sem espaços. Será convertido para maiúsculas.
+          Só você vê — o cliente aplica direto no checkout, sem digitar código.
         </p>
       </div>
 

@@ -14,7 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BadgeCheck, ChevronRight, Heart, MessageCircle, MoreHorizontal, Share2, Sparkles, X } from "lucide-react";
+import { BadgeCheck, ChevronRight, Heart, MessageCircle, Share2, Sparkles, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -103,68 +103,105 @@ export default function ProVerifiedCommunityTeaser() {
 
   return (
     <section className="relative mb-5">
-      {/* Etiqueta "EXEMPLO" flutuando por cima do post fantasma */}
-      <div className="pointer-events-none absolute inset-x-0 top-16 z-10 flex items-center justify-center">
-        <div className="rotate-[-6deg] px-4 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-extrabold uppercase tracking-[0.18em] shadow-lg ring-2 ring-white/80">
-          Exemplo
-        </div>
-      </div>
+      {/* Legenda discreta acima do post-exemplo */}
+      <p className="text-[12px] font-semibold text-muted-foreground mb-1.5 px-1">
+        Sua publicação pode ser assim.
+      </p>
 
-      {/* Botão de dispensar, acima do post-mock */}
-      <button
-        type="button"
-        onClick={handleDismiss}
-        aria-label="Ocultar sugestão de selo verificado"
-        className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-white/95 hover:bg-white shadow-sm"
-      >
-        <X className="w-3.5 h-3.5 text-muted-foreground" />
-      </button>
+      <div className="relative">
+        {/* Botão de dispensar, acima do post-mock */}
+        <button
+          type="button"
+          onClick={handleDismiss}
+          aria-label="Ocultar sugestão de selo verificado"
+          className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-white/95 hover:bg-white shadow-sm"
+        >
+          <X className="w-3.5 h-3.5 text-muted-foreground" />
+        </button>
 
-      {/* Post-mock, baixa opacidade (preview) — apenas TEXTO */}
-      <div
-        aria-hidden
-        className="opacity-55 pointer-events-none select-none bg-white dark:bg-zinc-900 rounded-2xl border border-black/[0.06] dark:border-white/10 shadow-sm overflow-hidden"
-      >
-        <div className="flex items-center gap-3 px-4 pt-4">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary overflow-hidden shrink-0 ring-2 ring-primary/20">
-            {info.avatar_url ? (
-              <img src={info.avatar_url} alt={info.full_name} className="w-full h-full object-cover" />
-            ) : (
-              initials
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1 min-w-0">
-              <p className="font-bold text-[14px] text-foreground truncate leading-tight">{info.full_name}</p>
-              {/* Selo verificado destacado */}
-              <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-blue-500 shrink-0">
-                <BadgeCheck className="w-3 h-3 text-white" strokeWidth={2.5} />
-              </span>
+        {/* Post-mock, baixa opacidade (preview) — apenas TEXTO */}
+        <div
+          aria-hidden
+          className="opacity-55 pointer-events-none select-none bg-white dark:bg-zinc-900 rounded-2xl border border-black/[0.06] dark:border-white/10 shadow-sm overflow-hidden"
+        >
+          <div className="flex items-center gap-3 px-4 pt-4">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary overflow-hidden shrink-0 ring-2 ring-primary/20">
+              {info.avatar_url ? (
+                <img src={info.avatar_url} alt={info.full_name} className="w-full h-full object-cover" />
+              ) : (
+                initials
+              )}
             </div>
-            <p className="text-[12px] text-primary font-semibold truncate mt-0.5">{info.profession_name}</p>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1 min-w-0">
+                <p className="font-bold text-[14px] text-foreground truncate leading-tight">{info.full_name}</p>
+                {/* Selo verificado destacado */}
+                <span
+                  data-teaser-badge
+                  className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-blue-500 shrink-0"
+                >
+                  <BadgeCheck className="w-3 h-3 text-white" strokeWidth={2.5} />
+                </span>
+              </div>
+              <p className="text-[12px] text-primary font-semibold truncate mt-0.5">{info.profession_name}</p>
+            </div>
           </div>
-          <MoreHorizontal className="w-5 h-5 text-muted-foreground shrink-0" />
+
+          <div className="px-4 pt-3 pb-4">
+            <p className="text-[14.5px] text-foreground leading-relaxed">
+              Mais um cliente atendido hoje 🎉 Obrigado pela confiança! Quem precisar de um
+              profissional de qualidade, é só chamar. 💪
+            </p>
+          </div>
+
+          {/* barra de reações mock */}
+          <div className="px-4 py-2 border-t border-black/[0.05] dark:border-white/10 flex items-center gap-4 text-muted-foreground text-[12px]">
+            <span className="inline-flex items-center gap-1">
+              <Heart className="w-4 h-4" /> 28
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <MessageCircle className="w-4 h-4" /> 6
+            </span>
+            <span className="inline-flex items-center gap-1 ml-auto">
+              <Share2 className="w-4 h-4" />
+            </span>
+          </div>
         </div>
 
-        <div className="px-4 pt-3 pb-4">
-          <p className="text-[14.5px] text-foreground leading-relaxed">
-            Mais um cliente atendido hoje 🎉 Obrigado pela confiança! Quem precisar de um
-            profissional de qualidade, é só chamar. 💪
-          </p>
-        </div>
-
-        {/* barra de reações mock */}
-        <div className="px-4 py-2 border-t border-black/[0.05] dark:border-white/10 flex items-center gap-4 text-muted-foreground text-[12px]">
-          <span className="inline-flex items-center gap-1">
-            <Heart className="w-4 h-4" /> 28
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <MessageCircle className="w-4 h-4" /> 6
-          </span>
-          <span className="inline-flex items-center gap-1 ml-auto">
-            <Share2 className="w-4 h-4" />
-          </span>
-        </div>
+        {/* Callout com seta apontando para o selo verificado, em opacidade total */}
+        {!info.verified && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute right-3 top-3 flex flex-col items-end"
+          >
+            <div className="max-w-[150px] rounded-lg bg-primary text-primary-foreground text-[11px] font-bold leading-tight px-2.5 py-1.5 shadow-md shadow-primary/30 text-center">
+              Adquira o selo verificado no Chamô
+            </div>
+            <svg
+              width="60"
+              height="32"
+              viewBox="0 0 60 32"
+              className="text-primary -mt-1 mr-5"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M55 2 C 40 10, 25 20, 8 28"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                fill="none"
+              />
+              <path
+                d="M8 28 L 16 24 M 8 28 L 13 20"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                fill="none"
+              />
+            </svg>
+          </div>
+        )}
       </div>
 
       {/* CTA por baixo do post fantasma — apenas para quem ainda não é verificado */}

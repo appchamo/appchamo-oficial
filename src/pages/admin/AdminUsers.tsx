@@ -709,7 +709,7 @@ const AdminUsers = () => {
       </AlertDialog>
 
       <Dialog open={!!detailsUser} onOpenChange={(o) => !o && setDetailsUser(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detalhes — {detailsUser?.full_name || "Usuário"}</DialogTitle>
             <DialogDescription className="sr-only">

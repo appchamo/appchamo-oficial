@@ -264,10 +264,30 @@ serve(async (req) => {
     if (!request_id || !amount) {
       throw new Error("request_id and amount required");
     }
-    // original_amount: valor original antes do cupom — usado para calcular professional_net
-    // amount: valor que o cliente efetivamente paga (pode ter desconto de cupom ou já inclui taxas de cartão)
-    // anticipation: flag por cobrança — profissional escolheu receber antecipado nesta cobrança
-    const originalAmountRaw  = body.original_amount ?? amount;
+    // Semântica dos valores (Fase 2 — empilhamento de cupons):
+    //   subtotal_amount               = valor do serviço antes de qualquer cupom
+    //   pro_coupon_discount_amount    = R$ descontados pelo cupom do profissional
+    //                                   (profissional banca: reduz base de cálculo)
+    //   app_coupon_discount_amount    = R$ descontados pelo cupom do app
+    //                                   (Chamô banca: não afeta base do profissional)
+    //   original_amount               = subtotal - pro_coupon_discount_amount
+    //                                   (base para comissão, taxas e líquido)
+    //   amount (total_amount)         = original_amount - app_coupon_discount_amount
+    //                                   (+ taxas de cartão, se clientPassFee)
+    //
+    // Retrocompatibilidade: se o frontend (ou fluxo antigo) mandar apenas
+    // `original_amount` sem os campos de cupom, assumimos sem cupom do pro
+    // (discount = 0) e o comportamento é o mesmo de antes.
+    const proCouponId                  = body.pro_coupon_id ?? null;
+    const proCouponDiscountAmount      = Number(body.pro_coupon_discount_amount ?? 0) || 0;
+    const appCouponId                  = body.app_coupon_id ?? null;
+    const appCouponDiscountAmount      = Number(body.app_coupon_discount_amount ?? 0) || 0;
+    const subtotalAmountRaw            = body.subtotal_amount ?? body.original_amount ?? amount;
+    // Base do profissional: subtotal menos o desconto do cupom do pro.
+    // Se `original_amount` já vier com essa semântica (novo frontend), preferimos ele.
+    const originalAmountRaw            =
+      body.original_amount ??
+      (Number(subtotalAmountRaw) - proCouponDiscountAmount);
     const installmentCount   = Math.max(1, parseInt(body.installment_count || "1"));
     const isCreditCard       = !!(body.credit_card && body.credit_card.number);
     const anticipationChosen = !!(body.anticipation) && isCreditCard;
@@ -324,6 +344,7 @@ serve(async (req) => {
     // ===============================
     const totalAmount    = Number(amount);
     const originalAmount = Number(originalAmountRaw);
+    const subtotalAmount = Number(subtotalAmountRaw);
 
     const settingsKeys = ["commission_pct", "pix_fee_pct", "pix_fee_fixed", "card_fee_pct", "card_fee_fixed", "anticipation_fee_pct", "anticipation_mode", "anticipation_monthly_rate"];
     const { data: settingsRows } = await supabase
@@ -415,6 +436,11 @@ serve(async (req) => {
         request_id: request_id,
         total_amount: totalAmount,
         original_amount: originalAmount,
+        subtotal_amount: subtotalAmount,
+        pro_coupon_id: proCouponId,
+        pro_coupon_discount_amount: proCouponDiscountAmount,
+        app_coupon_id: appCouponId,
+        app_coupon_discount_amount: appCouponDiscountAmount,
         platform_fee: platformFee,
         commission_fee: commissionFee,
         payment_fee: paymentFee,
@@ -472,6 +498,11 @@ serve(async (req) => {
         request_id: request_id,
         total_amount: totalAmount,
         original_amount: originalAmount,
+        subtotal_amount: subtotalAmount,
+        pro_coupon_id: proCouponId,
+        pro_coupon_discount_amount: proCouponDiscountAmount,
+        app_coupon_id: appCouponId,
+        app_coupon_discount_amount: appCouponDiscountAmount,
         platform_fee: platformFee,
         commission_fee: commissionFee,
         payment_fee: paymentFee,

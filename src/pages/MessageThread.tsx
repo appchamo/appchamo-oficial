@@ -5,7 +5,7 @@ import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
 import { format, isValid, parse } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
@@ -214,10 +214,12 @@ const MessageThread = () => {
   const [requestStatus, setRequestStatus] = useState<string>("pending");
   const [requestKind, setRequestKind] = useState<"service" | "following">("service");
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
+  /** Cupom do app (tabela `coupons`) — até 1 por compra. */
   const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
-  const [couponDiscount, setCouponDiscount] = useState<{type: string;value: number;} | null>(null);
-  /** Cupom criado pelo profissional (auto-aplicável no checkout). Quando aplicado,
-   *  também alimenta `couponDiscount` para reaproveitar o cálculo de `getDiscountedAmount`. */
+  /** Cupom do profissional (tabela `professional_coupons`) — até 1 por compra.
+   *  Os dois podem coexistir: o cupom do pro é aplicado primeiro (reduz a base
+   *  de cálculo do profissional), depois o cupom do app é aplicado sobre o
+   *  restante (bancado pela Chamô). */
   const [proCoupon, setProCoupon] = useState<AppliedCoupon | null>(null);
   const [rewardCoupon, setRewardCoupon] = useState<{type: string;value: number;} | null>(null);
   const [rewardOpen, setRewardOpen] = useState(false);
@@ -249,7 +251,11 @@ const MessageThread = () => {
   const pixConfirmParamsRef = useRef<{
     threadId: string; userId: string; chatProUserId: string; finalAmount: number;
     originalAmount: number;
-    couponDiscount: { type: string; value: number } | null; selectedCouponId: string | null;
+    /** Soma dos descontos (pro + app) em R$, só para exibir na mensagem de confirmação. */
+    totalDiscount: number;
+    /** Cupom do app (tabela coupons) aplicado — será marcado como `used`. */
+    appCouponId: string | null;
+    /** Cupom do profissional aplicado — será incrementado via RPC. */
     proCouponId: string | null;
     paymentDataAmount: string;
   } | null>(null);
@@ -457,8 +463,8 @@ const MessageThread = () => {
           chatProUserId: chatProUserId || "",
           finalAmount: tx.total_amount,
           originalAmount: tx.total_amount,
-          couponDiscount: null,
-          selectedCouponId: null,
+          totalDiscount: 0,
+          appCouponId: null,
           proCouponId: null,
           paymentDataAmount: String(tx.total_amount),
         };
@@ -913,8 +919,8 @@ const MessageThread = () => {
             pixIntervalRef.current = null;
           }
           setPixPolling(false);
-          const discountNote = params.couponDiscount
-            ? `\nDesconto: ${params.couponDiscount.type === "percentage" ? `${params.couponDiscount.value}%` : `R$ ${params.couponDiscount.value.toFixed(2).replace(".", ",")}`}`
+          const discountNote = params.totalDiscount > 0
+            ? `\nDesconto: R$ ${params.totalDiscount.toFixed(2).replace(".", ",")}`
             : "";
           const proNet = calcProfessionalNet(params.originalAmount, "pix");
           const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${params.finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX\nRecebe: R$ ${proNet.toFixed(2).replace(".", ",")}`;
@@ -923,8 +929,8 @@ const MessageThread = () => {
             sender_id: params.userId,
             content: confirmContent,
           });
-          if (params.selectedCouponId) {
-            await supabase.from("coupons").update({ used: true } as any).eq("id", params.selectedCouponId);
+          if (params.appCouponId) {
+            await supabase.from("coupons").update({ used: true } as any).eq("id", params.appCouponId);
           }
           if (params.proCouponId) {
             await (supabase.rpc as unknown as (
@@ -1785,7 +1791,6 @@ const MessageThread = () => {
     setCardForm({ number: "", name: "", expiry: "", cvv: "", postalCode: "", addressNumber: "", cpf: "" });
     if (!billing.method) setInstallments("1");
     setSelectedCouponId(null);
-    setCouponDiscount(null);
     setProCoupon(null);
 
     // Sempre abrir na etapa "Dados para pagamento" (CPF + endereço) para o usuário poder corrigir ou tentar outro CPF (ex.: após "CPF já cadastrado")
@@ -1816,35 +1821,25 @@ const MessageThread = () => {
     setPaymentOpen(true);
   };
 
+  /** Aplicar cupom do app (tabela `coupons`). Pode coexistir com o cupom do profissional. */
   const applyCoupon = (couponId: string) => {
     const coupon = availableCoupons.find((c) => c.id === couponId);
     if (!coupon) return;
-    // Cupom do cliente é exclusivo com o cupom do profissional.
-    setProCoupon(null);
     setSelectedCouponId(couponId);
-    setCouponDiscount({ type: coupon.discount_percent > 0 ? "percentage" : "fixed", value: coupon.discount_percent });
   };
 
   const removeCoupon = () => {
     setSelectedCouponId(null);
-    setCouponDiscount(null);
   };
 
-  /** Cupom do profissional: aplicar (auto-aplicável, sem código). */
+  /** Aplicar cupom do profissional (auto-aplicável, sem código). Pode coexistir
+   *  com o cupom do app — o do profissional desconta primeiro, o do app depois. */
   const applyProCoupon = (c: AppliedCoupon) => {
-    // Cupom do profissional é exclusivo com o cupom do cliente.
-    setSelectedCouponId(null);
     setProCoupon(c);
-    // Reaproveita o cálculo existente: convertendo "amount" → "fixed" (R$).
-    setCouponDiscount({
-      type: c.discount_type === "percent" ? "percentage" : "fixed",
-      value: c.discount_type === "percent" ? c.discount_value : c.effective_discount,
-    });
   };
 
   const removeProCoupon = () => {
     setProCoupon(null);
-    setCouponDiscount(null);
   };
 
   const handleBillingCepChange = async (rawCep: string) => {
@@ -1914,13 +1909,43 @@ const MessageThread = () => {
     setBillingDataStep(false);
   };
 
-  const getDiscountedAmount = () => {
-    if (!paymentData || !couponDiscount) return paymentData ? parseFloat(paymentData.amount) : 0;
-    const amount = parseFloat(paymentData.amount);
-    if (couponDiscount.type === "percentage") {
-      return Math.max(0, amount * (1 - couponDiscount.value / 100));
+  // ===== Cálculo de descontos empilhados =====
+  // 1) Cupom do profissional desconta PRIMEIRO (profissional banca: reduz a
+  //    base de comissão/taxas do repasse).
+  // 2) Cupom do app desconta sobre o valor remanescente (Chamô banca: não
+  //    mexe no que o profissional recebe, só no que o cliente paga).
+  const proCouponDiscountAmount = useMemo(() => {
+    if (!paymentData || !proCoupon) return 0;
+    const subtotal = parseFloat(paymentData.amount);
+    if (!Number.isFinite(subtotal)) return 0;
+    // `effective_discount` vem do RPC já calculado em R$ sobre o valor cheio.
+    const raw = Number(proCoupon.effective_discount || 0);
+    return Math.max(0, Math.min(raw, subtotal));
+  }, [paymentData, proCoupon]);
+
+  const amountAfterProCoupon = useMemo(() => {
+    if (!paymentData) return 0;
+    return Math.max(0, parseFloat(paymentData.amount) - proCouponDiscountAmount);
+  }, [paymentData, proCouponDiscountAmount]);
+
+  const appCouponDiscountAmount = useMemo(() => {
+    if (!paymentData || !selectedCouponId) return 0;
+    const c = availableCoupons.find((x) => x.id === selectedCouponId);
+    if (!c) return 0;
+    const pct = Number(c.discount_percent ?? 0);
+    if (pct > 0) {
+      return Math.max(0, amountAfterProCoupon * pct / 100);
     }
-    return Math.max(0, amount - couponDiscount.value);
+    const fixed = Number(c.discount_value ?? 0);
+    return Math.max(0, Math.min(fixed, amountAfterProCoupon));
+  }, [paymentData, selectedCouponId, availableCoupons, amountAfterProCoupon]);
+
+  const totalCouponDiscount = proCouponDiscountAmount + appCouponDiscountAmount;
+  const hasAnyCouponApplied = !!proCoupon || !!selectedCouponId;
+
+  const getDiscountedAmount = () => {
+    if (!paymentData) return 0;
+    return Math.max(0, parseFloat(paymentData.amount) - totalCouponDiscount);
   };
 
   const getFinalAmountWithFee = (installmentsCount: number = 1, method: "pix" | "card" | null = paymentMethod) => {
@@ -2181,7 +2206,14 @@ const MessageThread = () => {
             action: "create_service_payment",
             request_id: threadId,
             amount: finalAmount,
-            original_amount: parseFloat(paymentData.amount), // valor original sem desconto de cupom
+            // original_amount (base do profissional) = subtotal - desconto do cupom do profissional.
+            // Cupom do app NÃO entra aqui (Chamô banca), só reduz o `amount`.
+            original_amount: parseFloat(paymentData.amount) - proCouponDiscountAmount,
+            subtotal_amount: parseFloat(paymentData.amount),
+            pro_coupon_id: proCoupon?.id ?? null,
+            pro_coupon_discount_amount: proCouponDiscountAmount,
+            app_coupon_id: selectedCouponId,
+            app_coupon_discount_amount: appCouponDiscountAmount,
             anticipation: paymentData.anticipation === true,  // flag por cobrança
             installment_count: parseInt(installments),
             credit_card: {
@@ -2257,7 +2289,13 @@ const MessageThread = () => {
             action: "create_service_payment",
             request_id: threadId,
             amount: finalAmount,
-            original_amount: parseFloat(paymentData.amount), // valor sem desconto de cupom
+            // original_amount (base do profissional) = subtotal - desconto do cupom do profissional.
+            original_amount: parseFloat(paymentData.amount) - proCouponDiscountAmount,
+            subtotal_amount: parseFloat(paymentData.amount),
+            pro_coupon_id: proCoupon?.id ?? null,
+            pro_coupon_discount_amount: proCouponDiscountAmount,
+            app_coupon_id: selectedCouponId,
+            app_coupon_discount_amount: appCouponDiscountAmount,
             billing_type: "PIX",
           }),
         });
@@ -2285,9 +2323,10 @@ const MessageThread = () => {
           userId: userId!,
           chatProUserId: chatProUserId || "",
           finalAmount,
-          originalAmount: parseFloat(paymentData.amount), // valor original sem desconto de cupom
-          couponDiscount,
-          selectedCouponId,
+          // Base do profissional: subtotal - desconto do cupom do profissional.
+          originalAmount: parseFloat(paymentData.amount) - proCouponDiscountAmount,
+          totalDiscount: totalCouponDiscount,
+          appCouponId: selectedCouponId,
           proCouponId: proCoupon?.id ?? null,
           paymentDataAmount: paymentData.amount,
         };
@@ -2315,11 +2354,12 @@ const MessageThread = () => {
               setPixPolling(false);
               pixConfirmParamsRef.current = null;
 
-              const discountNote = couponDiscount ?
-              `\nDesconto: ${couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`}` :
-              "";
-              const originalAmt = parseFloat(paymentData?.amount || String(finalAmount));
-              const proNetPoll = calcProfessionalNet(originalAmt, "pix");
+              const discountNote = totalCouponDiscount > 0
+                ? `\nDesconto: R$ ${totalCouponDiscount.toFixed(2).replace(".", ",")}`
+                : "";
+              // Base do profissional para cálculo do líquido (subtotal − cupom do pro).
+              const proBase = parseFloat(paymentData?.amount || String(finalAmount)) - proCouponDiscountAmount;
+              const proNetPoll = calcProfessionalNet(proBase, "pix");
               const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${finalAmount.toFixed(2).replace(".", ",")}${discountNote}\nMétodo: PIX\nRecebe: R$ ${proNetPoll.toFixed(2).replace(".", ",")}`;
 
               await supabase.from("chat_messages").insert({
@@ -2360,13 +2400,19 @@ const MessageThread = () => {
         return;
       }
 
-      // Valor original do serviço (sem desconto de cupom — o profissional não precisa saber do desconto)
-      const originalAmtCard = parseFloat(paymentData.amount);
+      // Valor efetivamente cobrado do cliente (subtotal − cupons aplicados,
+      // + eventuais taxas de cartão se `clientPassFee`).
+      const chargedAmountCard = getFinalAmountWithFee(parseInt(installments), "card");
+      // Base do profissional: subtotal − cupom do profissional (cupom do app
+      // é bancado pela Chamô).
+      const proBaseCard = parseFloat(paymentData.amount) - proCouponDiscountAmount;
       const inst = parseInt(installments);
       const methodLabel = inst > 1 ? `Cartão de crédito (${inst}x)` : "Cartão de crédito (1x)";
-      // Profissional recebe: valor original - comissão - taxa cartão
-      const proNetCard = calcProfessionalNet(originalAmtCard, "card", inst);
-      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${originalAmtCard.toFixed(2).replace(".", ",")}\nMétodo: ${methodLabel}\nRecebe: R$ ${proNetCard.toFixed(2).replace(".", ",")}`;
+      const proNetCard = calcProfessionalNet(proBaseCard, "card", inst);
+      const discountNoteCard = totalCouponDiscount > 0
+        ? `\nDesconto: R$ ${totalCouponDiscount.toFixed(2).replace(".", ",")}`
+        : "";
+      const confirmContent = `✅ PAGAMENTO CONFIRMADO\nValor Pago: R$ ${chargedAmountCard.toFixed(2).replace(".", ",")}${discountNoteCard}\nMétodo: ${methodLabel}\nRecebe: R$ ${proNetCard.toFixed(2).replace(".", ",")}`;
 
       await supabase.from("chat_messages").insert({
         request_id: threadId,
@@ -2386,7 +2432,7 @@ const MessageThread = () => {
         });
       }
 
-      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${originalAmtCard.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
+      await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${chargedAmountCard.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
       await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetCard.toFixed(2).replace(".", ",")} via Cartão (líquido após taxas).`, null, profile?.avatar_url ?? null);
 
       await awardPostPaymentCoupon(parseFloat(paymentData.amount));
@@ -4119,7 +4165,7 @@ const MessageThread = () => {
           {paymentData && !billingDataStep && !cardStep &&
           <div className="space-y-4">
               <div className="text-center p-4 bg-muted/50 rounded-xl relative">
-                {couponDiscount ?
+                {hasAnyCouponApplied ?
               <>
                     <p className="text-sm line-through text-muted-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
                     <p className="text-3xl font-bold text-primary">R$ {getFinalAmountWithFee(paymentMethod === "card" ? parseInt(installments) : 1, paymentMethod).toFixed(2).replace(".", ",")}</p>
@@ -4136,9 +4182,8 @@ const MessageThread = () => {
                 <p className="text-xs text-muted-foreground mt-2">{paymentData.desc}</p>
               </div>
 
-              {/* Cupom auto-aplicável criado pelo PROFISSIONAL — só aparece se houver
-                   cupom ativo e nenhum cupom do cliente já estiver aplicado. */}
-              {chatProId && paymentData && !selectedCouponId && (
+              {/* Cupom do profissional (até 1 por compra). Pode coexistir com o cupom do app. */}
+              {chatProId && paymentData && (
                 <ApplyCouponButton
                   professionalId={chatProId}
                   amount={parseFloat(paymentData.amount)}
@@ -4148,10 +4193,11 @@ const MessageThread = () => {
                 />
               )}
 
-              {!selectedCouponId && !proCoupon && availableCoupons.length > 0 && (
+              {/* Lista de cupons do app disponíveis — aparece enquanto nenhum estiver selecionado. */}
+              {!selectedCouponId && availableCoupons.length > 0 && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <p className="text-xs font-bold text-emerald-600 uppercase flex items-center gap-1">
-                    <Ticket className="w-3.5 h-3.5" /> Seus Cupons
+                    <Ticket className="w-3.5 h-3.5" /> Seus Cupons do app
                   </p>
                   {availableCoupons.slice(0, 5).map((c) => (
                     <div key={c.id} className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 flex items-center justify-between shadow-sm hover:bg-emerald-500/20 transition-colors">
@@ -4177,14 +4223,15 @@ const MessageThread = () => {
                 </div>
               )}
 
-              {selectedCouponId && couponDiscount && (
+              {/* Cupom do app aplicado */}
+              {selectedCouponId && appCouponDiscountAmount > 0 && (
                 <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in zoom-in">
                   <div>
                     <p className="text-sm font-bold text-primary flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4" /> Cupom Aplicado
+                      <CheckCircle2 className="w-4 h-4" /> Cupom do app aplicado
                     </p>
                     <p className="text-[10px] font-medium text-muted-foreground">
-                      Desconto de {couponDiscount.type === "percentage" ? `${couponDiscount.value}%` : `R$ ${couponDiscount.value.toFixed(2).replace(".", ",")}`} no serviço
+                      Desconto de R$ {appCouponDiscountAmount.toFixed(2).replace(".", ",")} sobre o valor{proCoupon ? " após o cupom do profissional" : ""}
                     </p>
                   </div>
                   <button 
@@ -4193,6 +4240,17 @@ const MessageThread = () => {
                   >
                     Remover
                   </button>
+                </div>
+              )}
+
+              {/* Resumo dos dois cupons quando ambos aplicados */}
+              {proCoupon && selectedCouponId && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] leading-snug text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-50 flex items-start gap-2">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <p>
+                    Você está usando <strong>2 cupons nesta compra</strong>: 1 do profissional + 1 do app.
+                    Total de desconto: <strong>R$ {totalCouponDiscount.toFixed(2).replace(".", ",")}</strong>.
+                  </p>
                 </div>
               )}
 
@@ -4231,7 +4289,7 @@ const MessageThread = () => {
           <div className="space-y-4">
               <div className="bg-muted/50 rounded-xl p-3 text-center">
                 <p className="text-xs text-muted-foreground">{paymentData.desc}</p>
-                {couponDiscount ?
+                {hasAnyCouponApplied ?
               <>
                     <p className="text-sm line-through text-muted-foreground">R$ {parseFloat(paymentData.amount).toFixed(2).replace(".", ",")}</p>
                     <p className="text-xl font-bold text-primary">R$ {getFinalAmountWithFee(parseInt(installments), "card").toFixed(2).replace(".", ",")}</p>

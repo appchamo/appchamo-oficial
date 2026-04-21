@@ -1,23 +1,18 @@
 /**
- * Carrossel "Profissionais com Cupons" na Home.
+ * Lista "Contrate com desconto" na Home.
  *
  * Regras:
  *   - Só entram profissionais com pelo menos 1 cupom ATIVO (não expirado, com usos disponíveis).
- *   - Mostra o melhor cupom (maior desconto percebido) como destaque no card.
- *   - Clicando no badge de cupom, abre um modal detalhando valor/teto/compras mínimas.
+ *   - Mostra o melhor cupom (maior desconto percebido) como destaque na linha.
+ *   - Clicando na linha, abre um modal com detalhes do cupom (e CTA "Ver profissional").
  *
- * O badge aparece dentro do card do profissional; o card inteiro continua
- * linkando para o perfil público (`/professional/:id`).
+ * Layout em lista vertical (mesmo padrão visual do "Profissionais próximos",
+ * porém com destaque laranja e o chip do desconto bem prominente à direita).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { BadgeCheck, MapPin, Star, Ticket, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { BadgeCheck, Star, Ticket, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { CouponShowcaseDialog } from "@/components/coupon/CouponShowcaseDialog";
-import { cn } from "@/lib/utils";
-
-const CARD_CLASS =
-  "flex-none w-[min(11rem,calc(50vw-1.75rem))] sm:w-[13.5rem] lg:w-[15rem] min-w-0";
 
 interface CouponRow {
   id: string;
@@ -83,7 +78,6 @@ const CouponProfessionals = () => {
   const [items, setItems] = useState<ProRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [openCouponProId, setOpenCouponProId] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -174,7 +168,7 @@ const CouponProfessionals = () => {
         return b.rating - a.rating;
       });
 
-      setItems(rows.slice(0, 18));
+      setItems(rows.slice(0, 5));
       setLoaded(true);
     } catch (err) {
       console.warn("[CouponProfessionals] load failed:", err);
@@ -224,16 +218,14 @@ const CouponProfessionals = () => {
         </span>
       </div>
 
-      <div
-        ref={scrollRef}
-        data-tab-swipe-ignore
-        className="flex overflow-x-auto overflow-y-hidden gap-3 lg:gap-4 pb-2 scrollbar-hide px-1 box-border overscroll-x-contain"
-        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" }}
-      >
-        {items.map((pro) => (
-          <div key={pro.id} className={CARD_CLASS}>
-            <CouponProCard pro={pro} onOpenCoupon={() => setOpenCouponProId(pro.id)} />
-          </div>
+      <div className="bg-card border-2 border-primary/30 rounded-2xl overflow-hidden shadow-sm">
+        {items.map((pro, i) => (
+          <CouponProRow
+            key={pro.id}
+            pro={pro}
+            isLast={i === items.length - 1}
+            onOpenCoupon={() => setOpenCouponProId(pro.id)}
+          />
         ))}
       </div>
 
@@ -249,7 +241,15 @@ const CouponProfessionals = () => {
   );
 };
 
-function CouponProCard({ pro, onOpenCoupon }: { pro: ProRow; onOpenCoupon: () => void }) {
+function CouponProRow({
+  pro,
+  isLast,
+  onOpenCoupon,
+}: {
+  pro: ProRow;
+  isLast: boolean;
+  onOpenCoupon: () => void;
+}) {
   const initials = (pro.full_name || "P")
     .split(" ")
     .map((w) => w[0])
@@ -257,89 +257,63 @@ function CouponProCard({ pro, onOpenCoupon }: { pro: ProRow; onOpenCoupon: () =>
     .slice(0, 2)
     .toUpperCase();
   const avatarSrc = getAvatarUrl(pro.avatar_url);
-  const cityLine =
-    pro.address_city || pro.address_state
-      ? [pro.address_city, pro.address_state].filter(Boolean).join(", ")
-      : null;
   const label = formatCouponShort(pro.coupon);
 
   return (
-    <div className="relative w-full min-w-0 min-h-0 flex">
-      {/* Ribbon do cupom — fica acima do card sem bloquear o Link para o perfil. */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          onOpenCoupon();
-        }}
-        aria-label={`Ver detalhes do cupom ${label}`}
-        className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full bg-gradient-to-r from-primary to-amber-500 px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wide text-white shadow-md ring-2 ring-white active:scale-[0.96] transition-transform"
-      >
-        <Ticket className="w-3 h-3" />
-        {label}
-      </button>
-
-      <Link
-        to={`/professional/${pro.id}`}
-        className={cn(
-          "bg-card rounded-xl lg:rounded-2xl border-2 border-primary/25 shadow-card p-4 lg:p-5 flex flex-col gap-2.5 lg:gap-3 w-full min-w-0 overflow-hidden active:scale-[0.97] transition-transform",
-        )}
-      >
-        <div className="flex gap-4 lg:gap-5 items-start w-full min-w-0 mt-6">
-          <div className="relative shrink-0 self-start">
-            <div className="w-16 h-16 lg:w-[72px] lg:h-[72px] rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
-              {avatarSrc ? (
-                <img
-                  src={avatarSrc}
-                  alt={pro.full_name}
-                  className="w-full h-full object-cover rounded-full"
-                  loading="lazy"
-                  decoding="async"
-                />
-              ) : (
-                initials
-              )}
-            </div>
-            {pro.verified && (
-              <div className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-card shadow-sm">
-                <BadgeCheck className="w-3 h-3 text-white" />
-              </div>
-            )}
-          </div>
-          <div className="flex-1 min-w-0" />
+    <button
+      type="button"
+      onClick={onOpenCoupon}
+      aria-label={`Ver cupom ${label} de ${pro.full_name}`}
+      className={`flex items-center gap-3 px-3 py-3 active:bg-primary/5 transition-colors w-full text-left ${
+        !isLast ? "border-b border-primary/15" : ""
+      }`}
+    >
+      <div className="relative shrink-0">
+        <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary overflow-hidden">
+          {avatarSrc ? (
+            <img
+              src={avatarSrc}
+              alt={pro.full_name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            initials
+          )}
         </div>
-
-        <div className="min-w-0 -mt-0.5">
-          <p className="font-bold text-foreground text-sm lg:text-base truncate leading-tight">
-            {pro.full_name}
-          </p>
-          <p className="text-sm lg:text-[15px] font-semibold text-primary truncate mt-0.5">
-            {pro.profession_name}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-1">
-          <Star className="w-3.5 h-3.5 fill-primary text-primary flex-shrink-0" />
-          <span className="text-sm font-semibold text-foreground">{pro.rating.toFixed(1)}</span>
-          <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
-        </div>
-
-        {cityLine && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="w-3 h-3 text-primary flex-shrink-0" />
-            <span className="truncate">{cityLine}</span>
+        {pro.verified && (
+          <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-primary rounded-full flex items-center justify-center ring-2 ring-card">
+            <BadgeCheck className="w-2.5 h-2.5 text-white" />
           </div>
         )}
+      </div>
 
-        <div className="mt-auto pt-1">
-          <div className="w-full text-center text-sm font-semibold py-2.5 rounded-lg bg-primary text-white flex items-center justify-center gap-1">
-            Contrate com desconto
-            <ChevronRight className="w-4 h-4" aria-hidden />
-          </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+          {pro.full_name}
+        </p>
+        <p className="text-xs font-medium text-primary truncate mt-0.5">
+          {pro.profession_name}
+        </p>
+        <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
+          <Star className="w-3 h-3 fill-primary text-primary" />
+          <span className="font-semibold text-foreground/80">{pro.rating.toFixed(1)}</span>
+          <span>· {pro.total_services} serv.</span>
         </div>
-      </Link>
-    </div>
+      </div>
+
+      <div className="flex items-center gap-1 shrink-0">
+        <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-primary to-amber-500 px-2.5 py-1.5 text-[12px] font-extrabold uppercase tracking-wide text-white shadow-sm">
+          <Ticket className="w-3 h-3" />
+          {label}
+        </span>
+        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+      </div>
+    </button>
   );
 }
 

@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Save, Loader2, Lock, Volume2, Trash2 } from "lucide-react";
+import { Save, Loader2, Lock, Volume2, Trash2, Megaphone, AlertTriangle } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,6 +8,13 @@ import { translateError } from "@/lib/errorMessages";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { iconMap } from "@/components/PlatformStats";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const AdminSettings = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -18,6 +25,8 @@ const AdminSettings = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
   const [uploadingSound, setUploadingSound] = useState(false);
+  const [publishTermsOpen, setPublishTermsOpen] = useState(false);
+  const [publishingTerms, setPublishingTerms] = useState(false);
 
   const handleChangePassword = async () => {
     if (!newPassword || newPassword.length < 6) {
@@ -64,6 +73,53 @@ const AdminSettings = () => {
 
   const updateStat = (id: string, field: string, value: any) =>
     setStatsRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+
+  const handlePublishTerms = async () => {
+    setPublishingTerms(true);
+    try {
+      const termsKeys = [
+        "terms_version",
+        "terms_of_use",
+        "privacy_policy",
+        "terms_version_professional",
+        "terms_of_use_professional",
+        "privacy_policy_professional",
+      ];
+      for (const key of termsKeys) {
+        const value = settings[key];
+        if (value === undefined) continue;
+        await supabase
+          .from("platform_settings")
+          .upsert({ key, value: value as any }, { onConflict: "key" });
+      }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await supabase.from("admin_logs").insert({
+          admin_user_id: session.user.id,
+          action: "publish_terms",
+          target_type: "settings",
+          details: {
+            terms_version: settings.terms_version || null,
+            terms_version_professional: settings.terms_version_professional || null,
+          } as any,
+        });
+      }
+      toast({
+        title: "Novos termos publicados!",
+        description:
+          "Usuários com versão diferente verão um aviso ao abrir o app para reler e aceitar.",
+      });
+      setPublishTermsOpen(false);
+    } catch (e: any) {
+      toast({
+        title: "Erro ao publicar termos",
+        description: translateError(e?.message || "Tente novamente."),
+        variant: "destructive",
+      });
+    } finally {
+      setPublishingTerms(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -301,6 +357,45 @@ const AdminSettings = () => {
           </div>
         </div>
 
+        {/* Publish Terms — dispara aviso de re-aceite para todos os usuários */}
+        <div className="bg-card border-2 border-amber-500/30 rounded-xl p-5 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/90 text-white shadow-sm">
+              <Megaphone className="h-5 w-5" strokeWidth={2.25} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-bold text-foreground">Enviar novos termos aos usuários</h3>
+              <p className="text-xs leading-relaxed text-muted-foreground mt-0.5">
+                Publica a versão atual dos termos e privacidade (cliente e profissional). Todos os
+                usuários cuja versão aceita for diferente verão um aviso no topo da Home pedindo
+                para reler e aceitar os novos termos.
+              </p>
+            </div>
+          </div>
+          <div className="text-[11.5px] text-muted-foreground bg-muted/50 rounded-lg px-3 py-2 border">
+            <p>
+              <span className="font-semibold text-foreground">Versão cliente:</span>{" "}
+              {settings.terms_version || "—"}
+            </p>
+            <p className="mt-0.5">
+              <span className="font-semibold text-foreground">Versão profissional:</span>{" "}
+              {settings.terms_version_professional || "—"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPublishTermsOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-amber-500/30 hover:bg-amber-600 transition-colors"
+          >
+            <Megaphone className="h-4 w-4" />
+            Enviar novos termos
+          </button>
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            Antes de publicar, edite os textos/versões acima e confirme que as versões foram
+            alteradas (ex: 1.0 → 1.1). Caso contrário, os usuários não serão avisados.
+          </p>
+        </div>
+
         {/* Payment Policies */}
         <div className="bg-card border rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-foreground">Políticas de Pagamento</h2>
@@ -449,6 +544,57 @@ const AdminSettings = () => {
           {saving ? "Salvando..." : "Salvar configurações"}
         </button>
       </div>
+
+      <Dialog open={publishTermsOpen} onOpenChange={(v) => !publishingTerms && setPublishTermsOpen(v)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+              Publicar novos termos?
+            </DialogTitle>
+            <DialogDescription>
+              Ao confirmar, a versão atual dos termos será considerada vigente e os usuários com
+              versão anteriormente aceita diferente verão um aviso no topo da Home solicitando
+              reler e aceitar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-[13px]">
+            <div className="rounded-lg border bg-muted/40 px-3 py-2">
+              <p>
+                <span className="font-semibold text-foreground">Versão cliente:</span>{" "}
+                {settings.terms_version || "—"}
+              </p>
+              <p className="mt-0.5">
+                <span className="font-semibold text-foreground">Versão profissional:</span>{" "}
+                {settings.terms_version_professional || "—"}
+              </p>
+            </div>
+            <p className="text-[11.5px] text-muted-foreground leading-snug">
+              Quem recusar os novos termos deverá excluir a conta para continuar recusando o uso do
+              app. O aceite fica registrado com data, hora e versão.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 mt-1">
+            <button
+              type="button"
+              onClick={handlePublishTerms}
+              disabled={publishingTerms}
+              className="inline-flex items-center justify-center gap-2 w-full rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-white shadow-md shadow-amber-500/25 hover:bg-amber-600 transition-colors disabled:opacity-60"
+            >
+              {publishingTerms ? <Loader2 className="h-4 w-4 animate-spin" /> : <Megaphone className="h-4 w-4" />}
+              {publishingTerms ? "Publicando..." : "Confirmar e publicar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPublishTermsOpen(false)}
+              disabled={publishingTerms}
+              className="inline-flex items-center justify-center w-full rounded-xl border border-border py-2.5 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 };

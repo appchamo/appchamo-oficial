@@ -23,6 +23,7 @@ import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
 import CouponProfessionals from "@/components/home/CouponProfessionals";
 import HomeProCarousel from "@/components/home/HomeProCarousel";
 import ProSellMoreChecklist from "@/components/home/ProSellMoreChecklist";
+import TermsReacceptBanner from "@/components/home/TermsReacceptBanner";
 import ProFeaturedUpsellBanner from "@/components/home/ProFeaturedUpsellBanner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
@@ -690,6 +691,9 @@ const Home = () => {
         <HomeSkeleton />
       ) : user && homeFeedComunidade ? (
         <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto lg:px-4 xl:px-6 2xl:px-8 lg:py-3">
+          <div className="px-4 pt-3 lg:px-0 lg:pt-0">
+            <TermsReacceptBanner />
+          </div>
           <CommunityFeed variant="embedded" />
           {showClientSignupProEndCta ? (
             <div className="mt-8 px-4 pb-4 max-w-screen-lg mx-auto">
@@ -709,6 +713,7 @@ const Home = () => {
           className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto px-4 lg:px-8 xl:px-12 py-2 lg:py-6 flex flex-col gap-4 lg:gap-6 bg-secondary transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
+          <TermsReacceptBanner />
           {user && isPro && proId ? (
             /* ── Carrossel: Carteira + Agenda (só monta quando proId está pronto) ── */
             <>

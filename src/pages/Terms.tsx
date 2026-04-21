@@ -52,6 +52,14 @@ const Terms = () => {
             {privacyPolicy || "Nenhuma política de privacidade cadastrada."}
           </div>
         </div>
+
+        <p className="mt-4 px-1 text-[11.5px] leading-relaxed text-muted-foreground">
+          Você pode excluir sua conta a qualquer momento em{" "}
+          <span className="font-semibold text-foreground">Perfil → Excluir minha conta</span>. Ao
+          excluir, todo o conteúdo vinculado (aceites, histórico, perfil e dados pessoais) é
+          encerrado e estes termos deixam de se aplicar a você, ressalvadas as obrigações legais
+          de retenção previstas na LGPD e demais normas aplicáveis.
+        </p>
       </main>
     </AppLayout>
   );

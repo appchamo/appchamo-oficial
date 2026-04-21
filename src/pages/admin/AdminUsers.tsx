@@ -72,6 +72,8 @@ interface Profile {
   address_state?: string | null;
   address_zip?: string | null;
   address_country?: string | null;
+  accepted_terms_version?: string | null;
+  accepted_terms_at?: string | null;
 }
 
 async function copyText(value: string | null | undefined, successTitle: string) {
@@ -349,6 +351,10 @@ const AdminUsers = () => {
   const [planUser, setPlanUser] = useState<Profile | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("free");
   const [detailsUser, setDetailsUser] = useState<Profile | null>(null);
+  const [termsVersions, setTermsVersions] = useState<{ client: string; professional: string }>({
+    client: "",
+    professional: "",
+  });
 
   const fetchUsers = async () => {
     const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
@@ -358,6 +364,25 @@ const AdminUsers = () => {
   };
 
   useEffect(() => { fetchUsers(); }, []);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("platform_settings")
+        .select("key, value")
+        .in("key", ["terms_version", "terms_version_professional"]);
+      if (!data) return;
+      const parse = (v: unknown): string =>
+        v == null ? "" : typeof v === "string" ? v : JSON.stringify(v).replace(/^"|"$/g, "");
+      const next = { client: "", professional: "" };
+      for (const row of data) {
+        const val = parse(row.value);
+        if (row.key === "terms_version") next.client = val;
+        if (row.key === "terms_version_professional") next.professional = val;
+      }
+      setTermsVersions(next);
+    })();
+  }, []);
 
   const invokeAdminManage = invokeAdminManageFn;
 
@@ -755,6 +780,62 @@ const AdminUsers = () => {
                   ) : null}
                   {!detailsUser.cpf?.trim() && !detailsUser.cnpj?.trim() ? <p>—</p> : null}
                 </div>
+              </div>
+
+              {/* Aceite dos Termos */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Aceite dos termos
+                </p>
+                {(() => {
+                  const isPro =
+                    detailsUser.user_type === "professional" || detailsUser.user_type === "company";
+                  const currentVersion = isPro
+                    ? termsVersions.professional
+                    : termsVersions.client;
+                  const acceptedVersion = (detailsUser.accepted_terms_version || "").trim();
+                  const acceptedAt = detailsUser.accepted_terms_at || "";
+                  if (!acceptedVersion) {
+                    return (
+                      <p className="text-foreground mt-0.5">
+                        <span className="inline-flex items-center rounded-md bg-destructive/10 text-destructive text-[11px] font-bold uppercase tracking-wide px-2 py-0.5">
+                          Nunca aceitou
+                        </span>
+                      </p>
+                    );
+                  }
+                  const upToDate =
+                    !!currentVersion && acceptedVersion === currentVersion;
+                  return (
+                    <div className="text-foreground mt-0.5 space-y-1">
+                      <p className="flex items-center gap-2 flex-wrap">
+                        <span className="text-muted-foreground">Status:</span>
+                        {upToDate ? (
+                          <span className="inline-flex items-center rounded-md bg-emerald-500/10 text-emerald-600 text-[11px] font-bold uppercase tracking-wide px-2 py-0.5">
+                            Atualizado
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-md bg-amber-500/10 text-amber-600 text-[11px] font-bold uppercase tracking-wide px-2 py-0.5">
+                            Versão desatualizada
+                          </span>
+                        )}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Versão aceita: </span>
+                        {acceptedVersion}
+                        {currentVersion && !upToDate ? (
+                          <span className="text-muted-foreground"> (atual: {currentVersion})</span>
+                        ) : null}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Data/hora: </span>
+                        {acceptedAt
+                          ? new Date(acceptedAt).toLocaleString("pt-BR")
+                          : "—"}
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ) : null}

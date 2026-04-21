@@ -8,6 +8,7 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
+import { useMetaSdkConsent } from "@/hooks/useMetaSdkConsent";
 
 const withTimeout = async <T,>(p: Promise<T>, ms: number, tag: string) => {
   let t: ReturnType<typeof setTimeout> | null = null;
@@ -760,6 +761,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Aqui o app escuta o DELETE do próprio profile via Realtime e desloga
   // imediatamente, sem precisar esperar o foreground/refresh de token.
   // Requer REPLICA IDENTITY FULL em public.profiles (migration realtime_profile_kick).
+  // LGPD: só ativa o Meta SDK (tracking de campanhas no Android) depois que
+  // o usuário aceitou os Termos — sinalizado por profile.accepted_terms_version.
+  // Sem consent, as flags autoInit/autoLog/AAID ficam "false" no Manifest e
+  // nenhum dado é enviado ao Meta.
+  useMetaSdkConsent(profile?.accepted_terms_version);
+
   useEffect(() => {
     const uid = user?.id;
     if (!uid) return;

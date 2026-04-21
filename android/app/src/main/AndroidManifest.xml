@@ -73,7 +73,13 @@
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="default_v2" />
 
-        <!-- Meta SDK (Facebook) — App ID e Client Token para tracking de campanhas -->
+        <!-- Meta SDK (Facebook) — App ID e Client Token para tracking de campanhas.
+             Por LGPD, o SDK NÃO é inicializado automaticamente: as 3 flags abaixo
+             ficam em "false" e o SDK só é ativado via MetaSdkPlugin.enable() em
+             tempo de execução, depois que o usuário aceita os Termos (sinalizado
+             por profile.accepted_terms_version). Sem consent, nenhum dado é
+             coletado nem enviado ao Meta — AAID, eventos e atribuição ficam
+             desligados até a ativação explícita. -->
         <meta-data
             android:name="com.facebook.sdk.ApplicationId"
             android:value="@string/facebook_app_id" />
@@ -82,13 +88,13 @@
             android:value="@string/facebook_client_token" />
         <meta-data
             android:name="com.facebook.sdk.AutoInitEnabled"
-            android:value="true" />
+            android:value="false" />
         <meta-data
             android:name="com.facebook.sdk.AutoLogAppEventsEnabled"
-            android:value="true" />
+            android:value="false" />
         <meta-data
             android:name="com.facebook.sdk.AdvertiserIDCollectionEnabled"
-            android:value="true" />
+            android:value="false" />
 
         <activity
             android:name="com.facebook.FacebookActivity"

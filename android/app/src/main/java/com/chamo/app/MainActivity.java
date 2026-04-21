@@ -1,21 +1,18 @@
 package com.chamo.app;
 
-import android.os.Bundle;
 import android.content.Intent;
-import android.net.Uri;
+import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
-import com.facebook.FacebookSdk;
-import com.facebook.appevents.AppEventsLogger;
 
 public class MainActivity extends BridgeActivity {
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void onCreate(Bundle savedInstanceState) {
+        // Por LGPD, o Meta SDK NÃO é inicializado no onCreate. As 3 flags
+        // (AutoInit, AutoLog, AdvertiserID) estão "false" no AndroidManifest
+        // e o SDK só é ativado via MetaSdkPlugin.enable(), chamado pelo JS
+        // depois que o usuário aceita os Termos (accepted_terms_version).
+        registerPlugin(MetaSdkPlugin.class);
         super.onCreate(savedInstanceState);
-
-        // Meta SDK: garante inicialização e dispara o evento de "app aberto"
-        // que o Meta Ads usa para atribuir installs de campanhas de tráfego.
-        FacebookSdk.sdkInitialize(getApplicationContext());
-        AppEventsLogger.activateApp(getApplication());
     }
 
     @Override

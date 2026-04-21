@@ -683,7 +683,7 @@ const BecomeProfessional = () => {
                           autoComplete="off"
                           value={displayNameValue}
                           onChange={(e) => setDisplayNameValue(e.target.value)}
-                          placeholder={isCnpjTyped ? "Ex.: Padaria do Zé" : "Ex.: João Silva"}
+                          placeholder={isCnpj ? "Ex.: Padaria do Zé" : "Ex.: João Silva"}
                           maxLength={80}
                           aria-label={nameLabel}
                           className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"

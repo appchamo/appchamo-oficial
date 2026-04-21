@@ -4,7 +4,7 @@ import { FileText, ShieldCheck, Clock, Star, ChevronRight, User, Building2, MapP
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { formatCpfOuCnpj, validateCpf, validateCnpj } from "@/lib/formatters";
+import { formatCpf, formatCnpj, validateCpf, validateCnpj } from "@/lib/formatters";
 import { uploadProfessionalDocument } from "@/lib/uploadProfessionalDocument";
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
@@ -15,14 +15,6 @@ type DocType = "cpf" | "cnpj";
 
 function digitsOnly(v: string): string {
   return v.replace(/\D/g, "");
-}
-
-function profileHasCompleteCpf(profile: { cpf?: string | null } | null | undefined): boolean {
-  return digitsOnly(profile?.cpf ?? "").length === 11;
-}
-
-function profileHasCompleteCnpj(profile: { cnpj?: string | null } | null | undefined): boolean {
-  return digitsOnly(profile?.cnpj ?? "").length === 14;
 }
 
 /** Máscara de CEP: 00000-000 */
@@ -56,8 +48,6 @@ const BecomeProfessional = () => {
     neighborhood: string;
     street: string;
   } | null>(null);
-  /** Trava o input de CPF/CNPJ quando o profile já tem documento salvo. */
-  const [docLocked, setDocLocked] = useState(false);
   const profileSubmitLockRef = useRef(false);
   /** Evita re-aplicar pré-preenchimento toda vez que profile/state mudar. */
   const docIdPrefilledRef = useRef(false);
@@ -93,6 +83,26 @@ const BecomeProfessional = () => {
     setStep("doc-id");
   };
 
+  /** Troca o tipo de documento (CPF/CNPJ) pelos botões. Repõe o valor salvo no
+   *  profile se existir, ou limpa o campo para o usuário digitar um novo.
+   *  Ex.: perfil tem CPF cadastrado → se clicar em "CNPJ", limpa o campo pra
+   *  digitar o CNPJ da empresa. Voltando pra "CPF", reaparece o CPF salvo. */
+  const handleSelectDocType = (next: DocType) => {
+    if (next === docType) return;
+    setDocType(next);
+    const saved =
+      next === "cpf" ? digitsOnly(profile?.cpf ?? "") : digitsOnly(profile?.cnpj ?? "");
+    const formatted =
+      next === "cpf"
+        ? saved.length === 11
+          ? formatCpf(saved)
+          : ""
+        : saved.length === 14
+          ? formatCnpj(saved)
+          : "";
+    setDocIdValue(formatted);
+  };
+
   // Pré-preenche os campos da Etapa 1 quando ela aparece pela primeira vez,
   // usando o que já existe no profile (CPF/CNPJ, display_name, CEP).
   useEffect(() => {
@@ -102,16 +112,15 @@ const BecomeProfessional = () => {
     const cpfDigits = digitsOnly(profile.cpf ?? "");
     const cnpjDigits = digitsOnly(profile.cnpj ?? "");
 
+    // Se a conta já nasceu como CNPJ, começa em CNPJ; senão começa em CPF
+    // (mesmo se ainda não houver nenhum documento). O usuário pode trocar
+    // manualmente pelos botões CPF/CNPJ.
     if (cnpjDigits.length === 14) {
       setDocType("cnpj");
-      setDocIdValue(formatCpfOuCnpj(cnpjDigits));
-      setDocLocked(true);
-    } else if (cpfDigits.length === 11) {
-      setDocType("cpf");
-      setDocIdValue(formatCpfOuCnpj(cpfDigits));
-      setDocLocked(true);
+      setDocIdValue(formatCnpj(cnpjDigits));
     } else {
-      setDocLocked(false);
+      setDocType("cpf");
+      if (cpfDigits.length === 11) setDocIdValue(formatCpf(cpfDigits));
     }
 
     if (profile.display_name) setDisplayNameValue(profile.display_name);
@@ -193,24 +202,27 @@ const BecomeProfessional = () => {
 
   const handleDocIdNext = async () => {
     const raw = digitsOnly(docIdValue);
+    const isCpf = docType === "cpf";
+    const expectedLen = isCpf ? 11 : 14;
     if (raw.length === 0) {
       toast({
         title: "Campo obrigatório",
-        description: "Digite seu CPF ou CNPJ.",
+        description: isCpf ? "Digite seu CPF." : "Digite o CNPJ.",
         variant: "destructive",
       });
       return;
     }
-    if (raw.length < 11 || (raw.length >= 12 && raw.length <= 13) || raw.length > 14) {
+    if (raw.length !== expectedLen) {
       toast({
         title: "Documento incompleto",
-        description: "Digite os 11 dígitos do CPF ou os 14 dígitos do CNPJ.",
+        description: isCpf
+          ? "Digite os 11 dígitos do CPF."
+          : "Digite os 14 dígitos do CNPJ.",
         variant: "destructive",
       });
       return;
     }
 
-    const isCpf = raw.length === 11;
     if (isCpf && !validateCpf(docIdValue)) {
       toast({ title: "CPF inválido", description: "Confira o número digitado.", variant: "destructive" });
       return;
@@ -561,15 +573,15 @@ const BecomeProfessional = () => {
       )}
 
       {step === "doc-id" && (() => {
-        const isCpfTyped = docIdLen === 11;
-        const isCnpjTyped = docIdLen === 14;
-        const docComplete = isCpfTyped || isCnpjTyped;
+        const isCnpj = docType === "cnpj";
+        const expectedLen = isCnpj ? 14 : 11;
+        const docComplete = docIdLen === expectedLen;
         const cepDigits = digitsOnly(cepValue).length;
-        const nameLabel = isCnpjTyped ? "Nome fantasia" : "Nome de exibição";
-        const nameHelper = isCnpjTyped
+        const nameLabel = isCnpj ? "Nome fantasia" : "Nome de exibição";
+        const nameHelper = isCnpj
           ? "Nome fantasia da empresa (como aparecerá no app)."
           : "Como seu nome aparecerá para os clientes no app.";
-        const NameIcon = isCnpjTyped ? Building2 : User;
+        const NameIcon = isCnpj ? Building2 : User;
         const canContinue =
           docComplete &&
           displayNameValue.trim().length >= 2 &&
@@ -599,38 +611,61 @@ const BecomeProfessional = () => {
 
                 <div>
                   <label className="text-[11px] uppercase font-bold text-muted-foreground ml-1">
-                    CPF ou CNPJ
+                    {isCnpj ? "CNPJ" : "CPF"}
                   </label>
-                  <div
-                    className={`mt-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30 ${
-                      docLocked ? "bg-muted/40" : ""
-                    }`}
-                  >
+
+                  {/* Seletor CPF / CNPJ — o tipo escolhido define o modo do input.
+                      Mesma UX do cadastro inicial (StepBasicData). */}
+                  <div className="flex gap-2 mt-1 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectDocType("cpf")}
+                      className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
+                        !isCnpj
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-transparent text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      CPF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectDocType("cnpj")}
+                      className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
+                        isCnpj
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-transparent text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      CNPJ
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
                     <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" aria-hidden />
                     <input
                       type="text"
                       inputMode="numeric"
                       autoComplete="off"
                       value={docIdValue}
-                      onChange={(e) => setDocIdValue(formatCpfOuCnpj(e.target.value))}
-                      placeholder="000.000.000-00 ou CNPJ"
-                      maxLength={18}
-                      readOnly={docLocked}
-                      aria-label="Digite seu CPF ou CNPJ"
-                      className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed"
+                      onChange={(e) =>
+                        setDocIdValue(isCnpj ? formatCnpj(e.target.value) : formatCpf(e.target.value))
+                      }
+                      placeholder={isCnpj ? "00.000.000/0000-00" : "000.000.000-00"}
+                      maxLength={isCnpj ? 18 : 14}
+                      aria-label={isCnpj ? "Digite o CNPJ" : "Digite o CPF"}
+                      className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
                     />
                   </div>
-                  {docLocked ? (
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      {profileHasCompleteCnpj(profile) ? "CNPJ" : "CPF"} já cadastrado na sua conta.
-                    </p>
-                  ) : docIdLen >= 12 && docIdLen <= 13 ? (
+                  {docIdLen > 0 && docIdLen < expectedLen ? (
                     <p className="text-[11px] text-destructive font-medium mt-1">
-                      Complete até 11 dígitos (CPF) ou 14 (CNPJ).
+                      {isCnpj ? "Complete os 14 dígitos do CNPJ." : "Complete os 11 dígitos do CPF."}
                     </p>
                   ) : (
                     <p className="text-[11px] text-muted-foreground mt-1">
-                      Digite o CPF (11 dígitos) ou CNPJ (14 dígitos).
+                      {isCnpj
+                        ? "Digite o CNPJ da empresa (14 dígitos)."
+                        : "Digite seu CPF (11 dígitos)."}
                     </p>
                   )}
                 </div>

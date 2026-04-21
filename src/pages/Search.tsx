@@ -48,40 +48,57 @@ interface Pro {
 function SearchProCard({ pro }: { pro: Pro }) {
   const impressionRef = useProProfileImpression(pro.user_id);
   const responseLabel = formatAvgResponseSeconds(pro.avg_response_seconds);
+  // Junta categoria + profissão de forma limpa (sem separador solto quando um
+  // dos dois está vazio — antes aparecia "Categoria · " ou "— · " nos cards).
+  const hasCategory = pro.category_name && pro.category_name !== "—";
+  const hasProfession = pro.profession_name && pro.profession_name.trim() !== "";
+  const subtitle = [hasCategory ? pro.category_name : null, hasProfession ? pro.profession_name : null]
+    .filter(Boolean)
+    .join(" · ");
+  const cityLabel = [pro.city, pro.state].filter(Boolean).join(", ");
+
   return (
     <div ref={impressionRef} className="min-w-0">
       <Link
         to={`/professional/${pro.id}`}
-        className="flex items-center gap-3 bg-card border border-border/70 rounded-2xl p-4 shadow-sm hover:border-primary/35 hover:shadow-md transition-all group w-full"
+        className="flex items-stretch gap-3 bg-card border border-border/70 rounded-2xl p-4 shadow-sm hover:border-primary/35 hover:shadow-md transition-all group w-full"
       >
-        <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
-          {pro.avatar_url ? <img src={pro.avatar_url} className="w-full h-full object-cover" alt="" /> : pro.full_name[0]}
+        <div className="w-14 h-14 shrink-0 self-start rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
+          {pro.avatar_url ? (
+            <img src={pro.avatar_url} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" />
+          ) : (
+            pro.full_name[0]
+          )}
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1 text-foreground">
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          <div className="flex items-center gap-1 text-foreground min-w-0">
             <p className="font-bold text-sm truncate group-hover:text-primary transition-colors">{pro.full_name}</p>
-            {pro.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
+            {pro.verified && <BadgeCheck className="w-4 h-4 text-primary shrink-0" />}
           </div>
-          <p className="text-xs text-muted-foreground truncate font-medium">
-            {pro.category_name} · {pro.profession_name}
-          </p>
-          <div className="flex items-center justify-between mt-1 gap-2">
+          {subtitle && (
+            // line-clamp-2: permite quebra em 2 linhas quando a categoria + profissão for longa
+            // (antes "truncate" cortava no meio da palavra — ex.: "Limpad...").
+            <p className="text-xs text-muted-foreground font-medium leading-snug line-clamp-2 break-words mt-0.5">
+              {subtitle}
+            </p>
+          )}
+          <div className="flex items-center justify-between mt-1.5 gap-2">
             <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1 shrink-0">
+                <Star className="w-3.5 h-3.5 fill-primary text-primary" />
+                <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
+              </div>
               {responseLabel && (
                 <span className="flex items-center gap-0.5 shrink-0" title="Tempo médio de resposta">
                   <Clock className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden />
                   <span className="text-[10px] font-semibold text-muted-foreground whitespace-nowrap">{responseLabel}</span>
                 </span>
               )}
-              <div className="flex items-center gap-1 shrink-0">
-                <Star className="w-3.5 h-3.5 fill-primary text-primary" />
-                <span className="text-xs font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
-              </div>
             </div>
-            {(pro.city || pro.state) && (
-              <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-0.5 max-w-[48%] truncate justify-end">
+            {cityLabel && (
+              <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-0.5 max-w-[48%] min-w-0 justify-end">
                 <MapPin className="w-3 h-3 shrink-0 text-primary" />
-                <span className="truncate">{[pro.city, pro.state].filter(Boolean).join(", ")}</span>
+                <span className="truncate">{cityLabel}</span>
               </p>
             )}
           </div>
@@ -360,7 +377,7 @@ const Search = () => {
 
   return (
     <AppLayout>
-      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-24 text-foreground">
+      <main className="max-w-screen-lg mx-auto px-4 py-5 pb-28 safe-area-bottom text-foreground">
         <div className="relative mb-6">
           <div className="relative group">
             <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />

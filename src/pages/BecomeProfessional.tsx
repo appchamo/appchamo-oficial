@@ -13,6 +13,29 @@ import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
 type Step = "intro" | "doc-id" | "doc-notice" | "documents" | "profile";
 type DocType = "cpf" | "cnpj";
 
+/**
+ * Em rede fraca, um único upload de documento pode travar indefinidamente
+ * (principalmente Android em 4G limitado). 45s por arquivo dá margem para
+ * fotos pesadas (~5MB) sem prender a UI para sempre. Se estourar, o usuário
+ * recebe toast com a falha e pode tentar de novo.
+ */
+const DOCUMENT_UPLOAD_TIMEOUT_MS = 45000;
+
+function withUploadTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label}_timeout`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(t);
+        resolve(v);
+      })
+      .catch((err) => {
+        clearTimeout(t);
+        reject(err);
+      });
+  });
+}
+
 function digitsOnly(v: string): string {
   return v.replace(/\D/g, "");
 }
@@ -429,8 +452,29 @@ const BecomeProfessional = () => {
         .eq("type", "identity")
         .eq("status", "pending");
 
-      for (const file of docFiles) {
-        const { path: uploadedPath } = await uploadProfessionalDocument(file, user.id);
+      for (let i = 0; i < docFiles.length; i++) {
+        const file = docFiles[i];
+        let uploadedPath: string;
+        try {
+          const result = await withUploadTimeout(
+            uploadProfessionalDocument(file, user.id),
+            DOCUMENT_UPLOAD_TIMEOUT_MS,
+            "upload",
+          );
+          uploadedPath = result.path;
+        } catch (err) {
+          const isTimeout = err instanceof Error && err.message === "upload_timeout";
+          toast({
+            title: isTimeout ? "Envio demorou demais" : "Falha no envio do documento",
+            description: isTimeout
+              ? `O arquivo ${i + 1} de ${docFiles.length} não foi enviado. Tente de novo em outra rede (ex.: Wi-Fi) ou use uma foto menor.`
+              : err instanceof Error
+                ? err.message
+                : "Tente novamente.",
+            variant: "destructive",
+          });
+          throw err;
+        }
 
         const { error: insertDocError } = await supabase
           .from("professional_documents")

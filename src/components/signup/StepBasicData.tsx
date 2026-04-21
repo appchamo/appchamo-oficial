@@ -526,7 +526,10 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       const invokePromise = supabase.functions.invoke("validate-cpf-signup", {
         body: { name: name.trim(), cpfCnpj: docClean },
       });
-      const timeoutMs = 32000;
+      // Asaas costuma responder em 1-3s. 32s era suficiente para o usuário
+      // desistir antes de ver o erro em rede 4G fraca; 15s dá folga razoável
+      // sem prender a UI por muito tempo.
+      const timeoutMs = 15000;
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("validate_timeout")), timeoutMs)
       );
@@ -615,6 +618,9 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                 setName(e.target.value);
               }}
               placeholder="Como no documento"
+              autoCapitalize="words"
+              autoCorrect="off"
+              autoComplete="name"
               className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
             />
           </InputRow>
@@ -629,6 +635,11 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
               }}
               placeholder="seu@email.com"
               disabled={isSocialSignup}
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="email"
               className={`flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground ${isSocialSignup ? "opacity-60 cursor-not-allowed" : ""}`}
             />
           </InputRow>
@@ -642,6 +653,8 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                 setPhone(formatPhone(e.target.value));
               }}
               placeholder="(00) 00000-0000"
+              inputMode="tel"
+              autoComplete="tel"
               className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
             />
           </InputRow>
@@ -795,8 +808,16 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             <div className="border-t pt-3 mt-2">
               <p className="text-xs font-semibold text-muted-foreground mb-2">Endereço *</p>
               <InputRow icon={MapPin} label="CEP">
-                <input type="text" value={addressZip} onChange={(e) => handleCepChange(e.target.value)} placeholder="00000-000"
-                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+                <input
+                  type="text"
+                  value={addressZip}
+                  onChange={(e) => handleCepChange(e.target.value)}
+                  placeholder="00000-000"
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  autoCorrect="off"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                />
                 {loadingCep && <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full flex-shrink-0" />}
               </InputRow>
               <div className="space-y-2 mt-2">
@@ -809,6 +830,9 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                     placeholder="Sua cidade"
                     onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
                     onFocus={() => citySuggestions.length > 0 && setShowCitySuggestions(true)}
+                    autoCapitalize="words"
+                    autoCorrect="off"
+                    autoComplete="address-level2"
                     className={cn(
                       "w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-colors",
                       fieldErrors.addressCity && "border-destructive border-2 ring-2 ring-destructive/25",
@@ -830,13 +854,27 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Rua</label>
-                  <input value={addressStreet} onChange={(e) => setAddressStreet(e.target.value)} placeholder="Sua rua"
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                  <input
+                    value={addressStreet}
+                    onChange={(e) => setAddressStreet(e.target.value)}
+                    placeholder="Sua rua"
+                    autoCapitalize="words"
+                    autoCorrect="off"
+                    autoComplete="address-line1"
+                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Bairro</label>
-                  <input value={addressNeighborhood} onChange={(e) => setAddressNeighborhood(e.target.value)} placeholder="Seu bairro"
-                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                  <input
+                    value={addressNeighborhood}
+                    onChange={(e) => setAddressNeighborhood(e.target.value)}
+                    placeholder="Seu bairro"
+                    autoCapitalize="words"
+                    autoCorrect="off"
+                    autoComplete="address-line2"
+                    className="w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div id="signup-field-addressNumber">
@@ -848,6 +886,8 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                         setAddressNumber(e.target.value);
                       }}
                       placeholder="Ex: 123"
+                      inputMode="numeric"
+                      autoComplete="off"
                       className={cn(
                         "w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-colors",
                         fieldErrors.addressNumber && "border-destructive border-2 ring-2 ring-destructive/25",
@@ -870,10 +910,14 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                       value={addressState}
                       onChange={(e) => {
                         clearFieldError("addressState");
-                        setAddressState(e.target.value);
+                        setAddressState(e.target.value.toUpperCase());
                       }}
                       placeholder="UF"
                       maxLength={2}
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      autoComplete="address-level1"
+                      spellCheck={false}
                       className={cn(
                         "w-full border rounded-lg px-2.5 py-2 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-colors uppercase",
                         fieldErrors.addressState && "border-destructive border-2 ring-2 ring-destructive/25",

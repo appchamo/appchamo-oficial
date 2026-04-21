@@ -170,6 +170,29 @@ const fileToBase64 = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
+/**
+ * Android em rede fraca: `getSession` e `select` do Supabase podem travar sem
+ * erro. Sem timeout, o signupBootstrapReady nunca vira `true` e a tela fica
+ * presa em "Carregando…". Aplicamos um teto curto para degradar graciosamente.
+ */
+const SIGNUP_BOOTSTRAP_TIMEOUT_MS = Capacitor.isNativePlatform() ? 5000 : 4000;
+const SIGNUP_EMAIL_CHECK_TIMEOUT_MS = Capacitor.isNativePlatform() ? 8000 : 6000;
+
+function withSignupTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label}_timeout`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(t);
+        resolve(v);
+      })
+      .catch((err) => {
+        clearTimeout(t);
+        reject(err);
+      });
+  });
+}
+
 const Signup = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -252,11 +275,40 @@ const Signup = () => {
 
     const checkSocialUser = async () => {
       try {
-        const {
-          data: { session: currentSession },
-        } = await supabase.auth.getSession();
+        let currentSession: Awaited<ReturnType<typeof supabase.auth.getSession>>["data"]["session"] | null = null;
+        try {
+          const { data } = await withSignupTimeout(
+            supabase.auth.getSession(),
+            SIGNUP_BOOTSTRAP_TIMEOUT_MS,
+            "getSession",
+          );
+          currentSession = data.session;
+        } catch (err) {
+          const isTimeout = err instanceof Error && err.message === "getSession_timeout";
+          console.warn("[Signup] bootstrap getSession falhou:", err);
+          if (isTimeout) {
+            toast({
+              title: "Conexão instável",
+              description: "Tentando de novo pode resolver. Prosseguindo para a tela inicial.",
+              variant: "destructive",
+            });
+          }
+          // Sem sessão conhecida: segue para method-choice (abaixo) sem travar a UI.
+          currentSession = null;
+        }
 
         if (!currentSession?.user) {
+          // OAuth iniciado mas não concluído (usuário fechou o navegador custom tab
+          // ou cancelou): limpa o flag antigo para não criar estado inconsistente
+          // numa próxima tentativa de login/cadastro.
+          try {
+            if (localStorage.getItem("signup_in_progress") === "true") {
+              localStorage.removeItem("signup_in_progress");
+            }
+          } catch {
+            /* ignore */
+          }
+
           const ed = readEmailDraft();
           if (ed && ed.step === "type") {
             setAccountType("client");
@@ -281,11 +333,35 @@ const Signup = () => {
 
         setLoading(true);
         try {
-          const { data: profileRow, error: profileError } = await supabase
+          const profileQuery = supabase
             .from("profiles")
             .select("cpf, phone, user_type, accepted_terms_version, signup_completed_at")
             .eq("user_id", currentSession.user.id)
             .maybeSingle();
+          let profileRow: Awaited<typeof profileQuery>["data"] = null;
+          let profileError: Awaited<typeof profileQuery>["error"] = null;
+          try {
+            const result = await withSignupTimeout(
+              profileQuery,
+              SIGNUP_BOOTSTRAP_TIMEOUT_MS,
+              "profileFetch",
+            );
+            profileRow = result.data;
+            profileError = result.error;
+          } catch (err) {
+            const isTimeout = err instanceof Error && err.message === "profileFetch_timeout";
+            console.warn("[Signup] bootstrap profile fetch falhou:", err);
+            if (isTimeout) {
+              toast({
+                title: "Conexão instável",
+                description: "Não consegui carregar seu perfil agora. Tente novamente em instantes.",
+                variant: "destructive",
+              });
+            }
+            // Deixa o fluxo seguir como se fosse um cadastro novo OAuth
+            profileRow = null;
+            profileError = null;
+          }
           // Sessão inválida (ex.: usuário excluído no Supabase) → limpa e manda pro login
           const errMsg = (profileError?.message || "").toLowerCase();
           if (
@@ -594,9 +670,27 @@ const Signup = () => {
       setLoading(true);
       try {
         if (emailNorm && !createdUserId) {
-          const { data: existsRaw, error: rpcError } = await supabase.rpc("check_email_exists", {
-            user_email: emailNorm,
-          });
+          let existsRaw: unknown = null;
+          let rpcError: { message?: string } | null = null;
+          try {
+            const result = await withSignupTimeout(
+              supabase.rpc("check_email_exists", { user_email: emailNorm }),
+              SIGNUP_EMAIL_CHECK_TIMEOUT_MS,
+              "checkEmail",
+            );
+            existsRaw = result.data;
+            rpcError = result.error;
+          } catch (err) {
+            const isTimeout = err instanceof Error && err.message === "checkEmail_timeout";
+            toast({
+              title: isTimeout ? "Tempo esgotado" : "Não foi possível verificar o e-mail",
+              description: isTimeout
+                ? "A verificação demorou demais. Confira sua conexão e tente novamente."
+                : "Confira a conexão e tente novamente.",
+              variant: "destructive",
+            });
+            return;
+          }
 
           if (rpcError) {
             toast({

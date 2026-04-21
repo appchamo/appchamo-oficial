@@ -1912,8 +1912,6 @@ export default function CommunityFeed({
         </div>
       )}
 
-      <ProVerifiedCommunityTeaser />
-
 
       {user && !isSinglePostMode && (
         <div className="mb-5 -mx-0.5">
@@ -2036,6 +2034,8 @@ export default function CommunityFeed({
               </button>
             </div>
           </div>
+
+          <ProVerifiedCommunityTeaser />
 
           <Dialog open={composerModalOpen} onOpenChange={setComposerModalOpen}>
             <DialogContent

@@ -80,7 +80,7 @@ export default function ProVerifiedCommunityTeaser() {
     };
   }, [user?.id, isPro, profile?.full_name, (profile as any)?.avatar_url]);
 
-  if (!isPro || !info || info.verified || dismissed) return null;
+  if (!isPro || !info || dismissed) return null;
 
   const initials = info.full_name
     .split(" ")
@@ -167,23 +167,25 @@ export default function ProVerifiedCommunityTeaser() {
         </div>
       </div>
 
-      {/* CTA "fixo" por baixo do post fantasma */}
-      <button
-        type="button"
-        onClick={goSubscribe}
-        className="mt-3 w-full flex items-center gap-3 rounded-2xl bg-gradient-to-r from-primary to-amber-500 text-white text-left px-4 py-3.5 shadow-md shadow-primary/20 active:scale-[0.99] transition-transform"
-      >
-        <div className="flex items-center justify-center w-9 h-9 rounded-full bg-white/20 shrink-0">
-          <Sparkles className="w-4 h-4" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-extrabold leading-tight">Adquira um selo verificado</p>
-          <p className="text-[11.5px] font-medium opacity-95 mt-0.5 leading-snug">
-            Para os clientes contratarem com mais segurança.
-          </p>
-        </div>
-        <ChevronRight className="w-5 h-5 shrink-0" />
-      </button>
+      {/* CTA por baixo do post fantasma — apenas para quem ainda não é verificado */}
+      {!info.verified && (
+        <button
+          type="button"
+          onClick={goSubscribe}
+          className="mt-3 w-full flex items-center gap-3 rounded-2xl bg-gradient-to-r from-primary to-amber-500 text-white text-left px-4 py-3.5 shadow-md shadow-primary/20 active:scale-[0.99] transition-transform"
+        >
+          <div className="flex items-center justify-center w-9 h-9 rounded-full bg-white/20 shrink-0">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-extrabold leading-tight">Adquira um selo verificado</p>
+            <p className="text-[11.5px] font-medium opacity-95 mt-0.5 leading-snug">
+              Para os clientes contratarem com mais segurança.
+            </p>
+          </div>
+          <ChevronRight className="w-5 h-5 shrink-0" />
+        </button>
+      )}
     </section>
   );
 }

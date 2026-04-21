@@ -708,6 +708,8 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
               <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <input
                 type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 value={document}
                 onChange={(e) => {
                   clearFieldError("document");

@@ -495,9 +495,12 @@ const Login = () => {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
+    // Normaliza: trim + lowercase. No Android, o Gboard costuma adicionar
+    // espaço no fim após o autocomplete — sem trim, o Supabase rejeita.
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
     setForgotLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
     if (error) toast({ title: "Erro ao enviar", description: translateError(error.message), variant: "destructive" });
@@ -571,23 +574,32 @@ const Login = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorType(null);
-    if (!email || !password) {toast({ title: "Preencha todos os campos." });return;}
+    // Normaliza: trim + lowercase. No Android (Gboard) e iOS o teclado costuma
+    // adicionar espaço após autocomplete ou capitalizar a 1ª letra — sem isso
+    // o Supabase rejeita como "credenciais inválidas" e o usuário fica perdido.
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {toast({ title: "Preencha todos os campos." });return;}
     setLoading(true);
-    
-    localStorage.setItem("manual_login_intent", "true"); 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    
+
+    localStorage.setItem("manual_login_intent", "true");
+    const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+
     if (error) {
       console.log("💥 Erro no login, limpando dados residuais...");
-      localStorage.removeItem("sb-wfxeiuqxzrlnvlopcrwd-auth-token");
-      
+      // Deriva a chave de token a partir do env em vez de hard-code do ref do
+      // projeto — mais seguro se trocar de projeto Supabase futuramente.
+      try {
+        const projectRef = import.meta.env.VITE_SUPABASE_URL?.split("//")[1]?.split(".")[0];
+        if (projectRef) localStorage.removeItem(`sb-${projectRef}-auth-token`);
+      } catch { /* ignore */ }
+
       const type = getErrorType(error.message);
       setErrorType(type);
       toast({ title: friendlyError(type), variant: "destructive" });
       setLoading(false);
       return;
     }
-    
+
     localStorage.removeItem("manual_login_intent");
     try {
       await proceedToRedirect(data.user.id, data.user.email ?? undefined);
@@ -769,7 +781,18 @@ const Login = () => {
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">E-mail</label>
               <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
                 <Mail className="w-4 h-4 text-muted-foreground" />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                />
               </div>
             </div>
             <button type="submit" disabled={forgotLoading} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
@@ -783,7 +806,18 @@ const Login = () => {
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">E-mail</label>
                 <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/30">
                   <Mail className="w-4 h-4 text-muted-foreground" />
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground" />
+                  <input
+                    type="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="seu@email.com"
+                    className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                  />
                 </div>
               </div>
               <PasswordInput label="Senha" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="current-password" />

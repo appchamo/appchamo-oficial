@@ -26,6 +26,7 @@ import {
   Ticket,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
+import { CouponShowcaseDialog } from "@/components/coupon/CouponShowcaseDialog";
 import ImageCropUpload from "@/components/ImageCropUpload";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -120,6 +121,7 @@ const ProfessionalProfile = () => {
   const [isMutual, setIsMutual] = useState(false);
   /** True se o profissional tem ao menos um cupom ativo (não expirado e com usos disponíveis). */
   const [hasActiveCoupon, setHasActiveCoupon] = useState(false);
+  const [couponDialogOpen, setCouponDialogOpen] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
   const [dmOpening, setDmOpening] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
@@ -723,12 +725,14 @@ const ProfessionalProfile = () => {
             {/* Badges — TODOS na mesma linha */}
             <div className="flex flex-wrap items-center gap-2 mb-2">
               {hasActiveCoupon && (
-                <span
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 text-white text-xs font-bold shadow-sm animate-pulse"
-                  title="Este profissional tem cupom de desconto ativo"
+                <button
+                  type="button"
+                  onClick={() => setCouponDialogOpen(true)}
+                  aria-label="Ver cupom de desconto"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 text-white text-xs font-bold shadow-sm hover:shadow-md active:scale-[0.96] transition-[transform,box-shadow]"
                 >
                   <Ticket className="w-3.5 h-3.5" /> Contrate com desconto
-                </span>
+                </button>
               )}
               {pro.verified && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
@@ -1161,6 +1165,15 @@ const ProfessionalProfile = () => {
           </>
         )}
       </main>
+
+      {pro ? (
+        <CouponShowcaseDialog
+          open={couponDialogOpen}
+          onClose={() => setCouponDialogOpen(false)}
+          professionalId={pro.id}
+          professionalName={pro.full_name || "Profissional"}
+        />
+      ) : null}
     </AppLayout>
   );
 };

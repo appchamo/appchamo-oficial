@@ -11,9 +11,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { BadgeCheck, MapPin, Star, Ticket, X, ChevronRight } from "lucide-react";
+import { BadgeCheck, MapPin, Star, Ticket, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CouponShowcaseDialog } from "@/components/coupon/CouponShowcaseDialog";
 import { cn } from "@/lib/utils";
 
 const CARD_CLASS =
@@ -236,11 +236,13 @@ const CouponProfessionals = () => {
         ))}
       </div>
 
-      <CouponDetailsDialog
+      <CouponShowcaseDialog
         open={!!openPro && !!openCoupon}
-        pro={openPro}
-        coupon={openCoupon}
         onClose={() => setOpenCouponProId(null)}
+        professionalId={openPro?.id ?? ""}
+        professionalName={openPro?.full_name ?? "Profissional"}
+        coupon={openCoupon ?? null}
+        professionalHref={openPro ? `/professional/${openPro.id}` : undefined}
       />
     </section>
   );
@@ -337,118 +339,6 @@ function CouponProCard({ pro, onOpenCoupon }: { pro: ProRow; onOpenCoupon: () =>
         </div>
       </Link>
     </div>
-  );
-}
-
-function CouponDetailsDialog({
-  open,
-  pro,
-  coupon,
-  onClose,
-}: {
-  open: boolean;
-  pro: ProRow | null;
-  coupon: CouponRow | null;
-  onClose: () => void;
-}) {
-  if (!coupon || !pro) {
-    return (
-      <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : null)}>
-        <DialogContent className="max-w-sm" />
-      </Dialog>
-    );
-  }
-  const label = formatCouponShort(coupon);
-  const isUnlimited = coupon.max_uses == null;
-  const remaining = coupon.max_uses != null ? Math.max(0, coupon.max_uses - (coupon.used_count ?? 0)) : null;
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : null)}>
-      <DialogContent className="max-w-sm p-0 overflow-hidden rounded-2xl">
-        <div className="relative bg-gradient-to-br from-primary via-amber-500 to-primary p-5 text-white">
-          <button
-            type="button"
-            aria-label="Fechar"
-            onClick={onClose}
-            className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center"
-          >
-            <X className="w-4 h-4" />
-          </button>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] opacity-95">
-            <Ticket className="w-4 h-4" /> Cupom de desconto
-          </div>
-          <div className="mt-2 text-3xl font-black leading-none drop-shadow-sm">{label}</div>
-          <div className="mt-1 text-sm font-semibold opacity-95">com {pro.full_name}</div>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <DialogHeader>
-            <DialogTitle className="text-base">Detalhes do cupom</DialogTitle>
-          </DialogHeader>
-
-          <ul className="text-sm text-foreground space-y-2.5">
-            <li className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Tipo do desconto</span>
-              <span className="font-semibold">
-                {coupon.discount_type === "percent" ? "Porcentagem" : "Valor fixo"}
-              </span>
-            </li>
-            <li className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Valor</span>
-              <span className="font-semibold">
-                {coupon.discount_type === "percent"
-                  ? `${Number(coupon.discount_value)}%`
-                  : formatBRL(Number(coupon.discount_value))}
-              </span>
-            </li>
-            <li className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Compra mínima</span>
-              <span className="font-semibold">
-                {coupon.min_purchase != null ? formatBRL(Number(coupon.min_purchase)) : "Sem mínimo"}
-              </span>
-            </li>
-            <li className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Compra máxima</span>
-              <span className="font-semibold">
-                {coupon.max_purchase != null ? formatBRL(Number(coupon.max_purchase)) : "Sem teto"}
-              </span>
-            </li>
-            <li className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Usos</span>
-              <span className="font-semibold">
-                {isUnlimited
-                  ? "Ilimitado"
-                  : remaining != null && remaining > 0
-                    ? `${remaining} restante${remaining === 1 ? "" : "s"}`
-                    : "Esgotado"}
-              </span>
-            </li>
-            {coupon.expires_at && (
-              <li className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Validade</span>
-                <span className="font-semibold">
-                  {new Date(coupon.expires_at).toLocaleDateString("pt-BR")}
-                </span>
-              </li>
-            )}
-          </ul>
-
-          <p className="text-[11px] text-muted-foreground leading-snug">
-            O cupom é aplicado automaticamente na tela de pagamento quando você contratar este
-            profissional. Respeita compra mínima e teto, se houver.
-          </p>
-
-          <Link
-            to={`/professional/${pro.id}`}
-            onClick={onClose}
-            className="mt-1 flex items-center justify-center gap-1.5 rounded-xl bg-primary py-3 text-sm font-bold text-primary-foreground shadow-md hover:shadow-lg active:scale-[0.99] transition-all"
-          >
-            Ver profissional
-            <ChevronRight className="w-4 h-4" />
-          </Link>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 

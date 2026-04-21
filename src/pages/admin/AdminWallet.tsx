@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Timer, X, FileText, Download, RefreshCw } from "lucide-react";
+import { Wallet, Send, Clock, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, AlertCircle, Timer, X, FileText, Download, RefreshCw, Ticket } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -15,6 +15,15 @@ interface WalletEntry {
   transferred_amount: number;
   pending_count: number;
   transactions: WalletTx[];
+}
+
+interface ProCouponInfo {
+  id: string;
+  name: string | null;
+  discount_type: "amount" | "percent" | string;
+  discount_value: number;
+  /** Valor em R$ efetivamente descontado na transação (bancado pelo profissional). */
+  discount_amount: number;
 }
 
 interface WalletTx {
@@ -34,6 +43,12 @@ interface WalletTx {
   asaas_transfer_id: string | null;
   /** Preenchido quando já existe NFS-e de comissão vinculada a esta transação */
   platform_fee_nf?: { pdf_url: string | null; nf_number: string | null; invoice_id: string };
+  /** Valor do serviço antes de qualquer cupom (subtotal cobrado pelo profissional). */
+  subtotal_amount?: number;
+  /** Cupom do profissional aplicado (bancado por ele mesmo — reduz a base do repasse). */
+  pro_coupon?: ProCouponInfo | null;
+  /** R$ descontados pelo cupom do app (bancado pela Chamô — NÃO afeta o repasse). */
+  app_coupon_discount_amount?: number;
 }
 
 const fmt = (v: number) =>
@@ -69,9 +84,21 @@ const TransferTimingModal = ({
   const { ready, text } = timeUntilAvailable(earliest || null);
   const net = entry.pending_amount;
   const gross = pendingTxs.reduce((s, t) => s + (t.gross_amount || t.amount), 0);
-        const platformFee = pendingTxs.reduce((s, t) => s + (t.platform_fee_amount || 0), 0);
-        const paymentFee = pendingTxs.reduce((s, t) => s + (t.payment_fee_amount || 0), 0);
-        const anticipationFee = pendingTxs.reduce((s, t) => s + (t.anticipation_fee_amount || 0), 0);
+  const subtotal = pendingTxs.reduce(
+    (s, t) => s + (t.subtotal_amount ?? t.gross_amount ?? t.amount),
+    0,
+  );
+  const proCouponDiscount = pendingTxs.reduce(
+    (s, t) => s + (t.pro_coupon?.discount_amount ?? 0),
+    0,
+  );
+  const appCouponDiscount = pendingTxs.reduce(
+    (s, t) => s + (t.app_coupon_discount_amount ?? 0),
+    0,
+  );
+  const platformFee = pendingTxs.reduce((s, t) => s + (t.platform_fee_amount || 0), 0);
+  const paymentFee = pendingTxs.reduce((s, t) => s + (t.payment_fee_amount || 0), 0);
+  const anticipationFee = pendingTxs.reduce((s, t) => s + (t.anticipation_fee_amount || 0), 0);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -85,24 +112,38 @@ const TransferTimingModal = ({
         <div className="rounded-xl border bg-muted/30 p-4 space-y-2">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Detalhamento</p>
           <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Valor cobrado (bruto)</span>
-            <span className="font-medium">{fmt(gross)}</span>
+            <span className="text-muted-foreground">Valor cobrado pelo profissional</span>
+            <span className="font-medium">{fmt(subtotal)}</span>
           </div>
+          {proCouponDiscount > 0 && (
+            <>
+              <div className="flex justify-between text-sm text-violet-700">
+                <span className="inline-flex items-center gap-1">
+                  <Ticket className="w-3.5 h-3.5" /> (−) Cupom do profissional
+                </span>
+                <span>- {fmt(proCouponDiscount)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-foreground/80 border-t border-dashed pt-1.5">
+                <span className="font-medium">Base de cálculo do repasse</span>
+                <span className="font-medium">{fmt(gross)}</span>
+              </div>
+            </>
+          )}
           {platformFee > 0 && (
             <div className="flex justify-between text-sm text-red-600">
-              <span>(-) Comissão da plataforma</span>
+              <span>(−) Comissão da plataforma</span>
               <span>- {fmt(platformFee)}</span>
             </div>
           )}
           {paymentFee > 0 && (
             <div className="flex justify-between text-sm text-red-600">
-              <span>(-) Taxa de transação ({pendingTxs[0]?.payment_method === "pix" ? "PIX" : "Cartão"})</span>
+              <span>(−) Taxa de transação ({pendingTxs[0]?.payment_method === "pix" ? "PIX" : "Cartão"})</span>
               <span>- {fmt(paymentFee)}</span>
             </div>
           )}
           {anticipationFee > 0 && (
             <div className="flex justify-between text-sm text-orange-600">
-              <span>(-) Taxa de antecipação</span>
+              <span>(−) Taxa de antecipação</span>
               <span>- {fmt(anticipationFee)}</span>
             </div>
           )}
@@ -110,6 +151,17 @@ const TransferTimingModal = ({
             <span>Valor líquido ao profissional</span>
             <span>{fmt(net)}</span>
           </div>
+          {appCouponDiscount > 0 && (
+            <div className="mt-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 flex items-start gap-1.5 text-emerald-800 text-xs">
+              <Ticket className="w-3.5 h-3.5 shrink-0 mt-[1px]" />
+              <div className="flex-1">
+                <p className="font-medium">Cupom do app: −{fmt(appCouponDiscount)}</p>
+                <p className="text-[11px] opacity-80 leading-tight">
+                  Bancado pela Chamô — não afeta este repasse.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Configurações escolhidas */}
@@ -252,13 +304,56 @@ const AdminWallet = () => {
     setLoading(true);
       const { data, error } = await supabase
       .from("wallet_transactions")
-      .select("id, professional_id, amount, gross_amount, platform_fee_amount, payment_fee_amount, anticipation_fee_amount, payment_method, anticipation_enabled, description, status, created_at, transferred_at, available_at, asaas_transfer_id")
+      .select("id, professional_id, transaction_id, amount, gross_amount, platform_fee_amount, payment_fee_amount, anticipation_fee_amount, payment_method, anticipation_enabled, description, status, created_at, transferred_at, available_at, asaas_transfer_id")
       .order("created_at", { ascending: false });
 
     if (error) { toast({ title: "Erro ao carregar carteiras", variant: "destructive" }); setLoading(false); return; }
 
     const proIds = [...new Set((data || []).map(t => t.professional_id))];
     if (!proIds.length) { setEntries([]); setLoading(false); return; }
+
+    // Enriquecer com dados de cupons (subtotal, cupom do pro, cupom do app) via transactions.
+    const txIds = [...new Set((data || []).map((t: any) => t.transaction_id).filter(Boolean))] as string[];
+    const txInfoById: Record<string, {
+      subtotal_amount: number;
+      pro_coupon_id: string | null;
+      pro_coupon_discount_amount: number;
+      app_coupon_discount_amount: number;
+    }> = {};
+    if (txIds.length > 0) {
+      const { data: txs } = await supabase
+        .from("transactions")
+        .select("id, subtotal_amount, pro_coupon_id, pro_coupon_discount_amount, app_coupon_id, app_coupon_discount_amount, original_amount, total_amount")
+        .in("id", txIds);
+      (txs || []).forEach((tx: any) => {
+        txInfoById[tx.id] = {
+          subtotal_amount: Number(tx.subtotal_amount ?? tx.original_amount ?? tx.total_amount ?? 0),
+          pro_coupon_id: tx.pro_coupon_id ?? null,
+          pro_coupon_discount_amount: Number(tx.pro_coupon_discount_amount ?? 0),
+          app_coupon_discount_amount: Number(tx.app_coupon_discount_amount ?? 0),
+        };
+      });
+    }
+
+    const proCouponIds = [...new Set(
+      Object.values(txInfoById)
+        .map((t) => t.pro_coupon_id)
+        .filter(Boolean),
+    )] as string[];
+    const proCouponById: Record<string, { name: string | null; discount_type: string; discount_value: number }> = {};
+    if (proCouponIds.length > 0) {
+      const { data: pcs } = await (supabase as any)
+        .from("professional_coupons")
+        .select("id, name, discount_type, discount_value")
+        .in("id", proCouponIds);
+      (pcs || []).forEach((c: any) => {
+        proCouponById[c.id] = {
+          name: c.name ?? null,
+          discount_type: c.discount_type,
+          discount_value: Number(c.discount_value),
+        };
+      });
+    }
 
     const allTxIds = (data || []).map(t => t.id);
     const nfByTxId: Record<string, { pdf_url: string | null; nf_number: string | null; invoice_id: string }> = {};
@@ -326,6 +421,17 @@ const AdminWallet = () => {
         };
       }
       const nf = nfByTxId[tx.id];
+      const txInfo = (tx as any).transaction_id ? txInfoById[(tx as any).transaction_id] : undefined;
+      const proCouponInfo = txInfo?.pro_coupon_id ? proCouponById[txInfo.pro_coupon_id] : undefined;
+      const proCoupon: ProCouponInfo | null = (txInfo?.pro_coupon_id && proCouponInfo)
+        ? {
+            id: txInfo.pro_coupon_id,
+            name: proCouponInfo.name,
+            discount_type: proCouponInfo.discount_type,
+            discount_value: proCouponInfo.discount_value,
+            discount_amount: txInfo.pro_coupon_discount_amount,
+          }
+        : null;
       map[pid].transactions.push({
         id: tx.id,
         amount: Number(tx.amount),
@@ -342,6 +448,9 @@ const AdminWallet = () => {
         available_at: tx.available_at,
         asaas_transfer_id: tx.asaas_transfer_id,
         ...(nf ? { platform_fee_nf: nf } : {}),
+        subtotal_amount: txInfo?.subtotal_amount,
+        pro_coupon: proCoupon,
+        app_coupon_discount_amount: txInfo?.app_coupon_discount_amount ?? 0,
       });
       if (tx.status === "pending") {
         map[pid].pending_amount += Number(tx.amount);
@@ -640,25 +749,57 @@ const AdminWallet = () => {
 
                               {/* Breakdown de valores */}
                               <div className="bg-muted/50 rounded-lg p-2.5 space-y-1 text-xs">
+                                {/* Subtotal do serviço (valor que o profissional cobrou) */}
                                 <div className="flex justify-between text-muted-foreground">
-                                  <span>Valor cobrado (bruto)</span>
-                                  <span>{fmt(tx.gross_amount)}</span>
+                                  <span>
+                                    Valor cobrado pelo profissional
+                                    {tx.subtotal_amount == null && <span className="text-[10px] ml-1 opacity-60">(bruto)</span>}
+                                  </span>
+                                  <span>{fmt(tx.subtotal_amount ?? tx.gross_amount)}</span>
                                 </div>
+
+                                {/* Cupom do profissional — bancado por ele */}
+                                {tx.pro_coupon && tx.pro_coupon.discount_amount > 0 && (
+                                  <>
+                                    <div className="flex justify-between text-violet-700">
+                                      <span className="inline-flex items-center gap-1">
+                                        <Ticket className="w-3 h-3" />
+                                        (−) Cupom do profissional
+                                        {tx.pro_coupon.discount_type === "percent" && (
+                                          <span className="text-[10px] opacity-75">
+                                            ({Number(tx.pro_coupon.discount_value)}%)
+                                          </span>
+                                        )}
+                                        {tx.pro_coupon.name && (
+                                          <span className="text-[10px] opacity-70 truncate max-w-[100px]">
+                                            · {tx.pro_coupon.name}
+                                          </span>
+                                        )}
+                                      </span>
+                                      <span>- {fmt(tx.pro_coupon.discount_amount)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-foreground/80 border-t border-dashed pt-1">
+                                      <span className="font-medium">Base de cálculo do repasse</span>
+                                      <span className="font-medium">{fmt(tx.gross_amount)}</span>
+                                    </div>
+                                  </>
+                                )}
+
                                 {tx.platform_fee_amount > 0 && (
                                   <div className="flex justify-between text-red-600">
-                                    <span>(-) Comissão da plataforma</span>
+                                    <span>(−) Comissão da plataforma</span>
                                     <span>- {fmt(tx.platform_fee_amount)}</span>
                                   </div>
                                 )}
                                 {tx.payment_fee_amount > 0 && (
                                   <div className="flex justify-between text-red-600">
-                                    <span>(-) Taxa de transação ({tx.payment_method === "pix" ? "PIX" : "Cartão"})</span>
+                                    <span>(−) Taxa de transação ({tx.payment_method === "pix" ? "PIX" : "Cartão"})</span>
                                     <span>- {fmt(tx.payment_fee_amount)}</span>
                                   </div>
                                 )}
                                 {tx.anticipation_fee_amount > 0 && (
                                   <div className="flex justify-between text-orange-600">
-                                    <span>(-) Taxa de antecipação</span>
+                                    <span>(−) Taxa de antecipação</span>
                                     <span>- {fmt(tx.anticipation_fee_amount)}</span>
                                   </div>
                                 )}
@@ -666,6 +807,21 @@ const AdminWallet = () => {
                                   <span>Valor líquido ao profissional</span>
                                   <span>{fmt(tx.amount)}</span>
                                 </div>
+
+                                {/* Cupom do app — bancado pela Chamô, só informativo */}
+                                {tx.app_coupon_discount_amount && tx.app_coupon_discount_amount > 0 && (
+                                  <div className="mt-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 flex items-start gap-1.5 text-emerald-800">
+                                    <Ticket className="w-3 h-3 shrink-0 mt-[1px]" />
+                                    <div className="flex-1">
+                                      <p className="font-medium">
+                                        Cupom do app: −{fmt(tx.app_coupon_discount_amount)}
+                                      </p>
+                                      <p className="text-[10px] opacity-80 leading-tight">
+                                        Bancado pela Chamô — não afeta o que o profissional recebe.
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Prazo */}

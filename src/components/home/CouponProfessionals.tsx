@@ -216,7 +216,7 @@ const CouponProfessionals = () => {
           <Ticket className="w-4 h-4 text-white" />
         </div>
         <h3 className="font-bold text-foreground tracking-tight text-[15px] lg:text-base">
-          Profissionais com cupons
+          Contrate com desconto
         </h3>
         <span className="ml-auto text-[11px] font-semibold text-primary/80 uppercase tracking-wide">
           {items.length} {items.length === 1 ? "oferta" : "ofertas"}

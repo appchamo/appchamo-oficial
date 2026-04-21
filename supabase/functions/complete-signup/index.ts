@@ -134,6 +134,30 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Lê a versão vigente dos termos para o tipo de conta. Evita gravar uma
+    // versão hard-coded que ficaria desatualizada assim que o admin publicar
+    // novos termos — o banner de re-aceite apareceria indevidamente para quem
+    // acabou de se cadastrar.
+    const termsKey =
+      accountType === "professional" || accountType === "company"
+        ? "terms_version_professional"
+        : "terms_version";
+    const { data: termsRow } = await supabase
+      .from("platform_settings")
+      .select("value")
+      .eq("key", termsKey)
+      .maybeSingle();
+    const parseSettingVal = (v: unknown): string => {
+      if (v == null) return "";
+      if (typeof v === "string") return v;
+      try {
+        return JSON.stringify(v).replace(/^"|"$/g, "");
+      } catch {
+        return String(v);
+      }
+    };
+    const currentTermsVersion = parseSettingVal(termsRow?.value) || "1.0";
+
     // ✅ 4. Preparação dos dados do Perfil
     const profileUpdates: Record<string, any> = {
       user_type: accountType,
@@ -141,7 +165,7 @@ Deno.serve(async (req) => {
       display_name: basicData.displayName || basicData.name,
       phone: basicData.phone,
       birth_date: basicData.birthDate || null,
-      accepted_terms_version: "1.0",
+      accepted_terms_version: currentTermsVersion,
       accepted_terms_at: new Date().toISOString(),
       signup_completed_at: new Date().toISOString(),
       address_zip: basicData.addressZip || null,

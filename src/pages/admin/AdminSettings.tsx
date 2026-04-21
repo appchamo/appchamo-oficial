@@ -1,5 +1,17 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Save, Loader2, Lock, Volume2, Trash2, Megaphone, AlertTriangle } from "lucide-react";
+import {
+  Save,
+  Loader2,
+  Lock,
+  Volume2,
+  Trash2,
+  Megaphone,
+  AlertTriangle,
+  Users,
+  UserCheck,
+  Search,
+  X,
+} from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,6 +39,23 @@ const AdminSettings = () => {
   const [uploadingSound, setUploadingSound] = useState(false);
   const [publishTermsOpen, setPublishTermsOpen] = useState(false);
   const [publishingTerms, setPublishingTerms] = useState(false);
+  const [publishScope, setPublishScope] = useState<"all" | "user">("all");
+  const [userSearch, setUserSearch] = useState("");
+  const [userResults, setUserResults] = useState<Array<{
+    user_id: string;
+    full_name: string;
+    email: string;
+    user_type: string;
+    accepted_terms_version: string | null;
+    accepted_terms_at: string | null;
+  }>>([]);
+  const [selectedUser, setSelectedUser] = useState<{
+    user_id: string;
+    full_name: string;
+    email: string;
+    user_type: string;
+  } | null>(null);
+  const [searchingUsers, setSearchingUsers] = useState(false);
 
   const handleChangePassword = async () => {
     if (!newPassword || newPassword.length < 6) {
@@ -74,45 +103,125 @@ const AdminSettings = () => {
   const updateStat = (id: string, field: string, value: any) =>
     setStatsRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
 
+  const resetPublishDialog = () => {
+    setPublishScope("all");
+    setUserSearch("");
+    setUserResults([]);
+    setSelectedUser(null);
+  };
+
+  useEffect(() => {
+    if (!publishTermsOpen || publishScope !== "user") return;
+    const term = userSearch.trim();
+    if (term.length < 2) {
+      setUserResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSearchingUsers(true);
+      const like = `%${term}%`;
+      const { data } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, email, user_type, accepted_terms_version, accepted_terms_at")
+        .or(`full_name.ilike.${like},email.ilike.${like}`)
+        .order("created_at", { ascending: false })
+        .limit(15);
+      if (cancelled) return;
+      setUserResults((data || []) as any);
+      setSearchingUsers(false);
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [userSearch, publishScope, publishTermsOpen]);
+
   const handlePublishTerms = async () => {
     setPublishingTerms(true);
     try {
-      const termsKeys = [
-        "terms_version",
-        "terms_of_use",
-        "privacy_policy",
-        "terms_version_professional",
-        "terms_of_use_professional",
-        "privacy_policy_professional",
-      ];
-      for (const key of termsKeys) {
-        const value = settings[key];
-        if (value === undefined) continue;
-        await supabase
-          .from("platform_settings")
-          .upsert({ key, value: value as any }, { onConflict: "key" });
-      }
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        await supabase.from("admin_logs").insert({
-          admin_user_id: session.user.id,
-          action: "publish_terms",
-          target_type: "settings",
-          details: {
-            terms_version: settings.terms_version || null,
-            terms_version_professional: settings.terms_version_professional || null,
-          } as any,
+
+      if (publishScope === "all") {
+        const termsKeys = [
+          "terms_version",
+          "terms_of_use",
+          "privacy_policy",
+          "terms_version_professional",
+          "terms_of_use_professional",
+          "privacy_policy_professional",
+        ];
+        for (const key of termsKeys) {
+          const value = settings[key];
+          if (value === undefined) continue;
+          await supabase
+            .from("platform_settings")
+            .upsert({ key, value: value as any }, { onConflict: "key" });
+        }
+        if (session) {
+          await supabase.from("admin_logs").insert({
+            admin_user_id: session.user.id,
+            action: "publish_terms",
+            target_type: "settings",
+            details: {
+              scope: "all",
+              terms_version: settings.terms_version || null,
+              terms_version_professional: settings.terms_version_professional || null,
+            } as any,
+          });
+        }
+        toast({
+          title: "Novos termos publicados!",
+          description:
+            "Usuários com versão diferente verão um aviso ao abrir o app para reler e aceitar.",
+        });
+      } else {
+        if (!selectedUser) {
+          toast({
+            title: "Selecione um usuário",
+            description: "Busque e escolha o usuário para o qual deseja invalidar o aceite.",
+            variant: "destructive",
+          });
+          setPublishingTerms(false);
+          return;
+        }
+        const { error } = await supabase
+          .from("profiles")
+          .update({
+            accepted_terms_version: null,
+            accepted_terms_at: null,
+          })
+          .eq("user_id", selectedUser.user_id);
+        if (error) throw error;
+        if (session) {
+          await supabase.from("admin_logs").insert({
+            admin_user_id: session.user.id,
+            action: "invalidate_terms_acceptance",
+            target_type: "profile",
+            target_id: selectedUser.user_id,
+            details: {
+              scope: "user",
+              full_name: selectedUser.full_name,
+              email: selectedUser.email,
+              terms_version:
+                selectedUser.user_type === "professional" ||
+                selectedUser.user_type === "company"
+                  ? settings.terms_version_professional || null
+                  : settings.terms_version || null,
+            } as any,
+          });
+        }
+        toast({
+          title: "Aceite invalidado!",
+          description: `${selectedUser.full_name} verá o aviso de re-aceite ao abrir o app.`,
         });
       }
-      toast({
-        title: "Novos termos publicados!",
-        description:
-          "Usuários com versão diferente verão um aviso ao abrir o app para reler e aceitar.",
-      });
+
       setPublishTermsOpen(false);
+      resetPublishDialog();
     } catch (e: any) {
       toast({
-        title: "Erro ao publicar termos",
+        title: "Erro ao enviar novos termos",
         description: translateError(e?.message || "Tente novamente."),
         variant: "destructive",
       });
@@ -545,48 +654,210 @@ const AdminSettings = () => {
         </button>
       </div>
 
-      <Dialog open={publishTermsOpen} onOpenChange={(v) => !publishingTerms && setPublishTermsOpen(v)}>
-        <DialogContent className="max-w-md">
+      <Dialog
+        open={publishTermsOpen}
+        onOpenChange={(v) => {
+          if (publishingTerms) return;
+          setPublishTermsOpen(v);
+          if (!v) resetPublishDialog();
+        }}
+      >
+        <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-              Publicar novos termos?
+              Enviar novos termos
             </DialogTitle>
             <DialogDescription>
-              Ao confirmar, a versão atual dos termos será considerada vigente e os usuários com
-              versão anteriormente aceita diferente verão um aviso no topo da Home solicitando
-              reler e aceitar.
+              Escolha para quem enviar o aviso de re-aceite dos termos.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 text-[13px]">
-            <div className="rounded-lg border bg-muted/40 px-3 py-2">
-              <p>
-                <span className="font-semibold text-foreground">Versão cliente:</span>{" "}
-                {settings.terms_version || "—"}
-              </p>
-              <p className="mt-0.5">
-                <span className="font-semibold text-foreground">Versão profissional:</span>{" "}
-                {settings.terms_version_professional || "—"}
+
+          {/* Toggle de escopo */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setPublishScope("all")}
+              disabled={publishingTerms}
+              className={`flex flex-col items-start gap-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors ${
+                publishScope === "all"
+                  ? "border-amber-500 bg-amber-500/10"
+                  : "border-border hover:border-amber-500/50 hover:bg-muted/40"
+              }`}
+            >
+              <span className="flex items-center gap-1.5 text-[12px] font-bold text-foreground">
+                <Users className="h-3.5 w-3.5" />
+                Para todos
+              </span>
+              <span className="text-[10.5px] leading-snug text-muted-foreground">
+                Publica a versão atual; quem estiver em versão antiga recebe o aviso.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPublishScope("user")}
+              disabled={publishingTerms}
+              className={`flex flex-col items-start gap-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors ${
+                publishScope === "user"
+                  ? "border-amber-500 bg-amber-500/10"
+                  : "border-border hover:border-amber-500/50 hover:bg-muted/40"
+              }`}
+            >
+              <span className="flex items-center gap-1.5 text-[12px] font-bold text-foreground">
+                <UserCheck className="h-3.5 w-3.5" />
+                Usuário específico
+              </span>
+              <span className="text-[10.5px] leading-snug text-muted-foreground">
+                Invalida o aceite apenas desse usuário, sem alterar a versão.
+              </span>
+            </button>
+          </div>
+
+          {publishScope === "all" ? (
+            <div className="space-y-2 text-[13px]">
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p>
+                  <span className="font-semibold text-foreground">Versão cliente:</span>{" "}
+                  {settings.terms_version || "—"}
+                </p>
+                <p className="mt-0.5">
+                  <span className="font-semibold text-foreground">Versão profissional:</span>{" "}
+                  {settings.terms_version_professional || "—"}
+                </p>
+              </div>
+              <p className="text-[11.5px] text-muted-foreground leading-snug">
+                A versão e o texto configurados acima serão gravados como vigentes. Usuários com
+                versão aceita diferente verão um aviso no topo da Home.
               </p>
             </div>
-            <p className="text-[11.5px] text-muted-foreground leading-snug">
-              Quem recusar os novos termos deverá excluir a conta para continuar recusando o uso do
-              app. O aceite fica registrado com data, hora e versão.
-            </p>
-          </div>
+          ) : (
+            <div className="space-y-2">
+              {selectedUser ? (
+                <div className="flex items-start gap-2 rounded-xl border-2 border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-bold text-foreground truncate">
+                      {selectedUser.full_name}
+                    </p>
+                    <p className="text-[11.5px] text-muted-foreground truncate">
+                      {selectedUser.email}
+                    </p>
+                    <p className="mt-0.5 inline-flex items-center rounded-md bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5">
+                      {selectedUser.user_type === "professional"
+                        ? "Profissional"
+                        : selectedUser.user_type === "company"
+                          ? "Empresa"
+                          : "Cliente"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedUser(null)}
+                    disabled={publishingTerms}
+                    className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    aria-label="Trocar usuário"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Buscar por nome ou e-mail..."
+                      className="w-full border rounded-xl pl-8 pr-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                  <div className="max-h-[240px] overflow-y-auto rounded-xl border bg-muted/20">
+                    {userSearch.trim().length < 2 ? (
+                      <p className="px-3 py-3 text-[12px] text-muted-foreground text-center">
+                        Digite pelo menos 2 caracteres para buscar.
+                      </p>
+                    ) : searchingUsers ? (
+                      <p className="px-3 py-3 text-[12px] text-muted-foreground text-center flex items-center justify-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Buscando...
+                      </p>
+                    ) : userResults.length === 0 ? (
+                      <p className="px-3 py-3 text-[12px] text-muted-foreground text-center">
+                        Nenhum usuário encontrado.
+                      </p>
+                    ) : (
+                      <ul className="divide-y">
+                        {userResults.map((u) => (
+                          <li key={u.user_id}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedUser({
+                                  user_id: u.user_id,
+                                  full_name: u.full_name,
+                                  email: u.email,
+                                  user_type: u.user_type,
+                                })
+                              }
+                              className="w-full text-left px-3 py-2 hover:bg-muted transition-colors"
+                            >
+                              <p className="text-[13px] font-semibold text-foreground truncate">
+                                {u.full_name}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground truncate">
+                                {u.email}
+                              </p>
+                              <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                <span className="inline-flex items-center rounded bg-primary/10 text-primary text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5">
+                                  {u.user_type === "professional"
+                                    ? "Profissional"
+                                    : u.user_type === "company"
+                                      ? "Empresa"
+                                      : "Cliente"}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {u.accepted_terms_version
+                                    ? `Aceitou v${u.accepted_terms_version}`
+                                    : "Sem aceite"}
+                                </span>
+                              </div>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </>
+              )}
+              <p className="text-[11.5px] text-muted-foreground leading-snug">
+                Ao invalidar o aceite, <span className="font-semibold text-foreground">apenas esse usuário</span>{" "}
+                verá o aviso de re-aceite ao abrir o app. A versão vigente não é alterada.
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2 mt-1">
             <button
               type="button"
               onClick={handlePublishTerms}
-              disabled={publishingTerms}
+              disabled={
+                publishingTerms || (publishScope === "user" && !selectedUser)
+              }
               className="inline-flex items-center justify-center gap-2 w-full rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-white shadow-md shadow-amber-500/25 hover:bg-amber-600 transition-colors disabled:opacity-60"
             >
               {publishingTerms ? <Loader2 className="h-4 w-4 animate-spin" /> : <Megaphone className="h-4 w-4" />}
-              {publishingTerms ? "Publicando..." : "Confirmar e publicar"}
+              {publishingTerms
+                ? "Enviando..."
+                : publishScope === "all"
+                  ? "Confirmar e enviar a todos"
+                  : "Invalidar aceite e notificar"}
             </button>
             <button
               type="button"
-              onClick={() => setPublishTermsOpen(false)}
+              onClick={() => {
+                setPublishTermsOpen(false);
+                resetPublishDialog();
+              }}
               disabled={publishingTerms}
               className="inline-flex items-center justify-center w-full rounded-xl border border-border py-2.5 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-60"
             >

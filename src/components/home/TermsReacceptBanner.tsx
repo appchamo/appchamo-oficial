@@ -98,10 +98,13 @@ export default function TermsReacceptBanner() {
   }, [settings, isPro]);
 
   const acceptedVersion = (profile?.accepted_terms_version || "").trim();
+  // Mostra o banner se o usuário já concluiu o cadastro (signup_completed_at) e:
+  //  - a versão aceita difere da versão vigente (versão antiga), ou
+  //  - o aceite foi explicitamente invalidado pelo admin (accepted_terms_version = null).
   const needsReaccept =
     !!user?.id &&
     !!profile &&
-    !!acceptedVersion &&
+    !!profile.signup_completed_at &&
     !!currentVersion &&
     acceptedVersion !== currentVersion;
 

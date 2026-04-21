@@ -23,6 +23,7 @@ import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
 import CouponProfessionals from "@/components/home/CouponProfessionals";
 import HomeProCarousel from "@/components/home/HomeProCarousel";
 import ProSellMoreChecklist from "@/components/home/ProSellMoreChecklist";
+import ProFeaturedUpsellBanner from "@/components/home/ProFeaturedUpsellBanner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
@@ -949,6 +950,7 @@ const Home = () => {
                   </div>
                 )}
                 {block}
+                {section.id === "featured" && <ProFeaturedUpsellBanner />}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
                 {section.id === "sponsors" && linkedSponsor && !homeFeedComunidade ? (
                   <div className="mt-3 flex flex-col gap-3">

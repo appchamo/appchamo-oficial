@@ -519,9 +519,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             } catch {
               /* ignore */
             }
-          } else if (Capacitor.isNativePlatform()) {
-            // Apple/Google: full-page para /post-login. O SPA em /login falhava (corrida storage vs React,
-            // proceedToRedirect lento, SIGNED_IN vs flags de hard-reload) — o utilizador ficava na login até reabrir a app.
+          } else if (Capacitor.getPlatform() === "ios") {
+            // iOS: ainda precisa de full-page reload porque o WebKit tem corridas de estado
+            // (Preferences vs React context, SIGNED_IN atrasado). Mantido para não regressar.
             try {
               localStorage.removeItem("manual_login_intent");
               localStorage.removeItem("chamo_force_hard_reload");
@@ -534,6 +534,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             try {
               window.location.replace("/post-login");
+            } catch {
+              /* ignore */
+            }
+          } else if (Capacitor.getPlatform() === "android") {
+            // Android (Chromium WebView): NÃO fazer window.location.replace — o reload completo
+            // era a "piscada + atualiza" reportada pelo usuário. O listener externo do appUrlOpen
+            // chama loadUserData(session) logo após esta função retornar, e o Login.tsx tem um
+            // polling que detecta a sessão pelo getSession() e dispara proceedToRedirect (SPA).
+            // Assim o fluxo vira: Browser fecha → /login detecta sessão → navigate('/home').
+            try {
+              localStorage.removeItem("manual_login_intent");
+              localStorage.removeItem("chamo_force_hard_reload");
+              // Mantém chamo_oauth_just_landed para o modal de boas-vindas aparecer na Home.
+              sessionStorage.setItem("chamo_oauth_just_landed", "1");
+              localStorage.setItem("chamo_oauth_just_landed", "1");
+              // Marca grace period para qualquer heurística de "hang reload" não disparar agora.
+              sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
+              // Impede o reload-de-estabilização da Home (ver Home.tsx, effect pós-OAuth).
+              sessionStorage.setItem("chamo_featured_reload_after_oauth", "1");
             } catch {
               /* ignore */
             }
@@ -569,6 +588,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             window.dispatchEvent(new CustomEvent('chamo-oauth-done', { detail: { success: false } }));
           }
+        } else if (Capacitor.getPlatform() === 'android' && !exchangeOk) {
+          // Android: se a troca do code falhou, avisa o Login para destravar o overlay
+          // "Processando login…" e o botão "Entrando…". Sem isso o usuário ficaria travado
+          // na tela de login até o timeout de 45s.
+          window.dispatchEvent(new CustomEvent('chamo-oauth-done', { detail: { success: false } }));
         }
       }
       return exchangeOk;

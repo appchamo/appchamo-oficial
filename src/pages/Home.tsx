@@ -305,8 +305,10 @@ const Home = () => {
 
   // iOS WebView: reload de estabilização pós-OAuth/login feito aqui (fase do skeleton),
   // antes de qualquer conteúdo ou modal aparecer para o usuário.
+  // Restrito a iOS: no Android o Chromium WebView não precisa desse reload e ele aparecia
+  // como uma 2ª "piscada" após o login com Google.
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
+    if (Capacitor.getPlatform() !== "ios") return;
     try {
       const graceUntil = parseInt(sessionStorage.getItem("chamo_hang_reload_grace_until") || "0", 10);
       const postOAuthWarmup = Date.now() < graceUntil;

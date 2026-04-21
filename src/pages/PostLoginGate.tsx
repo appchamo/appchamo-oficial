@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -14,11 +14,17 @@ export default function PostLoginGate() {
   /** user resolvido via polling direto em getSession() — usa quando o contexto ainda não atualizou (corrida pós-OAuth). */
   const [fallbackUserId, setFallbackUserId] = useState<string | null>(null);
   const didDecideRef = useRef(false);
-
-  const firstName = useMemo(() => {
-    const full = (session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name) as string | undefined;
-    return full?.trim().split(/\s+/)[0] || "bem-vindo(a)";
-  }, [session?.user?.user_metadata]);
+  /**
+   * Antes usávamos `let cancelled = false` no escopo do effect e cleanup `cancelled = true`,
+   * mas ele disparava em qualquer mudança de dep (ex.: `profile?.user_id` aparecendo no contexto
+   * do useAuth durante o run()). O re-run do effect retornava cedo por `didDecideRef.current`,
+   * deixando o `run()` cancelado SEM chamar setChecking(false)/navigate(...) — spinner
+   * "Verificando seu cadastro…" eterno. Agora só cancelamos no unmount real.
+   */
+  const unmountedRef = useRef(false);
+  useEffect(() => () => {
+    unmountedRef.current = true;
+  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -59,7 +65,7 @@ export default function PostLoginGate() {
     if (!profile) {
       setChecking(true);
 
-      let cancelled = false;
+      const isCancelled = () => unmountedRef.current;
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
       const run = async () => {
@@ -72,7 +78,7 @@ export default function PostLoginGate() {
         ];
 
         for (const a of attempts) {
-          if (cancelled) return;
+          if (isCancelled()) return;
           if (a.waitBeforeMs) await sleep(a.waitBeforeMs);
           try {
             const { data, error } = await Promise.race([
@@ -85,7 +91,7 @@ export default function PostLoginGate() {
               new Promise<never>((_, reject) => setTimeout(() => reject(new Error("post_login_profile_timeout")), a.timeoutMs)),
             ]);
 
-            if (cancelled) return;
+            if (isCancelled()) return;
             if (error) {
               console.warn("[post-login] profiles select:", error.message);
             }
@@ -100,7 +106,7 @@ export default function PostLoginGate() {
                 // Aguarda até 12s para o flushPendingEmailSignup (background) completar
                 // antes de jogar o usuário na tela de seleção CLIENTE/PROFISSIONAL
                 let finalType = userType;
-                for (let w = 0; w < 24 && !cancelled; w++) {
+                for (let w = 0; w < 24 && !isCancelled(); w++) {
                   await sleep(500);
                   try {
                     const { data: d2 } = await supabase
@@ -112,7 +118,7 @@ export default function PostLoginGate() {
                     if (t2 && t2 !== "pending_signup") { finalType = t2; break; }
                   } catch { /* continua */ }
                 }
-                if (cancelled) return;
+                if (isCancelled()) return;
                 setChecking(false);
                 if (finalType !== "pending_signup") {
                   void refreshProfile(userId).catch(() => {});
@@ -127,7 +133,7 @@ export default function PostLoginGate() {
                       signup_completed_at?: string | null;
                       accepted_terms_version?: string | null;
                     } | null);
-                  if (cancelled) return;
+                  if (isCancelled()) return;
                   if (!lastRow || !isProfileSignupComplete(lastRow)) {
                     navigate("/signup", { replace: true });
                   } else {
@@ -169,13 +175,13 @@ export default function PostLoginGate() {
           }
         }
 
-        if (cancelled) return;
+        if (isCancelled()) return;
 
         // Trigger handle_new_user pode falhar ou atrasar: criar perfil cliente com a sessão OAuth (RLS permite insert own row).
         const { data: liveAuth } = await supabase.auth.getSession();
         const u = liveAuth?.session?.user;
         if (!u || u.id !== userId) {
-          if (!cancelled) {
+          if (!isCancelled()) {
             setChecking(false);
             navigate("/login", { replace: true });
           }
@@ -194,13 +200,13 @@ export default function PostLoginGate() {
           { onConflict: "user_id" },
         );
         if (isNewSignupFallback) {
-          if (!cancelled) {
+          if (!isCancelled()) {
             setChecking(false);
             navigate("/signup", { replace: true });
           }
           return;
         }
-        if (!upsertErr && !cancelled) {
+        if (!upsertErr && !isCancelled()) {
           try {
             const { data: row, error: rowErr } = await Promise.race([
               supabase
@@ -210,7 +216,7 @@ export default function PostLoginGate() {
                 .maybeSingle(),
               new Promise<never>((_, reject) => setTimeout(() => reject(new Error("post_login_after_upsert_timeout")), 5000)),
             ]);
-            if (!cancelled && !rowErr) {
+            if (!isCancelled() && !rowErr) {
               const ut = (row as { user_type?: string } | null)?.user_type;
               const r = row as {
                 user_type?: string;
@@ -243,7 +249,7 @@ export default function PostLoginGate() {
           console.warn("[post-login] upsert profile:", upsertErr.message);
         }
 
-        if (cancelled) return;
+        if (isCancelled()) return;
         // Último recurso: sessão inválida ou bloqueio raro
         try {
           await hardClearNativeAuthSession().catch(() => {});
@@ -254,9 +260,10 @@ export default function PostLoginGate() {
       };
 
       run();
-      return () => {
-        cancelled = true;
-      };
+      // Sem cleanup aqui: o `unmountedRef` (effect próprio com deps []) cuida do unmount real.
+      // Cleanup via cancelled local rodava em qualquer mudança de dep (ex.: profile aparecendo
+      // no contexto enquanto o run() estava em andamento) e travava a tela em "Verificando...".
+      return;
     }
 
     // Perfil já no contexto (ex. retry anterior)

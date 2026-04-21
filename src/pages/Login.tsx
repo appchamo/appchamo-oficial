@@ -9,6 +9,7 @@ import { translateError } from "@/lib/errorMessages";
 import { resolveAuthReturnPath, setPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
 import { getAuthEmailRedirectUrl } from "@/lib/authEmailRedirect";
 import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
+import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
@@ -134,9 +135,7 @@ const Login = () => {
         window.history.replaceState({}, "", window.location.pathname);
         if (data?.session?.user && !hasRedirectedForSessionRef.current) {
           hasRedirectedForSessionRef.current = true;
-          setLoading(false);
-          setProcessingOAuth(false);
-          proceedToRedirect(data.session.user.id, data.session.user.email ?? undefined);
+          proceedToRedirect(data.session.user.id, data.session.user.email ?? undefined, true);
         }
       } catch (e) {
         console.error("[Login] exchange from URL:", e);
@@ -172,11 +171,16 @@ const Login = () => {
       if (!live?.user) return false;
       const ctxId = contextSessionUserIdRef.current;
       if (ctxId && ctxId !== live.user.id) return true;
+      // Considera OAuth apenas se o usuário iniciou o fluxo social nesta sessão do Login.
+      // Caso contrário (sessão persistida antiga ao entrar em /login), é um simples "já logado":
+      // não setar flag evita modal de boas-vindas indevido e piscada no iOS.
+      const fromOAuth =
+        oauthBrowserOpenedRef.current || socialLoginInProgressRef.current;
       hasRedirectedForSessionRef.current = true;
       oauthBrowserOpenedRef.current = false;
-      setLoading(false);
-      setProcessingOAuth(false);
-      proceedToRedirect(live.user.id, live.user.email ?? undefined);
+      // proceedToRedirect controla processingOAuth/loading e navega — não mexemos aqui
+      // para evitar flash do formulário antes do redirect.
+      proceedToRedirect(live.user.id, live.user.email ?? undefined, fromOAuth);
       return true;
     };
 
@@ -208,9 +212,9 @@ const Login = () => {
           clearInterval(sessionPollRef.current);
           sessionPollRef.current = null;
         }
-        setLoading(false);
-        setProcessingOAuth(false);
-            proceedToRedirect(s.user.id, s.user.email ?? undefined);
+        // Polling só roda com loading=true, que em nativo vem de hasOAuthCodeInUrl() ou
+        // de handleSocialLogin — em ambos os casos é fluxo OAuth real.
+        proceedToRedirect(s.user.id, s.user.email ?? undefined, true);
       }
     }, 1000);
     return () => {
@@ -268,15 +272,24 @@ const Login = () => {
         appResumeTimerRef.current = null;
       }
       if (isActive) {
+        // Android: assim que o app volta ao primeiro plano vindo do Browser OAuth,
+        // subimos o overlay imediatamente para cobrir o formulário de Login enquanto
+        // conferimos a sessão e disparamos o redirect. Sem isso havia um flash visível
+        // do formulário entre o fechamento do Custom Tab e o navigate('/home').
+        if (oauthBrowserOpenedRef.current) setProcessingOAuth(true);
         appResumeTimerRef.current = setTimeout(async () => {
           appResumeTimerRef.current = null;
           const { data: { session: s } } = await supabase.auth.getSession();
           if (s?.user && !hasRedirectedForSessionRef.current) {
+            // Este caminho só executa logo após o app voltar do Browser OAuth (appStateChange).
+            // Considera OAuth se houve de fato uma abertura do Browser nesta sessão.
+            const fromOAuth =
+              oauthBrowserOpenedRef.current || socialLoginInProgressRef.current;
             hasRedirectedForSessionRef.current = true;
             oauthBrowserOpenedRef.current = false;
-            setLoading(false);
-            setProcessingOAuth(false);
-            proceedToRedirect(s.user.id, s.user.email ?? undefined);
+            // Não baixamos processingOAuth/loading aqui: o proceedToRedirect assume
+            // o controle e o navigate desmonta a tela.
+            proceedToRedirect(s.user.id, s.user.email ?? undefined, fromOAuth);
           } else if (!s?.user && loading) {
             socialLoginInProgressRef.current = false;
             setLoading(false);
@@ -311,45 +324,71 @@ const Login = () => {
 
   /** Após OAuth (Google/Apple) o trigger pode demorar a criar o perfil. Retry só enquanto não existir perfil; se já existir (mesmo pending_signup), decide na hora. */
   const fetchProfileWithRetry = async (userId: string): Promise<{ profile: any; roles: any[] }> => {
-    const fetchOne = async () => {
-      const [{ data: profile }, { data: roles }] = await Promise.all([
-        supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
-        supabase.from("user_roles").select("role").eq("user_id", userId),
+    // Em iOS (WebKit), após login a 1ª request ao PostgREST pode ficar pendurada se a rede vacilar;
+    // sem timeout, o proceedToRedirect nunca chama navigate e o overlay "Processando login…" some
+    // aos 10s deixando o botão Entrar travado. Timeout por tentativa resolve isso.
+    const withDbTimeout = <T,>(p: Promise<T>, ms: number) =>
+      Promise.race<T>([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error("login_profile_timeout")), ms)),
       ]);
-      return { profile: profile ?? null, roles: roles ?? [] };
+
+    const fetchOne = async (timeoutMs: number) => {
+      try {
+        const [profileRes, rolesRes] = await Promise.all([
+          withDbTimeout(
+            supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle().then((r) => r),
+            timeoutMs,
+          ).catch(() => ({ data: null as any })),
+          withDbTimeout(
+            supabase.from("user_roles").select("role").eq("user_id", userId).then((r) => r),
+            timeoutMs,
+          ).catch(() => ({ data: null as any })),
+        ]);
+        return {
+          profile: (profileRes?.data as any) ?? null,
+          roles: (rolesRes?.data as any[]) ?? [],
+        };
+      } catch {
+        return { profile: null, roles: [] as any[] };
+      }
     };
 
     // No native, garantir que o cliente Supabase já tem a sessão antes da 1ª requisição (evita perfil null no Android).
     if (Capacitor.isNativePlatform()) {
       await supabase.auth.getSession();
     }
-    const { profile: firstProfile, roles: firstRoles } = await fetchOne();
+    const isNative = Capacitor.isNativePlatform();
+    const firstTimeout = isNative ? 4000 : 3000;
+    const { profile: firstProfile, roles: firstRoles } = await fetchOne(firstTimeout);
 
     // Se já existe perfil (incl. pending_signup), não precisa retry: trigger já rodou.
-    if (firstProfile) {
-      const hasCompleteProfile =
-        firstProfile.user_type && firstProfile.user_type !== "pending_signup";
-      if (hasCompleteProfile) return { profile: firstProfile, roles: firstRoles };
-      return { profile: firstProfile, roles: firstRoles };
-    }
+    if (firstProfile) return { profile: firstProfile, roles: firstRoles };
 
-    // Perfil ainda não existe: trigger pode estar atrasado (Apple/Google no nativo).
-    const delays = Capacitor.isNativePlatform() ? [500, 1200, 2500, 3500] : [400, 1000, 2000];
+    // Perfil ainda não existe (ou 1ª query caiu no timeout): trigger pode estar atrasado (Apple/Google no nativo).
+    const delays = isNative ? [500, 1200, 2500, 3500] : [400, 1000, 2000];
     for (const delay of delays) {
       await new Promise((r) => setTimeout(r, delay));
-      const { profile, roles } = await fetchOne();
-      if (profile) {
-        const hasCompleteProfile = profile.user_type && profile.user_type !== "pending_signup";
-        if (hasCompleteProfile) return { profile, roles };
-        return { profile, roles };
-      }
+      const { profile, roles } = await fetchOne(firstTimeout);
+      if (profile) return { profile, roles };
     }
     return { profile: null, roles: [] };
   };
 
-  const proceedToRedirect = async (userId: string, emailFromAuth?: string) => {
+  const proceedToRedirect = async (
+    userId: string,
+    emailFromAuth?: string,
+    // Só quando veio de retorno OAuth (Apple/Google) de verdade.
+    // Login por e-mail+senha NÃO deve setar chamo_oauth_just_landed — isso antes disparava o
+    // modal de boas-vindas "pós-OAuth" (AppLayout) e o hard reload de estabilização da Home no
+    // iOS, causando uma piscada visível em login comum.
+    cameFromOAuth: boolean = false,
+  ) => {
     if (isRedirectingRef.current) return;
     isRedirectingRef.current = true;
+    // Overlay "Processando login…" durante o fetch do perfil (evita flash do form de
+    // Login visível entre o retorno do Browser OAuth e o navigate('/home')).
+    setProcessingOAuth(true);
 
     try {
       const normalizedSupportEmail = SUPPORT_EMAIL.toLowerCase().trim();
@@ -406,6 +445,17 @@ const Login = () => {
         return;
       }
 
+      // Perfil existe com user_type definido mas cadastro incompleto (sem termos/signup_completed_at):
+      // alinha com PostLoginGate e RedirectLoggedIn — manda para /signup em vez de /home.
+      if (!isProfileSignupComplete(profile)) {
+        const back = resolveAuthReturnPath(returnTo);
+        if (back) setPostAuthRedirect(back);
+        localStorage.removeItem("signup_in_progress");
+        localStorage.removeItem("manual_login_intent");
+        navigate("/signup", { replace: true });
+        return;
+      }
+
       localStorage.removeItem("signup_in_progress");
       localStorage.removeItem("manual_login_intent");
       const afterAuth = resolveAuthReturnPath(returnTo);
@@ -413,13 +463,29 @@ const Login = () => {
         clearPostAuthRedirect();
         navigate(afterAuth, { replace: true });
       } else {
-        sessionStorage.setItem("chamo_oauth_just_landed", "1");
-        localStorage.setItem("chamo_oauth_just_landed", "1");
-        navigate("/post-login", { replace: true });
+        // Perfil já completo → vai DIRETO para /home (SPA) em vez de passar pelo
+        // /post-login, que mostrava um spinner "Verificando…" e causava a 2ª piscada
+        // no Android. A flag chamo_oauth_just_landed só é setada quando o login veio de
+        // OAuth (Apple/Google): ela controla o modal de boas-vindas do AppLayout e
+        // dispara o hard reload de estabilização da Home no iOS. Em e-mail+senha, setar
+        // a flag causava piscada no iOS e modal indevido — por isso restringimos aqui.
+        if (cameFromOAuth) {
+          sessionStorage.setItem("chamo_oauth_just_landed", "1");
+          localStorage.setItem("chamo_oauth_just_landed", "1");
+        }
+        navigate("/home", { replace: true });
       }
     } catch (err) {
       console.error("Erro ao verificar perfil:", err);
       setLoading(false);
+      setProcessingOAuth(false);
+      // Avisar o usuário que não conseguimos concluir — antes o botão voltava a
+      // "Entrar" silenciosamente e dava impressão de clique sem efeito.
+      toast({
+        title: "Não conseguimos verificar seu perfil",
+        description: "Verifique sua conexão e tente novamente.",
+        variant: "destructive",
+      });
     } finally {
       window.setTimeout(() => {
         isRedirectingRef.current = false;
@@ -439,22 +505,21 @@ const Login = () => {
     setForgotLoading(false);
   };
 
-  // Ao voltar do OAuth (Apple/Google) com ?code=, mostrar "Processando login..." até ter sessão ou timeout
+  // Overlay "Processando login..." tem um timeout de segurança de 10s para nunca travar.
+  // Não desligamos só por ter sessão: o redirect vai desmontar a tela logo em seguida e,
+  // se desligássemos aqui, daria flash do formulário de Login entre sessão-vista-no-contexto
+  // e o navigate('/home') disparado pelo proceedToRedirect.
   useEffect(() => {
     if (!processingOAuth) return;
-    if (session?.user) {
-      setProcessingOAuth(false);
-      return;
-    }
     const t = setTimeout(() => {
       setProcessingOAuth(false);
       setLoading(false);
       if (hasOAuthCodeInUrl()) {
         window.history.replaceState({}, "", window.location.pathname);
       }
-    }, 8000);
+    }, 10000);
     return () => clearTimeout(t);
-  }, [processingOAuth, session]);
+  }, [processingOAuth]);
 
   useEffect(() => {
     supabase

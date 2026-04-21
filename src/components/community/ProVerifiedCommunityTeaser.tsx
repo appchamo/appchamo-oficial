@@ -1,14 +1,16 @@
 /**
  * Banner/teaser exibido no topo da Comunidade para profissionais ainda
- * NÃO verificados. Mostra um "post fantasma" do próprio pro com o selo
- * de verificado destacado, em baixa opacidade (aparência de preview),
- * e um CTA para conhecer a vantagem do selo.
+ * NÃO verificados. Mostra um "post fantasma" do próprio pro (apenas texto)
+ * com o selo de verificado destacado, em baixa opacidade (aparência de
+ * preview), e um CTA para adquirir o selo.
  *
- * Aparece apenas quando:
- *   - o usuário é profissional (isPro);
- *   - o registro do profissional tem `verified = false`.
+ * Regra de visibilidade:
+ *   - Só para usuários profissionais/empresa (isPro).
+ *   - Só quando `professionals.verified !== true`
+ *     (se não encontrar registro, assume não-verificado para não esconder).
+ *   - Respeita dispensa local via localStorage.
  *
- * Clique no banner (ou no CTA) → `/subscriptions` (onde o plano concede selo).
+ * Clique no CTA → `/subscriptions` (onde o plano concede o selo).
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -49,27 +51,30 @@ export default function ProVerifiedCommunityTeaser() {
       return;
     }
     let cancelled = false;
+
+    const fullName = profile?.full_name || "Você";
+    const avatarUrl = (profile as any)?.avatar_url ?? null;
+
     (async () => {
-      const { data: pro } = await supabase
+      const { data: pro } = await (supabase as any)
         .from("professionals")
-        .select("verified, professions:profession_id(name), categories(name)")
+        .select("verified, professions(name)")
         .eq("user_id", user.id)
         .maybeSingle();
+
       if (cancelled) return;
-      if (!pro) {
-        setInfo(null);
-        return;
-      }
-      const fullName = profile?.full_name || "Você";
-      const avatarUrl = (profile as any)?.avatar_url ?? null;
-      const prof = (pro as any)?.professions?.name || (pro as any)?.categories?.name || "Profissional";
+
+      const verified = pro?.verified === true;
+      const profName = pro?.professions?.name || "Profissional";
+
       setInfo({
-        verified: !!(pro as any).verified,
+        verified,
         full_name: fullName,
         avatar_url: avatarUrl,
-        profession_name: prof,
+        profession_name: profName,
       });
     })();
+
     return () => {
       cancelled = true;
     };
@@ -97,15 +102,25 @@ export default function ProVerifiedCommunityTeaser() {
   const goSubscribe = () => navigate("/subscriptions");
 
   return (
-    <section className="relative mb-4">
+    <section className="relative mb-5">
       {/* Etiqueta "EXEMPLO" flutuando por cima do post fantasma */}
-      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+      <div className="pointer-events-none absolute inset-x-0 top-16 z-10 flex items-center justify-center">
         <div className="rotate-[-6deg] px-4 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-extrabold uppercase tracking-[0.18em] shadow-lg ring-2 ring-white/80">
           Exemplo
         </div>
       </div>
 
-      {/* Post-mock, baixa opacidade (preview) */}
+      {/* Botão de dispensar, acima do post-mock */}
+      <button
+        type="button"
+        onClick={handleDismiss}
+        aria-label="Ocultar sugestão de selo verificado"
+        className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-white/95 hover:bg-white shadow-sm"
+      >
+        <X className="w-3.5 h-3.5 text-muted-foreground" />
+      </button>
+
+      {/* Post-mock, baixa opacidade (preview) — apenas TEXTO */}
       <div
         aria-hidden
         className="opacity-55 pointer-events-none select-none bg-white dark:bg-zinc-900 rounded-2xl border border-black/[0.06] dark:border-white/10 shadow-sm overflow-hidden"
@@ -131,10 +146,10 @@ export default function ProVerifiedCommunityTeaser() {
           <MoreHorizontal className="w-5 h-5 text-muted-foreground shrink-0" />
         </div>
 
-        <div className="px-4 pt-3 pb-3">
+        <div className="px-4 pt-3 pb-4">
           <p className="text-[14.5px] text-foreground leading-relaxed">
-            Acabei de concluir mais um serviço para um cliente incrível 🎉 Obrigado pela confiança!
-            Bora juntos para o próximo? 💪
+            Mais um cliente atendido hoje 🎉 Obrigado pela confiança! Quem precisar de um
+            profissional de qualidade, é só chamar. 💪
           </p>
         </div>
 
@@ -168,15 +183,6 @@ export default function ProVerifiedCommunityTeaser() {
           </p>
         </div>
         <ChevronRight className="w-5 h-5 shrink-0" />
-      </button>
-
-      <button
-        type="button"
-        onClick={handleDismiss}
-        aria-label="Ocultar sugestão de selo verificado"
-        className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-white/90 hover:bg-white shadow-sm"
-      >
-        <X className="w-3.5 h-3.5 text-muted-foreground" />
       </button>
     </section>
   );

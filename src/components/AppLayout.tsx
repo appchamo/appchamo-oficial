@@ -40,6 +40,13 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
       return false;
     })();
     if (!hasFlag) return;
+    // Limpa a flag imediatamente para que, se o usuário matar o app antes de
+    // interagir com o modal, a flag não persista no localStorage e o modal
+    // "Bem-vindo" não reapareça numa abertura seguinte fora de contexto.
+    try {
+      sessionStorage.removeItem("chamo_oauth_just_landed");
+      localStorage.removeItem("chamo_oauth_just_landed");
+    } catch (_) {}
     const t = setTimeout(() => setOauthWelcomeOpen(true), 700);
     return () => clearTimeout(t);
   }, []);

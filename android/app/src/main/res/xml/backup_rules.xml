@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Regras legadas (Android 6–11) para Auto Backup. Mantém o mesmo contrato do
+  data_extraction_rules.xml (Android 12+): auth/shared prefs e WebView ficam
+  fora do backup na nuvem do Google Drive.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" />
+    <exclude domain="database" />
+    <exclude domain="file" path="app_webview/" />
+</full-backup-content>

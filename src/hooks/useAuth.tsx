@@ -543,16 +543,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // chama loadUserData(session) logo após esta função retornar, e o Login.tsx tem um
             // polling que detecta a sessão pelo getSession() e dispara proceedToRedirect (SPA).
             // Assim o fluxo vira: Browser fecha → /login detecta sessão → navigate('/home').
+            // chamo_hang_reload_grace_until / chamo_featured_reload_after_oauth NÃO são setadas
+            // aqui: ambas só são lidas no iOS (Home.tsx tem early-return em plataforma != ios).
             try {
               localStorage.removeItem("manual_login_intent");
               localStorage.removeItem("chamo_force_hard_reload");
               // Mantém chamo_oauth_just_landed para o modal de boas-vindas aparecer na Home.
               sessionStorage.setItem("chamo_oauth_just_landed", "1");
               localStorage.setItem("chamo_oauth_just_landed", "1");
-              // Marca grace period para qualquer heurística de "hang reload" não disparar agora.
-              sessionStorage.setItem("chamo_hang_reload_grace_until", String(Date.now() + 120_000));
-              // Impede o reload-de-estabilização da Home (ver Home.tsx, effect pós-OAuth).
-              sessionStorage.setItem("chamo_featured_reload_after_oauth", "1");
             } catch {
               /* ignore */
             }

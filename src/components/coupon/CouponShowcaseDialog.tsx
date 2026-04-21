@@ -262,20 +262,24 @@ export function CouponShowcaseDialog({
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-primary">
                   <Sparkles className="w-3.5 h-3.5" /> Como usar
                 </p>
-                <ol className="mt-2 space-y-1.5 text-[13px] text-foreground/90">
-                  <li className="flex gap-2">
-                    <span className="font-bold text-primary shrink-0">1.</span>
-                    Toque em <strong>Chamar</strong> no perfil para iniciar um atendimento.
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="font-bold text-primary shrink-0">2.</span>
-                    No momento do pagamento, o cupom aparece no total e é aplicado com um toque.
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="font-bold text-primary shrink-0">3.</span>
-                    O desconto respeita os limites de compra mínima/máxima do cupom.
-                  </li>
-                </ol>
+                            <ol className="mt-2 space-y-1.5 text-[13px] text-foreground/90">
+                              <li className="flex gap-2">
+                                <span className="font-bold text-primary shrink-0">1.</span>
+                                <span>
+                                  Toque em <strong>Chamar</strong> no perfil para iniciar um atendimento.
+                                </span>
+                              </li>
+                              <li className="flex gap-2">
+                                <span className="font-bold text-primary shrink-0">2.</span>
+                                <span>
+                                  No momento do pagamento, o cupom aparece no total e é aplicado com um toque.
+                                </span>
+                              </li>
+                              <li className="flex gap-2">
+                                <span className="font-bold text-primary shrink-0">3.</span>
+                                <span>O desconto respeita os limites de compra mínima/máxima do cupom.</span>
+                              </li>
+                            </ol>
               </div>
 
               {/* Aviso: cliente pode somar cupom do app ao cupom do profissional */}

@@ -32,6 +32,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import SponsorCarousel from "@/components/SponsorCarousel";
+import ProVerifiedCommunityTeaser from "@/components/community/ProVerifiedCommunityTeaser";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -1910,6 +1911,9 @@ export default function CommunityFeed({
           </p>
         </div>
       )}
+
+      <ProVerifiedCommunityTeaser />
+
 
       {user && !isSinglePostMode && (
         <div className="mb-5 -mx-0.5">

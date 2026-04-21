@@ -22,6 +22,7 @@ import HomeAlertCarousel from "@/components/home/HomeAlertCarousel";
 import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
 import CouponProfessionals from "@/components/home/CouponProfessionals";
 import HomeProCarousel from "@/components/home/HomeProCarousel";
+import ProSellMoreChecklist from "@/components/home/ProSellMoreChecklist";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
@@ -709,16 +710,19 @@ const Home = () => {
         >
           {user && isPro && proId ? (
             /* ── Carrossel: Carteira + Agenda (só monta quando proId está pronto) ── */
-            <HomeProCarousel
-              profile={profile}
-              userName={userName}
-              welcomeWord={welcomeWord}
-              locationLabel={locationLabel}
-              onLocationClick={handleOpenLocation}
-              walletBalance={walletBalance}
-              walletLoaded={walletLoaded}
-              professionalId={proId}
-            />
+            <>
+              <HomeProCarousel
+                profile={profile}
+                userName={userName}
+                welcomeWord={welcomeWord}
+                locationLabel={locationLabel}
+                onLocationClick={handleOpenLocation}
+                walletBalance={walletBalance}
+                walletLoaded={walletLoaded}
+                professionalId={proId}
+              />
+              <ProSellMoreChecklist professionalId={proId} userId={user.id} />
+            </>
           ) : user && isPro ? (
             /* ── Placeholder enquanto proId carrega ── */
             <div

@@ -21,7 +21,8 @@ const CARD_CLASS =
 
 interface CouponRow {
   id: string;
-  code: string;
+  /** Rótulo interno opcional do cupom (migrado de `code`). */
+  name: string | null;
   professional_id: string;
   discount_type: "amount" | "percent";
   discount_value: number;
@@ -91,7 +92,7 @@ const CouponProfessionals = () => {
       const { data: rawCoupons, error: cErr } = await supabase
         .from("professional_coupons")
         .select(
-          "id, code, professional_id, discount_type, discount_value, min_purchase, max_purchase, max_uses, used_count, expires_at, active",
+          "id, name, professional_id, discount_type, discount_value, min_purchase, max_purchase, max_uses, used_count, expires_at, active",
         )
         .eq("active", true)
         .limit(200);

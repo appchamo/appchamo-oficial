@@ -73,7 +73,8 @@ type DeviceRow = {
 
 type ProCouponRow = {
   id: string;
-  code: string;
+  /** Rótulo interno opcional (migrado de `code`). */
+  name: string | null;
   professional_id: string;
   discount_type: "amount" | "percent";
   discount_value: number;
@@ -100,7 +101,7 @@ type ProEnrich = {
   addressFull: string;
   addressShort: string;
   deviceLabel: string;
-  coupon: { code: string; short: string; detail: string } | null;
+  coupon: { name: string | null; short: string; detail: string } | null;
 };
 
 type ClientEnrich = {
@@ -108,7 +109,7 @@ type ClientEnrich = {
   addressFull: string;
   addressShort: string;
   deviceLabel: string;
-  coupon: { code: string; short: string; detail: string } | null;
+  coupon: { name: string | null; short: string; detail: string } | null;
 };
 
 /** Formata endereço completo (ou retorna "—" se vazio). */
@@ -175,7 +176,7 @@ function formatProCouponShort(c: ProCouponRow): string {
 
 function formatProCouponDetail(c: ProCouponRow): string {
   const bits: string[] = [];
-  bits.push(`código ${c.code}`);
+  if (c.name) bits.push(c.name);
   if (c.min_purchase != null) bits.push(`mín. ${formatBRL(Number(c.min_purchase))}`);
   if (c.max_purchase != null) bits.push(`teto ${formatBRL(Number(c.max_purchase))}`);
   if (c.max_uses == null) {
@@ -369,7 +370,7 @@ const AdminProtocols = () => {
             supabase
               .from("professional_coupons")
               .select(
-                "id, code, professional_id, discount_type, discount_value, min_purchase, max_purchase, max_uses, used_count, expires_at, active",
+                "id, name, professional_id, discount_type, discount_value, min_purchase, max_purchase, max_uses, used_count, expires_at, active",
               )
               .in("professional_id", proIds)
               .eq("active", true),
@@ -404,7 +405,7 @@ const AdminProtocols = () => {
               addressShort: addr.short,
               deviceLabel: pickPrimaryDeviceLabel(devices),
               coupon: best
-                ? { code: best.code, short: formatProCouponShort(best), detail: formatProCouponDetail(best) }
+                ? { name: best.name, short: formatProCouponShort(best), detail: formatProCouponDetail(best) }
                 : null,
             });
           }

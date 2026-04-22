@@ -153,7 +153,6 @@ export const SEARCH_ALIASES: Record<string, string[]> = {
   // —— Variações e termos comuns (typos / como as pessoas buscam) ——
   eletrisista: ["eletricista", "eletrica"],
   hidraulico: ["hidraulica", "encanador", "encanamento"],
-  "pintura automotiva": ["pintura", "pintor", "residencial", "automotiva"],
   moveis: ["moveis", "marcenaria", "marceneiro", "armario"],
   armario: ["armario", "marcenaria", "marceneiro", "moveis planejados"],
   portao: ["portao", "serralheiro", "serralheria", "automatizacao"],
@@ -187,7 +186,6 @@ export const SEARCH_ALIASES: Record<string, string[]> = {
   animal: ["animal", "pet", "veterinario", "cao", "gato"],
   treinar: ["treino", "personal", "fitness", "academia"],
   foto: ["foto", "fotografia", "fotografo"],
-  filmagem: ["filmagem", "video", "producao"],
 };
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();

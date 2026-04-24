@@ -24,6 +24,7 @@ import { Capacitor } from "@capacitor/core";
 import { Loader2 } from "lucide-react";
 import { syncAppIconBadge } from "@/lib/appBadge";
 import { registerNativeDevicePresence } from "@/lib/registerNativeDevicePresence";
+import { usePresenceTracker } from "@/lib/presence";
 import { diagLog, diagEnabled } from "@/lib/diag";
 
 // Lazy pages – carregam sob demanda para navegação mais rápida
@@ -326,6 +327,18 @@ const NativeDevicePresenceReporter = () => {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [uid]);
 
+  return null;
+};
+
+/**
+ * Heartbeat global de presença (web + nativo).
+ * - Atualiza profiles.last_seen_at via RPC touch_last_seen() a cada 60s enquanto a app está visível.
+ * - Mantém o utilizador "online" no canal Realtime presence:online-users (consumido pelo painel admin).
+ */
+const PresenceTracker = () => {
+  const { session, loading } = useAuth();
+  const uid = session?.user?.id ?? null;
+  usePresenceTracker(loading ? null : uid);
   return null;
 };
 
@@ -638,6 +651,7 @@ const App = () => {
             <RefreshProvider>
               <AuthSessionGate />
               <NativeDevicePresenceReporter />
+              <PresenceTracker />
               <DeepLinkRouter />
               <ScrollToTop />
               <AdminRedirectGuard />

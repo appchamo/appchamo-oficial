@@ -12,15 +12,36 @@ import {
   EyeOff,
   Trash2,
   Wifi,
+  Clock,
+  UserCheck,
+  CheckSquare,
+  Square,
+  X,
 } from "lucide-react";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { toast } from "@/hooks/use-toast";
 import { NOTIFICATION_MENU_DESTINATIONS } from "@/lib/appNotificationDestinations";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
-type TargetType = "all" | "clients" | "professionals" | "companies" | "category" | "individual";
+type TargetType =
+  | "all"
+  | "clients"
+  | "professionals"
+  | "companies"
+  | "pending_pros"
+  | "category"
+  | "individual"
+  | "selected";
+
+type PickableUser = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  user_type: string | null;
+};
 
 interface AdminNotif {
   id: string;
@@ -78,6 +99,15 @@ const AdminNotifications = () => {
   const [userResults, setUserResults] = useState<{ user_id: string; full_name: string; email: string }[]>([]);
   const [selectedUser, setSelectedUser] = useState<{ user_id: string; full_name: string } | null>(null);
   const [searching, setSearching] = useState(false);
+
+  // Multi-select users (modal)
+  const [selectOpen, setSelectOpen] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState<PickableUser[]>([]);
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerTypeFilter, setPickerTypeFilter] = useState<"all" | "client" | "professional" | "company" | "pending_pros">("all");
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerResults, setPickerResults] = useState<PickableUser[]>([]);
+  const [pickerPendingIds, setPickerPendingIds] = useState<Set<string>>(new Set());
 
   // Painel "Notificações por usuário" (auditoria + Realtime)
   const [auditSearch, setAuditSearch] = useState("");
@@ -155,6 +185,96 @@ const AdminNotifications = () => {
     setUserResults(data || []);
     setSearching(false);
   };
+
+  /** Carrega IDs de profissionais com `profile_status = 'pending'` (em análise). */
+  const fetchPendingProUserIds = useCallback(async (): Promise<Set<string>> => {
+    const { data, error } = await supabase
+      .from("professionals")
+      .select("user_id")
+      .eq("profile_status", "pending");
+    if (error) {
+      toast({ title: "Erro ao listar profissionais em análise", description: error.message, variant: "destructive" });
+      return new Set();
+    }
+    return new Set((data || []).map((r) => r.user_id).filter(Boolean) as string[]);
+  }, []);
+
+  // ── Modal "Selecionar usuários" ───────────────────────────────────────────
+  const pickerSelectedIds = useMemo(() => new Set(selectedUsers.map((u) => u.user_id)), [selectedUsers]);
+
+  const runPickerQuery = useCallback(
+    async (query: string, typeFilter: typeof pickerTypeFilter) => {
+      setPickerLoading(true);
+      try {
+        let pendingIds: Set<string> = pickerPendingIds;
+        if (typeFilter === "pending_pros" && pendingIds.size === 0) {
+          pendingIds = await fetchPendingProUserIds();
+          setPickerPendingIds(pendingIds);
+        }
+
+        let q = supabase
+          .from("profiles")
+          .select("user_id, full_name, email, user_type")
+          .order("full_name", { ascending: true, nullsFirst: false })
+          .limit(50);
+
+        const trimmed = query.trim();
+        if (trimmed.length >= 2) {
+          q = q.or(`full_name.ilike.%${trimmed}%,email.ilike.%${trimmed}%`);
+        }
+        if (typeFilter === "client" || typeFilter === "professional" || typeFilter === "company") {
+          q = q.eq("user_type", typeFilter);
+        }
+        if (typeFilter === "pending_pros") {
+          const ids = Array.from(pendingIds);
+          if (ids.length === 0) {
+            setPickerResults([]);
+            setPickerLoading(false);
+            return;
+          }
+          q = q.in("user_id", ids);
+        }
+
+        const { data, error } = await q;
+        if (error) throw error;
+        setPickerResults((data || []) as PickableUser[]);
+      } catch (e: any) {
+        toast({ title: "Erro na busca", description: e?.message, variant: "destructive" });
+        setPickerResults([]);
+      }
+      setPickerLoading(false);
+    },
+    [fetchPendingProUserIds, pickerPendingIds],
+  );
+
+  // Busca debounced quando o modal está aberto
+  useEffect(() => {
+    if (!selectOpen) return;
+    const id = window.setTimeout(() => {
+      void runPickerQuery(pickerSearch, pickerTypeFilter);
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [selectOpen, pickerSearch, pickerTypeFilter, runPickerQuery]);
+
+  const togglePickerUser = (user: PickableUser) => {
+    setSelectedUsers((prev) => {
+      const exists = prev.some((u) => u.user_id === user.user_id);
+      if (exists) return prev.filter((u) => u.user_id !== user.user_id);
+      return [...prev, user];
+    });
+  };
+
+  const selectAllCurrentResults = () => {
+    setSelectedUsers((prev) => {
+      const map = new Map(prev.map((u) => [u.user_id, u]));
+      for (const u of pickerResults) {
+        if (!map.has(u.user_id)) map.set(u.user_id, u);
+      }
+      return [...map.values()];
+    });
+  };
+
+  const clearAllSelected = () => setSelectedUsers([]);
 
   // ── Painel "Notificações por usuário" ──────────────────────────────────────
   // Busca debounced (350ms) por nome/email
@@ -254,6 +374,10 @@ const AdminNotifications = () => {
       toast({ title: "Selecione um usuário", variant: "destructive" });
       return;
     }
+    if (target === "selected" && selectedUsers.length === 0) {
+      toast({ title: "Selecione pelo menos um usuário", variant: "destructive" });
+      return;
+    }
 
     setSending(true);
     setSentCount(null);
@@ -263,6 +387,11 @@ const AdminNotifications = () => {
 
       if (target === "individual" && selectedUser) {
         userIds = [selectedUser.user_id];
+      } else if (target === "selected") {
+        userIds = selectedUsers.map((u) => u.user_id);
+      } else if (target === "pending_pros") {
+        const ids = await fetchPendingProUserIds();
+        userIds = [...ids];
       } else if (target === "all") {
         const { data } = await supabase.from("profiles").select("user_id");
         const ids = new Set((data || []).map((p) => p.user_id).filter(Boolean) as string[]);
@@ -318,6 +447,7 @@ const AdminNotifications = () => {
       setDestinationPath("");
       setSelectedUser(null);
       setUserSearch("");
+      setSelectedUsers([]);
     } catch (e: any) {
       toast({ title: "Erro ao enviar", description: e.message, variant: "destructive" });
     }
@@ -330,7 +460,9 @@ const AdminNotifications = () => {
     { value: "clients", label: "Clientes", icon: Users, desc: "Apenas clientes" },
     { value: "professionals", label: "Profissionais", icon: Briefcase, desc: "Apenas profissionais" },
     { value: "companies", label: "Empresas", icon: Building2, desc: "Apenas empresas" },
+    { value: "pending_pros", label: "Em análise", icon: Clock, desc: "Profissionais aguardando aprovação" },
     { value: "category", label: "Categoria", icon: Briefcase, desc: "Por categoria" },
+    { value: "selected", label: "Selecionar", icon: UserCheck, desc: "Escolher múltiplos usuários" },
   ];
 
   return (
@@ -405,15 +537,22 @@ const AdminNotifications = () => {
                 {targets.map(t => (
                   <button
                     key={t.value}
-                    onClick={() => { setTarget(t.value); setSelectedUser(null); setUserSearch(""); }}
+                    onClick={() => {
+                      setTarget(t.value);
+                      setSelectedUser(null);
+                      setUserSearch("");
+                      if (t.value === "selected") {
+                        setSelectOpen(true);
+                      }
+                    }}
                     className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-colors text-left ${
                       target === t.value ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"
                     }`}
                   >
                     <t.icon className="w-4 h-4 text-primary flex-shrink-0" />
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs font-semibold text-foreground">{t.label}</p>
-                      <p className="text-[10px] text-muted-foreground">{t.desc}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{t.desc}</p>
                     </div>
                   </button>
                 ))}
@@ -434,6 +573,59 @@ const AdminNotifications = () => {
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
+              </div>
+            )}
+
+            {/* Em análise (pending_pros) */}
+            {target === "pending_pros" && (
+              <div className="flex items-start gap-2 border rounded-xl p-3 bg-amber-500/5 border-amber-500/30">
+                <Clock className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  A notificação será enviada para <strong>todos os profissionais com cadastro em análise</strong>
+                  (<code className="text-[10px]">professionals.profile_status = pending</code>). O número real é calculado no momento do envio.
+                </p>
+              </div>
+            )}
+
+            {/* Usuários selecionados (multi) */}
+            {target === "selected" && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-foreground">
+                    {selectedUsers.length === 0
+                      ? "Nenhum usuário selecionado"
+                      : `${selectedUsers.length} usuário${selectedUsers.length === 1 ? "" : "s"} selecionado${selectedUsers.length === 1 ? "" : "s"}`}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSelectOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    {selectedUsers.length === 0 ? "Selecionar usuários" : "Editar seleção"}
+                  </button>
+                </div>
+
+                {selectedUsers.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 rounded-xl border bg-muted/30 p-2 max-h-32 overflow-y-auto">
+                    {selectedUsers.map((u) => (
+                      <span
+                        key={u.user_id}
+                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 text-[10px] font-medium text-primary pl-2 pr-1 py-0.5"
+                      >
+                        <span className="max-w-[14ch] truncate">{u.full_name || u.email}</span>
+                        <button
+                          type="button"
+                          onClick={() => togglePickerUser(u)}
+                          className="rounded-full hover:bg-primary/20 p-0.5"
+                          aria-label={`Remover ${u.full_name}`}
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -712,6 +904,164 @@ const AdminNotifications = () => {
           </div>
         </div>
       </div>
+
+      {/* ─── Modal: Selecionar usuários (multi) ──────────────────────────── */}
+      <Dialog open={selectOpen} onOpenChange={setSelectOpen}>
+        <DialogContent className="max-w-xl p-0 overflow-hidden">
+          <DialogHeader className="p-5 pb-3 border-b">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <UserCheck className="w-5 h-5 text-primary" /> Selecionar usuários
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Marque os usuários que devem receber a notificação. Use a lupa para filtrar por nome ou e-mail.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="px-5 pt-3 pb-2 space-y-2 border-b">
+            <div className="flex items-center gap-2 border rounded-xl px-3 py-2 bg-background focus-within:ring-2 focus-within:ring-primary/30">
+              <Search className="w-4 h-4 text-muted-foreground" />
+              <input
+                autoFocus
+                value={pickerSearch}
+                onChange={(e) => setPickerSearch(e.target.value)}
+                placeholder="Buscar por nome ou e-mail..."
+                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+              />
+              {pickerSearch && (
+                <button
+                  type="button"
+                  onClick={() => setPickerSearch("")}
+                  className="p-1 rounded hover:bg-muted"
+                  aria-label="Limpar busca"
+                >
+                  <X className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto">
+              {([
+                { key: "all", label: "Todos" },
+                { key: "client", label: "Clientes" },
+                { key: "professional", label: "Profissionais" },
+                { key: "company", label: "Empresas" },
+                { key: "pending_pros", label: "Em análise" },
+              ] as const).map((f) => {
+                const active = pickerTypeFilter === f.key;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setPickerTypeFilter(f.key)}
+                    className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border ${
+                      active
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:bg-muted"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="max-h-[360px] overflow-y-auto px-2 py-2">
+            {pickerLoading ? (
+              <div className="flex justify-center py-10">
+                <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : pickerResults.length === 0 ? (
+              <p className="text-center text-xs text-muted-foreground py-10">
+                {pickerSearch.trim().length > 0 ? "Nenhum usuário encontrado." : "Digite para buscar ou use os filtros acima."}
+              </p>
+            ) : (
+              <ul>
+                {pickerResults.map((u) => {
+                  const picked = pickerSelectedIds.has(u.user_id);
+                  const isPending = pickerPendingIds.has(u.user_id);
+                  const typeLabel =
+                    u.user_type === "client"
+                      ? "Cliente"
+                      : u.user_type === "professional"
+                      ? "Profissional"
+                      : u.user_type === "company"
+                      ? "Empresa"
+                      : u.user_type === "sponsor"
+                      ? "Patrocinador"
+                      : u.user_type || "—";
+                  return (
+                    <li key={u.user_id}>
+                      <button
+                        type="button"
+                        onClick={() => togglePickerUser(u)}
+                        className={`w-full flex items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                          picked ? "bg-primary/5" : "hover:bg-muted/60"
+                        }`}
+                      >
+                        {picked ? (
+                          <CheckSquare className="w-4 h-4 text-primary flex-shrink-0" />
+                        ) : (
+                          <Square className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground truncate">{u.full_name || "Sem nome"}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{u.email}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isPending && pickerTypeFilter !== "pending_pros" && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                              <Clock className="w-2.5 h-2.5" /> Em análise
+                            </span>
+                          )}
+                          <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground">
+                            {typeLabel}
+                          </span>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 justify-between border-t bg-muted/30 px-5 py-3">
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="font-semibold text-foreground">{selectedUsers.length}</span>
+              selecionado{selectedUsers.length === 1 ? "" : "s"}
+              {selectedUsers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAllSelected}
+                  className="text-destructive hover:underline ml-1"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {pickerResults.length > 0 && (
+                <button
+                  type="button"
+                  onClick={selectAllCurrentResults}
+                  className="px-3 py-1.5 rounded-lg border text-[11px] font-semibold hover:bg-muted transition-colors"
+                >
+                  Selecionar todos ({pickerResults.length})
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelectOpen(false)}
+                className="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground text-[12px] font-bold hover:bg-primary/90 transition-colors"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 };

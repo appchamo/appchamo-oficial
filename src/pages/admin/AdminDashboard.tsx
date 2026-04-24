@@ -1,8 +1,9 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Users, BadgeCheck, Megaphone, CreditCard, Ticket, TrendingUp } from "lucide-react";
+import { Users, BadgeCheck, Megaphone, CreditCard, Ticket, TrendingUp, Wifi } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useOnlineUsers } from "@/lib/presence";
 
 const actionMap: Record<string, string> = {
   change_plan: "Alterar plano",
@@ -38,6 +39,7 @@ const AdminDashboard = () => {
     users: 0, pros: 0, sponsors: 0, transactions: "0", coupons: 0, fees: "0",
   });
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
+  const { onlineIds, ready: presenceReady } = useOnlineUsers();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -85,6 +87,35 @@ const AdminDashboard = () => {
 
   return (
     <AdminLayout title="Dashboard">
+      {/* Card de presença em tempo real */}
+      <Link
+        to="/admin/users"
+        className="block bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/30 rounded-xl p-4 mb-3 hover:border-emerald-500/60 transition-colors"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="relative w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center">
+              <Wifi className="w-5 h-5 text-emerald-600" />
+              {presenceReady && onlineIds.size > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-background animate-pulse" />
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                Online agora
+              </p>
+              <p className="text-2xl font-black text-foreground tabular-nums">
+                {presenceReady ? onlineIds.size.toLocaleString("pt-BR") : "—"}
+                <span className="text-xs font-medium text-muted-foreground ml-2">conectado{onlineIds.size === 1 ? "" : "s"} em tempo real</span>
+              </p>
+            </div>
+          </div>
+          <span className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold opacity-70 hidden sm:inline">
+            Ver usuários →
+          </span>
+        </div>
+      </Link>
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
         {statCards.map((stat) => (
           <Link key={stat.label} to={stat.path}

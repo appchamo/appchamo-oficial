@@ -1,7 +1,8 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy, Users as UsersIcon, Archive } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy, Users as UsersIcon, Archive, Wifi } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
+import { useOnlineUsers, formatRelativeFromNow } from "@/lib/presence";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
@@ -74,6 +75,7 @@ interface Profile {
   address_country?: string | null;
   accepted_terms_version?: string | null;
   accepted_terms_at?: string | null;
+  last_seen_at?: string | null;
 }
 
 async function copyText(value: string | null | undefined, successTitle: string) {
@@ -338,10 +340,21 @@ const DeletedUsersTab = () => {
   );
 };
 
+type PresenceFilter = "all" | "online" | "today" | "week" | "inactive";
+
 const AdminUsers = () => {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "client" | "professional" | "company">("all");
-  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc">("date_desc");
+  const [presenceFilter, setPresenceFilter] = useState<PresenceFilter>("all");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "name_asc" | "name_desc" | "last_seen_desc" | "last_seen_asc">("date_desc");
+  const { onlineIds } = useOnlineUsers();
+  const [, forceTickRerender] = useState(0);
+
+  // Re-renderiza a cada 30s para os textos relativos ("há X min") ficarem atualizados.
+  useEffect(() => {
+    const id = setInterval(() => forceTickRerender((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -386,12 +399,39 @@ const AdminUsers = () => {
 
   const invokeAdminManage = invokeAdminManageFn;
 
+  const presenceCounts = useMemo(() => {
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    let online = 0, today = 0, week = 0, inactive = 0;
+    for (const u of users) {
+      if (onlineIds.has(u.user_id)) online++;
+      const last = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
+      const diff = last ? now - last : Infinity;
+      if (diff <= DAY) today++;
+      if (diff <= 7 * DAY) week++;
+      if (!last || diff > 30 * DAY) inactive++;
+    }
+    return { online, today, week, inactive, total: users.length };
+  }, [users, onlineIds]);
+
   const filtered = users
     .filter((u) => {
       const safeType = u.user_type === "enterprise" ? "company" : u.user_type;
       if (typeFilter === "client" && safeType !== "client") return false;
       if (typeFilter === "professional" && safeType !== "professional") return false;
       if (typeFilter === "company" && safeType !== "company") return false;
+      return true;
+    })
+    .filter((u) => {
+      if (presenceFilter === "all") return true;
+      const isOnline = onlineIds.has(u.user_id);
+      const last = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
+      const diff = last ? Date.now() - last : Infinity;
+      const DAY = 24 * 60 * 60 * 1000;
+      if (presenceFilter === "online") return isOnline;
+      if (presenceFilter === "today") return isOnline || diff <= DAY;
+      if (presenceFilter === "week") return isOnline || diff <= 7 * DAY;
+      if (presenceFilter === "inactive") return !isOnline && (!last || diff > 30 * DAY);
       return true;
     })
     .filter((u) =>
@@ -404,6 +444,16 @@ const AdminUsers = () => {
         case "name_desc": return (b.full_name || "").localeCompare(a.full_name || "", "pt-BR");
         case "date_asc":  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
         case "date_desc": return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case "last_seen_desc": {
+          const ta = a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0;
+          const tb = b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0;
+          return tb - ta;
+        }
+        case "last_seen_asc": {
+          const ta = a.last_seen_at ? new Date(a.last_seen_at).getTime() : Infinity;
+          const tb = b.last_seen_at ? new Date(b.last_seen_at).getTime() : Infinity;
+          return ta - tb;
+        }
         default: return 0;
       }
     });
@@ -572,6 +622,38 @@ const AdminUsers = () => {
         </TabsContent>
 
         <TabsContent value="active">
+      {/* Chips de presença */}
+      <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-1">
+        {([
+          { key: "all", label: "Todos", count: presenceCounts.total, dot: null },
+          { key: "online", label: "Online agora", count: presenceCounts.online, dot: "bg-emerald-500" },
+          { key: "today", label: "Ativos hoje", count: presenceCounts.today, dot: "bg-blue-500" },
+          { key: "week", label: "Últimos 7 dias", count: presenceCounts.week, dot: "bg-violet-500" },
+          { key: "inactive", label: "Inativos +30 dias", count: presenceCounts.inactive, dot: "bg-muted-foreground/40" },
+        ] as Array<{ key: PresenceFilter; label: string; count: number; dot: string | null }>).map((chip) => {
+          const active = presenceFilter === chip.key;
+          return (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => setPresenceFilter(chip.key)}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors ${
+                active
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-card text-foreground hover:bg-muted"
+              }`}
+            >
+              {chip.dot && <span className={`w-2 h-2 rounded-full ${chip.dot} ${chip.key === "online" && active ? "animate-pulse" : ""}`} />}
+              {chip.key === "online" && !chip.dot ? <Wifi className="w-3 h-3" /> : null}
+              <span>{chip.label}</span>
+              <span className={`ml-0.5 px-1.5 rounded-md text-[10px] tabular-nums ${active ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground"}`}>
+                {chip.count.toLocaleString("pt-BR")}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
         <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
           <Search className="w-4 h-4 text-muted-foreground" />
@@ -600,6 +682,8 @@ const AdminUsers = () => {
           <option value="date_asc">Data ↑ (mais antigo)</option>
           <option value="name_asc">Nome A → Z</option>
           <option value="name_desc">Nome Z → A</option>
+          <option value="last_seen_desc">Última atividade ↓</option>
+          <option value="last_seen_asc">Última atividade ↑</option>
         </select>
       </div>
 
@@ -614,6 +698,7 @@ const AdminUsers = () => {
                   <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Email</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Tipo</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Atividade</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Criado em</th>
                   <th className="p-3"></th>
@@ -623,10 +708,25 @@ const AdminUsers = () => {
                 {filtered.map((user) => {
                   // Trava de segurança: converte enterprise do teste anterior para company visualmente
                   const safeUserType = user.user_type === 'enterprise' ? 'company' : user.user_type;
+                  const isOnline = onlineIds.has(user.user_id);
+                  const lastSeenRel = formatRelativeFromNow(user.last_seen_at ?? null);
+                  const lastSeenAbs = user.last_seen_at
+                    ? new Date(user.last_seen_at).toLocaleString("pt-BR")
+                    : null;
 
                   return (
                     <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="p-3 font-medium text-foreground">{user.full_name || "—"}</td>
+                      <td className="p-3 font-medium text-foreground">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${
+                              isOnline ? "bg-emerald-500 animate-pulse shadow-[0_0_0_3px_hsl(var(--background))]" : "bg-muted-foreground/30"
+                            }`}
+                            title={isOnline ? "Online agora" : "Offline"}
+                          />
+                          <span>{user.full_name || "—"}</span>
+                        </div>
+                      </td>
                       <td className="p-3 text-muted-foreground">{user.email}</td>
                       <td className="p-3">
                         <Select value={safeUserType} onValueChange={(v) => handleChangeUserType(user, v)}>
@@ -639,6 +739,17 @@ const AdminUsers = () => {
                             <SelectItem value="company">Empresa</SelectItem>
                           </SelectContent>
                         </Select>
+                      </td>
+                      <td className="p-3 text-xs whitespace-nowrap" title={lastSeenAbs ?? "Nunca abriu o app desde o registo desta funcionalidade"}>
+                        {isOnline ? (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-600 font-bold">
+                            <Wifi className="w-3 h-3" /> Online
+                          </span>
+                        ) : lastSeenRel ? (
+                          <span className="text-muted-foreground">{lastSeenRel}</span>
+                        ) : (
+                          <span className="text-muted-foreground/60 italic">Nunca</span>
+                        )}
                       </td>
                       <td className="p-3">
                         {user.is_blocked ? (
@@ -687,7 +798,7 @@ const AdminUsers = () => {
                   )
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="p-8 text-center text-muted-foreground text-sm">Nenhum usuário encontrado</td></tr>
+                  <tr><td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">Nenhum usuário encontrado</td></tr>
                 )}
               </tbody>
             </table>
@@ -757,6 +868,27 @@ const AdminUsers = () => {
                   ) : null}
                 </div>
               </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Última atividade</p>
+                <div className="mt-0.5">
+                  {onlineIds.has(detailsUser.user_id) ? (
+                    <span className="inline-flex items-center gap-1.5 text-emerald-600 font-bold text-sm">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Online agora
+                    </span>
+                  ) : detailsUser.last_seen_at ? (
+                    <p className="text-foreground">
+                      {formatRelativeFromNow(detailsUser.last_seen_at)}
+                      <span className="text-xs text-muted-foreground ml-2">
+                        ({new Date(detailsUser.last_seen_at).toLocaleString("pt-BR")})
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground italic text-xs">Nunca abriu o app desde que esta funcionalidade foi ativada.</p>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Endereço</p>
                 <p className="text-foreground mt-0.5 whitespace-pre-wrap">

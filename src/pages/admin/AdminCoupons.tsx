@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Ticket, Trophy, Plus, Shuffle, Search, Percent, Settings2, Trash2, Power, PowerOff, Check, User, Mail, Phone } from "lucide-react";
+import { Ticket, Trophy, Plus, Shuffle, Search, Percent, Settings2, Trash2, Power, PowerOff, Check, User, Mail, Phone, Users, Briefcase, UserRound, Megaphone } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -26,11 +26,19 @@ const AdminCoupons = () => {
 
   // Add Coupon Dialogs
   const [addCouponOpen, setAddCouponOpen] = useState(false);
-  const [couponForm, setCouponForm] = useState({ coupon_type: "raffle" as "raffle" | "discount", target: "individual" as "individual" | "random", discount_percent: "5", expires_days: "30" });
+  const [couponForm, setCouponForm] = useState({
+    coupon_type: "raffle" as "raffle" | "discount",
+    target: "individual" as "individual" | "random" | "all" | "professionals" | "clients",
+    discount_percent: "5",
+    expires_days: "30",
+  });
   const [userSearch, setUserSearch] = useState("");
   const [userResults, setUserResults] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [addingCoupon, setAddingCoupon] = useState(false);
+  const [broadcastConfirmOpen, setBroadcastConfirmOpen] = useState(false);
+  const [broadcastTargetCount, setBroadcastTargetCount] = useState<number | null>(null);
+  const [loadingBroadcastCount, setLoadingBroadcastCount] = useState(false);
 
   // Campanhas de Cupons (Lotes)
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -211,6 +219,65 @@ const AdminCoupons = () => {
     setUserResults(data || []);
   };
 
+  const buildCouponData = (userId: string, source: string) => {
+    const couponData: any = {
+      user_id: userId,
+      source,
+      coupon_type: couponForm.coupon_type,
+      used: false,
+    };
+    if (couponForm.coupon_type === "discount") {
+      couponData.discount_percent = parseFloat(couponForm.discount_percent) || 5;
+      couponData.expires_at = new Date(
+        Date.now() + (parseInt(couponForm.expires_days) || 30) * 86400000,
+      ).toISOString();
+    }
+    return couponData;
+  };
+
+  const buildNotification = (userId: string) => ({
+    user_id: userId,
+    title: couponForm.coupon_type === "raffle" ? "🎟️ Cupom de sorteio recebido!" : "🎉 Cupom de desconto recebido!",
+    message: couponForm.coupon_type === "raffle"
+      ? "Você recebeu um cupom para o sorteio mensal!"
+      : `Você recebeu um cupom de ${couponForm.discount_percent}% de desconto!`,
+    type: "coupon",
+    read: false,
+  });
+
+  const fetchTargetUsers = async (target: "all" | "professionals" | "clients" | "random") => {
+    let query = supabase.from("profiles").select("user_id, full_name").is("deleted_at", null);
+    if (target === "professionals") {
+      query = query.in("user_type", ["professional", "company"]);
+    } else if (target === "clients") {
+      query = query.eq("user_type", "client");
+    }
+    const { data, error } = await query.limit(20000);
+    if (error) throw error;
+    return (data || []).filter((u) => !!u.user_id);
+  };
+
+  const targetLabel = (() => {
+    if (couponForm.target === "all") return "todos os usuários";
+    if (couponForm.target === "professionals") return "todos os profissionais";
+    if (couponForm.target === "clients") return "todos os clientes";
+    return "";
+  })();
+
+  const requestBroadcast = async () => {
+    setLoadingBroadcastCount(true);
+    setBroadcastTargetCount(null);
+    setBroadcastConfirmOpen(true);
+    try {
+      const users = await fetchTargetUsers(couponForm.target as any);
+      setBroadcastTargetCount(users.length);
+    } catch (err: any) {
+      toast({ title: "Erro ao buscar usuários", description: err.message, variant: "destructive" });
+      setBroadcastConfirmOpen(false);
+    }
+    setLoadingBroadcastCount(false);
+  };
+
   const handleAddCoupon = async () => {
     setAddingCoupon(true);
     try {
@@ -220,68 +287,85 @@ const AdminCoupons = () => {
           setAddingCoupon(false);
           return;
         }
-        const couponData: any = {
-          user_id: selectedUser.user_id,
-          source: "admin",
-          coupon_type: couponForm.coupon_type,
-          used: false,
-        };
-        if (couponForm.coupon_type === "discount") {
-          couponData.discount_percent = parseFloat(couponForm.discount_percent) || 5;
-          couponData.expires_at = new Date(Date.now() + (parseInt(couponForm.expires_days) || 30) * 86400000).toISOString();
-        }
-        const { error: couponError } = await supabase.from("coupons").insert(couponData);
+        const { error: couponError } = await supabase.from("coupons").insert(buildCouponData(selectedUser.user_id, "admin"));
         if (couponError) {
           toast({ title: "Erro ao criar cupom", description: couponError.message, variant: "destructive" });
           setAddingCoupon(false);
           return;
         }
-        await supabase.from("notifications").insert({
-          user_id: selectedUser.user_id,
-          title: couponForm.coupon_type === "raffle" ? "🎟️ Cupom de sorteio recebido!" : "🎉 Cupom de desconto recebido!",
-          message: couponForm.coupon_type === "raffle"
-            ? "Você recebeu um cupom para o sorteio mensal!"
-            : `Você recebeu um cupom de ${couponForm.discount_percent}% de desconto!`,
-          type: "coupon",
-          read: false,
-        } as any);
+        await supabase.from("notifications").insert(buildNotification(selectedUser.user_id) as any);
         toast({ title: `Cupom adicionado para ${selectedUser.full_name}!` });
-      } else {
-        const { data: allUsers } = await supabase.from("profiles").select("user_id, full_name").limit(1000);
+      } else if (couponForm.target === "random") {
+        const allUsers = await fetchTargetUsers("random");
         if (!allUsers || allUsers.length === 0) {
           toast({ title: "Nenhum usuário encontrado", variant: "destructive" });
           setAddingCoupon(false);
           return;
         }
         const lucky = allUsers[Math.floor(Math.random() * allUsers.length)];
-        const couponData: any = {
-          user_id: lucky.user_id,
-          source: "admin_random",
-          coupon_type: couponForm.coupon_type,
-          used: false,
-        };
-        if (couponForm.coupon_type === "discount") {
-          couponData.discount_percent = parseFloat(couponForm.discount_percent) || 5;
-          couponData.expires_at = new Date(Date.now() + (parseInt(couponForm.expires_days) || 30) * 86400000).toISOString();
-        }
-        const { error: couponError } = await supabase.from("coupons").insert(couponData);
+        const { error: couponError } = await supabase.from("coupons").insert(buildCouponData(lucky.user_id, "admin_random"));
         if (couponError) {
           toast({ title: "Erro ao criar cupom", description: couponError.message, variant: "destructive" });
           setAddingCoupon(false);
           return;
         }
-        await supabase.from("notifications").insert({
-          user_id: lucky.user_id,
-          title: couponForm.coupon_type === "raffle" ? "🎟️ Cupom de sorteio recebido!" : "🎉 Cupom de desconto recebido!",
-          message: couponForm.coupon_type === "raffle"
-            ? "Você recebeu um cupom para o sorteio mensal!"
-            : `Você recebeu um cupom de ${couponForm.discount_percent}% de desconto!`,
-          type: "coupon",
-          read: false,
-        } as any);
+        await supabase.from("notifications").insert(buildNotification(lucky.user_id) as any);
         toast({ title: `Cupom sorteado para ${lucky.full_name}!` });
+      } else {
+        // Broadcast: all / professionals / clients
+        const targetUsers = await fetchTargetUsers(couponForm.target);
+        if (!targetUsers || targetUsers.length === 0) {
+          toast({ title: "Nenhum usuário encontrado para esse grupo", variant: "destructive" });
+          setAddingCoupon(false);
+          return;
+        }
+
+        const sourceTag =
+          couponForm.target === "all"
+            ? "admin_broadcast_all"
+            : couponForm.target === "professionals"
+            ? "admin_broadcast_pros"
+            : "admin_broadcast_clients";
+
+        const couponsPayload = targetUsers.map((u) => buildCouponData(u.user_id, sourceTag));
+        const notifPayload = targetUsers.map((u) => buildNotification(u.user_id));
+
+        const CHUNK = 500;
+        let totalInserted = 0;
+        for (let i = 0; i < couponsPayload.length; i += CHUNK) {
+          const slice = couponsPayload.slice(i, i + CHUNK);
+          const { error: cErr } = await supabase.from("coupons").insert(slice);
+          if (cErr) {
+            toast({
+              title: "Erro ao criar cupons em massa",
+              description: `${cErr.message} (após ${totalInserted} cupons)`,
+              variant: "destructive",
+            });
+            setAddingCoupon(false);
+            setBroadcastConfirmOpen(false);
+            return;
+          }
+          totalInserted += slice.length;
+        }
+
+        for (let i = 0; i < notifPayload.length; i += CHUNK) {
+          const slice = notifPayload.slice(i, i + CHUNK);
+          await supabase.from("notifications").insert(slice as any);
+        }
+
+        toast({
+          title: `Cupom enviado para ${totalInserted.toLocaleString("pt-BR")} ${
+            couponForm.target === "all"
+              ? "usuários"
+              : couponForm.target === "professionals"
+              ? "profissionais"
+              : "clientes"
+          }!`,
+        });
       }
+
       setAddCouponOpen(false);
+      setBroadcastConfirmOpen(false);
       setSelectedUser(null);
       setUserSearch("");
       setUserResults([]);
@@ -754,6 +838,29 @@ const AdminCoupons = () => {
                   <p className="text-xs font-semibold text-foreground">Mandar Aleatório</p>
                 </button>
               </div>
+
+              <div className="mt-3 pt-3 border-t">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+                  <Megaphone className="w-3 h-3" /> Enviar em massa
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <button onClick={() => setCouponForm(f => ({ ...f, target: "all" }))}
+                    className={`p-3 rounded-xl border-2 text-center transition-colors ${couponForm.target === "all" ? "border-primary bg-primary/5" : "border-border"}`}>
+                    <Users className="w-5 h-5 mx-auto mb-1 text-primary" />
+                    <p className="text-xs font-semibold text-foreground">Todos</p>
+                  </button>
+                  <button onClick={() => setCouponForm(f => ({ ...f, target: "professionals" }))}
+                    className={`p-3 rounded-xl border-2 text-center transition-colors ${couponForm.target === "professionals" ? "border-primary bg-primary/5" : "border-border"}`}>
+                    <Briefcase className="w-5 h-5 mx-auto mb-1 text-primary" />
+                    <p className="text-xs font-semibold text-foreground">Profissionais</p>
+                  </button>
+                  <button onClick={() => setCouponForm(f => ({ ...f, target: "clients" }))}
+                    className={`p-3 rounded-xl border-2 text-center transition-colors ${couponForm.target === "clients" ? "border-primary bg-primary/5" : "border-border"}`}>
+                    <UserRound className="w-5 h-5 mx-auto mb-1 text-primary" />
+                    <p className="text-xs font-semibold text-foreground">Clientes</p>
+                  </button>
+                </div>
+              </div>
             </div>
 
             {couponForm.target === "individual" && (
@@ -799,6 +906,18 @@ const AdminCoupons = () => {
               </div>
             )}
 
+            {(couponForm.target === "all" || couponForm.target === "professionals" || couponForm.target === "clients") && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2">
+                <Megaphone className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs font-bold text-foreground">Envio em massa</p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Cada {targetLabel.replace("todos os ", "").replace(/s$/, "")} receberá <strong>1 cupom</strong> e uma notificação. Essa ação <strong>não pode ser desfeita</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {couponForm.coupon_type === "discount" && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -814,10 +933,85 @@ const AdminCoupons = () => {
               </div>
             )}
 
-            <button onClick={handleAddCoupon} disabled={addingCoupon}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {addingCoupon ? "Adicionando..." : couponForm.target === "random" ? "Sortear e enviar" : "Enviar cupom"}
+            <button
+              onClick={() => {
+                if (couponForm.target === "all" || couponForm.target === "professionals" || couponForm.target === "clients") {
+                  void requestBroadcast();
+                } else {
+                  void handleAddCoupon();
+                }
+              }}
+              disabled={addingCoupon}
+              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {addingCoupon
+                ? "Adicionando..."
+                : couponForm.target === "random"
+                ? "Sortear e enviar"
+                : couponForm.target === "all" || couponForm.target === "professionals" || couponForm.target === "clients"
+                ? `Enviar para ${targetLabel}`
+                : "Enviar cupom"}
             </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: Confirmação de envio em massa */}
+      <Dialog open={broadcastConfirmOpen} onOpenChange={(open) => { if (!addingCoupon) setBroadcastConfirmOpen(open); }}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <Megaphone className="w-5 h-5" /> Confirmar envio em massa
+            </DialogTitle>
+            <DialogDescription>
+              Você está prestes a enviar um cupom para <strong>{targetLabel}</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="bg-muted/50 border rounded-xl p-4 text-center">
+              {loadingBroadcastCount ? (
+                <div className="flex items-center justify-center gap-2 py-4">
+                  <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+                  <p className="text-xs text-muted-foreground">Calculando destinatários...</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-3xl font-black text-primary">
+                    {(broadcastTargetCount ?? 0).toLocaleString("pt-BR")}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {couponForm.target === "all" ? "usuários" : couponForm.target === "professionals" ? "profissionais" : "clientes"} receberão o cupom
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-[11px] text-muted-foreground">
+              <strong className="text-foreground">Tipo:</strong> {couponForm.coupon_type === "raffle" ? "Cupom de sorteio" : `Cupom de ${couponForm.discount_percent}% de desconto`}
+              {couponForm.coupon_type === "discount" && (
+                <>
+                  <br /><strong className="text-foreground">Validade:</strong> {couponForm.expires_days} dias
+                </>
+              )}
+              <br /><span className="text-amber-700 dark:text-amber-400">Esta ação não pode ser desfeita.</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                disabled={addingCoupon}
+                onClick={() => setBroadcastConfirmOpen(false)}
+                className="py-2.5 rounded-xl border font-semibold text-sm hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                disabled={addingCoupon || loadingBroadcastCount || !broadcastTargetCount}
+                onClick={() => void handleAddCoupon()}
+                className="py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {addingCoupon ? "Enviando..." : "Confirmar envio"}
+              </button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

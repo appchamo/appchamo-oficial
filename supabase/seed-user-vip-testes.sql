@@ -71,6 +71,9 @@ WHERE email = 'testes@appchamo.com';
 
 -- 3) Garante que o profile existe (caso o trigger não tenha rodado) + ajusta
 --    campos para profissional VIP com CNPJ válido.
+--    IMPORTANTE: marca o cadastro como "completo" (signup_completed_at +
+--    accepted_terms_version) para que PostLoginGate/RedirectLoggedIn nunca
+--    enviem o revisor para /signup ou /post-login.
 INSERT INTO public.profiles (user_id, email, full_name, user_type, cnpj)
 SELECT u.id, u.email, 'Testes AppChamo', 'professional', '54308342000100'
 FROM auth.users u
@@ -80,8 +83,27 @@ WHERE u.email = 'testes@appchamo.com'
 UPDATE public.profiles
 SET
   full_name = 'Testes AppChamo',
+  display_name = COALESCE(NULLIF(display_name, ''), 'Testes AppChamo'),
   user_type = 'professional',
-  cnpj = '54308342000100'
+  cnpj = '54308342000100',
+  -- Marca cadastro completo para evitar redirect a /signup/post-login.
+  signup_completed_at = COALESCE(signup_completed_at, now()),
+  accepted_terms_at = COALESCE(accepted_terms_at, now()),
+  -- Usa a versão vigente em platform_settings (terms_version_professional).
+  -- Fallback para '1.0' se a chave não existir ainda.
+  accepted_terms_version = COALESCE(
+    NULLIF(accepted_terms_version, ''),
+    (
+      SELECT CASE
+        WHEN value IS NULL THEN '1.0'
+        WHEN jsonb_typeof(value) = 'string' THEN value #>> '{}'
+        ELSE trim(both '"' from value::text)
+      END
+      FROM public.platform_settings
+      WHERE key = 'terms_version_professional'
+    ),
+    '1.0'
+  )
 WHERE email = 'testes@appchamo.com';
 
 -- 4) Role professional (para acessar área de profissional)
@@ -135,12 +157,19 @@ WHERE p.email = 'testes@appchamo.com'
   );
 
 -- 7) Verificação final — deve retornar 1 linha com todos os dados OK
+--    Confirme:
+--      - email_confirmed = true
+--      - signup_complete = true (signup_completed_at não nulo)
+--      - terms_version não nulo
+--      - role = professional, plan_id = vip, status = active
 SELECT
   u.email,
   u.email_confirmed_at IS NOT NULL AS email_confirmed,
   p.full_name,
   p.user_type,
   p.cnpj,
+  p.signup_completed_at IS NOT NULL AS signup_complete,
+  p.accepted_terms_version AS terms_version,
   (SELECT role::text FROM public.user_roles WHERE user_id = u.id AND role = 'professional' LIMIT 1) AS role,
   pr.profile_status,
   pr.active AS professional_active,

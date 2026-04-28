@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Megaphone,
   Ticket,
@@ -15,13 +15,25 @@ import {
   Circle,
   ArrowRight,
   Sparkles,
+  Lock,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
+import { useSubscription } from "@/hooks/useSubscription";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+
+/**
+ * Cupons de desconto são feature paga: liberada apenas a partir do plano Pro
+ * (Pro / VIP / Business). Plano free não cria nem edita cupons. Mantemos a
+ * mesma lógica nas RLS (`can_create_professional_coupon`) — front é só
+ * conveniência/UX para guiar o pro até /subscriptions.
+ */
+const PAID_COUPON_PLANS = new Set(["pro", "vip", "business"]);
+const planAllowsCoupons = (planId: string | null | undefined): boolean =>
+  !!planId && PAID_COUPON_PLANS.has(planId);
 
 /**
  * `professional_coupons` é uma tabela nova; ainda não está nos types gerados do
@@ -90,6 +102,8 @@ const ProMarketing = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [proRecord, setProRecord] = useState<ProRecord | null>(null);
   const [loadingPro, setLoadingPro] = useState(true);
+  const { plan, loading: subLoading } = useSubscription();
+  const canCreateCoupons = planAllowsCoupons(plan?.id);
   const tabFromUrl = searchParams.get("tab");
   const initialTab = tabFromUrl === "trust" ? "trust" : "coupons";
   const [tab, setTab] = useState<"coupons" | "trust">(initialTab);
@@ -168,12 +182,16 @@ const ProMarketing = () => {
           </TabsList>
 
           <TabsContent value="coupons">
-            {loadingPro ? (
+            {loadingPro || subLoading ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="w-6 h-6 text-primary animate-spin" />
               </div>
             ) : proRecord ? (
-              <CouponsTab professionalId={proRecord.id} />
+              <CouponsTab
+                professionalId={proRecord.id}
+                canCreate={canCreateCoupons}
+                currentPlanId={plan?.id ?? null}
+              />
             ) : (
               <EmptyProState />
             )}
@@ -204,18 +222,74 @@ const EmptyProState = () => (
   </div>
 );
 
+interface CouponsLockedUpsellProps {
+  currentPlanId: string | null;
+  /** Pro fez downgrade — explicar que cupons antigos seguem visíveis até pausar/excluir. */
+  hasLegacyCoupons: boolean;
+}
+
+const CouponsLockedUpsell = ({ currentPlanId, hasLegacyCoupons }: CouponsLockedUpsellProps) => {
+  const isFree = !currentPlanId || currentPlanId === "free";
+  return (
+    <div className="bg-gradient-to-br from-primary/10 via-pink-500/5 to-amber-500/10 border-2 border-primary/30 rounded-2xl p-4 sm:p-5 space-y-3">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
+          <Lock className="w-5 h-5 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-foreground">
+            Cupons de desconto: a partir do plano Pro
+          </p>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+            {isFree
+              ? "Crie cupons exclusivos para seus clientes, ganhe o destaque "
+              : "Para criar novos cupons você precisa estar no Pro, VIP ou Business. Ganhe o destaque "}
+            <strong className="text-primary">"Contrate com desconto"</strong> no perfil público e apareça
+            antes da concorrência. Disponível nos planos <strong>Pro</strong>, <strong>VIP</strong> e{" "}
+            <strong>Business</strong>.
+          </p>
+          {hasLegacyCoupons && (
+            <p className="text-[11px] text-muted-foreground/90 mt-2 italic">
+              Os cupons já criados continuam abaixo — você pode pausar ou excluir, mas não criar novos sem
+              um plano pago ativo.
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Link
+          to="/subscriptions"
+          className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+        >
+          Ver planos <ArrowRight className="w-4 h-4" />
+        </Link>
+      </div>
+    </div>
+  );
+};
+
 // =====================================================================
 // Aba 1 — Cupons de desconto
 // =====================================================================
 
 interface CouponsTabProps {
   professionalId: string;
+  /**
+   * Se o plano atual permite criar/editar cupons (Pro / VIP / Business).
+   * Free e plano sem assinatura ativa: vê o card de upsell e os cupons
+   * existentes em modo somente leitura (mas pode pausar/excluir, para limpar
+   * o que ficou no perfil público depois de um downgrade).
+   */
+  canCreate: boolean;
+  currentPlanId: string | null;
 }
 
-const CouponsTab = ({ professionalId }: CouponsTabProps) => {
+const CouponsTab = ({ professionalId, canCreate, currentPlanId }: CouponsTabProps) => {
   const [coupons, setCoupons] = useState<ProfessionalCoupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+
+  const showLockedNewCoupon = !canCreate;
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -260,18 +334,22 @@ const CouponsTab = ({ professionalId }: CouponsTabProps) => {
 
   return (
     <div className="space-y-4">
-      <div className="bg-gradient-to-r from-primary/10 to-pink-500/10 border border-primary/20 rounded-2xl p-4 flex items-start gap-3">
-        <Sparkles className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-foreground">Como funciona</p>
-          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-            O cliente <strong>não digita código</strong>. Quando ele for pagar você, aparece um botão
-            <strong> "Aplicar cupom"</strong> com o melhor desconto que você criou. Quem banca é você. Seu
-            perfil ganha o destaque <strong className="text-primary">"Contrate com desconto"</strong>{" "}
-            sempre que houver pelo menos um cupom ativo.
-          </p>
+      {canCreate ? (
+        <div className="bg-gradient-to-r from-primary/10 to-pink-500/10 border border-primary/20 rounded-2xl p-4 flex items-start gap-3">
+          <Sparkles className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-foreground">Como funciona</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              O cliente <strong>não digita código</strong>. Quando ele for pagar você, aparece um botão
+              <strong> "Aplicar cupom"</strong> com o melhor desconto que você criou. Quem banca é você. Seu
+              perfil ganha o destaque <strong className="text-primary">"Contrate com desconto"</strong>{" "}
+              sempre que houver pelo menos um cupom ativo.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <CouponsLockedUpsell currentPlanId={currentPlanId} hasLegacyCoupons={coupons.length > 0} />
+      )}
 
       <div className="flex items-center justify-between">
         <div>
@@ -280,16 +358,26 @@ const CouponsTab = ({ professionalId }: CouponsTabProps) => {
             {activeCount} ativo{activeCount === 1 ? "" : "s"} · {coupons.length} no total
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-        >
-          <Plus className="w-4 h-4" /> {showForm ? "Cancelar" : "Novo cupom"}
-        </button>
+        {showLockedNewCoupon ? (
+          <Link
+            to="/subscriptions"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-muted text-muted-foreground text-sm font-semibold border border-border hover:bg-muted/80 transition-colors"
+            aria-label="Disponível a partir do plano Pro — abrir planos"
+          >
+            <Lock className="w-4 h-4" /> Novo cupom
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> {showForm ? "Cancelar" : "Novo cupom"}
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {showForm && canCreate && (
         <CouponForm
           professionalId={professionalId}
           onCreated={() => {

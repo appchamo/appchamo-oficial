@@ -101,11 +101,14 @@ export async function enrichMutualFriends(
 
   return userIds.map((uid) => {
     const p = pmap.get(uid);
-    const dn = (p?.display_name ?? "").trim();
+    // full_name primeiro (== Perfil profissional público); display_name é
+    // fallback caso o full_name esteja em branco. Antes priorizávamos
+    // display_name e o nome de exibição ficava stale após edição em /profile.
     const fn = (p?.full_name ?? "").trim();
+    const dn = (p?.display_name ?? "").trim();
     return {
       user_id: uid,
-      full_name: dn || fn || "Usuário",
+      full_name: fn || dn || "Usuário",
       avatar_url: p?.avatar_url ?? null,
       pro_key: proKeyByUser.get(uid) ?? null,
     };

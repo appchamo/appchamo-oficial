@@ -194,9 +194,23 @@ interface CommentReactionRow {
   reaction_type: ReactionType;
 }
 
+/**
+ * Nome a mostrar nos posts/comentários da comunidade.
+ *
+ * Importante: usamos `full_name` PRIMEIRO e só caímos em `display_name` se ele
+ * estiver em branco. O Perfil profissional público (ProfessionalProfile.tsx)
+ * mostra `profiles.full_name`. Quando o usuário edita o nome em /profile, só o
+ * `full_name` é atualizado — o `display_name` antigo (gravado em
+ * BecomeProfessional ou no signup) continua "stale". Antes priorizávamos
+ * `display_name`, então o feed mostrava o nome antigo enquanto o perfil já
+ * mostrava o novo. Agora os dois batem.
+ */
 function authorLabel(a: AuthorRow | undefined) {
   if (!a) return "Usuário";
-  return (a.display_name || a.full_name || "Usuário").trim();
+  const fn = (a.full_name || "").trim();
+  if (fn) return fn;
+  const dn = (a.display_name || "").trim();
+  return dn || "Usuário";
 }
 
 function postTimeLabel(iso: string) {

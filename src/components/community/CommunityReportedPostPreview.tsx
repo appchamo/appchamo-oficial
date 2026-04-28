@@ -24,9 +24,12 @@ type Post = {
 
 function authorLabel(a: Author | null): string {
   if (!a) return "Utilizador";
-  const d = (a.display_name || "").trim();
-  if (d) return d;
-  return (a.full_name || "").trim() || "Utilizador";
+  // Mesma regra do feed (CommunityFeed.authorLabel) e do Perfil profissional:
+  // full_name primeiro, display_name como fallback. Mantém o moderador vendo
+  // o mesmo nome que o usuário denunciado mostra no perfil público.
+  const fn = (a.full_name || "").trim();
+  if (fn) return fn;
+  return (a.display_name || "").trim() || "Utilizador";
 }
 
 function postTimeLabel(iso: string): string {

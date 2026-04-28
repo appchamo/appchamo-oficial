@@ -700,7 +700,9 @@ const MessageThread = () => {
       const nameMap = new Map(
         (profs || []).map((p: any) => [
           p.user_id,
-          String((p.display_name || p.full_name || "Profissional").trim() || "Profissional"),
+          // full_name primeiro (alinhado com Perfil profissional + feed). Antes
+          // priorizávamos display_name e o embed de post mostrava nome antigo.
+          String((p.full_name || p.display_name || "Profissional").trim() || "Profissional"),
         ]),
       );
       if (cancelled) return;

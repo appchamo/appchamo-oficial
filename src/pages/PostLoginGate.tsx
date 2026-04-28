@@ -25,6 +25,20 @@ export default function PostLoginGate() {
   useEffect(() => () => {
     unmountedRef.current = true;
   }, []);
+  /**
+   * Guard absoluta contra navegação dupla: depois de qualquer navigate()
+   * desta página, ignoramos todos os outros (effects/retries em background
+   * que ainda estavam a correr). No iOS o WebKit limita a 100 chamadas de
+   * history.replaceState() por 30s — se vários caminhos acionam navigate()
+   * em sequência, cai no ErrorBoundary com "Attempt to use replaceState…",
+   * que foi o erro reportado pela Apple na revisão.
+   */
+  const hasNavigatedRef = useRef(false);
+  const safeNavigate = (to: string) => {
+    if (hasNavigatedRef.current || unmountedRef.current) return;
+    hasNavigatedRef.current = true;
+    navigate(to, { replace: true });
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -46,7 +60,7 @@ export default function PostLoginGate() {
         }
         await new Promise((r) => setTimeout(r, 150));
       }
-      if (!cancelled) navigate("/login", { replace: true });
+      if (!cancelled) safeNavigate("/login");
     })();
 
     return () => {
@@ -135,14 +149,14 @@ export default function PostLoginGate() {
                     } | null);
                   if (isCancelled()) return;
                   if (!lastRow || !isProfileSignupComplete(lastRow)) {
-                    navigate("/signup", { replace: true });
+                    safeNavigate("/signup");
                   } else {
                     const pending = peekPostAuthRedirect();
-                    if (pending) { clearPostAuthRedirect(); navigate(pending, { replace: true }); }
-                    else navigate("/home", { replace: true });
+                    if (pending) { clearPostAuthRedirect(); safeNavigate(pending); }
+                    else safeNavigate("/home");
                   }
                 } else {
-                  navigate("/signup", { replace: true });
+                  safeNavigate("/signup");
                 }
                 return;
               }
@@ -151,19 +165,19 @@ export default function PostLoginGate() {
               // redireciona para o Signup para escolher o tipo de conta (Cliente/Profissional).
               const isNewSignup = localStorage.getItem("signup_in_progress") === "true";
               if (isNewSignup) {
-                navigate("/signup", { replace: true });
+                safeNavigate("/signup");
                 return;
               }
               if (!isProfileSignupComplete(row ?? {})) {
-                navigate("/signup", { replace: true });
+                safeNavigate("/signup");
                 return;
               }
               const pending = peekPostAuthRedirect();
               if (pending) {
                 clearPostAuthRedirect();
-                navigate(pending, { replace: true });
+                safeNavigate(pending);
               } else {
-                navigate("/home", { replace: true });
+                safeNavigate("/home");
               }
               // Sempre com userId da sessão: após Apple/Google `user` no contexto pode atrasar e refreshProfile() era no-op.
               void refreshProfile(userId).catch(() => {});
@@ -183,7 +197,7 @@ export default function PostLoginGate() {
         if (!u || u.id !== userId) {
           if (!isCancelled()) {
             setChecking(false);
-            navigate("/login", { replace: true });
+            safeNavigate("/login");
           }
           return;
         }
@@ -202,7 +216,7 @@ export default function PostLoginGate() {
         if (isNewSignupFallback) {
           if (!isCancelled()) {
             setChecking(false);
-            navigate("/signup", { replace: true });
+            safeNavigate("/signup");
           }
           return;
         }
@@ -226,16 +240,16 @@ export default function PostLoginGate() {
               if (ut && ut !== "pending_signup") {
                 if (!isProfileSignupComplete(r ?? {})) {
                   setChecking(false);
-                  navigate("/signup", { replace: true });
+                  safeNavigate("/signup");
                   return;
                 }
                 setChecking(false);
                 const pending = peekPostAuthRedirect();
                 if (pending) {
                   clearPostAuthRedirect();
-                  navigate(pending, { replace: true });
+                  safeNavigate(pending);
                 } else {
-                  navigate("/home", { replace: true });
+                  safeNavigate("/home");
                 }
                 void refreshProfile(userId).catch(() => {});
                 void refreshRoles(userId).catch(() => {});
@@ -256,7 +270,7 @@ export default function PostLoginGate() {
           await supabase.auth.signOut().catch(() => {});
         } catch (_) {}
         setChecking(false);
-        navigate("/signup", { replace: true });
+        safeNavigate("/signup");
       };
 
       run();
@@ -269,26 +283,26 @@ export default function PostLoginGate() {
     // Perfil já no contexto (ex. retry anterior)
     setChecking(false);
     if (profile.user_type === "pending_signup") {
-      navigate("/signup", { replace: true });
+      safeNavigate("/signup");
       return;
     }
     // Se veio do fluxo de cadastro via OAuth, vai para /signup para escolher tipo de conta.
     const isNewSignupCtx = localStorage.getItem("signup_in_progress") === "true";
     if (isNewSignupCtx) {
-      navigate("/signup", { replace: true });
+      safeNavigate("/signup");
       return;
     }
     if (!isProfileSignupComplete(profile)) {
-      navigate("/signup", { replace: true });
+      safeNavigate("/signup");
       return;
     }
     const pending = peekPostAuthRedirect();
     if (pending) {
       clearPostAuthRedirect();
-      navigate(pending, { replace: true });
+      safeNavigate(pending);
       return;
     }
-    navigate("/home", { replace: true });
+    safeNavigate("/home");
   }, [loading, session?.user?.id, fallbackUserId, profile?.user_id, navigate, refreshProfile, refreshRoles]);
 
   return (

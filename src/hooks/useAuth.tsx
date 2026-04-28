@@ -533,8 +533,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             } catch {
               /* ignore */
             }
+            // Em fluxo de cadastro (Apple/Google a partir de /signup) vamos
+            // direto para /signup. Sem isto o app passava por /post-login →
+            // PostLoginGate → /signup, encadeando vários replaceState() que no
+            // iOS WebKit pode estourar o limite de 100 chamadas/30s e cair no
+            // ErrorBoundary ("Algo deu errado"). Foi exatamente o que a Apple
+            // viu na revisão (Submission 1a49c79d-2fee-4225-8631-d8bf2180a7a5).
+            let iosTarget = "/post-login";
             try {
-              window.location.replace("/post-login");
+              if (localStorage.getItem("signup_in_progress") === "true") {
+                iosTarget = "/signup";
+              }
+            } catch {
+              /* ignore */
+            }
+            try {
+              window.location.replace(iosTarget);
             } catch {
               /* ignore */
             }

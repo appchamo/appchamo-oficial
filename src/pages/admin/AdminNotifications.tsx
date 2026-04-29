@@ -1,6 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
 import {
-  Bell,
   Send,
   Users,
   Briefcase,
@@ -17,6 +16,12 @@ import {
   CheckSquare,
   Square,
   X,
+  Inbox,
+  History,
+  ChevronDown,
+  ChevronUp,
+  Link2,
+  CalendarDays,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
@@ -25,6 +30,7 @@ import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { toast } from "@/hooks/use-toast";
 import { NOTIFICATION_MENU_DESTINATIONS } from "@/lib/appNotificationDestinations";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type TargetType =
   | "all"
@@ -66,6 +72,40 @@ interface UserNotif {
   deleted_at: string | null;
 }
 
+/** Linha de envio (cada batch criado pelo painel). */
+interface SentBatch {
+  id: string;
+  sent_by: string | null;
+  sent_by_email: string | null;
+  sent_by_name: string | null;
+  title: string;
+  message: string;
+  link: string | null;
+  target_type: TargetType | string;
+  target_meta: {
+    category_id?: string;
+    category_name?: string;
+    user_ids?: string[];
+    selected_label?: string;
+    individual_user_id?: string;
+    individual_user_name?: string;
+  } | null;
+  recipient_count: number;
+  created_at: string;
+}
+
+/** Recipiente de um batch (linha em notifications + nome/email do perfil). */
+interface BatchRecipient {
+  notification_id: string;
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+  read: boolean;
+  read_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
+}
+
 const formatDateTimeBR = (iso: string | null): string => {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("pt-BR", {
@@ -80,10 +120,40 @@ const formatDateTimeBR = (iso: string | null): string => {
 /** Sempre incluir no broadcast “Todos os usuários” (conta de painel). */
 const ADMIN_PANEL_EMAIL = "admin@appchamo.com";
 
+const TARGET_LABELS: Record<string, string> = {
+  all: "Todos os usuários",
+  clients: "Apenas clientes",
+  professionals: "Apenas profissionais",
+  companies: "Apenas empresas",
+  pending_pros: "Profissionais em análise",
+  category: "Por categoria",
+  individual: "Individual",
+  selected: "Selecionados",
+};
+
+const targetBadgeLabel = (b: SentBatch): string => {
+  const base = TARGET_LABELS[b.target_type] || b.target_type;
+  if (b.target_type === "category" && b.target_meta?.category_name) {
+    return `Categoria: ${b.target_meta.category_name}`;
+  }
+  if (b.target_type === "individual" && b.target_meta?.individual_user_name) {
+    return `Individual: ${b.target_meta.individual_user_name}`;
+  }
+  return base;
+};
+
 const AdminNotifications = () => {
   const { adminUser } = useAdminAuth();
+
+  // ── Aba ativa
+  const [activeTab, setActiveTab] = useState<"send" | "sent" | "audit">("send");
+
+  // ── Suas notificações (caixa pessoal do admin)
   const [myNotifications, setMyNotifications] = useState<AdminNotif[]>([]);
   const [loadingMine, setLoadingMine] = useState(true);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+
+  // ── Form de envio
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [target, setTarget] = useState<TargetType>("all");
@@ -92,7 +162,6 @@ const AdminNotifications = () => {
   const [sending, setSending] = useState(false);
   const [destinationPath, setDestinationPath] = useState("");
   const [sentCount, setSentCount] = useState<number | null>(null);
-  const [markingAllRead, setMarkingAllRead] = useState(false);
 
   // Individual user search
   const [userSearch, setUserSearch] = useState("");
@@ -109,7 +178,16 @@ const AdminNotifications = () => {
   const [pickerResults, setPickerResults] = useState<PickableUser[]>([]);
   const [pickerPendingIds, setPickerPendingIds] = useState<Set<string>>(new Set());
 
-  // Painel "Notificações por usuário" (auditoria + Realtime)
+  // ── Aba "Notificações enviadas" (histórico de batches)
+  const [sentBatches, setSentBatches] = useState<SentBatch[]>([]);
+  const [sentLoading, setSentLoading] = useState(false);
+  const [sentSearch, setSentSearch] = useState("");
+  const [sentExpandedId, setSentExpandedId] = useState<string | null>(null);
+  const [sentRecipientsByBatch, setSentRecipientsByBatch] = useState<Record<string, BatchRecipient[]>>({});
+  const [sentRecipientsLoading, setSentRecipientsLoading] = useState<Set<string>>(new Set());
+  const [sentLive, setSentLive] = useState(false);
+
+  // ── Painel "Notificações por usuário" (auditoria + Realtime)
   const [auditSearch, setAuditSearch] = useState("");
   const [auditResults, setAuditResults] =
     useState<{ user_id: string; full_name: string; email: string }[]>([]);
@@ -238,8 +316,8 @@ const AdminNotifications = () => {
         const { data, error } = await q;
         if (error) throw error;
         setPickerResults((data || []) as PickableUser[]);
-      } catch (e: any) {
-        toast({ title: "Erro na busca", description: e?.message, variant: "destructive" });
+      } catch (e: unknown) {
+        toast({ title: "Erro na busca", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
         setPickerResults([]);
       }
       setPickerLoading(false);
@@ -275,6 +353,152 @@ const AdminNotifications = () => {
   };
 
   const clearAllSelected = () => setSelectedUsers([]);
+
+  // ── Aba "Notificações enviadas" ──────────────────────────────────────────
+  const loadSentBatches = useCallback(async () => {
+    setSentLoading(true);
+    const { data, error } = await supabase
+      .from("admin_notification_batches" as never)
+      .select("id, sent_by, sent_by_email, sent_by_name, title, message, link, target_type, target_meta, recipient_count, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      toast({ title: "Erro ao carregar histórico", description: error.message, variant: "destructive" });
+      setSentBatches([]);
+    } else {
+      setSentBatches((data as unknown as SentBatch[]) || []);
+    }
+    setSentLoading(false);
+  }, []);
+
+  // Carrega quando entra na aba e mantém Realtime para INSERTs novos
+  useEffect(() => {
+    if (activeTab !== "sent") return;
+    void loadSentBatches();
+
+    const channel = supabase
+      .channel("admin-sent-batches")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "admin_notification_batches" },
+        (payload) => {
+          const row = payload.new as SentBatch;
+          setSentBatches((prev) => {
+            if (prev.some((b) => b.id === row.id)) return prev;
+            return [row, ...prev];
+          });
+        },
+      )
+      .subscribe((status) => setSentLive(status === "SUBSCRIBED"));
+
+    return () => {
+      supabase.removeChannel(channel);
+      setSentLive(false);
+    };
+  }, [activeTab, loadSentBatches]);
+
+  const filteredBatches = useMemo(() => {
+    const q = sentSearch.trim().toLowerCase();
+    if (!q) return sentBatches;
+    return sentBatches.filter(
+      (b) =>
+        b.title.toLowerCase().includes(q) ||
+        b.message.toLowerCase().includes(q) ||
+        targetBadgeLabel(b).toLowerCase().includes(q),
+    );
+  }, [sentBatches, sentSearch]);
+
+  const loadBatchRecipients = useCallback(async (batchId: string) => {
+    setSentRecipientsLoading((prev) => {
+      const next = new Set(prev);
+      next.add(batchId);
+      return next;
+    });
+
+    // Sem FK declarada entre notifications.user_id e profiles → join manual em 2 queries.
+    // Usamos `as never` para escapar do typing do supabase (batch_id ainda não está
+    // refletido em src/integrations/supabase/types.ts até a próxima regeneração).
+    const { data: rows, error } = await (supabase
+      .from("notifications") as unknown as {
+        select: (cols: string) => {
+          eq: (col: string, val: string) => {
+            order: (col: string, opts: { ascending: boolean }) => {
+              limit: (n: number) => Promise<{
+                data: Array<{
+                  id: string;
+                  user_id: string;
+                  read: boolean;
+                  read_at: string | null;
+                  deleted_at: string | null;
+                  created_at: string;
+                }> | null;
+                error: { message: string } | null;
+              }>;
+            };
+          };
+        };
+      })
+      .select("id, user_id, read, read_at, deleted_at, created_at")
+      .eq("batch_id", batchId)
+      .order("created_at", { ascending: false })
+      .limit(2000);
+
+    if (error) {
+      toast({ title: "Erro ao listar destinatários", description: error.message, variant: "destructive" });
+      setSentRecipientsLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(batchId);
+        return next;
+      });
+      return;
+    }
+
+    const list = rows || [];
+
+    const userIds = Array.from(new Set(list.map((r) => r.user_id)));
+    const profileMap = new Map<string, { full_name: string | null; email: string | null }>();
+    if (userIds.length > 0) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, email")
+        .in("user_id", userIds);
+      for (const p of profs || []) {
+        profileMap.set(p.user_id, { full_name: p.full_name ?? null, email: p.email ?? null });
+      }
+    }
+
+    const recipients: BatchRecipient[] = list.map((row) => {
+      const prof = profileMap.get(row.user_id);
+      return {
+        notification_id: row.id,
+        user_id: row.user_id,
+        full_name: prof?.full_name ?? null,
+        email: prof?.email ?? null,
+        read: row.read,
+        read_at: row.read_at,
+        deleted_at: row.deleted_at,
+        created_at: row.created_at,
+      };
+    });
+
+    setSentRecipientsByBatch((prev) => ({ ...prev, [batchId]: recipients }));
+    setSentRecipientsLoading((prev) => {
+      const next = new Set(prev);
+      next.delete(batchId);
+      return next;
+    });
+  }, []);
+
+  const toggleBatchExpand = (batchId: string) => {
+    if (sentExpandedId === batchId) {
+      setSentExpandedId(null);
+      return;
+    }
+    setSentExpandedId(batchId);
+    if (!sentRecipientsByBatch[batchId]) {
+      void loadBatchRecipients(batchId);
+    }
+  };
 
   // ── Painel "Notificações por usuário" ──────────────────────────────────────
   // Busca debounced (350ms) por nome/email
@@ -427,17 +651,57 @@ const AdminNotifications = () => {
         return;
       }
 
+      const link = destinationPath.trim() || null;
+
+      // 1) Cria o batch (registro de "ata") antes de inserir as notificações.
+      const targetMeta: SentBatch["target_meta"] = {};
+      if (target === "category") {
+        targetMeta!.category_id = categoryId;
+        const cat = categories.find((c) => c.id === categoryId);
+        if (cat) targetMeta!.category_name = cat.name;
+      }
+      if (target === "individual" && selectedUser) {
+        targetMeta!.individual_user_id = selectedUser.user_id;
+        targetMeta!.individual_user_name = selectedUser.full_name;
+      }
+      if (target === "selected") {
+        targetMeta!.user_ids = selectedUsers.map((u) => u.user_id);
+      }
+
+      const { data: batchData, error: batchErr } = await supabase
+        .from("admin_notification_batches" as never)
+        .insert({
+          sent_by: adminUser?.id ?? null,
+          sent_by_email: adminUser?.email ?? null,
+          sent_by_name: (adminUser as { full_name?: string | null } | null)?.full_name ?? null,
+          title: title.trim(),
+          message: message.trim(),
+          link,
+          target_type: target,
+          target_meta: targetMeta,
+          recipient_count: userIds.length,
+        } as never)
+        .select("id")
+        .single();
+
+      const batchId = (batchData as { id?: string } | null)?.id ?? null;
+      if (batchErr) {
+        // Não bloqueia o envio em si — só perde o histórico desse envio.
+        console.warn("Falha ao registrar batch:", batchErr.message);
+      }
+
+      // 2) Insere as notificações em lotes, amarradas ao batch.
       const batchSize = 100;
       for (let i = 0; i < userIds.length; i += batchSize) {
-        const link = destinationPath.trim() || null;
         const batch = userIds.slice(i, i + batchSize).map((uid) => ({
           user_id: uid,
           title: title.trim(),
           message: message.trim(),
           type: "info",
           ...(link ? { link } : {}),
+          ...(batchId ? { batch_id: batchId } : {}),
         }));
-        await supabase.from("notifications").insert(batch);
+        await supabase.from("notifications").insert(batch as never);
       }
 
       setSentCount(userIds.length);
@@ -448,13 +712,13 @@ const AdminNotifications = () => {
       setSelectedUser(null);
       setUserSearch("");
       setSelectedUsers([]);
-    } catch (e: any) {
-      toast({ title: "Erro ao enviar", description: e.message, variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Erro ao enviar", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     }
     setSending(false);
   };
 
-  const targets: { value: TargetType; label: string; icon: any; desc: string }[] = [
+  const targets: { value: TargetType; label: string; icon: typeof Users; desc: string }[] = [
     { value: "all", label: "Todos", icon: Users, desc: "Todos os usuários" },
     { value: "individual", label: "Individual", icon: User, desc: "Um usuário específico" },
     { value: "clients", label: "Clientes", icon: Users, desc: "Apenas clientes" },
@@ -467,272 +731,480 @@ const AdminNotifications = () => {
 
   return (
     <AdminLayout title="Notificações">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-        <div className="space-y-5 min-w-0">
-        <div className="bg-card border rounded-xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
-              <Bell className="w-4 h-4 text-primary" /> Suas notificações
-            </h2>
-            {!loadingMine && myNotifications.length > 0 && unreadMineCount > 0 && (
-              <button
-                type="button"
-                onClick={() => void markAllMineAsRead()}
-                disabled={markingAllRead}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                {markingAllRead ? (
-                  <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <CheckCheck className="w-3.5 h-3.5 text-primary" />
-                )}
-                Marcar todas como lidas
-              </button>
-            )}
-          </div>
-          {loadingMine ? (
-            <p className="text-xs text-muted-foreground">Carregando...</p>
-          ) : myNotifications.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nenhuma notificação.</p>
-          ) : (
-            <ul className="space-y-2 max-h-64 overflow-y-auto">
-              {myNotifications.map((n) => (
-                <li key={n.id}>
-                  {n.link ? (
-                    <Link
-                      to={n.link}
-                      onClick={() => markAsRead(n.id)}
-                      className={`block rounded-xl border p-3 transition-colors hover:bg-muted/50 ${!n.read ? "bg-primary/5 border-primary/20" : "border-border"}`}
-                    >
-                      <p className="text-xs font-semibold text-foreground">{n.title}</p>
-                      {n.message && <p className="text-[11px] text-muted-foreground mt-0.5">{n.message}</p>}
-                      <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString("pt-BR")}</p>
-                    </Link>
-                  ) : (
-                    <div
-                      className={`rounded-xl border p-3 ${!n.read ? "bg-primary/5 border-primary/20" : "border-border"}`}
-                      onClick={() => markAsRead(n.id)}
-                    >
-                      <p className="text-xs font-semibold text-foreground">{n.title}</p>
-                      {n.message && <p className="text-[11px] text-muted-foreground mt-0.5">{n.message}</p>}
-                      <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString("pt-BR")}</p>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="w-full">
+        <TabsList className="grid w-full grid-cols-3 h-auto p-1 bg-muted">
+          <TabsTrigger value="send" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
+            <Send className="w-4 h-4" />
+            <span className="hidden sm:inline">Enviar notificação</span>
+            <span className="sm:hidden">Enviar</span>
+          </TabsTrigger>
+          <TabsTrigger value="sent" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
+            <History className="w-4 h-4" />
+            <span className="hidden sm:inline">Notificações enviadas</span>
+            <span className="sm:hidden">Enviadas</span>
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
+            <Search className="w-4 h-4" />
+            <span className="hidden sm:inline">Por usuário</span>
+            <span className="sm:hidden">Usuário</span>
+          </TabsTrigger>
+        </TabsList>
 
-        <div className="bg-card border rounded-xl p-5">
-          <h2 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
-            <Send className="w-4 h-4 text-primary" /> Enviar notificação manual
-          </h2>
+        {/* ─────────────────────────  Aba 1: Enviar  ───────────────────────── */}
+        <TabsContent value="send" className="mt-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+            <div className="bg-card border rounded-xl p-5 min-w-0">
+              <h2 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
+                <Send className="w-4 h-4 text-primary" /> Enviar notificação manual
+              </h2>
 
-          <div className="space-y-4">
-            {/* Target selection */}
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-2 block">Enviar para:</label>
-              <div className="grid grid-cols-2 gap-2">
-                {targets.map(t => (
-                  <button
-                    key={t.value}
-                    onClick={() => {
-                      setTarget(t.value);
-                      setSelectedUser(null);
-                      setUserSearch("");
-                      if (t.value === "selected") {
-                        setSelectOpen(true);
-                      }
-                    }}
-                    className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-colors text-left ${
-                      target === t.value ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"
-                    }`}
-                  >
-                    <t.icon className="w-4 h-4 text-primary flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-foreground">{t.label}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{t.desc}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Category selector */}
-            {target === "category" && (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Categoria:</label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">Selecione...</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Em análise (pending_pros) */}
-            {target === "pending_pros" && (
-              <div className="flex items-start gap-2 border rounded-xl p-3 bg-amber-500/5 border-amber-500/30">
-                <Clock className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  A notificação será enviada para <strong>todos os profissionais com cadastro em análise</strong>
-                  (<code className="text-[10px]">professionals.profile_status = pending</code>). O número real é calculado no momento do envio.
-                </p>
-              </div>
-            )}
-
-            {/* Usuários selecionados (multi) */}
-            {target === "selected" && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-foreground">
-                    {selectedUsers.length === 0
-                      ? "Nenhum usuário selecionado"
-                      : `${selectedUsers.length} usuário${selectedUsers.length === 1 ? "" : "s"} selecionado${selectedUsers.length === 1 ? "" : "s"}`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setSelectOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 transition-colors"
-                  >
-                    <UserCheck className="w-3.5 h-3.5" />
-                    {selectedUsers.length === 0 ? "Selecionar usuários" : "Editar seleção"}
-                  </button>
-                </div>
-
-                {selectedUsers.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 rounded-xl border bg-muted/30 p-2 max-h-32 overflow-y-auto">
-                    {selectedUsers.map((u) => (
-                      <span
-                        key={u.user_id}
-                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 text-[10px] font-medium text-primary pl-2 pr-1 py-0.5"
+              <div className="space-y-4">
+                {/* Target selection */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-2 block">Enviar para:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {targets.map(t => (
+                      <button
+                        key={t.value}
+                        onClick={() => {
+                          setTarget(t.value);
+                          setSelectedUser(null);
+                          setUserSearch("");
+                          if (t.value === "selected") {
+                            setSelectOpen(true);
+                          }
+                        }}
+                        className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-colors text-left ${
+                          target === t.value ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"
+                        }`}
                       >
-                        <span className="max-w-[14ch] truncate">{u.full_name || u.email}</span>
-                        <button
-                          type="button"
-                          onClick={() => togglePickerUser(u)}
-                          className="rounded-full hover:bg-primary/20 p-0.5"
-                          aria-label={`Remover ${u.full_name}`}
-                        >
-                          <X className="w-2.5 h-2.5" />
-                        </button>
-                      </span>
+                        <t.icon className="w-4 h-4 text-primary flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-foreground">{t.label}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{t.desc}</p>
+                        </div>
+                      </button>
                     ))}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
 
-            {/* Individual user search */}
-            {target === "individual" && (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Buscar usuário:</label>
-                {selectedUser ? (
-                  <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-primary/5 border-primary/30">
-                    <User className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-medium text-foreground flex-1">{selectedUser.full_name}</span>
-                    <button onClick={() => { setSelectedUser(null); setUserSearch(""); }} className="text-xs text-destructive hover:underline">Remover</button>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <input
-                      value={userSearch}
-                      onChange={(e) => searchUsers(e.target.value)}
-                      placeholder="Nome ou email do usuário..."
+                {/* Category selector */}
+                {target === "category" && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Categoria:</label>
+                    <select
+                      value={categoryId}
+                      onChange={(e) => setCategoryId(e.target.value)}
                       className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                    />
-                    {userResults.length > 0 && (
-                      <div className="absolute z-10 w-full mt-1 bg-card border rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                        {userResults.map(u => (
-                          <button
+                    >
+                      <option value="">Selecione...</option>
+                      {categories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {target === "pending_pros" && (
+                  <div className="flex items-start gap-2 border rounded-xl p-3 bg-amber-500/5 border-amber-500/30">
+                    <Clock className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      A notificação será enviada para <strong>todos os profissionais com cadastro em análise</strong>
+                      (<code className="text-[10px]">professionals.profile_status = pending</code>). O número real é calculado no momento do envio.
+                    </p>
+                  </div>
+                )}
+
+                {target === "selected" && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-foreground">
+                        {selectedUsers.length === 0
+                          ? "Nenhum usuário selecionado"
+                          : `${selectedUsers.length} usuário${selectedUsers.length === 1 ? "" : "s"} selecionado${selectedUsers.length === 1 ? "" : "s"}`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setSelectOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        {selectedUsers.length === 0 ? "Selecionar usuários" : "Editar seleção"}
+                      </button>
+                    </div>
+
+                    {selectedUsers.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 rounded-xl border bg-muted/30 p-2 max-h-32 overflow-y-auto">
+                        {selectedUsers.map((u) => (
+                          <span
                             key={u.user_id}
-                            onClick={() => { setSelectedUser({ user_id: u.user_id, full_name: u.full_name }); setUserResults([]); }}
-                            className="w-full text-left px-3 py-2 hover:bg-muted transition-colors border-b last:border-0"
+                            className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 text-[10px] font-medium text-primary pl-2 pr-1 py-0.5"
                           >
-                            <p className="text-sm font-medium text-foreground">{u.full_name}</p>
-                            <p className="text-[10px] text-muted-foreground">{u.email}</p>
-                          </button>
+                            <span className="max-w-[14ch] truncate">{u.full_name || u.email}</span>
+                            <button
+                              type="button"
+                              onClick={() => togglePickerUser(u)}
+                              className="rounded-full hover:bg-primary/20 p-0.5"
+                              aria-label={`Remover ${u.full_name}`}
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
                         ))}
                       </div>
                     )}
-                    {searching && <p className="text-[10px] text-muted-foreground mt-1">Buscando...</p>}
+                  </div>
+                )}
+
+                {target === "individual" && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Buscar usuário:</label>
+                    {selectedUser ? (
+                      <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-primary/5 border-primary/30">
+                        <User className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-medium text-foreground flex-1">{selectedUser.full_name}</span>
+                        <button onClick={() => { setSelectedUser(null); setUserSearch(""); }} className="text-xs text-destructive hover:underline">Remover</button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          value={userSearch}
+                          onChange={(e) => searchUsers(e.target.value)}
+                          placeholder="Nome ou email do usuário..."
+                          className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                        {userResults.length > 0 && (
+                          <div className="absolute z-10 w-full mt-1 bg-card border rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                            {userResults.map(u => (
+                              <button
+                                key={u.user_id}
+                                onClick={() => { setSelectedUser({ user_id: u.user_id, full_name: u.full_name }); setUserResults([]); }}
+                                className="w-full text-left px-3 py-2 hover:bg-muted transition-colors border-b last:border-0"
+                              >
+                                <p className="text-sm font-medium text-foreground">{u.full_name}</p>
+                                <p className="text-[10px] text-muted-foreground">{u.email}</p>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {searching && <p className="text-[10px] text-muted-foreground mt-1">Buscando...</p>}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Título *</label>
+                  <input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Ex: Feliz Natal!"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Mensagem *</label>
+                  <textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder="Escreva a mensagem da notificação..."
+                    rows={3}
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Página de destino</label>
+                  <p className="text-[10px] text-muted-foreground mb-1.5">
+                    Ao tocar na notificação no app, o utilizador é enviado para esta página (mesmas rotas do menu lateral).
+                  </p>
+                  <select
+                    value={destinationPath}
+                    onChange={(e) => setDestinationPath(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">Só mensagem (sem abrir página)</option>
+                    {NOTIFICATION_MENU_DESTINATIONS.map((d) => (
+                      <option key={d.path} value={d.path}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={handleSend}
+                  disabled={sending}
+                  className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {sending ? (
+                    <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  {sending ? "Enviando..." : "Enviar notificação"}
+                </button>
+
+                {sentCount !== null && (
+                  <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
+                    <p className="text-sm font-medium text-primary">✅ Enviado para {sentCount} usuário(s)</p>
                   </div>
                 )}
               </div>
-            )}
-
-            {/* Title */}
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Título *</label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ex: Feliz Natal!"
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-              />
             </div>
 
-            {/* Message */}
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Mensagem *</label>
-              <textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="Escreva a mensagem da notificação..."
-                rows={3}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Página de destino</label>
-              <p className="text-[10px] text-muted-foreground mb-1.5">
-                Ao tocar na notificação no app, o utilizador é enviado para esta página (mesmas rotas do menu lateral).
-              </p>
-              <select
-                value={destinationPath}
-                onChange={(e) => setDestinationPath(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="">Só mensagem (sem abrir página)</option>
-                {NOTIFICATION_MENU_DESTINATIONS.map((d) => (
-                  <option key={d.path} value={d.path}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              onClick={handleSend}
-              disabled={sending}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {sending ? (
-                <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-              {sending ? "Enviando..." : "Enviar notificação"}
-            </button>
-
-            {sentCount !== null && (
-              <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 text-center">
-                <p className="text-sm font-medium text-primary">✅ Enviado para {sentCount} usuário(s)</p>
+            {/* Caixa pessoal do admin (mantém visível ao lado do form em desktop). */}
+            <div className="bg-card border rounded-xl p-5 min-w-0">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <Inbox className="w-4 h-4 text-primary" /> Suas notificações
+                </h2>
+                {!loadingMine && myNotifications.length > 0 && unreadMineCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void markAllMineAsRead()}
+                    disabled={markingAllRead}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    {markingAllRead ? (
+                      <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <CheckCheck className="w-3.5 h-3.5 text-primary" />
+                    )}
+                    Marcar todas como lidas
+                  </button>
+                )}
               </div>
+              {loadingMine ? (
+                <p className="text-xs text-muted-foreground">Carregando...</p>
+              ) : myNotifications.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nenhuma notificação.</p>
+              ) : (
+                <ul className="space-y-2 max-h-[640px] overflow-y-auto">
+                  {myNotifications.map((n) => (
+                    <li key={n.id}>
+                      {n.link ? (
+                        <Link
+                          to={n.link}
+                          onClick={() => markAsRead(n.id)}
+                          className={`block rounded-xl border p-3 transition-colors hover:bg-muted/50 ${!n.read ? "bg-primary/5 border-primary/20" : "border-border"}`}
+                        >
+                          <p className="text-xs font-semibold text-foreground">{n.title}</p>
+                          {n.message && <p className="text-[11px] text-muted-foreground mt-0.5">{n.message}</p>}
+                          <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString("pt-BR")}</p>
+                        </Link>
+                      ) : (
+                        <div
+                          className={`rounded-xl border p-3 ${!n.read ? "bg-primary/5 border-primary/20" : "border-border"}`}
+                          onClick={() => markAsRead(n.id)}
+                        >
+                          <p className="text-xs font-semibold text-foreground">{n.title}</p>
+                          {n.message && <p className="text-[11px] text-muted-foreground mt-0.5">{n.message}</p>}
+                          <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString("pt-BR")}</p>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ────────────────  Aba 2: Notificações enviadas  ──────────────── */}
+        <TabsContent value="sent" className="mt-5">
+          <div className="bg-card border rounded-xl p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <History className="w-4 h-4 text-primary" /> Histórico de notificações enviadas
+              </h2>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 ${
+                    sentLive
+                      ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                      : "bg-muted text-muted-foreground border border-border"
+                  }`}
+                  title={sentLive ? "Atualização em tempo real ativa" : "Conectando…"}
+                >
+                  <Wifi className="w-3 h-3" />
+                  {sentLive ? "Ao vivo" : "Conectando…"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void loadSentBatches()}
+                  disabled={sentLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                >
+                  {sentLoading ? (
+                    <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <History className="w-3.5 h-3.5" />
+                  )}
+                  Atualizar
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground mb-3">
+              Cada linha é um envio feito pelo painel (para todos, grupos ou usuários específicos).
+              Clique para ver quem recebeu, quem visualizou e quem excluiu.
+            </p>
+
+            <div className="relative mb-3">
+              <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                value={sentSearch}
+                onChange={(e) => setSentSearch(e.target.value)}
+                placeholder="Buscar por título, mensagem ou destino…"
+                className="w-full border rounded-xl pl-9 pr-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+
+            {sentLoading && sentBatches.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-8 text-center">Carregando…</p>
+            ) : filteredBatches.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-8 text-center">
+                {sentSearch.trim() ? "Nenhum envio bate com a busca." : "Nenhuma notificação enviada por aqui ainda."}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {filteredBatches.map((b) => {
+                  const expanded = sentExpandedId === b.id;
+                  const recipients = sentRecipientsByBatch[b.id];
+                  const loadingRecipients = sentRecipientsLoading.has(b.id);
+                  const counts = recipients
+                    ? {
+                        total: recipients.length,
+                        read: recipients.filter((r) => r.read && !r.deleted_at).length,
+                        unread: recipients.filter((r) => !r.read && !r.deleted_at).length,
+                        deleted: recipients.filter((r) => !!r.deleted_at).length,
+                      }
+                    : null;
+                  return (
+                    <li key={b.id} className="rounded-xl border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => toggleBatchExpand(b.id)}
+                        className="w-full flex items-start gap-3 p-3 text-left hover:bg-muted/40 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <p className="text-xs font-semibold text-foreground truncate max-w-full">{b.title}</p>
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-primary/10 text-primary border border-primary/20">
+                              <Users className="w-3 h-3" />
+                              {targetBadgeLabel(b)}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-muted text-muted-foreground border border-border">
+                              {b.recipient_count} destinatário{b.recipient_count === 1 ? "" : "s"}
+                            </span>
+                            {b.link && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-blue-500/10 text-blue-600 border border-blue-500/20 max-w-[18ch] truncate"
+                                title={b.link}
+                              >
+                                <Link2 className="w-3 h-3" /> {b.link}
+                              </span>
+                            )}
+                          </div>
+                          {b.message && (
+                            <p className="text-[11px] text-muted-foreground line-clamp-2">{b.message}</p>
+                          )}
+                          <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
+                            <span className="inline-flex items-center gap-1">
+                              <CalendarDays className="w-3 h-3" /> {formatDateTimeBR(b.created_at)}
+                            </span>
+                            {(b.sent_by_name || b.sent_by_email) && (
+                              <span className="inline-flex items-center gap-1 truncate max-w-[24ch]">
+                                <User className="w-3 h-3" /> {b.sent_by_name || b.sent_by_email}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 mt-0.5 text-muted-foreground">
+                          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </div>
+                      </button>
+
+                      {expanded && (
+                        <div className="border-t bg-muted/20 px-3 py-3">
+                          {loadingRecipients && !recipients ? (
+                            <p className="text-[11px] text-muted-foreground py-4 text-center">Carregando destinatários…</p>
+                          ) : !recipients || recipients.length === 0 ? (
+                            <p className="text-[11px] text-muted-foreground py-4 text-center">
+                              Nenhum destinatário encontrado para este envio.
+                            </p>
+                          ) : (
+                            <>
+                              {counts && (
+                                <div className="grid grid-cols-4 gap-2 mb-3">
+                                  <div className="rounded-lg border bg-card px-2 py-1.5 text-center">
+                                    <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Total</p>
+                                    <p className="text-sm font-bold text-foreground">{counts.total}</p>
+                                  </div>
+                                  <div className="rounded-lg border border-primary/20 bg-primary/5 px-2 py-1.5 text-center">
+                                    <p className="text-[9px] uppercase tracking-wide text-primary">Não vista</p>
+                                    <p className="text-sm font-bold text-primary">{counts.unread}</p>
+                                  </div>
+                                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-center">
+                                    <p className="text-[9px] uppercase tracking-wide text-emerald-600">Vista</p>
+                                    <p className="text-sm font-bold text-emerald-600">{counts.read}</p>
+                                  </div>
+                                  <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-center">
+                                    <p className="text-[9px] uppercase tracking-wide text-destructive">Excluída</p>
+                                    <p className="text-sm font-bold text-destructive">{counts.deleted}</p>
+                                  </div>
+                                </div>
+                              )}
+                              <ul className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+                                {recipients.map((r) => {
+                                  const isDeleted = !!r.deleted_at;
+                                  const isRead = r.read && !isDeleted;
+                                  const badge = isDeleted ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-destructive/10 text-destructive border border-destructive/20">
+                                      <Trash2 className="w-3 h-3" /> Excluída em {formatDateTimeBR(r.deleted_at)}
+                                    </span>
+                                  ) : isRead ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                                      <Eye className="w-3 h-3" /> Vista em {formatDateTimeBR(r.read_at)}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-primary/10 text-primary border border-primary/20">
+                                      <EyeOff className="w-3 h-3" /> Ainda não vista
+                                    </span>
+                                  );
+                                  return (
+                                    <li
+                                      key={r.notification_id}
+                                      className="flex items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-2"
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <p className="text-xs font-medium text-foreground truncate">
+                                          {r.full_name || "Sem nome"}
+                                        </p>
+                                        {r.email && (
+                                          <p className="text-[10px] text-muted-foreground truncate">{r.email}</p>
+                                        )}
+                                      </div>
+                                      <div className="shrink-0">{badge}</div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
-        </div>
-        </div>
+        </TabsContent>
 
-        {/* Coluna direita (desktop) — preenche o espaço branco da página. */}
-        <div className="space-y-5 min-w-0">
+        {/* ────────────────  Aba 3: Notificações por usuário  ──────────────── */}
+        <TabsContent value="audit" className="mt-5">
           <div className="bg-card border rounded-xl p-5">
             <div className="flex items-center justify-between gap-2 mb-1">
               <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
@@ -810,7 +1282,6 @@ const AdminNotifications = () => {
                   </button>
                 </div>
 
-                {/* Resumo */}
                 <div className="grid grid-cols-4 gap-2 mb-3">
                   <div className="rounded-lg border bg-muted/30 px-2 py-1.5 text-center">
                     <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Total</p>
@@ -837,7 +1308,7 @@ const AdminNotifications = () => {
                     Esse usuário ainda não recebeu nenhuma notificação.
                   </p>
                 ) : (
-                  <ul className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+                  <ul className="space-y-2 max-h-[640px] overflow-y-auto pr-1">
                     {auditNotifs.map((n) => {
                       const isDeleted = !!n.deleted_at;
                       const isRead = n.read && !isDeleted;
@@ -902,8 +1373,8 @@ const AdminNotifications = () => {
               </>
             )}
           </div>
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {/* ─── Modal: Selecionar usuários (multi) ──────────────────────────── */}
       <Dialog open={selectOpen} onOpenChange={setSelectOpen}>

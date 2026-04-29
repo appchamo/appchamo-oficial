@@ -7,15 +7,40 @@ import { useEffect, useRef, useState } from "react";
  */
 const PRESENCE_CHANNEL = "presence:online-users";
 
+/** Log de diagnóstico controlado por localStorage.debug_presence = "1". */
+function dlog(...args: unknown[]) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage?.getItem("debug_presence") === "1") {
+      console.info("[presence]", ...args);
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+let rpcMissingWarned = false;
+
 /** Heartbeat: chama o RPC touch_last_seen no Postgres. */
 async function callTouchLastSeen(): Promise<void> {
-  try {
-    await (supabase as any).rpc("touch_last_seen");
-  } catch (err) {
-    if (typeof console !== "undefined") {
-      console.warn("[presence] touch_last_seen falhou:", err);
+  const { error } = await (supabase as any).rpc("touch_last_seen");
+  if (error) {
+    // 42883 = function does not exist; PGRST202 = schema cache miss. Sinal de migration não aplicada.
+    const code = (error as { code?: string }).code;
+    const msg = String((error as { message?: string }).message || "");
+    const missing = code === "42883" || code === "PGRST202" || /touch_last_seen/.test(msg);
+    if (missing && !rpcMissingWarned) {
+      rpcMissingWarned = true;
+      console.warn(
+        "[presence] A função touch_last_seen() não existe no Supabase. " +
+          "Aplique a migration 20260512000000_profiles_last_seen_presence.sql " +
+          "(ver supabase/migrations/). Enquanto isso, last_seen_at ficará NULL.",
+      );
+    } else if (!missing) {
+      console.warn("[presence] touch_last_seen falhou:", error);
     }
+    return;
   }
+  dlog("heartbeat ok");
 }
 
 /**
@@ -32,20 +57,25 @@ export function usePresenceTracker(userId: string | null | undefined): void {
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
 
+    dlog("tracker start", { userId });
     void callTouchLastSeen();
 
     const channel = supabase.channel(PRESENCE_CHANNEL, {
       config: { presence: { key: userId } },
     });
 
-    channel.subscribe(async (status) => {
+    channel.subscribe(async (status, err) => {
       if (cancelled) return;
+      dlog("tracker subscribe status", status, err || "");
       if (status === "SUBSCRIBED") {
         try {
-          await channel.track({ user_id: userId, online_at: new Date().toISOString() });
-        } catch (err) {
-          console.warn("[presence] track falhou:", err);
+          const res = await channel.track({ user_id: userId, online_at: new Date().toISOString() });
+          dlog("tracker track() =>", res);
+        } catch (e) {
+          console.warn("[presence] track falhou:", e);
         }
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.warn("[presence] canal realtime falhou:", status, err || "");
       }
     });
 
@@ -87,6 +117,7 @@ export function usePresenceTracker(userId: string | null | undefined): void {
         /* noop */
       }
       void supabase.removeChannel(channel);
+      dlog("tracker cleanup", { userId });
     };
   }, [userId]);
 }
@@ -103,8 +134,9 @@ export function useOnlineUsers(): { onlineIds: Set<string>; ready: boolean } {
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   useEffect(() => {
+    const observerKey = "admin-observer-" + Math.random().toString(36).slice(2, 8);
     const channel = supabase.channel(PRESENCE_CHANNEL, {
-      config: { presence: { key: "admin-observer-" + Math.random().toString(36).slice(2, 8) } },
+      config: { presence: { key: observerKey } },
     });
     channelRef.current = channel;
 
@@ -116,21 +148,31 @@ export function useOnlineUsers(): { onlineIds: Set<string>; ready: boolean } {
         for (const meta of arr) {
           if (meta?.user_id) ids.add(meta.user_id);
         }
-        if (key && key !== "admin-observer" && !key.startsWith("admin-observer-")) {
+        if (key && !key.startsWith("admin-observer-")) {
           ids.add(key);
         }
       }
+      dlog("observer recompute", { onlineCount: ids.size, keys: Object.keys(state) });
       setOnlineIds(ids);
     };
 
     channel
       .on("presence", { event: "sync" }, recompute)
-      .on("presence", { event: "join" }, recompute)
-      .on("presence", { event: "leave" }, recompute)
-      .subscribe((status) => {
+      .on("presence", { event: "join" }, (payload) => {
+        dlog("observer join", payload);
+        recompute();
+      })
+      .on("presence", { event: "leave" }, (payload) => {
+        dlog("observer leave", payload);
+        recompute();
+      })
+      .subscribe((status, err) => {
+        dlog("observer subscribe status", status, err || "");
         if (status === "SUBSCRIBED") {
           setReady(true);
           recompute();
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("[presence] observer canal realtime falhou:", status, err || "");
         }
       });
 

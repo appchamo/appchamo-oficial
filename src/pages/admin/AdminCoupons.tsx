@@ -23,6 +23,8 @@ import {
   Send,
   Clock,
   AlertTriangle,
+  Filter,
+  ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -119,10 +121,40 @@ const userTypeLabel = (t: string | null | undefined): string => {
   return t || "—";
 };
 
+type UserWithCoupons = {
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+  user_type: string | null;
+  total: number;
+  raffle: number;
+  discount: number;
+  active: number;
+};
+
+type UsersHasCouponFilter = "all" | "with" | "without";
+type UsersTypeFilter = "all" | "client" | "professional";
+type UsersSortBy = "count_desc" | "count_asc" | "name_asc" | "name_desc";
+
 const AdminCoupons = () => {
-  const [activeTab, setActiveTab] = useState<"raffle_coupons" | "discount_coupons" | "auto" | "raffles">(
-    "raffle_coupons",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "users" | "raffle_coupons" | "discount_coupons" | "auto" | "raffles"
+  >("raffle_coupons");
+
+  // ── Aba: Usuários (lista geral com contagem de cupons)
+  const [usersList, setUsersList] = useState<UserWithCoupons[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersFetched, setUsersFetched] = useState(false);
+  const [usersSearch, setUsersSearch] = useState("");
+  const [usersFiltersOpen, setUsersFiltersOpen] = useState(false);
+  const [usersTypeFilter, setUsersTypeFilter] = useState<UsersTypeFilter>("all");
+  const [usersHasCouponFilter, setUsersHasCouponFilter] = useState<UsersHasCouponFilter>("all");
+  const [usersSortBy, setUsersSortBy] = useState<UsersSortBy>("count_desc");
+
+  // Dialog: cupons de um usuário (visão consolidada raffle + discount)
+  const [userCouponsDialog, setUserCouponsDialog] = useState<UserWithCoupons | null>(null);
+  const [userCouponsAll, setUserCouponsAll] = useState<UserCoupon[]>([]);
+  const [userCouponsAllLoading, setUserCouponsAllLoading] = useState(false);
 
   // ── Stats globais
   const [counts, setCounts] = useState({
@@ -849,6 +881,173 @@ const AdminCoupons = () => {
     }
   };
 
+  // ── Aba "Usuários": carregar todos os usuários + contagem de cupons ──
+  const fetchUsersWithCoupons = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      // Profiles ativos (não deletados)
+      const { data: profilesData, error: profilesErr } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, email, user_type")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(50000);
+      if (profilesErr) throw profilesErr;
+
+      // Cupons (paginar para suportar grandes volumes)
+      type CouponRow = {
+        user_id: string | null;
+        coupon_type: string | null;
+        used: boolean | null;
+        expires_at: string | null;
+      };
+      const allCoupons: CouponRow[] = [];
+      const PAGE = 1000;
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("coupons")
+          .select("user_id, coupon_type, used, expires_at")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const chunk = (data as CouponRow[] | null) || [];
+        allCoupons.push(...chunk);
+        if (chunk.length < PAGE) break;
+        from += PAGE;
+        if (from > 200000) break; // hard guard
+      }
+
+      const now = Date.now();
+      const map = new Map<
+        string,
+        { total: number; raffle: number; discount: number; active: number }
+      >();
+      for (const c of allCoupons) {
+        if (!c.user_id) continue;
+        const cur = map.get(c.user_id) || { total: 0, raffle: 0, discount: 0, active: 0 };
+        cur.total += 1;
+        if (c.coupon_type === "raffle") cur.raffle += 1;
+        else if (c.coupon_type === "discount") cur.discount += 1;
+        const expired = c.expires_at ? new Date(c.expires_at).getTime() < now : false;
+        if (!c.used && !expired) cur.active += 1;
+        map.set(c.user_id, cur);
+      }
+
+      const profiles =
+        (profilesData as {
+          user_id: string | null;
+          full_name: string | null;
+          email: string | null;
+          user_type: string | null;
+        }[] | null) || [];
+
+      const merged: UserWithCoupons[] = profiles
+        .filter((p) => !!p.user_id)
+        .map((p) => {
+          const counts = map.get(p.user_id as string) || {
+            total: 0,
+            raffle: 0,
+            discount: 0,
+            active: 0,
+          };
+          return {
+            user_id: p.user_id as string,
+            full_name: p.full_name,
+            email: p.email,
+            user_type: p.user_type,
+            total: counts.total,
+            raffle: counts.raffle,
+            discount: counts.discount,
+            active: counts.active,
+          };
+        });
+
+      setUsersList(merged);
+      setUsersFetched(true);
+    } catch (err: unknown) {
+      toast({
+        title: "Erro ao carregar usuários",
+        description: err instanceof Error ? err.message : undefined,
+        variant: "destructive",
+      });
+    }
+    setUsersLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "users" && !usersFetched && !usersLoading) {
+      void fetchUsersWithCoupons();
+    }
+  }, [activeTab, usersFetched, usersLoading, fetchUsersWithCoupons]);
+
+  const filteredUsersList = useMemo(() => {
+    const q = usersSearch.trim().toLowerCase();
+    return usersList
+      .filter((u) => {
+        const safeType = u.user_type === "company" ? "professional" : u.user_type;
+        if (usersTypeFilter === "client" && safeType !== "client") return false;
+        if (usersTypeFilter === "professional" && safeType !== "professional") return false;
+        return true;
+      })
+      .filter((u) => {
+        if (usersHasCouponFilter === "with") return u.total > 0;
+        if (usersHasCouponFilter === "without") return u.total === 0;
+        return true;
+      })
+      .filter((u) => {
+        if (!q) return true;
+        return (
+          (u.full_name || "").toLowerCase().includes(q) ||
+          (u.email || "").toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => {
+        switch (usersSortBy) {
+          case "count_desc":
+            return b.total - a.total || (a.full_name || "").localeCompare(b.full_name || "", "pt-BR");
+          case "count_asc":
+            return a.total - b.total || (a.full_name || "").localeCompare(b.full_name || "", "pt-BR");
+          case "name_asc":
+            return (a.full_name || "").localeCompare(b.full_name || "", "pt-BR");
+          case "name_desc":
+            return (b.full_name || "").localeCompare(a.full_name || "", "pt-BR");
+          default:
+            return 0;
+        }
+      });
+  }, [usersList, usersSearch, usersTypeFilter, usersHasCouponFilter, usersSortBy]);
+
+  const usersActiveFilterCount = useMemo(() => {
+    let n = 0;
+    if (usersTypeFilter !== "all") n += 1;
+    if (usersHasCouponFilter !== "all") n += 1;
+    if (usersSortBy !== "count_desc") n += 1;
+    return n;
+  }, [usersTypeFilter, usersHasCouponFilter, usersSortBy]);
+
+  const clearUsersFilters = () => {
+    setUsersTypeFilter("all");
+    setUsersHasCouponFilter("all");
+    setUsersSortBy("count_desc");
+  };
+
+  const openUserCouponsDialog = async (user: UserWithCoupons) => {
+    setUserCouponsDialog(user);
+    setUserCouponsAll([]);
+    setUserCouponsAllLoading(true);
+    const { data, error } = await supabase
+      .from("coupons")
+      .select("id, coupon_type, source, used, discount_percent, expires_at, created_at")
+      .eq("user_id", user.user_id)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      toast({ title: "Erro ao carregar cupons", description: error.message, variant: "destructive" });
+    }
+    setUserCouponsAll((data as UserCoupon[]) || []);
+    setUserCouponsAllLoading(false);
+  };
+
   // ── UI helpers ────────────────────────────────────────────────────────
   const couponStatus = (c: UserCoupon): "used" | "expired" | "active" => {
     if (c.used) return "used";
@@ -1075,7 +1274,7 @@ const AdminCoupons = () => {
         onValueChange={(v) => setActiveTab(v as typeof activeTab)}
         className="w-full"
       >
-        <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 h-auto p-1 bg-muted gap-1">
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 h-auto p-1 bg-muted gap-1">
           <TabsTrigger value="raffle_coupons" className="flex items-center gap-1.5 py-2.5 text-xs sm:text-sm">
             <Ticket className="w-4 h-4" />
             <span className="hidden sm:inline">Cupom de sorteio</span>
@@ -1094,6 +1293,10 @@ const AdminCoupons = () => {
           <TabsTrigger value="raffles" className="flex items-center gap-1.5 py-2.5 text-xs sm:text-sm">
             <Trophy className="w-4 h-4" />
             Sorteio
+          </TabsTrigger>
+          <TabsTrigger value="users" className="flex items-center gap-1.5 py-2.5 text-xs sm:text-sm">
+            <Users className="w-4 h-4" />
+            Usuários
           </TabsTrigger>
         </TabsList>
 
@@ -1518,6 +1721,240 @@ const AdminCoupons = () => {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* ───────────────  Aba 5: Usuários  ─────────────────────── */}
+        <TabsContent value="users" className="mt-5 space-y-4">
+          <div className="bg-card border rounded-xl p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <Users className="w-4 h-4 text-primary" /> Usuários e seus cupons
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Veja todos os usuários da plataforma e quantos cupons cada um possui. Clique no número
+                  de cupons para ver detalhes (validade, status).
+                </p>
+              </div>
+            </div>
+
+            {/* Filtros */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3">
+              <div className="flex-1 flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30">
+                <Search className="w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={usersSearch}
+                  onChange={(e) => setUsersSearch(e.target.value)}
+                  placeholder="Buscar por nome ou email..."
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setUsersFiltersOpen((o) => !o)}
+                className={`relative inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${
+                  usersFiltersOpen || usersActiveFilterCount > 0
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-card text-foreground hover:bg-muted"
+                }`}
+              >
+                <Filter className="w-4 h-4" />
+                Filtros
+                {usersActiveFilterCount > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center rounded-full bg-primary-foreground/20 text-[10px] font-bold w-5 h-5">
+                    {usersActiveFilterCount}
+                  </span>
+                )}
+                <ChevronDown
+                  className={`w-3.5 h-3.5 transition-transform ${usersFiltersOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+            </div>
+
+            {usersFiltersOpen && (
+              <div className="border rounded-xl p-3 mb-3 bg-muted/30 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                      Tipo
+                    </label>
+                    <select
+                      value={usersTypeFilter}
+                      onChange={(e) => setUsersTypeFilter(e.target.value as UsersTypeFilter)}
+                      className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="client">Cliente</option>
+                      <option value="professional">Profissional</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                      Cupons
+                    </label>
+                    <select
+                      value={usersHasCouponFilter}
+                      onChange={(e) =>
+                        setUsersHasCouponFilter(e.target.value as UsersHasCouponFilter)
+                      }
+                      className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="with">Com cupom</option>
+                      <option value="without">Sem cupom</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                      Ordenar
+                    </label>
+                    <select
+                      value={usersSortBy}
+                      onChange={(e) => setUsersSortBy(e.target.value as UsersSortBy)}
+                      className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 text-foreground cursor-pointer"
+                    >
+                      <option value="count_desc">Cupons ↓ (maior → menor)</option>
+                      <option value="count_asc">Cupons ↑ (menor → maior)</option>
+                      <option value="name_asc">Nome A → Z</option>
+                      <option value="name_desc">Nome Z → A</option>
+                    </select>
+                  </div>
+                </div>
+                {usersActiveFilterCount > 0 && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={clearUsersFilters}
+                      className="text-xs font-semibold text-destructive hover:underline"
+                    >
+                      Limpar filtros
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Resumo */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+              <div className="rounded-lg border bg-muted/30 px-2 py-1.5 text-center">
+                <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Usuários</p>
+                <p className="text-sm font-bold text-foreground">
+                  {filteredUsersList.length.toLocaleString("pt-BR")}
+                </p>
+              </div>
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-center">
+                <p className="text-[9px] uppercase tracking-wide text-emerald-600">Com cupons</p>
+                <p className="text-sm font-bold text-emerald-600">
+                  {filteredUsersList.filter((u) => u.total > 0).length.toLocaleString("pt-BR")}
+                </p>
+              </div>
+              <div className="rounded-lg border border-muted-foreground/15 bg-muted/30 px-2 py-1.5 text-center">
+                <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Sem cupons</p>
+                <p className="text-sm font-bold text-foreground">
+                  {filteredUsersList.filter((u) => u.total === 0).length.toLocaleString("pt-BR")}
+                </p>
+              </div>
+              <div className="rounded-lg border border-primary/20 bg-primary/5 px-2 py-1.5 text-center">
+                <p className="text-[9px] uppercase tracking-wide text-primary">Cupons (soma)</p>
+                <p className="text-sm font-bold text-primary">
+                  {filteredUsersList
+                    .reduce((sum, u) => sum + u.total, 0)
+                    .toLocaleString("pt-BR")}
+                </p>
+              </div>
+            </div>
+
+            {/* Tabela */}
+            {usersLoading ? (
+              <div className="flex justify-center py-12">
+                <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
+              </div>
+            ) : (
+              <div className="bg-card border rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
+                        <th className="text-left p-3 font-medium text-muted-foreground">Email</th>
+                        <th className="text-left p-3 font-medium text-muted-foreground">Tipo</th>
+                        <th className="text-right p-3 font-medium text-muted-foreground">Cupons</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsersList.map((u) => {
+                        const safeType = u.user_type === "company" ? "professional" : u.user_type;
+                        const typeLabel =
+                          safeType === "client"
+                            ? "Cliente"
+                            : safeType === "professional"
+                            ? "Profissional"
+                            : userTypeLabel(u.user_type);
+                        return (
+                          <tr
+                            key={u.user_id}
+                            className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                          >
+                            <td className="p-3 font-medium text-foreground">
+                              {u.full_name || "—"}
+                            </td>
+                            <td className="p-3 text-muted-foreground">{u.email || "—"}</td>
+                            <td className="p-3">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium ${
+                                  safeType === "professional"
+                                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                    : "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                                }`}
+                              >
+                                {safeType === "professional" ? (
+                                  <Briefcase className="w-3 h-3" />
+                                ) : (
+                                  <UserRound className="w-3 h-3" />
+                                )}
+                                {typeLabel}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => void openUserCouponsDialog(u)}
+                                disabled={u.total === 0}
+                                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
+                                  u.total > 0
+                                    ? "bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                                    : "bg-muted text-muted-foreground cursor-not-allowed"
+                                }`}
+                                title={
+                                  u.total > 0
+                                    ? "Ver detalhes dos cupons"
+                                    : "Usuário sem cupons"
+                                }
+                              >
+                                <Ticket className="w-3.5 h-3.5" />
+                                {u.total.toLocaleString("pt-BR")}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filteredUsersList.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={4}
+                            className="p-8 text-center text-muted-foreground text-sm"
+                          >
+                            Nenhum usuário encontrado.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
           </div>
         </TabsContent>
@@ -2091,6 +2528,148 @@ const AdminCoupons = () => {
               </button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Modal: Cupons do usuário (vindo da Aba Usuários) ───── */}
+      <Dialog
+        open={!!userCouponsDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setUserCouponsDialog(null);
+            setUserCouponsAll([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Ticket className="w-5 h-5 text-primary" /> Cupons do usuário
+            </DialogTitle>
+            <DialogDescription>
+              {userCouponsDialog?.full_name || "Sem nome"}
+              {userCouponsDialog?.email ? ` · ${userCouponsDialog.email}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          {userCouponsAllLoading ? (
+            <div className="flex justify-center py-8">
+              <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+            </div>
+          ) : userCouponsAll.length === 0 ? (
+            <div className="rounded-xl border border-dashed py-8 text-center">
+              <Ticket className="w-7 h-7 text-muted-foreground/50 mx-auto mb-2" />
+              <p className="text-sm font-medium text-foreground">Nenhum cupom para este usuário.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Stats */}
+              <div className="grid grid-cols-4 gap-2">
+                <div className="rounded-lg border bg-muted/30 px-2 py-1.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Total</p>
+                  <p className="text-sm font-bold text-foreground">{userCouponsAll.length}</p>
+                </div>
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-emerald-600">Ativos</p>
+                  <p className="text-sm font-bold text-emerald-600">
+                    {userCouponsAll.filter((c) => couponStatus(c) === "active").length}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-primary/20 bg-primary/5 px-2 py-1.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-primary">Usados</p>
+                  <p className="text-sm font-bold text-primary">
+                    {userCouponsAll.filter((c) => couponStatus(c) === "used").length}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-destructive">Expirados</p>
+                  <p className="text-sm font-bold text-destructive">
+                    {userCouponsAll.filter((c) => couponStatus(c) === "expired").length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Resumo por tipo */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                    <Ticket className="w-3.5 h-3.5" /> Sorteio
+                  </span>
+                  <span className="text-sm font-bold text-foreground">
+                    {userCouponsAll.filter((c) => c.coupon_type === "raffle").length}
+                  </span>
+                </div>
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                    <Percent className="w-3.5 h-3.5" /> Desconto
+                  </span>
+                  <span className="text-sm font-bold text-foreground">
+                    {userCouponsAll.filter((c) => c.coupon_type === "discount").length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Lista */}
+              <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                {userCouponsAll.map((c) => {
+                  const st = couponStatus(c);
+                  const isDiscount = c.coupon_type === "discount";
+                  const statusBadge =
+                    st === "used" ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-primary/10 text-primary border border-primary/20">
+                        <Check className="w-3 h-3" /> Usado
+                      </span>
+                    ) : st === "expired" ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-destructive/10 text-destructive border border-destructive/20">
+                        <Clock className="w-3 h-3" /> Expirado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        <Check className="w-3 h-3" /> Ativo
+                      </span>
+                    );
+                  return (
+                    <li
+                      key={c.id}
+                      className={`rounded-xl border p-3 ${
+                        st === "active" ? "border-emerald-500/20 bg-emerald-500/[0.03]" : "border-border"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isDiscount ? (
+                            <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-primary/10 text-primary font-black text-xs">
+                              {Number(c.discount_percent || 0)}%
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-amber-500/10 text-amber-600">
+                              <Ticket className="w-4 h-4" />
+                            </span>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-foreground">
+                              {isDiscount
+                                ? `Cupom de ${Number(c.discount_percent || 0)}% OFF`
+                                : "Cupom de sorteio"}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Origem: {sourceLabel(c.source)} · Recebido em {formatDateBR(c.created_at)}
+                            </p>
+                            {c.expires_at && (
+                              <p className="text-[10px] text-muted-foreground">
+                                Validade: {formatDateTimeBR(c.expires_at)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {statusBadge}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </AdminLayout>

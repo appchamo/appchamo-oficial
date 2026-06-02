@@ -20,65 +20,81 @@ const ResetPassword = () => {
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
   const [linkInvalid, setLinkInvalid] = useState(false);
-
-  // useRef evita o bug de closure do setTimeout (capturaria ready=false para sempre)
-  const readyRef = useRef(false);
+  const resolvedRef = useRef(false);
 
   const markReady = () => {
-    readyRef.current = true;
+    if (resolvedRef.current) return;
+    resolvedRef.current = true;
     setLinkInvalid(false);
     setReady(true);
   };
 
-  const markInvalid = () => {
-    if (readyRef.current) return; // já está pronto, ignora
+  const markInvalid = (reason?: string) => {
+    if (resolvedRef.current) return;
+    resolvedRef.current = true;
+    console.warn("[ResetPassword] link inválido:", reason);
     setLinkInvalid(true);
   };
 
   useEffect(() => {
-    const access_token = getParam("access_token");
-    const refresh_token = getParam("refresh_token");
-    const type = getParam("type");
-    const code = getParam("code"); // fluxo PKCE: Supabase envia ?code=XXX
+    const code         = getParam("code");          // PKCE: ?code=XXX
+    const accessToken  = getParam("access_token");  // Implicit: #access_token=XXX
+    const refreshToken = getParam("refresh_token");
+    const type         = getParam("type");
 
-    // Listener de evento — funciona para PKCE (detectSessionInUrl troca o code
-    // automaticamente e dispara PASSWORD_RECOVERY) e para implicit flow
+    // ── 1. Listener de evento (backup para casos em que o SDK já disparou o evento) ──
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "PASSWORD_RECOVERY" && session) {
         markReady();
       }
     });
 
-    // Fluxo implicit (tokens no hash): compatibilidade com links mais antigos ou app nativo
-    const tryImplicitFlow = async () => {
-      if (access_token && refresh_token && type === "recovery") {
-        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
-        if (error) {
-          console.error("[ResetPassword] setSession error:", error.message);
-          markInvalid();
-          return;
-        }
-        // Limpa os tokens da URL por segurança
-        if (window.history.replaceState) {
-          window.history.replaceState(null, "", window.location.pathname);
-        }
-        markReady();
-      }
-    };
+    // ── 2. PKCE flow: ?code=XXX  ──────────────────────────────────────────────────
+    // detectSessionInUrl pode já ter processado, mas chamamos explicitamente para
+    // garantir — se duplicado o SDK lida internamente sem problema.
+    if (code) {
+      supabase.auth.exchangeCodeForSession(code)
+        .then(({ data, error }) => {
+          if (error) {
+            markInvalid(`exchangeCodeForSession: ${error.message}`);
+          } else if (data?.session) {
+            // Limpa o code da URL por segurança
+            if (window.history.replaceState) {
+              window.history.replaceState(null, "", window.location.pathname);
+            }
+            markReady();
+          } else {
+            markInvalid("exchangeCodeForSession: sem sessão");
+          }
+        })
+        .catch((err) => markInvalid(String(err)));
+      // Timeout generoso para troca de código
+      const t = setTimeout(() => markInvalid("timeout (PKCE)"), 20000);
+      return () => { subscription.unsubscribe(); clearTimeout(t); };
+    }
 
-    void tryImplicitFlow();
+    // ── 3. Implicit flow: #access_token=XXX&type=recovery ────────────────────────
+    if (accessToken && refreshToken && type === "recovery") {
+      supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+        .then(({ error }) => {
+          if (error) {
+            markInvalid(`setSession: ${error.message}`);
+          } else {
+            if (window.history.replaceState) {
+              window.history.replaceState(null, "", window.location.pathname);
+            }
+            markReady();
+          }
+        })
+        .catch((err) => markInvalid(String(err)));
+      const t = setTimeout(() => markInvalid("timeout (implicit)"), 10000);
+      return () => { subscription.unsubscribe(); clearTimeout(t); };
+    }
 
-    // Fluxo PKCE: o SDK troca o ?code automaticamente (detectSessionInUrl: true na web)
-    // e dispara PASSWORD_RECOVERY. Se não houver nem code nem tokens, o link é inválido.
-    // Timeout de segurança — só dispara se nada funcionou
-    // (readyRef garante que não cobre um markReady() bem-sucedido)
-    const timeoutMs = code || (access_token && refresh_token) ? 15000 : 3000;
-    const timeout = setTimeout(() => markInvalid(), timeoutMs);
-
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(timeout);
-    };
+    // ── 4. Nenhum parâmetro reconhecido — link inválido ───────────────────────────
+    // Dá 3s para o evento PASSWORD_RECOVERY via detectSessionInUrl antes de desistir
+    const t = setTimeout(() => markInvalid("sem parâmetros de recovery"), 3000);
+    return () => { subscription.unsubscribe(); clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -107,18 +123,18 @@ const ResetPassword = () => {
   if (!ready) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-        <div className="text-center">
+        <div className="text-center max-w-xs">
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           {linkInvalid ? (
             <>
               <p className="text-sm text-muted-foreground mb-2">Link inválido ou expirado.</p>
               <p className="text-xs text-muted-foreground mb-5">
                 O link de recuperação tem validade de 1 hora e só pode ser usado uma vez.
-                <br />Solicite um novo e-mail de recuperação.
+                Solicite um novo.
               </p>
               <Link
                 to="/login"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
               >
                 Solicitar novo link
               </Link>
@@ -143,8 +159,20 @@ const ResetPassword = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-6 shadow-card space-y-4">
-          <PasswordInput label="Nova senha" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="new-password" />
-          <PasswordInput label="Confirmar nova senha" value={confirm} onChange={setConfirm} placeholder="••••••••" autoComplete="new-password" />
+          <PasswordInput
+            label="Nova senha"
+            value={password}
+            onChange={setPassword}
+            placeholder="••••••••"
+            autoComplete="new-password"
+          />
+          <PasswordInput
+            label="Confirmar nova senha"
+            value={confirm}
+            onChange={setConfirm}
+            placeholder="••••••••"
+            autoComplete="new-password"
+          />
           <button
             type="submit"
             disabled={loading}

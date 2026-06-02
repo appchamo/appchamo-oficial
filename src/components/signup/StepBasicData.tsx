@@ -133,6 +133,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
     return () => clearTimeout(t);
   }, []);
   const [name, setName] = useState(initialData?.name || initialData?.displayName || "");
+  const [displayName, setDisplayName] = useState(initialData?.displayName && initialData.displayName !== initialData?.name ? initialData.displayName : "");
   const [email, setEmail] = useState(initialData?.email || ""); // ✅ Preenche se vier do Google
   const [phone, setPhone] = useState("");
   const [documentType, setDocumentType] = useState<"cpf" | "cnpj">("cpf");
@@ -476,7 +477,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
 
     setFieldErrors({});
     const birthIso = brBirthToIso(birthDateBr) as string;
-    const displayName = name.trim();
+    const resolvedDisplayName = displayName.trim() || name.trim();
 
     const referralToSubmit =
       refTrim.length >= 6 && referralValidated && refTrim === referralValidatedCode ? refTrim : undefined;
@@ -572,7 +573,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
 
     onNext({
       name: name.trim(),
-      displayName,
+      displayName: resolvedDisplayName,
       email,
       phone: phone.replace(/\D/g, ""),
       document: docClean,
@@ -609,7 +610,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
         </div>
 
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-5 shadow-card space-y-3">
-          <InputRow icon={User} label="Nome completo *" fieldId="signup-field-name" error={fieldErrors.name}>
+          <InputRow icon={User} label="Nome completo * (igual ao documento)" fieldId="signup-field-name" error={fieldErrors.name}>
             <input
               type="text"
               value={name}
@@ -617,13 +618,31 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
                 clearFieldError("name");
                 setName(e.target.value);
               }}
-              placeholder="Como no documento"
+              placeholder="Exatamente como no CPF/CNPJ"
               autoCapitalize="words"
               autoCorrect="off"
               autoComplete="name"
               className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
             />
           </InputRow>
+
+          <div>
+            <InputRow icon={UserCircle} label="Nome de exibição (opcional)" fieldId="signup-field-displayName">
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder={name.trim() || "Nome fantasia, empresa…"}
+                autoCapitalize="words"
+                autoCorrect="off"
+                autoComplete="nickname"
+                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+              />
+            </InputRow>
+            <p className="text-[10px] text-muted-foreground mt-1 px-0.5">
+              Nome que aparece no app. Pode ser nome fantasia ou nome da empresa. Se deixar em branco, usamos o nome completo.
+            </p>
+          </div>
 
           <InputRow icon={Mail} label="E-mail *" fieldId="signup-field-email" error={fieldErrors.email}>
             <input

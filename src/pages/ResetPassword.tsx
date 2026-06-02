@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -21,50 +21,65 @@ const ResetPassword = () => {
   const [ready, setReady] = useState(false);
   const [linkInvalid, setLinkInvalid] = useState(false);
 
+  // useRef evita o bug de closure do setTimeout (capturaria ready=false para sempre)
+  const readyRef = useRef(false);
+
+  const markReady = () => {
+    readyRef.current = true;
+    setLinkInvalid(false);
+    setReady(true);
+  };
+
+  const markInvalid = () => {
+    if (readyRef.current) return; // já está pronto, ignora
+    setLinkInvalid(true);
+  };
+
   useEffect(() => {
     const access_token = getParam("access_token");
     const refresh_token = getParam("refresh_token");
     const type = getParam("type");
-    const isRecovery = type === "recovery";
+    const code = getParam("code"); // fluxo PKCE: Supabase envia ?code=XXX
 
-    const establishSession = async () => {
-      if (access_token && refresh_token && isRecovery) {
-        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
-        if (error) {
-          console.error("Erro ao estabelecer sessão de recovery:", error);
-          setLinkInvalid(true);
-          return;
-        }
-        // Limpa o hash da URL para não reenviar os tokens
-        if (window.history.replaceState) {
-          window.history.replaceState(null, "", window.location.pathname + window.location.search);
-        }
-        setReady(true);
-        return;
-      }
-      if (isRecovery && (!access_token || !refresh_token)) {
-        setLinkInvalid(true);
-        return;
-      }
-    };
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setLinkInvalid(false);
-        setReady(true);
+    // Listener de evento — funciona para PKCE (detectSessionInUrl troca o code
+    // automaticamente e dispara PASSWORD_RECOVERY) e para implicit flow
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" && session) {
+        markReady();
       }
     });
 
-    establishSession();
+    // Fluxo implicit (tokens no hash): compatibilidade com links mais antigos ou app nativo
+    const tryImplicitFlow = async () => {
+      if (access_token && refresh_token && type === "recovery") {
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (error) {
+          console.error("[ResetPassword] setSession error:", error.message);
+          markInvalid();
+          return;
+        }
+        // Limpa os tokens da URL por segurança
+        if (window.history.replaceState) {
+          window.history.replaceState(null, "", window.location.pathname);
+        }
+        markReady();
+      }
+    };
 
-    const timeout = setTimeout(() => {
-      if (!ready) setLinkInvalid(true);
-    }, 6000);
+    void tryImplicitFlow();
+
+    // Fluxo PKCE: o SDK troca o ?code automaticamente (detectSessionInUrl: true na web)
+    // e dispara PASSWORD_RECOVERY. Se não houver nem code nem tokens, o link é inválido.
+    // Timeout de segurança — só dispara se nada funcionou
+    // (readyRef garante que não cobre um markReady() bem-sucedido)
+    const timeoutMs = code || (access_token && refresh_token) ? 15000 : 3000;
+    const timeout = setTimeout(() => markInvalid(), timeoutMs);
 
     return () => {
       subscription.unsubscribe();
       clearTimeout(timeout);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -96,12 +111,21 @@ const ResetPassword = () => {
           <h1 className="text-2xl font-extrabold text-gradient mb-3">Chamô</h1>
           {linkInvalid ? (
             <>
-              <p className="text-sm text-muted-foreground mb-4">Link inválido ou expirado. Solicite um novo e-mail de recuperação.</p>
-              <Link to="/login" className="text-sm font-medium text-primary hover:underline">Voltar ao login</Link>
+              <p className="text-sm text-muted-foreground mb-2">Link inválido ou expirado.</p>
+              <p className="text-xs text-muted-foreground mb-5">
+                O link de recuperação tem validade de 1 hora e só pode ser usado uma vez.
+                <br />Solicite um novo e-mail de recuperação.
+              </p>
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                Solicitar novo link
+              </Link>
             </>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground">Verificando link de recuperação...</p>
+              <p className="text-sm text-muted-foreground">Verificando link de recuperação…</p>
               <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mt-4" />
             </>
           )}
@@ -121,10 +145,18 @@ const ResetPassword = () => {
         <form onSubmit={handleSubmit} className="bg-card border rounded-2xl p-6 shadow-card space-y-4">
           <PasswordInput label="Nova senha" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="new-password" />
           <PasswordInput label="Confirmar nova senha" value={confirm} onChange={setConfirm} placeholder="••••••••" autoComplete="new-password" />
-          <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-            {loading ? "Salvando..." : "Salvar nova senha"} <ArrowRight className="w-4 h-4" />
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {loading ? "Salvando…" : "Salvar nova senha"} <ArrowRight className="w-4 h-4" />
           </button>
         </form>
+
+        <p className="text-center text-xs text-muted-foreground mt-6">
+          <Link to="/login" className="text-primary hover:underline">Voltar ao login</Link>
+        </p>
       </div>
     </div>
   );

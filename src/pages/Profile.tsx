@@ -40,6 +40,7 @@ const Profile = () => {
   const [sponsorPanelKey, setSponsorPanelKey] = useState(0);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
   const [experience, setExperience] = useState("");
   const [services, setServices] = useState<string[]>([""]);
@@ -130,6 +131,7 @@ const Profile = () => {
   useEffect(() => {
     if (!user || !profile) return;
     setName(profile.full_name || "");
+    setDisplayName(profile.display_name || "");
     setPhone(profile.phone || "");
 
     if (profile.user_type === "professional" || profile.user_type === "company") {
@@ -192,7 +194,8 @@ const Profile = () => {
 
   const handleSave = async () => {
     if (!user) return;
-    const { error } = await supabase.from("profiles").update({ full_name: name, phone }).eq("user_id", user.id);
+    const resolvedDisplayName = displayName.trim() || profile?.full_name || "";
+    const { error } = await supabase.from("profiles").update({ display_name: resolvedDisplayName, phone }).eq("user_id", user.id);
     if (error) { toast({ title: "Erro ao salvar", variant: "destructive" }); return; }
     if (proData) {
       const servicesFiltered = services.map(s => s.trim()).filter(Boolean);
@@ -545,13 +548,29 @@ const Profile = () => {
             <div className="flex-1 min-w-0" style={{ paddingTop: (profile.user_type === "professional" || profile.user_type === "company") ? "2rem" : 0 }}>
               {editing ? (
                 <div className="space-y-2">
-                  <input value={name} onChange={(e) => setName(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="Nome completo" />
+                  <div>
+                    <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">Nome completo (documento)</p>
+                    <div className="w-full border border-dashed rounded-xl px-3 py-2 text-sm bg-muted/30 text-muted-foreground select-none">
+                      {profile.full_name || "—"}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 px-0.5">O nome legal não pode ser alterado aqui.</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">Nome de exibição</p>
+                    <input
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder={profile.full_name || "Nome que aparece no app"}
+                      className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-0.5 px-0.5">Nome fantasia, empresa ou apelido. Se vazio, usa o nome completo.</p>
+                  </div>
                   <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" placeholder="Telefone" />
                 </div>
               ) : (
                 <>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-                    <h2 className="text-lg font-bold text-foreground">{profile.full_name || "Usuário"}</h2>
+                    <h2 className="text-lg font-bold text-foreground">{profile.display_name || profile.full_name || "Usuário"}</h2>
                     {proData?.slug && (
                       <button
                         type="button"

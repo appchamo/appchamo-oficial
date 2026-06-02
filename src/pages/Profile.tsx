@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Loader2, Megaphone, MapPin } from "lucide-react";
+import { User, Mail, Shield, Ticket, ChevronRight, LogOut, Phone, Briefcase, Pencil, Star, Circle, Save, Trash2, FileQuestion, CalendarOff, Clock, CalendarCheck, Plus, AlertCircle, CheckCircle2, CreditCard, QrCode, Share2, Settings, BarChart2, Loader2, Megaphone, MapPin, ArrowLeftRight, Building2, UserCheck } from "lucide-react";
 import { formatCpf, formatCnpj } from "@/lib/formatters";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -47,6 +47,9 @@ const Profile = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [migrateDoc, setMigrateDoc] = useState("");
+  const [migrating, setMigrating] = useState(false);
   const [proData, setProData] = useState<{ id: string; slug: string | null; cover_image_url: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
@@ -222,6 +225,54 @@ const Profile = () => {
       toast({ title: "Link copiado!", description: link });
     } else if (result === "failed") {
       toast({ title: "Seu link:", description: link });
+    }
+  };
+
+  const handleMigrate = async () => {
+    if (!user || !profile) return;
+    const targetType = profile.user_type === "professional" ? "company" : "professional";
+    const targetDocField = targetType === "company" ? "cnpj" : "cpf";
+    const alreadyHasDoc = targetType === "company"
+      ? (profile.cnpj || "").replace(/\D/g, "").length >= 14
+      : (profile.cpf || "").replace(/\D/g, "").length >= 11;
+    const docClean = migrateDoc.replace(/\D/g, "");
+
+    if (!alreadyHasDoc) {
+      if (targetType === "company" && docClean.length < 14) {
+        toast({ title: "CNPJ inválido", description: "Informe um CNPJ válido com 14 dígitos.", variant: "destructive" });
+        return;
+      }
+      if (targetType === "professional" && docClean.length < 11) {
+        toast({ title: "CPF inválido", description: "Informe um CPF válido com 11 dígitos.", variant: "destructive" });
+        return;
+      }
+    }
+
+    setMigrating(true);
+    try {
+      const profileUpdate: Record<string, string> = { user_type: targetType };
+      if (!alreadyHasDoc && docClean) profileUpdate[targetDocField] = docClean;
+
+      const { error } = await supabase.from("profiles").update(profileUpdate).eq("user_id", user.id);
+      if (error) throw error;
+
+      if (proData) {
+        await supabase.from("professionals").update({
+          doc_type: targetType === "company" ? "cnpj" : "cpf",
+        } as any).eq("id", proData.id);
+      }
+
+      await refreshProfile();
+      toast({
+        title: "Migração realizada! 🎉",
+        description: `Seu perfil agora é ${targetType === "company" ? "Empresa" : "Profissional Individual"}.`,
+      });
+      setMigrateOpen(false);
+      setEditing(false);
+    } catch (e: any) {
+      toast({ title: "Erro ao migrar", description: e.message, variant: "destructive" });
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -627,6 +678,26 @@ const Profile = () => {
             </div>
           )}
 
+          {editing && (profile.user_type === "professional" || profile.user_type === "company") && (
+            <div className="mt-4 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetType = profile.user_type === "professional" ? "company" : "professional";
+                  const existing = targetType === "company"
+                    ? (profile.cnpj ? formatCnpj(profile.cnpj) : "")
+                    : (profile.cpf ? formatCpf(profile.cpf) : "");
+                  setMigrateDoc(existing);
+                  setMigrateOpen(true);
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-muted-foreground/25 rounded-xl text-sm text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
+              >
+                <ArrowLeftRight className="w-4 h-4" />
+                Migrar para {profile.user_type === "professional" ? "Empresa" : "Profissional Individual"}
+              </button>
+            </div>
+          )}
+
           {editing && (
             <div className="flex gap-2 mt-4">
               <button onClick={() => setEditing(false)} className="flex-1 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors">Cancelar</button>
@@ -688,6 +759,138 @@ const Profile = () => {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Modal de migração de tipo de conta */}
+        {profile && (profile.user_type === "professional" || profile.user_type === "company") && (() => {
+          const targetType = profile.user_type === "professional" ? "company" : "professional";
+          const isToCompany = targetType === "company";
+          const alreadyHasDoc = isToCompany
+            ? (profile.cnpj || "").replace(/\D/g, "").length >= 14
+            : (profile.cpf || "").replace(/\D/g, "").length >= 11;
+          const existingDoc = isToCompany
+            ? (profile.cnpj ? formatCnpj(profile.cnpj) : null)
+            : (profile.cpf ? formatCpf(profile.cpf) : null);
+
+          const missingFields: string[] = [];
+          if (!alreadyHasDoc) missingFields.push(isToCompany ? "CNPJ" : "CPF");
+          if (!(profile.full_name || "").trim()) missingFields.push("Nome completo");
+          if (!(profile.phone || "").trim()) missingFields.push("Telefone");
+
+          return (
+            <Dialog open={migrateOpen} onOpenChange={setMigrateOpen}>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    {isToCompany
+                      ? <><Building2 className="w-5 h-5 text-primary" /> Migrar para Empresa</>
+                      : <><UserCheck className="w-5 h-5 text-primary" /> Migrar para Profissional</>
+                    }
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 pt-1">
+                  <p className="text-sm text-muted-foreground">
+                    Seu perfil passará a ser identificado como{" "}
+                    <strong className="text-foreground">
+                      {isToCompany ? "Empresa (CNPJ)" : "Profissional Individual (CPF)"}
+                    </strong>.
+                  </p>
+
+                  {/* Análise de dados */}
+                  <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase">Análise do cadastro</p>
+
+                    {/* Nome */}
+                    <div className="flex items-center gap-2 text-sm">
+                      {(profile.full_name || "").trim()
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        : <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />}
+                      <span className={(profile.full_name || "").trim() ? "text-foreground" : "text-amber-700 dark:text-amber-400"}>
+                        Nome completo{!(profile.full_name || "").trim() && " — faltando"}
+                      </span>
+                    </div>
+
+                    {/* Telefone */}
+                    <div className="flex items-center gap-2 text-sm">
+                      {(profile.phone || "").trim()
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        : <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />}
+                      <span className={(profile.phone || "").trim() ? "text-foreground" : "text-amber-700 dark:text-amber-400"}>
+                        Telefone{!(profile.phone || "").trim() && " — faltando"}
+                      </span>
+                    </div>
+
+                    {/* Documento necessário */}
+                    <div className="flex items-center gap-2 text-sm">
+                      {alreadyHasDoc
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        : <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />}
+                      <span className={alreadyHasDoc ? "text-foreground" : "text-amber-700 dark:text-amber-400"}>
+                        {isToCompany ? "CNPJ" : "CPF"}
+                        {alreadyHasDoc ? ` — ${existingDoc}` : " — faltando (preencha abaixo)"}
+                      </span>
+                    </div>
+
+                    {/* Endereço */}
+                    <div className="flex items-center gap-2 text-sm">
+                      {(profile.address_city || profile.address_state)
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        : <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />}
+                      <span className={(profile.address_city || profile.address_state) ? "text-foreground" : "text-amber-700 dark:text-amber-400"}>
+                        Localização{!(profile.address_city || profile.address_state) && " — faltando"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Campo do documento (só se não tiver) */}
+                  {!alreadyHasDoc && (
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
+                        <CreditCard className="w-3.5 h-3.5" />
+                        {isToCompany ? "CNPJ da empresa" : "CPF"} <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        value={migrateDoc}
+                        onChange={e =>
+                          setMigrateDoc(
+                            isToCompany ? formatCnpj(e.target.value) : formatCpf(e.target.value)
+                          )
+                        }
+                        placeholder={isToCompany ? "00.000.000/0000-00" : "000.000.000-00"}
+                        maxLength={isToCompany ? 18 : 14}
+                        className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                  )}
+
+                  {missingFields.length > 0 && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+                      Após migrar, complete os dados faltantes em <strong>Configurações</strong>.
+                    </p>
+                  )}
+
+                  <p className="text-[11px] text-muted-foreground">
+                    Seus documentos de verificação poderão ser solicitados novamente pela equipe.
+                  </p>
+
+                  <div className="flex gap-2 pt-1">
+                    <Button variant="outline" className="flex-1" onClick={() => setMigrateOpen(false)} disabled={migrating}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      className="flex-1 gap-1.5"
+                      onClick={handleMigrate}
+                      disabled={migrating || (!alreadyHasDoc && migrateDoc.replace(/\D/g, "").length < (isToCompany ? 14 : 11))}
+                    >
+                      {migrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowLeftRight className="w-4 h-4" />}
+                      {migrating ? "Migrando..." : "Confirmar migração"}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          );
+        })()}
 
         <SponsorLaunchNovidadeModal
           open={sponsorNovidadeOpen}

@@ -8,6 +8,7 @@ import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
 import { resolveAuthReturnPath, setPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthReturn";
 import { getAuthEmailRedirectUrl } from "@/lib/authEmailRedirect";
+import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
 import { flushPendingEmailSignupWithRetries } from "@/lib/pendingEmailSignup";
 import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 import { Capacitor } from "@capacitor/core";
@@ -501,7 +502,7 @@ const Login = () => {
     if (!normalizedEmail) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
     setForgotLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: `${getPublicAppBaseUrl()}/reset-password`,
     });
     if (error) toast({ title: "Erro ao enviar", description: translateError(error.message), variant: "destructive" });
     else toast({ title: "E-mail de recuperação enviado!", description: "Verifique sua caixa de entrada." });

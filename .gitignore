@@ -33,3 +33,4 @@ firebase-service-account.json
 # Instalador/arquivos pesados (evitar no repo)
 *.dmg
 .vercel
+.env*.local

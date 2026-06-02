@@ -1,7 +1,7 @@
 import AdminLayout from "@/components/AdminLayout";
 import { AdminProsSealsPanel } from "@/pages/admin/AdminProsSealsPanel";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
-import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2, RefreshCw, Copy } from "lucide-react";
+import { BadgeCheck, Star, MoreHorizontal, Search, CheckCircle, XCircle, Eye, FileText, ChevronDown, Gift, EyeOff, Phone, ExternalLink, Trash2, MapPin, CreditCard, AlertTriangle, Building2, PhoneCall, Loader2, RefreshCw, Copy, Bell, Send } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -136,6 +136,9 @@ const AdminPros = () => {
   const [processingSub, setProcessingSub] = useState<string | null>(null);
   const [showForceApproveForUserId, setShowForceApproveForUserId] = useState<string | null>(null);
   const [requestingDocs, setRequestingDocs] = useState(false);
+  const [customNotifOpen, setCustomNotifOpen] = useState(false);
+  const [customNotifMessage, setCustomNotifMessage] = useState("");
+  const [sendingCustomNotif, setSendingCustomNotif] = useState(false);
 
   // Estados para o Modal de Recusa de Cadastro
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -282,6 +285,8 @@ const AdminPros = () => {
 
   const openDetail = async (pro: Professional) => {
     setDetailPro(pro);
+    setCustomNotifOpen(false);
+    setCustomNotifMessage("");
     const { data: list } = await supabase.from("professional_documents").select("*").eq("professional_id", pro.id);
     const items = list || [];
     const withUrls = await Promise.all(
@@ -995,6 +1000,57 @@ const AdminPros = () => {
                 className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
                 <ExternalLink className="w-3 h-3" /> Ver perfil público
               </a>
+
+              {/* Notificação personalizada */}
+              <div className="pt-2 border-t space-y-2">
+                <button
+                  onClick={() => { setCustomNotifOpen(v => !v); setCustomNotifMessage(""); }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  Enviar notificação personalizada
+                  <ChevronDown className={`w-3 h-3 transition-transform ${customNotifOpen ? "rotate-180" : ""}`} />
+                </button>
+                {customNotifOpen && (
+                  <div className="space-y-2">
+                    <textarea
+                      value={customNotifMessage}
+                      onChange={e => setCustomNotifMessage(e.target.value)}
+                      placeholder={`Escreva a mensagem para ${detailPro?.full_name?.split(" ")[0]}...`}
+                      rows={3}
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                    />
+                    <button
+                      disabled={!customNotifMessage.trim() || sendingCustomNotif}
+                      onClick={async () => {
+                        if (!detailPro || !customNotifMessage.trim()) return;
+                        setSendingCustomNotif(true);
+                        try {
+                          const { error } = await supabase.from("notifications").insert({
+                            user_id: detailPro.user_id,
+                            title: "Mensagem da equipe Chamô",
+                            message: customNotifMessage.trim(),
+                            type: "admin",
+                            link: "/notifications",
+                          });
+                          if (error) throw error;
+                          toast({ title: "Notificação enviada!", description: `${detailPro.full_name} receberá sua mensagem.` });
+                          setCustomNotifMessage("");
+                          setCustomNotifOpen(false);
+                        } catch (e: any) {
+                          toast({ title: "Erro ao enviar notificação", description: e.message, variant: "destructive" });
+                        } finally {
+                          setSendingCustomNotif(false);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+                    >
+                      {sendingCustomNotif ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                      Enviar mensagem
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Documentos de Identidade e Business */}
               <div className="pt-2 border-t space-y-2">

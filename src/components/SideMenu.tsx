@@ -22,6 +22,7 @@ import {
   Radio,
   Handshake,
   Megaphone,
+  QrCode,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -54,6 +55,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
         { icon: MessageSquare, label: "Mensagens", path: "/messages" },
         { icon: Briefcase, label: "Vagas de Emprego", path: "/jobs" },
         { icon: Gift, label: "Programa de recompensas", path: "/rewards" },
+        { icon: QrCode, label: "Validar no caixa", path: "/qr-scan?mode=checkin" },
       ],
     },
     {

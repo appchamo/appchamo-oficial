@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, CreditCard, QrCode, Copy, Loader2, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, CreditCard, QrCode, Copy, Loader2, ArrowLeft, CheckCircle2, Printer, Users } from "lucide-react";
+import { buildCheckinQrData, buildQrImageUrl, printCheckinQr, formatBirthDate } from "@/lib/sponsorCheckin";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import SponsorStoryViewer, { SponsorStory } from "@/components/SponsorStoryViewer";
@@ -17,6 +18,16 @@ interface Sponsor {
   logo_url: string | null;
   link_url: string;
   weekly_plan: "free" | "pack_14" | "pack_28";
+  checkin_token: string;
+}
+
+interface CheckinRow {
+  id: string;
+  created_at: string;
+  name: string;
+  avatar_url: string | null;
+  cpf_masked: string | null;
+  birth_date: string | null;
 }
 
 interface Story {
@@ -47,6 +58,9 @@ const SponsorDashboard = () => {
   const [stories, setStories] = useState<Story[]>([]);
   const [loading, setLoading] = useState(true);
   const [weeklyUsed, setWeeklyUsed] = useState(0);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [checkins, setCheckins] = useState<CheckinRow[]>([]);
+  const [loadingCheckins, setLoadingCheckins] = useState(false);
   const [newStoryOpen, setNewStoryOpen] = useState(false);
   const [newCaption, setNewCaption] = useState("");
   const [newLinkUrl, setNewLinkUrl] = useState("");
@@ -82,7 +96,7 @@ const SponsorDashboard = () => {
     if (!user) return;
     const { data: sp } = await supabase
       .from("sponsors")
-      .select("id, name, logo_url, link_url, weekly_plan")
+      .select("id, name, logo_url, link_url, weekly_plan, checkin_token")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -106,12 +120,30 @@ const SponsorDashboard = () => {
     setLoading(false);
   };
 
+  const loadCheckins = useCallback(async () => {
+    setLoadingCheckins(true);
+    try {
+      const { data } = await supabase.functions.invoke("sponsor-checkin", {
+        body: { action: "list", limit: 50 },
+      });
+      if (data?.checkins) setCheckins(data.checkins as CheckinRow[]);
+    } catch { /* ignore */ }
+    setLoadingCheckins(false);
+  }, []);
+
   useEffect(() => {
     if (searchParams.get("novidade") === "1") {
       setNewStoryOpen(true);
       setSearchParams({}, { replace: true });
     }
+    if (searchParams.get("checkins") === "1") {
+      setSearchParams({}, { replace: true });
+    }
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (sponsor) loadCheckins();
+  }, [sponsor, loadCheckins]);
 
   useEffect(() => {
     load();
@@ -441,6 +473,55 @@ const SponsorDashboard = () => {
             Adquirir mais limites
           </button>
         )}
+
+        {/* QR Code do caixa */}
+        <button
+          onClick={() => setQrOpen(true)}
+          className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-primary text-primary font-bold text-sm active:scale-[0.98] transition-transform"
+        >
+          <QrCode className="w-4 h-4" />
+          QR Code do caixa
+        </button>
+
+        {/* Clientes validados */}
+        <div className="bg-card border rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" />
+              <p className="font-semibold text-sm">Clientes validados</p>
+            </div>
+            <button onClick={loadCheckins} className="text-[11px] text-primary hover:underline">Atualizar</button>
+          </div>
+          {loadingCheckins ? (
+            <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+          ) : checkins.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-2">Nenhum cliente validado ainda. Imprima o QR e cole no caixa.</p>
+          ) : (
+            <div className="space-y-2">
+              {checkins.map((c) => (
+                <div key={c.id} className="flex items-center gap-3 py-2 border-b last:border-0">
+                  <div className="w-10 h-10 rounded-full bg-muted overflow-hidden flex items-center justify-center flex-shrink-0">
+                    {c.avatar_url ? (
+                      <img src={c.avatar_url} alt={c.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-xs font-bold text-muted-foreground">{c.name.slice(0, 2).toUpperCase()}</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{c.name}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      CPF {c.cpf_masked || "—"} · Nasc. {formatBirthDate(c.birth_date)}
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground flex items-center gap-1 flex-shrink-0">
+                    <Clock className="w-3 h-3" />
+                    {new Date(c.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Preview como aparece na Home */}
         <div className="bg-card border rounded-2xl p-4">
@@ -775,6 +856,32 @@ const SponsorDashboard = () => {
               <button onClick={() => { resetUpgradeModal(); setUpgradeOpen(false); }}
                 className="w-full py-3.5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm">
                 Ótimo, continuar!
+              </button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* QR Code do caixa */}
+      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader><DialogTitle>QR Code do caixa</DialogTitle></DialogHeader>
+          {sponsor && (
+            <div className="flex flex-col items-center text-center gap-3">
+              <p className="font-semibold text-sm text-foreground">{sponsor.name}</p>
+              <img
+                src={buildQrImageUrl(buildCheckinQrData(sponsor.checkin_token), 280)}
+                alt={`QR Code de ${sponsor.name}`}
+                className="w-56 h-56 border rounded-xl bg-white p-2"
+              />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Imprima e cole no caixa. O cliente abre o Chamô, toca em "Validar no caixa" e aponta a câmera.
+              </p>
+              <button
+                onClick={() => printCheckinQr(sponsor.name, sponsor.checkin_token)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                <Printer className="w-4 h-4" /> Imprimir
               </button>
             </div>
           )}

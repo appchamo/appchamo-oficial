@@ -1,5 +1,6 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Plus, ExternalLink, MoreHorizontal, Eye, EyeOff, Pencil, Trash2, Power, MapPin, Package, Save, Loader2, Settings2 } from "lucide-react";
+import { Plus, ExternalLink, MoreHorizontal, Eye, EyeOff, Pencil, Trash2, Power, MapPin, Package, Save, Loader2, Settings2, QrCode, Printer, Download } from "lucide-react";
+import { buildCheckinQrData, buildQrImageUrl, printCheckinQr } from "@/lib/sponsorCheckin";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -41,6 +42,7 @@ interface Sponsor {
   location_city: string | null;
   user_id: string | null;
   weekly_plan: WeeklyPlan;
+  checkin_token: string;
 }
 
 const PLAN_LABELS: Record<WeeklyPlan, string> = {
@@ -74,6 +76,7 @@ const AdminSponsors = () => {
   const [cities, setCities] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
   const [loadingCities, setLoadingCities] = useState(false);
+  const [qrSponsor, setQrSponsor] = useState<Sponsor | null>(null);
 
   // Preços dos pacotes de novidades
   const [pack14Price, setPack14Price] = useState("");
@@ -362,6 +365,7 @@ const AdminSponsors = () => {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5 mr-2" /> Editar</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setQrSponsor(s)}><QrCode className="w-3.5 h-3.5 mr-2" /> QR Code do caixa</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleResetAccess(s)}><Eye className="w-3.5 h-3.5 mr-2" /> Redefinir acesso</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => toggleActive(s)}><Power className="w-3.5 h-3.5 mr-2" /> {s.active ? "Desativar" : "Ativar"}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setDeleteId(s.id)} className="text-destructive"><Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir</DropdownMenuItem>
@@ -481,6 +485,41 @@ const AdminSponsors = () => {
               {saving ? "Salvando..." : editing ? "Salvar alterações" : "Criar patrocinador"}
             </button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* QR Code do caixa */}
+      <Dialog open={!!qrSponsor} onOpenChange={(o) => !o && setQrSponsor(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader><DialogTitle>QR Code do caixa</DialogTitle></DialogHeader>
+          {qrSponsor && (
+            <div className="flex flex-col items-center text-center gap-3">
+              <p className="font-semibold text-sm text-foreground">{qrSponsor.name}</p>
+              <img
+                src={buildQrImageUrl(buildCheckinQrData(qrSponsor.checkin_token), 280)}
+                alt={`QR Code de ${qrSponsor.name}`}
+                className="w-56 h-56 border rounded-xl bg-white p-2"
+              />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Imprima e cole no caixa. O cliente abre o Chamô, toca em "Validar no caixa" e aponta a câmera.
+              </p>
+              <div className="flex gap-2 w-full">
+                <button
+                  onClick={() => printCheckinQr(qrSponsor.name, qrSponsor.checkin_token)}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir
+                </button>
+                <a
+                  href={buildQrImageUrl(buildCheckinQrData(qrSponsor.checkin_token), 600)}
+                  target="_blank" rel="noopener noreferrer" download={`qr-caixa-${qrSponsor.name}.png`}
+                  className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                </a>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

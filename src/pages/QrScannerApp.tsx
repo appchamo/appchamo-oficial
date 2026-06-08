@@ -6,8 +6,9 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
+import { parseCheckinToken } from "@/lib/sponsorCheckin";
 import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
 import { Capacitor } from "@capacitor/core";
@@ -38,6 +39,8 @@ const useMLKit = platform === "android";
 
 export default function QrScannerApp() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const checkinMode = searchParams.get("mode") === "checkin";
   const { user } = useAuth();
   const [stage, setStage] = useState<Stage>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -92,6 +95,14 @@ export default function QrScannerApp() {
     if (handledRef.current) return;
     handledRef.current = true;
     await stopCamera();
+
+    // QR de check-in no caixa do patrocinador → tela dedicada de validação
+    const checkinToken = parseCheckinToken(token);
+    if (checkinToken) {
+      navigate(`/c/${checkinToken}`);
+      return;
+    }
+
     setStage("processing");
 
     try {
@@ -244,9 +255,9 @@ export default function QrScannerApp() {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-xl font-bold">Logar via Web</h1>
+            <h1 className="text-xl font-bold">{checkinMode ? "Validar no caixa" : "Logar via Web"}</h1>
             <p className="text-xs text-muted-foreground">
-              Escaneie o QR Code em appchamo.com
+              {checkinMode ? "Aponte para o QR Code do estabelecimento" : "Escaneie o QR Code em appchamo.com"}
             </p>
           </div>
         </div>
@@ -260,15 +271,25 @@ export default function QrScannerApp() {
             <div className="text-center max-w-xs">
               <h2 className="font-bold text-foreground text-xl mb-2">Escanear QR Code</h2>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Abra <strong>appchamo.com</strong> no computador, clique em{" "}
-                <strong>"Acessar via Web"</strong> e aponte a câmera para o QR Code.
+                {checkinMode ? (
+                  <>Aponte a câmera para o <strong>QR Code no caixa</strong> do estabelecimento para validar sua conta.</>
+                ) : (
+                  <>Abra <strong>appchamo.com</strong> no computador, clique em <strong>"Acessar via Web"</strong> e aponte a câmera para o QR Code.</>
+                )}
               </p>
             </div>
-            {[
-              "Acesse appchamo.com no computador",
-              'Clique em "Acessar via Web"',
-              'Toque em "Abrir Câmera" e aponte para o QR Code na tela',
-            ].map((step, i) => (
+            {(checkinMode
+              ? [
+                  "Vá até o caixa do estabelecimento parceiro",
+                  'Toque em "Abrir Câmera" abaixo',
+                  "Aponte para o QR Code colado no caixa",
+                ]
+              : [
+                  "Acesse appchamo.com no computador",
+                  'Clique em "Acessar via Web"',
+                  'Toque em "Abrir Câmera" e aponte para o QR Code na tela',
+                ]
+            ).map((step, i) => (
               <div key={i} className="w-full max-w-xs flex items-start gap-3 bg-muted/40 rounded-2xl px-4 py-3">
                 <span className="w-6 h-6 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
                   {i + 1}

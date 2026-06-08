@@ -37,10 +37,19 @@ const ResetPassword = () => {
   };
 
   useEffect(() => {
+    const tokenHash    = getParam("token_hash");    // OTP: ?token_hash=XXX (cross-device)
     const code         = getParam("code");          // PKCE: ?code=XXX
     const accessToken  = getParam("access_token");  // Implicit: #access_token=XXX
     const refreshToken = getParam("refresh_token");
     const type         = getParam("type");
+    const errorCode    = getParam("error_code");    // ex.: otp_expired
+    const errorParam   = getParam("error");         // ex.: access_denied
+
+    // ── 0. Link já veio com erro do Supabase (expirado / já usado) ─────────────────
+    if (errorCode || errorParam) {
+      markInvalid(`supabase: ${errorParam || ""} ${errorCode || ""}`.trim());
+      return;
+    }
 
     // ── 1. Listener de evento (backup para casos em que o SDK já disparou o evento) ──
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -49,7 +58,29 @@ const ResetPassword = () => {
       }
     });
 
-    // ── 2. PKCE flow: ?code=XXX  ──────────────────────────────────────────────────
+    // ── 2a. OTP flow: ?token_hash=XXX&type=recovery  ──────────────────────────────
+    // Não depende de code_verifier → funciona em qualquer dispositivo/navegador
+    // (o usuário pede o reset no app e abre o e-mail no PC, ou vice-versa).
+    if (tokenHash) {
+      supabase.auth.verifyOtp({ type: "recovery", token_hash: tokenHash })
+        .then(({ data, error }) => {
+          if (error) {
+            markInvalid(`verifyOtp: ${error.message}`);
+          } else if (data?.session) {
+            if (window.history.replaceState) {
+              window.history.replaceState(null, "", window.location.pathname);
+            }
+            markReady();
+          } else {
+            markInvalid("verifyOtp: sem sessão");
+          }
+        })
+        .catch((err) => markInvalid(String(err)));
+      const t = setTimeout(() => markInvalid("timeout (otp)"), 20000);
+      return () => { subscription.unsubscribe(); clearTimeout(t); };
+    }
+
+    // ── 2b. PKCE flow: ?code=XXX (fallback p/ links antigos) ──────────────────────
     // detectSessionInUrl pode já ter processado, mas chamamos explicitamente para
     // garantir — se duplicado o SDK lida internamente sem problema.
     if (code) {

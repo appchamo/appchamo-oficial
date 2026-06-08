@@ -11,7 +11,9 @@ import { Capacitor } from "@capacitor/core";
 function isPublicAppPath(pathname: string): boolean {
   return (
     /^\/(?:professional|pro|agendar)\/[^/?#]+$/i.test(pathname) ||
-    /^\/p\/comunidade\/[^/?#]+$/i.test(pathname)
+    /^\/p\/comunidade\/[^/?#]+$/i.test(pathname) ||
+    // Check-in no caixa do patrocinador (QR lido pela câmera nativa abre o app aqui)
+    /^\/c\/[^/?#]+$/i.test(pathname)
   );
 }
 

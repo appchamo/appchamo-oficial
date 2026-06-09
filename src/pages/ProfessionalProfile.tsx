@@ -115,6 +115,10 @@ const ProfessionalProfile = () => {
   const [savingCategoryProfession, setSavingCategoryProfession] = useState(false);
   const [planId, setPlanId] = useState<string | null>(null);
   const [reviewsVisible, setReviewsVisible] = useState(5);
+  const [myStars, setMyStars] = useState(0);
+  const [myComment, setMyComment] = useState("");
+  const [hasMyReview, setHasMyReview] = useState(false);
+  const [submittingReview, setSubmittingReview] = useState(false);
   const [publicSeals, setPublicSeals] = useState<{ seal_id: string; title: string; icon_variant: string }[]>([]);
   const [sealsModalOpen, setSealsModalOpen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -216,7 +220,7 @@ const ProfessionalProfile = () => {
         // Fetch reviews
         const { data: reviewsData } = await supabase
           .from("reviews" as any)
-          .select("id, rating, comment, created_at, client_id")
+          .select("id, rating, comment, created_at, client_id, request_id")
           .eq("professional_id", data.id)
           .order("created_at", { ascending: false }) as { data: any[] | null };
 
@@ -239,6 +243,12 @@ const ProfessionalProfile = () => {
         } else {
           setReviews([]);
         }
+
+        // Avaliação do próprio usuário feita pelo perfil (request_id null) — pré-preenche o formulário
+        const mine = (reviewsData || []).find((r: any) => r.client_id === authUser?.id && !r.request_id);
+        setHasMyReview(!!mine);
+        setMyStars(mine?.rating || 0);
+        setMyComment(mine?.comment || "");
 
         const { data: sealRows } = await supabase.rpc("public_professional_seals" as any, {
           p_ids: [data.id],
@@ -263,6 +273,25 @@ const ProfessionalProfile = () => {
   useEffect(() => {
     if (id) loadProfile();
   }, [id, loadProfile]);
+
+  const submitProfileReview = async () => {
+    if (!user) { toast({ title: "Entre na sua conta para avaliar." }); return; }
+    if (myStars < 1) { toast({ title: "Selecione de 1 a 5 estrelas.", variant: "destructive" }); return; }
+    if (!pro) return;
+    setSubmittingReview(true);
+    const { error } = await supabase.rpc("submit_profile_review" as any, {
+      _professional_id: pro.id,
+      _rating: myStars,
+      _comment: myComment.trim() || null,
+    });
+    if (error) {
+      toast({ title: "Erro ao avaliar", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: hasMyReview ? "Avaliação atualizada!" : "Avaliação enviada!" });
+      await loadProfile();
+    }
+    setSubmittingReview(false);
+  };
 
   // Realtime: listen for availability_status changes on this professional (use actual UUID, not slug)
   useEffect(() => {
@@ -1073,6 +1102,43 @@ const ProfessionalProfile = () => {
               <p className="text-xs text-muted-foreground mt-0.5">Baseado em avaliações de clientes</p>
             </div>
           </div>
+
+          {/* Formulário de avaliação (qualquer usuário logado, exceto o dono do perfil) */}
+          {user && !isOwner && (
+            <div className="mb-4 p-4 border rounded-xl bg-background">
+              <p className="text-sm font-semibold text-foreground mb-2">
+                {hasMyReview ? "Sua avaliação" : "Avaliar este profissional"}
+              </p>
+              <div className="flex gap-1 mb-3">
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setMyStars(s)}
+                    className="transition-transform hover:scale-110"
+                    aria-label={`${s} estrela${s > 1 ? "s" : ""}`}
+                  >
+                    <Star className={`w-7 h-7 ${s <= myStars ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={myComment}
+                onChange={(e) => setMyComment(e.target.value)}
+                placeholder="Escreva um comentário (opcional)"
+                rows={3}
+                maxLength={500}
+                className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+              />
+              <button
+                onClick={submitProfileReview}
+                disabled={submittingReview || myStars < 1}
+                className="mt-2 w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {submittingReview ? "Enviando..." : hasMyReview ? "Atualizar avaliação" : "Avaliar"}
+              </button>
+            </div>
+          )}
 
           {reviews.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">Nenhuma avaliação ainda.</p>

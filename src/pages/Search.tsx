@@ -63,11 +63,17 @@ function SearchProCard({ pro }: { pro: Pro }) {
         to={`/professional/${pro.id}`}
         className="flex items-stretch gap-3 bg-card border border-border/70 rounded-2xl p-4 shadow-sm hover:border-primary/35 hover:shadow-md transition-all group w-full"
       >
-        <div className="w-14 h-14 shrink-0 self-start rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
-          {pro.avatar_url ? (
-            <img src={pro.avatar_url} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" />
-          ) : (
-            pro.full_name[0]
+        <div className="relative w-14 h-14 shrink-0 self-start rounded-full bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground overflow-hidden border-2 border-background shadow-sm">
+          <span className="select-none">{pro.full_name?.[0] || "?"}</span>
+          {pro.avatar_url && (
+            <img
+              src={pro.avatar_url}
+              className="absolute inset-0 w-full h-full object-cover"
+              alt=""
+              loading="lazy"
+              decoding="async"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
           )}
         </div>
         <div className="flex-1 min-w-0 flex flex-col justify-center">

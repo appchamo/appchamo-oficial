@@ -221,17 +221,17 @@ function FeaturedProCard({ pro }: { pro: Pro }) {
         {/* Foto + selos ao lado (melhor selo maior); texto abaixo da foto */}
         <div className="flex gap-4 lg:gap-5 items-start w-full min-w-0">
           <div className="relative shrink-0 self-start">
-            <div className="w-16 h-16 lg:w-[72px] lg:h-[72px] rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
-              {avatarSrc ? (
+            <div className="relative w-16 h-16 lg:w-[72px] lg:h-[72px] rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
+              <span className="select-none">{initials}</span>
+              {avatarSrc && (
                 <img
                   src={avatarSrc}
                   alt={pro.full_name}
-                  className="w-full h-full object-cover rounded-full"
+                  className="absolute inset-0 w-full h-full object-cover rounded-full"
                   loading="lazy"
                   decoding="async"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
                 />
-              ) : (
-                initials
               )}
             </div>
             {pro.verified && (

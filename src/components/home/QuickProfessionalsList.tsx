@@ -30,19 +30,18 @@ function QuickProRow({ pro, isLast }: { pro: QuickPro; isLast: boolean }) {
           !isLast ? "border-b border-border/60" : ""
         }`}
       >
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary overflow-hidden shrink-0">
-          {avatarUrl ? (
+        <div className="relative w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary overflow-hidden shrink-0">
+          <span className="select-none">{initials}</span>
+          {avatarUrl && (
             <img
               src={avatarUrl}
               alt={pro.full_name}
-              className="w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-cover"
               loading="lazy"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = "none";
               }}
             />
-          ) : (
-            initials
           )}
         </div>
         <div className="flex-1 min-w-0">

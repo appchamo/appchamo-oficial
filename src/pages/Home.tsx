@@ -1,3 +1,5 @@
+import { motion } from "framer-motion";
+import { pageEnter } from "@/lib/motion";
 import AppLayout from "@/components/AppLayout";
 import BenefitsPanel, { CHAMO_HOME_SILENT_TICKER } from "@/components/BenefitsPanel";
 import ProProfileProgress from "@/components/ProProfileProgress";
@@ -756,7 +758,7 @@ const Home = () => {
             </div>
           ) : user ? (
             /* ── Welcome cliente ── */
-            <div className="flex flex-col gap-3">
+            <motion.div className="flex flex-col gap-3" variants={pageEnter} initial="hidden" animate="show">
               {profile?.user_type === "client" && !linkedSponsor && !clientSignupProTopDismissed ? (
                 <div className="relative -mt-0.5 overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-b from-primary/[0.09] via-primary/[0.03] to-transparent px-4 pt-3.5 pb-3 pr-10 shadow-sm ring-1 ring-primary/[0.06] dark:from-primary/[0.14] dark:via-primary/[0.06] dark:to-transparent">
                   <button
@@ -849,7 +851,7 @@ const Home = () => {
                   <span className="text-xs font-bold text-primary shrink-0">Alterar</span>
                 </button>
               )}
-            </div>
+            </motion.div>
           ) : null}
 
           {user && linkedSponsor && !homeFeedComunidade && (profile?.job_posting_enabled || profile?.user_type === "company") ? (

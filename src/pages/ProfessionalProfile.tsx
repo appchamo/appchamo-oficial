@@ -46,6 +46,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { cn } from "@/lib/utils";
+import ProfessionalSocialLinks from "@/components/ProfessionalSocialLinks";
 
 interface ProData {
   id: string;
@@ -74,6 +75,9 @@ interface ProData {
   avg_response_computed_at?: string | null;
   address_city?: string | null;
   address_state?: string | null;
+  social_whatsapp?: string | null;
+  social_instagram?: string | null;
+  social_link?: string | null;
 }
 
 interface Review {
@@ -136,7 +140,7 @@ const ProfessionalProfile = () => {
     const baseQuery = supabase
         .from("professionals")
         .select(
-          "id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug, cover_image_url, avg_response_seconds, avg_response_sample_count, avg_response_computed_at",
+          "id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug, cover_image_url, avg_response_seconds, avg_response_sample_count, avg_response_computed_at, social_whatsapp, social_instagram, social_link",
         );
     const { data } = await (isUUID ? baseQuery.eq("id", id) : baseQuery.eq("slug", id)).maybeSingle();
         
@@ -962,6 +966,15 @@ const ProfessionalProfile = () => {
             )}
           </div>
         </div>
+
+        <ProfessionalSocialLinks
+          proId={pro.id}
+          isOwner={isOwner}
+          isPaidPlan={planId === "pro" || planId === "vip" || planId === "business"}
+          whatsapp={pro.social_whatsapp ?? null}
+          instagram={pro.social_instagram ?? null}
+          link={pro.social_link ?? null}
+        />
 
         {publicSeals.length > 0 && (
           <>

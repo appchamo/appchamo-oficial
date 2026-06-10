@@ -619,9 +619,9 @@ const Login = () => {
       localStorage.setItem("manual_login_intent", "true");
 
       if (Capacitor.isNativePlatform()) {
-        const isIos = Capacitor.getPlatform() === 'ios';
-        // iOS: scheme direto (sem abrir web). Android: página web.
-        const redirectTo = isIos ? 'com.chamo.app://oauth' : 'https://appchamo.com/oauth-callback';
+        // Scheme próprio nos DOIS sistemas — reabre o app de forma confiável
+        // (app links https falham em muitos aparelhos e prendem o usuário no navegador).
+        const redirectTo = 'com.chamo.app://oauth';
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {

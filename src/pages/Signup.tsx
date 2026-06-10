@@ -605,7 +605,7 @@ const Signup = () => {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider,
           options: {
-            redirectTo: "com.chamo.app://google-auth",
+            redirectTo: "com.chamo.app://oauth",
             skipBrowserRedirect: true,
             queryParams: { prompt: "select_account" },
           },

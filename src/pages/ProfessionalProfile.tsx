@@ -748,12 +748,17 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
               </div>
 
               {/* Avaliação + quantidade de serviços — canto direito, mesma linha do avatar */}
-              <div className="flex items-center gap-1.5 mb-1 flex-wrap justify-end max-w-[55%] text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5 mb-1 flex-wrap justify-end max-w-[60%] text-xs text-muted-foreground">
                 <Star className="w-4 h-4 fill-amber-400 text-amber-400 shrink-0" />
                 <span className="font-bold text-foreground">{Number(pro.rating).toFixed(1)}</span>
                 <span>({pro.total_reviews})</span>
                 <span className="text-muted-foreground/80">·</span>
                 <span>{pro.total_services} serviços</span>
+                {pro.user_type === "company" ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold"><Building2 className="w-3 h-3" /> Empresa</span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground">Profissional</span>
+                )}
               </div>
             </div>
 
@@ -815,15 +820,15 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
                   <BadgeCheck className="w-3.5 h-3.5 fill-emerald-100" /> Verificado
                 </span>
               )}
-              {pro.user_type === "company" ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-white text-xs font-bold shadow-sm">
-                  <Building2 className="w-3 h-3" /> Empresa
-                </span>
-              ) : (
-                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground">
-                  Profissional
-                </span>
-              )}
+              <ProfessionalSocialLinks
+                compact
+                proId={pro.id}
+                isOwner={isOwner}
+                isPaidPlan={planId === "pro" || planId === "vip" || planId === "business"}
+                whatsapp={pro.social_whatsapp ?? null}
+                instagram={pro.social_instagram ?? null}
+                link={pro.social_link ?? null}
+              />
               {isOwner && pro.profile_status !== "approved" && (
                 <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
                   pro.profile_status === "pending" ? "bg-amber-100 text-amber-700" : "bg-destructive/10 text-destructive"
@@ -1010,14 +1015,16 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
           </div>
         </div>
 
-        <ProfessionalSocialLinks
-          proId={pro.id}
-          isOwner={isOwner}
-          isPaidPlan={planId === "pro" || planId === "vip" || planId === "business"}
-          whatsapp={pro.social_whatsapp ?? null}
-          instagram={pro.social_instagram ?? null}
-          link={pro.social_link ?? null}
-        />
+        {isOwner && (
+          <ProfessionalSocialLinks
+            proId={pro.id}
+            isOwner={isOwner}
+            isPaidPlan={planId === "pro" || planId === "vip" || planId === "business"}
+            whatsapp={pro.social_whatsapp ?? null}
+            instagram={pro.social_instagram ?? null}
+            link={pro.social_link ?? null}
+          />
+        )}
 
         {publicSeals.length > 0 && (
           <>

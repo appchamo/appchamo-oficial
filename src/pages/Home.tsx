@@ -7,6 +7,7 @@ import SponsorCarousel from "@/components/SponsorCarousel";
 import FeaturedProfessionals from "@/components/FeaturedProfessionals";
 import CategoriesGrid from "@/components/CategoriesGrid";
 import TutorialsSection from "@/components/TutorialsSection";
+import DailyCheckin from "@/components/DailyCheckin";
 import HomeBanners from "@/components/HomeBanners";
 import { useAuth } from "@/hooks/useAuth";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -716,6 +717,7 @@ const Home = () => {
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
           <TermsReacceptBanner />
+          {user ? <DailyCheckin hideWhenDone /> : null}
           {user && isPro && proId ? (
             /* ── Carrossel: Carteira + Agenda (só monta quando proId está pronto) ── */
             <>

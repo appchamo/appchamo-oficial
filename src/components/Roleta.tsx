@@ -9,11 +9,11 @@
  */
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, X } from "lucide-react";
+import { Loader2, X, Ticket } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import {
-  RoletaTrigger, RoletaResult, prizeTitle, prizeSubtitle, prizeEmoji,
+  RoletaTrigger, RoletaResult, prizeTitle, prizeSubtitle,
 } from "@/lib/roleta";
 
 interface Props {
@@ -46,7 +46,7 @@ export default function Roleta({ trigger, grantId = null, onDone, onDismiss }: P
   const [result, setResult] = useState<RoletaResult | null>(null);
   const resultRef = useRef<RoletaResult | null>(null);
 
-  const headerTitle = trigger === "login" ? "🎉 Giro do dia!" : "🎁 Você ganhou um giro!";
+  const headerTitle = trigger === "login" ? "Giro do dia!" : "Você ganhou um giro!";
   const headerSub = trigger === "login"
     ? "Gire a roleta e ganhe um prêmio. Volte todo dia!"
     : "Obrigado pela compra! Gire a roleta e ganhe um prêmio.";
@@ -156,7 +156,11 @@ export default function Roleta({ trigger, grantId = null, onDone, onDismiss }: P
                 ))}
                 {/* miolo */}
                 <circle cx={CX} cy={CY} r={26} fill="#fff" stroke="#f59e0b" strokeWidth={4} />
-                <text x={CX} y={CY + 5} textAnchor="middle" fontSize="22">🎁</text>
+                <path
+                  transform={`translate(${CX} ${CY})`}
+                  d="M0,-14 L4.1,-4.3 L14,-4.3 L6,2.2 L8.6,12 L0,6 L-8.6,12 L-6,2.2 L-14,-4.3 L-4.1,-4.3 Z"
+                  fill="#f59e0b"
+                />
               </motion.svg>
             </div>
 
@@ -185,12 +189,14 @@ export default function Roleta({ trigger, grantId = null, onDone, onDismiss }: P
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
             >
               <motion.div
-                className="text-6xl mb-3"
+                className="w-24 h-24 mx-auto mb-3 rounded-full bg-gradient-to-br from-primary to-amber-500 flex items-center justify-center text-white shadow-lg"
                 initial={{ scale: 0, rotate: -20 }}
                 animate={{ scale: 1, rotate: [0, -12, 12, 0] }}
                 transition={{ duration: 0.7, type: "spring", stiffness: 240, damping: 14 }}
               >
-                {prizeEmoji(result.prize)}
+                {result.prize === "raffle"
+                  ? <Ticket className="w-11 h-11" strokeWidth={2.2} />
+                  : <span className="text-4xl font-black leading-none">{result.discount}%</span>}
               </motion.div>
               <h3 className="text-xl font-extrabold text-foreground mb-1">Parabéns!</h3>
               <p className="text-lg font-bold text-primary mb-1">{prizeTitle(result.prize)}</p>

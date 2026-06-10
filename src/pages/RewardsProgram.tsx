@@ -86,9 +86,6 @@ function RewardsReferralTab() {
 
   return (
     <>
-      <div className="mb-6">
-        <DailyCheckin />
-      </div>
       <div className="relative mb-6 overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-primary/[0.12] via-background to-amber-500/[0.08] px-5 py-7 shadow-lg shadow-primary/10">
         <div
           className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/20 blur-3xl"
@@ -374,6 +371,9 @@ const RewardsProgram = () => {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="missions" className="mt-5 focus-visible:outline-none">
+            <div className="mb-6">
+              <DailyCheckin />
+            </div>
             <RewardsMissionsTab />
           </TabsContent>
           <TabsContent value="invite" className="mt-5 focus-visible:outline-none">

@@ -1,74 +1,106 @@
-import { BookOpen, UserCheck, CreditCard, Wallet, HelpCircle, MessageCircle, Phone, Shield, Star, Heart, Settings, FileText, Award, Briefcase } from "lucide-react";
+/**
+ * Seção de tutoriais da Home.
+ * Cards animados (Framer Motion), ícone em tile com gradiente, selo de
+ * "concluído" e barra de progresso geral. Conteúdo vem do admin
+ * (platform_settings.home_tutorials) com fallback/merge para os padrões.
+ */
+import {
+  BookOpen, UserCheck, CreditCard, Wallet, HelpCircle, MessageCircle,
+  Phone, Shield, Star, Heart, Settings, FileText, Award, Briefcase,
+  GraduationCap, Check, ChevronRight,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
+import { staggerContainer, fadeUpItem } from "@/lib/motion";
+import {
+  TutorialItem, DEFAULT_TUTORIALS_CONFIG, mergeTutorialItems,
+  isTutorialDone, countTutorialsDone,
+} from "@/lib/tutorials";
 
 const iconMap: Record<string, any> = {
   BookOpen, UserCheck, CreditCard, Wallet, HelpCircle, MessageCircle,
   Phone, Shield, Star, Heart, Settings, FileText, Award, Briefcase,
 };
 
-interface TutorialItem {
-  id: string;
-  icon: string;
-  label: string;
-  path: string;
-}
-
-interface TutorialsConfig {
-  title: string;
-  subtitle: string;
-  items: TutorialItem[];
-}
-
-const defaultConfig: TutorialsConfig = {
-  title: "Dúvidas sobre como usar o app?",
-  subtitle: "Acesse nossos tutoriais!",
-  items: [
-    { id: "1", icon: "BookOpen", label: "Como usar", path: "/tutorial/1" },
-    { id: "2", icon: "UserCheck", label: "Como contratar", path: "/tutorial/2" },
-    { id: "3", icon: "CreditCard", label: "Como pagar", path: "/tutorial/3" },
-    { id: "4", icon: "Wallet", label: "Assinaturas e saques", path: "/tutorial/4" },
-  ],
-};
-
 const TutorialsSection = () => {
-  const [config, setConfig] = useState<TutorialsConfig>(defaultConfig);
+  const [title, setTitle] = useState(DEFAULT_TUTORIALS_CONFIG.title);
+  const [subtitle, setSubtitle] = useState(DEFAULT_TUTORIALS_CONFIG.subtitle);
+  const [items, setItems] = useState<TutorialItem[]>(DEFAULT_TUTORIALS_CONFIG.items);
 
   useEffect(() => {
     supabase.from("platform_settings").select("value").eq("key", "home_tutorials").single().then(({ data }) => {
       if (data?.value && typeof data.value === "object" && !Array.isArray(data.value)) {
         const val = data.value as any;
-        setConfig({
-          title: val.title || defaultConfig.title,
-          subtitle: val.subtitle || defaultConfig.subtitle,
-          items: val.items || defaultConfig.items,
-        });
+        setTitle(val.title || DEFAULT_TUTORIALS_CONFIG.title);
+        setSubtitle(val.subtitle || DEFAULT_TUTORIALS_CONFIG.subtitle);
+        setItems(mergeTutorialItems(val.items));
       }
     });
   }, []);
 
+  const ids = items.map((t) => t.id);
+  const done = countTutorialsDone(ids);
+  const total = items.length;
+  const allDone = total > 0 && done === total;
+
   return (
     <section>
-      <h3 className="font-semibold text-foreground mb-1 px-1">{config.title}</h3>
-      <p className="text-xs text-muted-foreground mb-3 px-1">{config.subtitle}</p>
-      <div className="grid grid-cols-2 gap-3">
-        {config.items.map((t) => {
+      <div className="flex items-end justify-between gap-3 mb-3 px-1">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <GraduationCap className="w-4 h-4 text-primary shrink-0" strokeWidth={2.4} />
+            <h3 className="font-bold text-foreground truncate">{title}</h3>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+        </div>
+        {total > 0 && (
+          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ${
+            allDone ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-primary/10 text-primary"
+          }`}>
+            {done}/{total}
+          </span>
+        )}
+      </div>
+
+      <motion.div
+        className="grid grid-cols-2 gap-3"
+        variants={staggerContainer}
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, amount: 0.2 }}
+      >
+        {items.map((t) => {
           const Icon = iconMap[t.icon] || BookOpen;
+          const completed = isTutorialDone(t.id);
           return (
-            <Link
-              key={t.id}
-              to={t.path}
-              className="flex items-center gap-3 bg-card border rounded-xl p-3.5 hover:border-primary/30 hover:shadow-card transition-all group"
-            >
-              <div className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                <Icon className="w-4 h-4 text-primary" />
-              </div>
-              <span className="text-sm font-medium text-foreground">{t.label}</span>
-            </Link>
+            <motion.div key={t.id} variants={fadeUpItem}>
+              <Link
+                to={t.path}
+                className="relative flex h-full flex-col gap-2.5 overflow-hidden rounded-2xl border bg-card p-3.5 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md active:scale-[0.98]"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-amber-500 text-white shadow-sm shadow-primary/30">
+                    <Icon className="h-5 w-5" strokeWidth={2.2} />
+                  </div>
+                  {completed ? (
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm">
+                      <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                    </span>
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
+                  )}
+                </div>
+                <span className="text-sm font-semibold leading-snug text-foreground">{t.label}</span>
+                <span className={`text-[10px] font-bold uppercase tracking-wide ${completed ? "text-emerald-600 dark:text-emerald-400" : "text-primary"}`}>
+                  {completed ? "Concluído" : "Ver tutorial"}
+                </span>
+              </Link>
+            </motion.div>
           );
         })}
-      </div>
+      </motion.div>
     </section>
   );
 };

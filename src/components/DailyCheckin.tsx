@@ -21,7 +21,7 @@ const MILESTONES = [
   { day: 30, label: "🎁 Especial" },
 ];
 
-export default function DailyCheckin() {
+export default function DailyCheckin({ hideWhenDone = false }: { hideWhenDone?: boolean } = {}) {
   const { user } = useAuth();
   const [streak, setStreak] = useState(0);
   const [lastDate, setLastDate] = useState<string | null>(null);
@@ -71,8 +71,12 @@ export default function DailyCheckin() {
   };
 
   if (loading) {
+    if (hideWhenDone) return null; // na Home, não pisca loader
     return <div className="bg-card border rounded-2xl p-5 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>;
   }
+
+  // Na Home: some assim que o check-in do dia já foi feito.
+  if (hideWhenDone && checkedToday) return null;
 
   return (
     <div className="bg-card border rounded-2xl p-5 overflow-hidden">

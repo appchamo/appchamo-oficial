@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
+import { staggerContainer, fadeUpItem } from "@/lib/motion";
 import { diagLog, hardReloadOnce } from "@/lib/diag";
 import { Capacitor } from "@capacitor/core";
 import {
@@ -153,29 +155,38 @@ const CategoriesGrid = ({ section }: CategoriesGridProps) => {
   return (
     <section>
       <h3 className="font-semibold lg:text-lg text-foreground mb-3 lg:mb-4 px-1">{section?.title ?? "Categorias"}</h3>
-      <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 lg:gap-4">
+      <motion.div
+        className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 lg:gap-4"
+        variants={staggerContainer}
+        initial="hidden"
+        animate="show"
+        key={expanded ? "exp" : "col"}
+      >
       {shown.map((cat) => {
           const Icon = iconMap[cat.icon_name] || Briefcase;
           return (
+            <motion.div key={cat.id} variants={fadeUpItem}>
             <Link
-              key={cat.id}
               to={`/category/${cat.slug}`}
-              className="flex flex-col items-center justify-start gap-1.5 lg:gap-2 p-2.5 lg:p-3.5 min-h-[90px] lg:min-h-[104px] rounded-2xl lg:rounded-3xl bg-card border hover:border-primary/40 hover:shadow-lg lg:hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 group overflow-hidden"
+              className="flex h-full flex-col items-center justify-start gap-1.5 lg:gap-2 p-2.5 lg:p-3.5 min-h-[90px] lg:min-h-[104px] rounded-2xl lg:rounded-3xl bg-card border hover:border-primary/40 hover:shadow-lg lg:hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 group overflow-hidden"
             >
-              <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl lg:rounded-2xl bg-white flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-200">
-                {cat.icon_url ? (
+              {cat.icon_url ? (
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl lg:rounded-2xl bg-white flex items-center justify-center flex-shrink-0 ring-1 ring-border/60 group-hover:scale-110 transition-transform duration-200">
                   <img src={cat.icon_url} alt={cat.name} className="w-6 h-6 lg:w-7 lg:h-7 object-contain" />
-                ) : (
-                  <Icon className="w-5 h-5 lg:w-6 lg:h-6 text-primary" />
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl lg:rounded-2xl bg-gradient-to-br from-primary to-amber-500 text-white flex items-center justify-center flex-shrink-0 shadow-sm shadow-primary/30 group-hover:scale-110 transition-transform duration-200">
+                  <Icon className="w-5 h-5 lg:w-6 lg:h-6" strokeWidth={2.2} />
+                </div>
+              )}
               <span className="text-[9px] sm:text-[10px] lg:text-xs font-medium text-foreground text-center leading-tight line-clamp-3 w-full min-h-[2.25rem] lg:min-h-[2.5rem] flex items-center justify-center break-words overflow-hidden px-0.5">
                 {cat.name}
               </span>
             </Link>
+            </motion.div>
           );
         })}
-      </div>
+      </motion.div>
       {categories.length > visibleCount && (
         <button
           onClick={() => setExpanded(!expanded)}

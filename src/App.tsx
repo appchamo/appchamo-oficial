@@ -18,6 +18,7 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import DeepLinkRouter from "@/components/DeepLinkRouter";
+import RoletaGate from "@/components/RoletaGate";
 import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
 import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
@@ -531,6 +532,7 @@ const AppContent = () => {
   return (
     <>
       <OAuthCallbackRedirectGuard />
+      {session ? <RoletaGate /> : null}
       <Suspense fallback={<PageFallback />}>
         <MainTabPersistentLayers />
         <RoutesOverlayShell>

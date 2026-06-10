@@ -163,6 +163,17 @@ serve(async (req) => {
               image_url: proAvatar,
             } as any);
 
+            // ── Roleta: concede 1 giro ao cliente por pagamento confirmado ──
+            // Idempotente por transação (transaction_id UNIQUE). O cliente só consome via RPC.
+            const { error: rouletteErr } = await supabase
+              .from("roleta_grants")
+              .upsert(
+                { user_id: tx.client_id, trigger: "payment", transaction_id: tx.id },
+                { onConflict: "transaction_id", ignoreDuplicates: true }
+              );
+            if (rouletteErr) console.error("roleta_grants insert error:", rouletteErr);
+            else console.log("🎡 Giro de roleta concedido ao cliente:", tx.client_id, "tx:", tx.id);
+
             if (proUserId) {
               const proMsg = professionalNetStr
                 ? `Você vai receber R$ ${professionalNetStr} via ${methodLabel} (líquido após taxas).`

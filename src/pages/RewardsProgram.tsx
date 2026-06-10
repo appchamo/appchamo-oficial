@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { buildInviteShareMessage, buildSignupInviteUrl, buildSignupProInviteUrl } from "@/lib/referralInvite";
 import { cn } from "@/lib/utils";
+import DailyCheckin from "@/components/DailyCheckin";
 import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
 import { parseSealIconVariant } from "@/lib/sealIconVariant";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -85,6 +86,9 @@ function RewardsReferralTab() {
 
   return (
     <>
+      <div className="mb-6">
+        <DailyCheckin />
+      </div>
       <div className="relative mb-6 overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-primary/[0.12] via-background to-amber-500/[0.08] px-5 py-7 shadow-lg shadow-primary/10">
         <div
           className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/20 blur-3xl"

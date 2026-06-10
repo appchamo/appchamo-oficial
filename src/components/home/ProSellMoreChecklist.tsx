@@ -16,7 +16,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, ChevronRight, Circle, Sparkles, TrendingUp, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Circle, Sparkles, TrendingUp, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
@@ -35,6 +35,7 @@ interface ChecklistItem {
 }
 
 const DISMISS_KEY_PREFIX = "chamo_sell_more_checklist_dismissed_";
+const MINIMIZE_KEY_PREFIX = "chamo_sell_more_checklist_minimized_";
 
 function computeTrustDone(pro: {
   experience: string | null;
@@ -58,7 +59,9 @@ function computeTrustDone(pro: {
 export default function ProSellMoreChecklist({ professionalId, userId }: Props) {
   const navigate = useNavigate();
   const dismissKey = DISMISS_KEY_PREFIX + userId;
+  const minimizeKey = MINIMIZE_KEY_PREFIX + userId;
 
+  const [minimized, setMinimized] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [trustDone, setTrustDone] = useState(false);
   const [couponDone, setCouponDone] = useState(false);
@@ -70,10 +73,19 @@ export default function ProSellMoreChecklist({ professionalId, userId }: Props) 
   useEffect(() => {
     try {
       setDismissed(localStorage.getItem(dismissKey) === "1");
+      setMinimized(localStorage.getItem(minimizeKey) === "1");
     } catch {
       /* ignore */
     }
-  }, [dismissKey]);
+  }, [dismissKey, minimizeKey]);
+
+  const toggleMinimized = () => {
+    setMinimized((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(minimizeKey, next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!professionalId || !userId) return;
@@ -167,7 +179,8 @@ export default function ProSellMoreChecklist({ professionalId, userId }: Props) 
   const allDone = doneCount === items.length;
   const pct = Math.round((doneCount / items.length) * 100);
 
-  if (allDone && dismissed) return null;
+  // Concluiu 100% → sai da Home automaticamente.
+  if (allDone) return null;
 
   const handleDismiss = () => {
     try {
@@ -181,8 +194,13 @@ export default function ProSellMoreChecklist({ professionalId, userId }: Props) 
   return (
     <section className="w-full min-w-0">
       <div className="bg-card border-2 border-primary/20 rounded-2xl overflow-hidden shadow-sm">
-        {/* Cabeçalho dentro do card */}
-        <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+        {/* Cabeçalho (clicável: minimiza / expande) */}
+        <button
+          type="button"
+          onClick={toggleMinimized}
+          aria-expanded={!minimized}
+          className="w-full flex items-center gap-2 px-4 pt-4 pb-3 text-left active:bg-primary/[0.04] transition-colors"
+        >
           <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-primary to-amber-500 shadow-sm">
             <TrendingUp className="w-4 h-4 text-white" />
           </div>
@@ -192,8 +210,15 @@ export default function ProSellMoreChecklist({ professionalId, userId }: Props) 
           <span className="ml-auto text-[11px] font-bold text-primary uppercase tracking-wide">
             {doneCount}/{items.length}
           </span>
-        </div>
+          {minimized ? (
+            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
+          )}
+        </button>
 
+        {!minimized && (
+          <>
         {/* Barra de progresso logo abaixo do cabeçalho */}
         <div className="h-1.5 bg-muted">
           <div
@@ -226,6 +251,8 @@ export default function ProSellMoreChecklist({ professionalId, userId }: Props) 
           items.map((item, i) => (
             <ChecklistRow key={item.key} item={item} isLast={i === items.length - 1} />
           ))
+        )}
+          </>
         )}
       </div>
     </section>

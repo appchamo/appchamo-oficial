@@ -22,7 +22,7 @@ const Home = lazy(() => import("@/pages/Home"));
 const Search = lazy(() => import("@/pages/Search"));
 const Messages = lazy(() => import("@/pages/Messages"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
-const Profile = lazy(() => import("@/pages/Profile"));
+const Profile = lazy(() => import("@/components/ProfileTabRoute"));
 
 const TabComponents: Record<MainAppTabPath, LazyExoticComponent<ComponentType>> = {
   "/home": Home,

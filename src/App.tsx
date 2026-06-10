@@ -83,6 +83,7 @@ const CheckinConfirm = lazy(() => import("./pages/CheckinConfirm"));
 const JobApply = lazy(() => import("./pages/JobApply"));
 const BusinessCheckout = lazy(() => import("./pages/BusinessCheckout"));
 const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
+const ProfileAccount = lazy(() => import("./pages/Profile"));
 const ProfileSettingsPassword = lazy(() => import("./pages/ProfileSettingsPassword"));
 const ProfileSettingsAddress = lazy(() => import("./pages/ProfileSettingsAddress"));
 const ProfileSettingsSecurity = lazy(() => import("./pages/ProfileSettingsSecurity"));
@@ -599,6 +600,7 @@ const AppContent = () => {
         <Route path="/how-to-pay" element={<ProtectedRoute><HowToPay /></ProtectedRoute>} />
         <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
         <Route path="/profile/settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+        <Route path="/configuracoes" element={<ProtectedRoute><ProfileAccount /></ProtectedRoute>} />
         <Route path="/profile/settings/seguranca" element={<ProtectedRoute><ProfileSettingsSecurity /></ProtectedRoute>} />
         <Route path="/profile/settings/senha" element={<ProtectedRoute><ProfileSettingsPassword /></ProtectedRoute>} />
         <Route path="/profile/settings/endereco" element={<ProtectedRoute><ProfileSettingsAddress /></ProtectedRoute>} />

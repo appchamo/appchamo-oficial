@@ -24,6 +24,7 @@ import {
   UserPlus,
   UserCheck,
   Ticket,
+  Settings,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { CouponShowcaseDialog } from "@/components/coupon/CouponShowcaseDialog";
@@ -96,7 +97,7 @@ const availabilityOptions = [
   { value: "unavailable", label: "Indisponível", icon: CalendarOff, color: "text-destructive" },
 ];
 
-const ProfessionalProfile = () => {
+const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -123,6 +124,10 @@ const ProfessionalProfile = () => {
   const [myComment, setMyComment] = useState("");
   const [hasMyReview, setHasMyReview] = useState(false);
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [editingAbout, setEditingAbout] = useState(false);
+  const [aboutExp, setAboutExp] = useState("");
+  const [aboutBio, setAboutBio] = useState("");
+  const [savingAbout, setSavingAbout] = useState(false);
   const [publicSeals, setPublicSeals] = useState<{ seal_id: string; title: string; icon_variant: string }[]>([]);
   const [sealsModalOpen, setSealsModalOpen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -135,14 +140,22 @@ const ProfessionalProfile = () => {
   const [followBusy, setFollowBusy] = useState(false);
 
   const loadProfile = useCallback(async () => {
-    if (!id) return;
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    let lookupId = id || "";
+    let isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lookupId);
+    if (!id) {
+      // Modo "meu perfil": resolve o profissional do usuário logado
+      if (!ownMode || !user) { return; }
+      const { data: myPro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+      if (!myPro) { setLoading(false); return; }
+      lookupId = (myPro as { id: string }).id;
+      isUUID = true;
+    }
     const baseQuery = supabase
         .from("professionals")
         .select(
           "id, experience, services, bio, rating, total_services, total_reviews, verified, user_id, profile_status, availability_status, category_id, profession_id, categories(name), professions:profession_id(name), agenda_enabled, slug, cover_image_url, avg_response_seconds, avg_response_sample_count, avg_response_computed_at, social_whatsapp, social_instagram, social_link",
         );
-    const { data } = await (isUUID ? baseQuery.eq("id", id) : baseQuery.eq("slug", id)).maybeSingle();
+    const { data } = await (isUUID ? baseQuery.eq("id", lookupId) : baseQuery.eq("slug", lookupId)).maybeSingle();
         
       if (data) {
         setIsOwner(false);
@@ -270,13 +283,13 @@ const ProfessionalProfile = () => {
         setPublicSeals([]);
       }
     setLoading(false);
-  }, [id]);
+  }, [id, ownMode, user]);
 
   useRefreshAtKey(location.pathname, loadProfile);
 
   useEffect(() => {
-    if (id) loadProfile();
-  }, [id, loadProfile]);
+    if (id || ownMode) loadProfile();
+  }, [id, ownMode, loadProfile]);
 
   const submitProfileReview = async () => {
     if (!user) { toast({ title: "Entre na sua conta para avaliar." }); return; }
@@ -295,6 +308,23 @@ const ProfessionalProfile = () => {
       await loadProfile();
     }
     setSubmittingReview(false);
+  };
+
+  const saveAbout = async () => {
+    if (!pro) return;
+    setSavingAbout(true);
+    const { error } = await supabase
+      .from("professionals")
+      .update({ experience: aboutExp.trim() || null, bio: aboutBio.trim() || null } as any)
+      .eq("id", pro.id);
+    setSavingAbout(false);
+    if (error) {
+      toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Perfil atualizado!" });
+      setPro((prev) => prev ? { ...prev, experience: aboutExp.trim() || null, bio: aboutBio.trim() || null } : prev);
+      setEditingAbout(false);
+    }
   };
 
   // Realtime: listen for availability_status changes on this professional (use actual UUID, not slug)
@@ -643,6 +673,19 @@ const ProfessionalProfile = () => {
             )}
             {/* Overlay escuro suave para não misturar com a foto do perfil */}
             <div className="absolute inset-0 bg-black/25" />
+
+            {/* Configurações da conta (só para o dono) */}
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => navigate("/configuracoes")}
+                className="absolute top-3 left-3 z-10 h-9 px-3 rounded-full bg-black/35 backdrop-blur-md flex items-center justify-center gap-1.5 hover:bg-black/50 transition-colors border border-white/10"
+                title="Configurações"
+              >
+                <Settings className="w-4 h-4 text-white" />
+                <span className="text-xs font-semibold text-white hidden sm:inline">Configurações</span>
+              </button>
+            )}
 
             {/* Botão upload da capa (só para o dono) */}
             {isOwner && (
@@ -1056,29 +1099,74 @@ const ProfessionalProfile = () => {
         )}
 
         {/* Experiência, Serviços e Sobre */}
-        {(pro.experience || (pro.services && pro.services.length > 0) || pro.bio) && (
+        {(pro.experience || (pro.services && pro.services.length > 0) || pro.bio || isOwner) && (
           <div className="bg-card border rounded-2xl p-5 shadow-card mb-4 space-y-4">
-            {pro.experience && (
-              <div>
-                <h2 className="font-semibold text-foreground mb-2">Experiência</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{pro.experience}</p>
+            {isOwner && (
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-foreground">Sobre você</h2>
+                {!editingAbout && (
+                  <button
+                    onClick={() => { setAboutExp(pro.experience || ""); setAboutBio(pro.bio || ""); setEditingAbout(true); }}
+                    className="flex items-center gap-1 text-xs font-semibold text-primary"
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> Editar
+                  </button>
+                )}
               </div>
             )}
-            {pro.services && pro.services.length > 0 && (
-              <div>
-                <h2 className="font-semibold text-foreground mb-2">Serviços</h2>
-                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                  {pro.services.map((s, i) => (
-                    <li key={i}>{s}</li>
-                  ))}
-                </ul>
+
+            {isOwner && editingAbout ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Experiência</label>
+                  <textarea value={aboutExp} onChange={(e) => setAboutExp(e.target.value)} rows={3} maxLength={1000}
+                    placeholder="Conte sua experiência..."
+                    className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Sobre (bio)</label>
+                  <textarea value={aboutBio} onChange={(e) => setAboutBio(e.target.value)} rows={3} maxLength={1000}
+                    placeholder="Fale sobre você e seu trabalho..."
+                    className="w-full border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={saveAbout} disabled={savingAbout}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">
+                    {savingAbout ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
+                  </button>
+                  <button onClick={() => setEditingAbout(false)} className="px-4 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors">
+                    Cancelar
+                  </button>
+                </div>
               </div>
-            )}
-            {pro.bio && (
-              <div>
-                <h2 className="font-semibold text-foreground mb-2">Sobre</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{pro.bio}</p>
-              </div>
+            ) : (
+              <>
+                {pro.experience && (
+                  <div>
+                    <p className={isOwner ? "text-[11px] font-semibold text-muted-foreground uppercase mb-1" : "font-semibold text-foreground mb-2"}>Experiência</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{pro.experience}</p>
+                  </div>
+                )}
+                {pro.services && pro.services.length > 0 && (
+                  <div>
+                    <h2 className="font-semibold text-foreground mb-2">Serviços</h2>
+                    <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                      {pro.services.map((s, i) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {pro.bio && (
+                  <div>
+                    <p className={isOwner ? "text-[11px] font-semibold text-muted-foreground uppercase mb-1" : "font-semibold text-foreground mb-2"}>Sobre</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{pro.bio}</p>
+                  </div>
+                )}
+                {isOwner && !pro.experience && !pro.bio && (
+                  <p className="text-xs text-muted-foreground">Toque em "Editar" para adicionar sua experiência e bio.</p>
+                )}
+              </>
             )}
           </div>
         )}

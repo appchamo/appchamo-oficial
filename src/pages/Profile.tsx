@@ -607,6 +607,15 @@ const Profile = () => {
             </Button>
           )}
 
+          {!editing && proData?.slug && (profile.user_type === "professional" || profile.user_type === "company") && (
+            <Link
+              to={`/professional/${proData.slug}`}
+              className="w-full mt-2 h-11 rounded-xl border-2 border-primary/40 text-primary font-semibold text-sm flex items-center justify-center gap-2 hover:bg-primary/5 active:scale-[0.99] transition-[background-color,transform]"
+            >
+              <User className="w-4 h-4" /> Ver meu perfil público
+            </Link>
+          )}
+
           {proData && !editing && (
             <div className="flex items-center gap-4 mt-4 pt-3 border-t text-sm">
               <span className="flex items-center gap-1"><Star className="w-4 h-4 fill-amber-400 text-amber-400" /><strong>{Number(proData.rating).toFixed(1)}</strong></span>

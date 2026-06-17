@@ -21,6 +21,10 @@
   ],
   "rewrites": [
     {
+      "source": "/abrir",
+      "destination": "/abrir.html"
+    },
+    {
       "source": "/sw.js",
       "destination": "/sw.js"
     },

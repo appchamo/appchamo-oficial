@@ -374,7 +374,7 @@ function CheckinCaixaHeader() {
           <p className="text-xs text-muted-foreground mt-3 mb-2 px-1">
             Estabelecimentos que dão desconto ao validar no caixa:
           </p>
-          <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+          <div className="flex gap-3 overflow-x-auto pt-2.5 pb-1 -mx-1 px-1">
             {sponsors.map((s) => (
               <div key={s.id} className="flex flex-col items-center gap-1 shrink-0 w-16">
                 <div className="relative">

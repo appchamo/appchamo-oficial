@@ -43,7 +43,7 @@ const CategoryDetail = lazy(() => import("./pages/CategoryDetail"));
 const MessageThread = lazy(() => import("./pages/MessageThread"));
 const Coupons = lazy(() => import("./pages/Coupons"));
 const Jobs = lazy(() => import("./pages/Jobs"));
-const RewardsProgram = lazy(() => import("./pages/RewardsProgram"));
+const Notifications = lazy(() => import("./pages/Notifications"));
 const JobDetail = lazy(() => import("./pages/JobDetail"));
 const MyJobPostings = lazy(() => import("./pages/MyJobPostings"));
 const MyCatalog = lazy(() => import("./pages/MyCatalog"));
@@ -560,11 +560,11 @@ const AppContent = () => {
         <Route path="/category/:id" element={<CategoryDetail />} />
         <Route path="/messages" element={<TabRoutePlaceholder />} />
         <Route path="/messages/:threadId" element={<ProtectedRoute><MessageThread /></ProtectedRoute>} />
-        <Route path="/notifications" element={<TabRoutePlaceholder />} />
+        <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
         <Route path="/coupons" element={<ProtectedRoute><Coupons /></ProtectedRoute>} />
         <Route path="/profile" element={<TabRoutePlaceholder />} />
         <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
-        <Route path="/rewards" element={<ProtectedRoute><RewardsProgram /></ProtectedRoute>} />
+        <Route path="/rewards" element={<TabRoutePlaceholder />} />
         <Route path="/jobs/:id" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
         <Route path="/jobs/:id/apply" element={<JobApply />} />
         <Route path="/my-jobs" element={<ProtectedRoute><MyJobPostings /></ProtectedRoute>} />

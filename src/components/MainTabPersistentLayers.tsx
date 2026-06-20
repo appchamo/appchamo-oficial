@@ -21,14 +21,14 @@ import {
 const Home = lazy(() => import("@/pages/Home"));
 const Search = lazy(() => import("@/pages/Search"));
 const Messages = lazy(() => import("@/pages/Messages"));
-const Notifications = lazy(() => import("@/pages/Notifications"));
+const Rewards = lazy(() => import("@/pages/RewardsProgram"));
 const Profile = lazy(() => import("@/components/ProfileTabRoute"));
 
 const TabComponents: Record<MainAppTabPath, LazyExoticComponent<ComponentType>> = {
   "/home": Home,
   "/search": Search,
   "/messages": Messages,
-  "/notifications": Notifications,
+  "/rewards": Rewards,
   "/profile": Profile,
 };
 
@@ -38,7 +38,7 @@ export function TabRoutePlaceholder() {
 }
 
 function tabNeedsAuth(path: MainAppTabPath): boolean {
-  return path === "/messages" || path === "/notifications" || path === "/profile";
+  return path === "/messages" || path === "/rewards" || path === "/profile";
 }
 
 function TabInner({ path }: { path: MainAppTabPath }) {

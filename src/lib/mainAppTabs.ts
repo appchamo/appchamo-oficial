@@ -2,7 +2,7 @@
 export const EDGE_SWIPE_BACK_ZONE_PX = 36;
 
 /** Ordem das abas principais (bottom nav) — usado também para swipe entre telas */
-export const MAIN_APP_TAB_PATHS = ["/home", "/search", "/messages", "/notifications", "/profile"] as const;
+export const MAIN_APP_TAB_PATHS = ["/home", "/search", "/messages", "/rewards", "/profile"] as const;
 export type MainAppTabPath = (typeof MAIN_APP_TAB_PATHS)[number];
 
 /** `data-chamo-tab-persist` por rota de aba (peek no gesto voltar). */
@@ -10,7 +10,7 @@ export const MAIN_TAB_PERSIST_ATTR: Record<MainAppTabPath, string> = {
   "/home": "home",
   "/search": "search",
   "/messages": "messages",
-  "/notifications": "notifications",
+  "/rewards": "rewards",
   "/profile": "profile",
 };
 

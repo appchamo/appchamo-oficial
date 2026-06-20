@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { Gift, Copy, Loader2, Ticket, Sparkles, Share2, Trophy } from "lucide-react";
+import { Gift, Copy, Loader2, Ticket, Sparkles, Share2, Trophy, QrCode } from "lucide-react";
+import CouponsContent from "@/components/CouponsContent";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
@@ -343,13 +344,71 @@ function RewardsMissionsTab() {
   );
 }
 
+type CheckinSponsor = { id: string; name: string; logo_url: string | null; checkin_discount_percent: number };
+
+function CheckinCaixaHeader() {
+  const navigate = useNavigate();
+  const [sponsors, setSponsors] = useState<CheckinSponsor[]>([]);
+
+  useEffect(() => {
+    supabase
+      .from("sponsors")
+      .select("id, name, logo_url, checkin_discount_percent")
+      .eq("active", true)
+      .eq("checkin_active", true)
+      .order("sort_order")
+      .then(({ data }) => setSponsors((data as unknown as CheckinSponsor[]) || []));
+  }, []);
+
+  return (
+    <div className="mb-6">
+      <button
+        onClick={() => navigate("/qr-scan")}
+        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-primary text-primary-foreground font-extrabold shadow-lg shadow-primary/25 active:scale-[0.98] transition-transform"
+      >
+        <QrCode className="w-5 h-5" /> VALIDAR NO CAIXA
+      </button>
+
+      {sponsors.length > 0 && (
+        <>
+          <p className="text-xs text-muted-foreground mt-3 mb-2 px-1">
+            Estabelecimentos que dão desconto ao validar no caixa:
+          </p>
+          <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+            {sponsors.map((s) => (
+              <div key={s.id} className="flex flex-col items-center gap-1 shrink-0 w-16">
+                <div className="relative">
+                  <div className="w-14 h-14 rounded-full bg-muted overflow-hidden flex items-center justify-center ring-2 ring-primary/20">
+                    {s.logo_url ? (
+                      <img src={s.logo_url} alt={s.name} className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <span className="text-xs font-bold text-muted-foreground">{s.name.slice(0, 2).toUpperCase()}</span>
+                    )}
+                  </div>
+                  {Number(s.checkin_discount_percent) > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full shadow ring-2 ring-background">
+                      {Number(s.checkin_discount_percent)}%
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-foreground text-center leading-tight line-clamp-2">{s.name}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const RewardsProgram = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const activeTab = tabParam === "invite" ? "invite" : "missions";
+  const activeTab = tabParam === "invite" ? "invite" : tabParam === "cupons" ? "cupons" : "missions";
 
   const setTab = (v: string) => {
     if (v === "invite") setSearchParams({ tab: "invite" }, { replace: true });
+    else if (v === "cupons") setSearchParams({ tab: "cupons" }, { replace: true });
     else setSearchParams({}, { replace: true });
   };
 
@@ -361,13 +420,18 @@ const RewardsProgram = () => {
           <p className="text-sm text-muted-foreground mt-1">Missões com selos e indicações com cupons.</p>
         </div>
 
+        <CheckinCaixaHeader />
+
         <Tabs value={activeTab} onValueChange={setTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 h-11 rounded-xl bg-muted/80 p-1">
-            <TabsTrigger value="missions" className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm">
+          <TabsList className="grid w-full grid-cols-3 h-11 rounded-xl bg-muted/80 p-1">
+            <TabsTrigger value="missions" className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:shadow-sm">
               Missões
             </TabsTrigger>
-            <TabsTrigger value="invite" className="rounded-lg text-sm font-semibold data-[state=active]:shadow-sm">
-              Indique e ganhe
+            <TabsTrigger value="invite" className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:shadow-sm">
+              Indique
+            </TabsTrigger>
+            <TabsTrigger value="cupons" className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:shadow-sm">
+              Cupons
             </TabsTrigger>
           </TabsList>
           <TabsContent value="missions" className="mt-5 focus-visible:outline-none">
@@ -378,6 +442,9 @@ const RewardsProgram = () => {
           </TabsContent>
           <TabsContent value="invite" className="mt-5 focus-visible:outline-none">
             <RewardsReferralTab />
+          </TabsContent>
+          <TabsContent value="cupons" className="mt-5 focus-visible:outline-none">
+            <CouponsContent />
           </TabsContent>
         </Tabs>
       </main>

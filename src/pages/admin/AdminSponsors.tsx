@@ -43,6 +43,8 @@ interface Sponsor {
   user_id: string | null;
   weekly_plan: WeeklyPlan;
   checkin_token: string;
+  checkin_active: boolean;
+  checkin_discount_percent: number;
 }
 
 const PLAN_LABELS: Record<WeeklyPlan, string> = {
@@ -77,6 +79,28 @@ const AdminSponsors = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loadingCities, setLoadingCities] = useState(false);
   const [qrSponsor, setQrSponsor] = useState<Sponsor | null>(null);
+  const [discountInput, setDiscountInput] = useState("");
+  const [activatingCheckin, setActivatingCheckin] = useState(false);
+
+  useEffect(() => {
+    if (qrSponsor) setDiscountInput(qrSponsor.checkin_discount_percent ? String(qrSponsor.checkin_discount_percent) : "");
+  }, [qrSponsor?.id]);
+
+  const saveCheckinActivation = async (active: boolean) => {
+    if (!qrSponsor) return;
+    const pct = active ? Math.max(0, Math.min(100, Number(discountInput) || 0)) : 0;
+    setActivatingCheckin(true);
+    const { error } = await supabase
+      .from("sponsors")
+      .update({ checkin_active: active, checkin_discount_percent: pct } as any)
+      .eq("id", qrSponsor.id);
+    setActivatingCheckin(false);
+    if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); return; }
+    toast({ title: active ? "Check-in ativado!" : "Check-in desativado" });
+    const updated = { ...qrSponsor, checkin_active: active, checkin_discount_percent: pct };
+    setQrSponsor(updated);
+    setSponsors((list) => list.map((s) => (s.id === updated.id ? updated : s)));
+  };
 
   // Preços dos pacotes de novidades
   const [pack14Price, setPack14Price] = useState("");
@@ -87,7 +111,7 @@ const AdminSponsors = () => {
   const fetchSponsors = async () => {
     const { data, error } = await supabase.from("sponsors").select("*").order("sort_order");
     if (error) { toast({ title: "Erro ao carregar", description: translateError(error.message), variant: "destructive" }); return; }
-    setSponsors((data || []) as Sponsor[]);
+    setSponsors((data || []) as unknown as Sponsor[]);
     setLoading(false);
   };
 
@@ -495,29 +519,86 @@ const AdminSponsors = () => {
           {qrSponsor && (
             <div className="flex flex-col items-center text-center gap-3">
               <p className="font-semibold text-sm text-foreground">{qrSponsor.name}</p>
-              <img
-                src={buildQrImageUrl(buildCheckinQrData(qrSponsor.checkin_token), 280)}
-                alt={`QR Code de ${qrSponsor.name}`}
-                className="w-56 h-56 border rounded-xl bg-white p-2"
-              />
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Imprima e cole no caixa. O cliente abre o Chamô, toca em "Validar no caixa" e aponta a câmera.
-              </p>
-              <div className="flex gap-2 w-full">
-                <button
-                  onClick={() => printCheckinQr(qrSponsor.name, qrSponsor.checkin_token)}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-                >
-                  <Printer className="w-4 h-4" /> Imprimir
-                </button>
-                <a
-                  href={buildQrImageUrl(buildCheckinQrData(qrSponsor.checkin_token), 600)}
-                  target="_blank" rel="noopener noreferrer" download={`qr-caixa-${qrSponsor.name}.png`}
-                  className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                </a>
-              </div>
+
+              {!qrSponsor.checkin_active ? (
+                /* Ainda não ativado: pede o desconto e ativa */
+                <div className="w-full text-left">
+                  <p className="text-xs text-muted-foreground mb-3 text-center leading-relaxed">
+                    Ative o programa de check-in no caixa e defina o desconto que o cliente ganha ao validar.
+                  </p>
+                  <label className="text-xs font-medium text-muted-foreground">Desconto ao validar (%)</label>
+                  <input
+                    type="number" min={0} max={100} inputMode="numeric"
+                    value={discountInput}
+                    onChange={(e) => setDiscountInput(e.target.value)}
+                    placeholder="Ex: 10"
+                    className="w-full border rounded-xl px-3 py-2 text-sm bg-background mt-1 mb-3 outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <button
+                    onClick={() => saveCheckinActivation(true)}
+                    disabled={activatingCheckin}
+                    className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+                  >
+                    {activatingCheckin ? "Ativando..." : "Ativar check-in"}
+                  </button>
+                </div>
+              ) : (
+                /* Ativado: mostra QR + desconto + opções */
+                <>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 text-[11px] font-bold">
+                    Ativo · {qrSponsor.checkin_discount_percent}% de desconto
+                  </span>
+                  <img
+                    src={buildQrImageUrl(buildCheckinQrData(qrSponsor.checkin_token), 280)}
+                    alt={`QR Code de ${qrSponsor.name}`}
+                    className="w-56 h-56 border rounded-xl bg-white p-2"
+                  />
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Imprima e cole no caixa. O cliente abre o Chamô, toca em "Validar no caixa" e aponta a câmera.
+                  </p>
+                  <div className="flex gap-2 w-full">
+                    <button
+                      onClick={() => printCheckinQr(qrSponsor.name, qrSponsor.checkin_token)}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                    >
+                      <Printer className="w-4 h-4" /> Imprimir
+                    </button>
+                    <a
+                      href={buildQrImageUrl(buildCheckinQrData(qrSponsor.checkin_token), 600)}
+                      target="_blank" rel="noopener noreferrer" download={`qr-caixa-${qrSponsor.name}.png`}
+                      className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                    </a>
+                  </div>
+
+                  <div className="w-full border-t pt-3 mt-1 text-left">
+                    <label className="text-xs font-medium text-muted-foreground">Alterar desconto (%)</label>
+                    <div className="flex gap-2 mt-1">
+                      <input
+                        type="number" min={0} max={100} inputMode="numeric"
+                        value={discountInput}
+                        onChange={(e) => setDiscountInput(e.target.value)}
+                        className="flex-1 border rounded-xl px-3 py-2 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                      <button
+                        onClick={() => saveCheckinActivation(true)}
+                        disabled={activatingCheckin}
+                        className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-60"
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => saveCheckinActivation(false)}
+                      disabled={activatingCheckin}
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-semibold text-destructive hover:bg-destructive/5 transition-colors"
+                    >
+                      Desativar check-in
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </DialogContent>

@@ -15,6 +15,7 @@ const CheckinConfirm = () => {
   const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>("loading");
   const [sponsorName, setSponsorName] = useState<string>("");
+  const [discount, setDiscount] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const ranRef = useRef(false);
@@ -42,6 +43,7 @@ const CheckinConfirm = () => {
       }
       if (data?.ok) {
         setSponsorName(data.sponsor_name || "");
+        setDiscount(Number(data.discount_percent) || 0);
         setStage("success");
         return;
       }
@@ -114,6 +116,14 @@ const CheckinConfirm = () => {
               <Store className="w-4 h-4" />
               {sponsorName ? <>Você foi validado em <strong className="text-foreground">{sponsorName}</strong>.</> : "Validação concluída."}
             </p>
+
+            {discount > 0 && (
+              <div className="mt-1 w-full rounded-2xl border-2 border-emerald-400/40 bg-emerald-50 dark:bg-emerald-950/30 px-5 py-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">Você ganhou</p>
+                <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400 leading-none my-1">{discount}% OFF</p>
+                <p className="text-xs text-emerald-800/80 dark:text-emerald-300/80">de desconto no seu pagamento. Mostre esta tela no caixa.</p>
+              </div>
+            )}
             <Link
               to="/home"
               className="mt-2 inline-flex items-center px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"

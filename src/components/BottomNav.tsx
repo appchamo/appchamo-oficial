@@ -1,4 +1,4 @@
-import { Home, Search, MessageSquare, Bell, User } from "lucide-react";
+import { Home, Search, MessageSquare, Gift, User } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -11,7 +11,7 @@ const tabs = [
   { icon: Home, label: "Início", path: MAIN_APP_TAB_PATHS[0] },
   { icon: Search, label: "Buscar", path: MAIN_APP_TAB_PATHS[1] },
   { icon: MessageSquare, label: "Chat", path: MAIN_APP_TAB_PATHS[2], badgeKey: "chat" as const },
-  { icon: Bell, label: "Notificações", path: MAIN_APP_TAB_PATHS[3], badgeKey: "notifications" as const },
+  { icon: Gift, label: "Recompensas", path: MAIN_APP_TAB_PATHS[3] },
   { icon: User, label: "Perfil", path: MAIN_APP_TAB_PATHS[4] },
 ];
 

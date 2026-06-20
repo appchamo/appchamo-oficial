@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
-import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, CreditCard, QrCode, Copy, Loader2, ArrowLeft, CheckCircle2, Printer, Users } from "lucide-react";
+import { Eye, MousePointerClick, Plus, Sparkles, LogOut, Clock, Trash2, Camera, Image as ImageIcon, ShoppingCart, Check, CreditCard, QrCode, Copy, Loader2, ArrowLeft, CheckCircle2, Printer, Users, Percent } from "lucide-react";
 import { buildCheckinQrData, buildQrImageUrl, printCheckinQr, formatBirthDate } from "@/lib/sponsorCheckin";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,8 @@ interface Sponsor {
   link_url: string;
   weekly_plan: "free" | "pack_14" | "pack_28";
   checkin_token: string;
+  checkin_active: boolean;
+  checkin_discount_percent: number;
 }
 
 interface CheckinRow {
@@ -96,12 +98,12 @@ const SponsorDashboard = () => {
     if (!user) return;
     const { data: sp } = await supabase
       .from("sponsors")
-      .select("id, name, logo_url, link_url, weekly_plan, checkin_token")
+      .select("id, name, logo_url, link_url, weekly_plan, checkin_token, checkin_active, checkin_discount_percent")
       .eq("user_id", user.id)
       .maybeSingle();
 
     if (!sp) { setLoading(false); return; }
-    setSponsor(sp as Sponsor);
+    setSponsor(sp as unknown as Sponsor);
 
     const { data: st } = await supabase
       .from("sponsor_stories")
@@ -492,6 +494,22 @@ const SponsorDashboard = () => {
             </div>
             <button onClick={loadCheckins} className="text-[11px] text-primary hover:underline">Atualizar</button>
           </div>
+
+          {sponsor?.checkin_active && Number(sponsor?.checkin_discount_percent) > 0 ? (
+            <div className="mb-3 rounded-xl border-2 border-emerald-400/40 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2.5 flex items-center gap-2">
+              <Percent className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <p className="text-xs text-emerald-800 dark:text-emerald-300 leading-snug">
+                Você dá <strong className="font-black">{Number(sponsor.checkin_discount_percent)}% de desconto</strong> para cada cliente que validar no caixa.
+              </p>
+            </div>
+          ) : (
+            <div className="mb-3 rounded-xl border bg-muted/40 px-3 py-2.5">
+              <p className="text-xs text-muted-foreground leading-snug">
+                Programa de check-in não ativado. Fale com o Chamô para ativar e definir seu desconto.
+              </p>
+            </div>
+          )}
+
           {loadingCheckins ? (
             <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
           ) : checkins.length === 0 ? (

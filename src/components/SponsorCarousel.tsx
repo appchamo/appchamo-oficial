@@ -31,6 +31,8 @@ interface Sponsor {
   location_scope: string | null;
   location_state: string | null;
   location_city: string | null;
+  checkin_active?: boolean;
+  checkin_discount_percent?: number;
 }
 
 function sponsorMatchesLocation(
@@ -132,8 +134,8 @@ const SponsorCarousel = ({
 
     const fetchSponsors = (withLocation = true) => {
       const select = withLocation
-        ? "id, name, niche, link_url, logo_url, location_scope, location_state, location_city"
-        : "id, name, niche, link_url, logo_url";
+        ? "id, name, niche, link_url, logo_url, location_scope, location_state, location_city, checkin_active, checkin_discount_percent"
+        : "id, name, niche, link_url, logo_url, checkin_active, checkin_discount_percent";
       diagLog("info", "sponsors", "fetch start", { withLocation });
       let aborted = false;
       const timeoutMs = Capacitor.isNativePlatform() ? 22_000 : 12_000;
@@ -439,20 +441,27 @@ const SponsorCarousel = ({
                 onClick={() => handleClick(sponsor)}
                 className="flex-1 min-w-0 flex flex-col gap-1.5 items-center justify-start py-[4px] px-0 group"
               >
-                <div className={`w-[65px] h-[65px] lg:w-[84px] lg:h-[84px] rounded-full flex items-center justify-center overflow-hidden shrink-0 ${hasStory ? "ring-2 ring-primary ring-offset-2 ring-offset-background lg:ring-offset-4" : "ring-2 ring-muted group-hover:ring-primary/40 transition-all"}`}>
-                  <div className="w-full h-full rounded-full bg-muted flex items-center justify-center overflow-hidden">
-                    {sponsor.logo_url ? (
-                      <img
-                        src={getSponsorLogoUrl(sponsor.logo_url)}
-                        alt={sponsor.name}
-                        className="w-full h-full object-cover rounded-full"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <span className="text-xs font-bold text-muted-foreground leading-none">{sponsor.name.slice(0, 2).toUpperCase()}</span>
-                    )}
+                <div className="relative shrink-0">
+                  <div className={`w-[65px] h-[65px] lg:w-[84px] lg:h-[84px] rounded-full flex items-center justify-center overflow-hidden ${hasStory ? "ring-2 ring-primary ring-offset-2 ring-offset-background lg:ring-offset-4" : "ring-2 ring-muted group-hover:ring-primary/40 transition-all"}`}>
+                    <div className="w-full h-full rounded-full bg-muted flex items-center justify-center overflow-hidden">
+                      {sponsor.logo_url ? (
+                        <img
+                          src={getSponsorLogoUrl(sponsor.logo_url)}
+                          alt={sponsor.name}
+                          className="w-full h-full object-cover rounded-full"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
+                        <span className="text-xs font-bold text-muted-foreground leading-none">{sponsor.name.slice(0, 2).toUpperCase()}</span>
+                      )}
+                    </div>
                   </div>
+                  {sponsor.checkin_active && Number(sponsor.checkin_discount_percent) > 0 && (
+                    <span className="absolute -top-1 -right-1 flex items-center gap-0.5 bg-emerald-500 text-white text-[9px] lg:text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-md ring-2 ring-background leading-none">
+                      {Number(sponsor.checkin_discount_percent)}%
+                    </span>
+                  )}
                 </div>
                 <span className="text-[11px] lg:text-xs font-medium text-foreground truncate w-full text-center max-w-[100px] lg:max-w-[120px]">{sponsor.name}</span>
                 <span className={`text-[9px] lg:text-[10px] -mt-1 ${hasStory ? "text-primary font-medium" : "text-muted-foreground"}`}>{hasStory ? "Novidade" : subtitle}</span>

@@ -132,11 +132,14 @@ serve(async (req) => {
 
     const { data: sponsor } = await admin
       .from("sponsors")
-      .select("id, name, user_id, active")
+      .select("id, name, user_id, active, checkin_active, checkin_discount_percent")
       .eq("checkin_token", token)
       .maybeSingle();
     if (!sponsor) return json({ error: "QR Code inválido ou expirado." }, 404);
     if (!sponsor.active) return json({ error: "Este estabelecimento está inativo no momento." }, 409);
+    if (!sponsor.checkin_active) return json({ error: "Este estabelecimento ainda não está no programa de check-in." }, 409);
+
+    const discount = Number(sponsor.checkin_discount_percent) || 0;
 
     // Perfil do cliente
     const { data: profile } = await admin
@@ -169,17 +172,18 @@ serve(async (req) => {
       const hora = new Date().toLocaleTimeString("pt-BR", {
         hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo",
       });
+      const descTxt = discount > 0 ? ` Aplique ${discount}% de desconto.` : "";
       await admin.from("notifications").insert({
         user_id: sponsor.user_id,
         title: `Cliente ${clientName} autenticado`,
-        message: `Cliente validado no caixa às ${hora}. Toque para ver os dados.`,
+        message: `Cliente validado no caixa às ${hora}.${descTxt} Toque para ver os dados.`,
         type: "info",
         link: "/sponsor/dashboard?checkins=1",
         read: false,
       });
     }
 
-    return json({ ok: true, sponsor_name: sponsor.name });
+    return json({ ok: true, sponsor_name: sponsor.name, discount_percent: discount });
   }
 
   return json({ error: "Ação inválida." }, 400);

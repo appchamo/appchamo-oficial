@@ -189,6 +189,8 @@ const SponsorCarousel = ({
               location_scope: r.location_scope ?? "nationwide",
               location_state: r.location_state ?? null,
               location_city: r.location_city ?? null,
+              checkin_active: r.checkin_active ?? false,
+              checkin_discount_percent: r.checkin_discount_percent ?? 0,
             }));
             setAllSponsors(list as Sponsor[]);
           }

@@ -46,9 +46,9 @@ export default function Roleta({ trigger, grantId = null, onDone, onDismiss }: P
   const [result, setResult] = useState<RoletaResult | null>(null);
   const resultRef = useRef<RoletaResult | null>(null);
 
-  const headerTitle = trigger === "login" ? "Giro do dia!" : "Você ganhou um giro!";
+  const headerTitle = trigger === "login" ? "Giro da semana!" : "Você ganhou um giro!";
   const headerSub = trigger === "login"
-    ? "Gire a roleta e ganhe um prêmio. Volte todo dia!"
+    ? "Gire a roleta e ganhe um prêmio. Volte toda semana!"
     : "Obrigado pela compra! Gire a roleta e ganhe um prêmio.";
 
   const spin = async () => {

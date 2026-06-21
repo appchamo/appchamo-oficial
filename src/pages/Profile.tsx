@@ -51,6 +51,7 @@ const Profile = () => {
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [migrateDoc, setMigrateDoc] = useState("");
   const [migrating, setMigrating] = useState(false);
+  const [toClientOpen, setToClientOpen] = useState(false);
   const [proData, setProData] = useState<{ id: string; slug: string | null; cover_image_url: string | null; experience: string | null; services: string[] | null; bio: string | null; rating: number; total_services: number; total_reviews: number; verified: boolean; availability_status: string; category_name: string } | null>(null);
 
   // ── Pendências de cadastro ──────────────────────────────────────────────────
@@ -228,6 +229,23 @@ const Profile = () => {
       toast({ title: "Link copiado!", description: link });
     } else if (result === "failed") {
       toast({ title: "Seu link:", description: link });
+    }
+  };
+
+  const handleMigrateToClient = async () => {
+    if (!user || !profile) return;
+    setMigrating(true);
+    try {
+      const { error } = await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", user.id);
+      if (error) throw error;
+      await refreshProfile();
+      toast({ title: "Pronto! 🎉", description: "Seu perfil agora é de Cliente." });
+      setToClientOpen(false);
+      setEditing(false);
+    } catch (e: any) {
+      toast({ title: "Erro ao mudar", description: e.message, variant: "destructive" });
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -707,7 +725,11 @@ const Profile = () => {
           )}
 
           {editing && (profile.user_type === "professional" || profile.user_type === "company") && (
-            <div className="mt-4 pt-3 border-t">
+            <div className="mt-4 pt-3 border-t space-y-2">
+              <p className="text-xs text-muted-foreground px-0.5">
+                Tipo da sua conta:{" "}
+                <strong className="text-foreground">{profile.user_type === "company" ? "Empresa" : "Profissional"}</strong>
+              </p>
               <button
                 type="button"
                 onClick={() => {
@@ -722,6 +744,14 @@ const Profile = () => {
               >
                 <ArrowLeftRight className="w-4 h-4" />
                 Migrar para {profile.user_type === "professional" ? "Empresa" : "Profissional Individual"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setToClientOpen(true)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-muted-foreground/25 rounded-xl text-sm text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
+              >
+                <ArrowLeftRight className="w-4 h-4" />
+                Mudar para Cliente
               </button>
             </div>
           )}
@@ -919,6 +949,39 @@ const Profile = () => {
             </Dialog>
           );
         })()}
+
+        {/* Modal: mudar para Cliente */}
+        {profile && (profile.user_type === "professional" || profile.user_type === "company") && (
+          <Dialog open={toClientOpen} onOpenChange={setToClientOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-primary" /> Mudar para Cliente
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  Seu perfil deixará de ser{" "}
+                  <strong className="text-foreground">{profile.user_type === "company" ? "Empresa" : "Profissional"}</strong>{" "}
+                  e passará a ser <strong className="text-foreground">Cliente</strong>. Você não aparecerá mais nas buscas
+                  como prestador e perderá o acesso ao Painel Profissional.
+                </p>
+                <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+                  Se você tem um plano pago ativo, cancele a assinatura em <strong>Configurações</strong> para não ser cobrado.
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <Button variant="outline" className="flex-1" onClick={() => setToClientOpen(false)} disabled={migrating}>
+                    Cancelar
+                  </Button>
+                  <Button className="flex-1 gap-1.5" onClick={handleMigrateToClient} disabled={migrating}>
+                    {migrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowLeftRight className="w-4 h-4" />}
+                    {migrating ? "Mudando..." : "Confirmar"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
 
         <SponsorLaunchNovidadeModal
           open={sponsorNovidadeOpen}

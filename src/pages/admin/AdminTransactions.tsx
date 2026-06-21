@@ -38,6 +38,8 @@ interface Subscriber {
   last_payment_status: string | null;
   last_payment_at: string | null;
   courtesy: boolean | null;
+  cancel_at_period_end: boolean | null;
+  period_ends_at: string | null;
   full_name: string;
   email: string;
 }
@@ -1373,6 +1375,11 @@ const AdminTransactions = () => {
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.cls}`}>
                               <st.Icon className="w-3 h-3" /> {st.label}
                             </span>
+                            {s.cancel_at_period_end && s.status === "active" && (
+                              <span className="mt-1 block text-[9px] font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                                Cancela {s.period_ends_at ? `em ${new Date(s.period_ends_at).toLocaleDateString("pt-BR")}` : "ao fim do período"}
+                              </span>
+                            )}
                           </td>
                           <td className="p-3 text-[11px] text-muted-foreground hidden md:table-cell whitespace-nowrap">
                             <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDateTime(s.started_at)}</span>

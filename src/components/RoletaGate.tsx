@@ -38,6 +38,11 @@ function signupInProgress(): boolean {
   try { return localStorage.getItem("signup_in_progress") === "true"; } catch { return false; }
 }
 
+/** Tutorial de onboarding concluído? A roleta só abre depois dele (pra não empilhar modal). */
+function onboardingDone(): boolean {
+  try { return localStorage.getItem("chamo_onboarding_done") === "1"; } catch { return true; }
+}
+
 export default function RoletaGate() {
   const { user, profile, loading } = useAuth();
   const location = useLocation();
@@ -66,6 +71,7 @@ export default function RoletaGate() {
 
   const check = useCallback(async () => {
     if (!eligible || open || busyRef.current || isDismissed()) return;
+    if (!onboardingDone()) return; // espera o tutorial de boas-vindas fechar primeiro
     busyRef.current = true;
     try {
       const { data, error } = await supabase.rpc("roleta_pending" as any);
@@ -98,6 +104,13 @@ export default function RoletaGate() {
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [eligible, check]);
+
+  // Quando o tutorial de boas-vindas fecha, espera 2s e aí abre a roleta (um modal de cada vez).
+  useEffect(() => {
+    const onTutorialDone = () => { setTimeout(() => { void check(); }, 2000); };
+    window.addEventListener("chamo-tutorial-dismissed", onTutorialDone);
+    return () => window.removeEventListener("chamo-tutorial-dismissed", onTutorialDone);
+  }, [check]);
 
   const next = () => {
     if (idx + 1 < queue.length) {

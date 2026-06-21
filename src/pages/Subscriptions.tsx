@@ -305,18 +305,43 @@ const Subscriptions = () => {
 
   const handleCancelSubscription = async () => {
     if (!user) return;
+    const src = (currentSubscription?.source || "").toLowerCase();
     setCancelling(true);
-    const ok = await scheduleCancel();
-    if (ok) {
+    try {
+      // Apple: o app não cancela — só o usuário, em Ajustes → Apple ID → Assinaturas.
+      if (src === "apple_iap") {
+        window.open("https://apps.apple.com/account/subscriptions", "_blank");
+        toast({
+          title: "Gerencie pela Apple",
+          description: "Assinaturas da Apple são canceladas em Ajustes → Apple ID → Assinaturas. Abrimos a tela pra você.",
+        });
+        setCancelOpen(false);
+        return;
+      }
+      // Google Play: idem, cancela na Play.
+      if (src === "google_iap") {
+        window.open("https://play.google.com/store/account/subscriptions", "_blank");
+        toast({
+          title: "Gerencie pela Google Play",
+          description: "Assinaturas da Play são canceladas na Google Play → Assinaturas. Abrimos a tela pra você.",
+        });
+        setCancelOpen(false);
+        return;
+      }
+      // Asaas (PIX/cartão): para a cobrança agora e mantém o acesso até o fim do período pago.
+      const { data, error } = await supabase.functions.invoke("cancel_subscription", { body: {} });
+      if (error || !(data as any)?.ok) throw new Error("cancel_failed");
+      await refetch();
       toast({
-        title: "Cancelamento agendado",
-        description: "Você continuará com os benefícios do plano atual até o fim do período pago. Depois voltará ao plano Grátis.",
+        title: "Cancelamento confirmado",
+        description: "Você não será cobrado de novo. Os benefícios continuam até o fim do período já pago.",
       });
-    } else {
+      setCancelOpen(false);
+    } catch {
       toast({ title: "Erro ao cancelar assinatura.", variant: "destructive" });
+    } finally {
+      setCancelling(false);
     }
-    setCancelling(false);
-    setCancelOpen(false);
   };
 
   const formatCNPJ = (value: string) => {

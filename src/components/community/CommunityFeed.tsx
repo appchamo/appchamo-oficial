@@ -443,9 +443,9 @@ export default function CommunityFeed({
   const singlePostIdTrim = (singlePostId ?? "").trim();
   const isSinglePostMode = singlePostIdTrim.length > 0;
 
-  // Apenas profissional/empresa pode publicar (cliente é bloqueado).
+  // Qualquer usuário autenticado pode publicar (cliente, profissional ou empresa).
   // Espelha a RLS `community_posts_insert` no banco — se mudar lá, mudar aqui também.
-  const canPost = !!user && (profile?.user_type === "professional" || profile?.user_type === "company");
+  const canPost = !!user;
 
   const applyHydrationForPosts = useCallback(async (mergedList: PostRow[]) => {
     if (!mergedList.length) {

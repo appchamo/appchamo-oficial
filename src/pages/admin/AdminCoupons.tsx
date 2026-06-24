@@ -605,7 +605,7 @@ const AdminCoupons = () => {
   });
 
   const fetchTargetUsers = async (target: "all" | "professionals" | "clients" | "random") => {
-    let query = supabase.from("profiles").select("user_id, full_name").is("deleted_at", null);
+    let query = supabase.from("profiles").select("user_id, full_name");
     if (target === "professionals") {
       query = query.in("user_type", ["professional", "company"]);
     } else if (target === "clients") {
@@ -885,11 +885,9 @@ const AdminCoupons = () => {
   const fetchUsersWithCoupons = useCallback(async () => {
     setUsersLoading(true);
     try {
-      // Profiles ativos (não deletados)
       const { data: profilesData, error: profilesErr } = await supabase
         .from("profiles")
         .select("user_id, full_name, email, user_type")
-        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(50000);
       if (profilesErr) throw profilesErr;

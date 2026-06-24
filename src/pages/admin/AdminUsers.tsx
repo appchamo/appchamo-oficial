@@ -698,7 +698,18 @@ const AdminUsers = () => {
                   <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Email</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Tipo</th>
-                  <th className="text-left p-3 font-medium text-muted-foreground">Atividade</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">
+                    <button
+                      type="button"
+                      onClick={() => setSortBy((prev) => (prev === "last_seen_desc" ? "last_seen_asc" : "last_seen_desc"))}
+                      className="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
+                      title="Ordenar por atividade"
+                    >
+                      Atividade
+                      {sortBy === "last_seen_desc" && <span>↓</span>}
+                      {sortBy === "last_seen_asc" && <span>↑</span>}
+                    </button>
+                  </th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Criado em</th>
                   <th className="p-3"></th>

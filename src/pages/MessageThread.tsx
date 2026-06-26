@@ -132,6 +132,7 @@ const MessageThread = () => {
   const [text, setText] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [acceptSendOpen, setAcceptSendOpen] = useState(false);
   const [otherParty, setOtherParty] = useState<OtherParty>({ name: "Chat", avatar_url: null });
   const [threadLabel, setThreadLabel] = useState<{ color: ThreadLabelColor; text: string } | null>(null);
   const [peerActivity, setPeerActivity] = useState<"typing" | "recording" | null>(null);
@@ -991,7 +992,7 @@ const MessageThread = () => {
     });
   }, [messages, isFetchingMessages, threadId, userId]);
 
-  const handleSend = async () => {
+  const performSend = async () => {
     const content = text.trim();
     if (!content || !userId || !threadId) return;
 
@@ -1032,6 +1033,29 @@ const MessageThread = () => {
       if (typingIdleRef.current) clearTimeout(typingIdleRef.current);
       sendThreadActivity(threadId, userId, "idle");
     }
+  };
+
+  // Profissional respondendo a uma chamada AINDA pendente: ao enviar a 1ª
+  // mensagem, confirma e aceita a chamada automaticamente.
+  const needsAcceptOnSend =
+    isProfessional && !isFollowingDm && !isChatFinished && requestStatus === "pending";
+
+  const handleSend = async () => {
+    if (!text.trim() || !userId || !threadId) return;
+    if (needsAcceptOnSend) {
+      setAcceptSendOpen(true);
+      return;
+    }
+    await performSend();
+  };
+
+  const confirmAcceptAndSend = async () => {
+    setAcceptSendOpen(false);
+    if (threadId) {
+      await supabase.from("service_requests").update({ status: "accepted" } as any).eq("id", threadId);
+      setRequestStatus("accepted");
+    }
+    await performSend();
   };
 
   const headerPeerInteractive =
@@ -3475,6 +3499,32 @@ const MessageThread = () => {
           </div>
         </div>
       }
+
+      <Dialog open={acceptSendOpen} onOpenChange={setAcceptSendOpen}>
+        <DialogContent className="sm:max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-center">Aceitar esta chamada?</DialogTitle>
+            <DialogDescription className="text-center">
+              Ao enviar esta mensagem, você aceita a chamada deste cliente e ela passará para “Aceita”.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-col gap-2 w-full">
+            <button
+              onClick={confirmAcceptAndSend}
+              disabled={sending}
+              className="w-full rounded-xl bg-primary text-primary-foreground font-semibold py-3 disabled:opacity-60"
+            >
+              Aceitar e enviar
+            </button>
+            <button
+              onClick={() => setAcceptSendOpen(false)}
+              className="w-full rounded-xl border border-border bg-background text-foreground font-medium py-3"
+            >
+              Cancelar
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={peerClientPreviewOpen} onOpenChange={setPeerClientPreviewOpen}>
         <DialogContent className="sm:max-w-sm rounded-2xl">

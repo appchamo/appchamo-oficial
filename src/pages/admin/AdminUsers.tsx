@@ -18,6 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import UserAnalyticsModal, { type AnalyticsTarget } from "@/components/admin/UserAnalyticsModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 function maskCpf(value: string | null | undefined): string {
@@ -364,6 +365,7 @@ const AdminUsers = () => {
   const [planUser, setPlanUser] = useState<Profile | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("free");
   const [detailsUser, setDetailsUser] = useState<Profile | null>(null);
+  const [analyticsTarget, setAnalyticsTarget] = useState<AnalyticsTarget | null>(null);
   const [termsVersions, setTermsVersions] = useState<{ client: string; professional: string }>({
     client: "",
     professional: "",
@@ -735,7 +737,14 @@ const AdminUsers = () => {
                             }`}
                             title={isOnline ? "Online agora" : "Offline"}
                           />
-                          <span>{user.full_name || "—"}</span>
+                          <button
+                            type="button"
+                            onClick={() => setAnalyticsTarget({ user_id: user.user_id, full_name: user.full_name, email: user.email })}
+                            className="text-left hover:text-primary hover:underline transition-colors"
+                            title="Ver analytics do usuário"
+                          >
+                            {user.full_name || "—"}
+                          </button>
                         </div>
                       </td>
                       <td className="p-3 text-muted-foreground">{user.email}</td>
@@ -1054,6 +1063,8 @@ const AdminUsers = () => {
       </Dialog>
         </TabsContent>
       </Tabs>
+
+      <UserAnalyticsModal target={analyticsTarget} onClose={() => setAnalyticsTarget(null)} />
     </AdminLayout>
   );
 };

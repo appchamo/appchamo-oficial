@@ -19,6 +19,7 @@ import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import DeepLinkRouter from "@/components/DeepLinkRouter";
 import RoletaGate from "@/components/RoletaGate";
+import AnalyticsTracker from "@/components/AnalyticsTracker";
 import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
 import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
@@ -660,6 +661,7 @@ const App = () => {
               <AuthSessionGate />
               <NativeDevicePresenceReporter />
               <PresenceTracker />
+              <AnalyticsTracker />
               <DeepLinkRouter />
               <ScrollToTop />
               <AdminRedirectGuard />

@@ -87,6 +87,33 @@ export default function AdminCRM() {
     return () => { cancelled = true; };
   }, [selected]);
 
+  // ----- aba WhatsApp -----
+  const [waMsgs, setWaMsgs] = useState<{ id: number; to_phone: string | null; template: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null }[]>([]);
+  const [waInbound, setWaInbound] = useState<{ id: number; from_phone: string | null; type: string | null; body: string | null; received_at: string }[]>([]);
+  const [waLoaded, setWaLoaded] = useState(false);
+  useEffect(() => {
+    if (tab !== "whatsapp" || waLoaded) return;
+    (async () => {
+      const [{ data: m }, { data: inb }] = await Promise.all([
+        supabase.from("wa_messages" as never).select("id, to_phone, template, status, sent_at, read_at, delivered_at").order("sent_at", { ascending: false }).limit(500),
+        supabase.from("wa_inbound" as never).select("id, from_phone, type, body, received_at").order("received_at", { ascending: false }).limit(200),
+      ]);
+      setWaMsgs(((m as unknown) as typeof waMsgs) || []);
+      setWaInbound(((inb as unknown) as typeof waInbound) || []);
+      setWaLoaded(true);
+    })();
+  }, [tab, waLoaded]);
+
+  const waStats = useMemo(() => {
+    const total = waMsgs.length;
+    const entregues = waMsgs.filter((m) => m.status === "delivered" || m.status === "read" || !!m.delivered_at || !!m.read_at).length;
+    const lidas = waMsgs.filter((m) => m.status === "read" || !!m.read_at).length;
+    const falhas = waMsgs.filter((m) => m.status === "failed").length;
+    const cliques = waInbound.filter((i) => i.type === "button" || i.type === "interactive").length;
+    const respostas = waInbound.length;
+    return { total, entregues, lidas, falhas, cliques, respostas };
+  }, [waMsgs, waInbound]);
+
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return users.slice(0, 60);
@@ -222,15 +249,66 @@ export default function AdminCRM() {
       )}
 
       {tab === "whatsapp" && (
-        <Placeholder
-          icon={<MessageCircle className="w-10 h-10" />}
-          title="Painel do WhatsApp (em montagem)"
-          lines={[
-            "Vai mostrar: mensagens enviadas, entregues, lidas e cliques no botão.",
-            "Já temos o envio (API oficial da Meta). Falta capturar os status — preciso criar um webhook e você apontar a URL no painel da Meta.",
-            "Me confirma que quer seguir e eu monto o webhook + a tabela de mensagens; aí o painel enche conforme as mensagens vão saindo.",
-          ]}
-        />
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <Kpi icon={<MessageCircle className="w-3.5 h-3.5" />} label="Enviadas" value={String(waStats.total)} />
+            <Kpi icon={<Activity className="w-3.5 h-3.5" />} label="Entregues" value={String(waStats.entregues)} />
+            <Kpi icon={<Activity className="w-3.5 h-3.5" />} label="Lidas" value={String(waStats.lidas)} />
+            <Kpi icon={<Bug className="w-3.5 h-3.5" />} label="Falhas" value={String(waStats.falhas)} />
+            <Kpi icon={<MousePointerClick className="w-3.5 h-3.5" />} label="Cliques/Respostas" value={String(waStats.respostas)} />
+          </div>
+
+          {waMsgs.length === 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              Ainda sem mensagens registradas. A captação já está ativa: cada WhatsApp enviado pelo sistema passa a aparecer aqui.
+              Para registrar <b>entregue/lida/clique</b>, configure o webhook na Meta (instruções abaixo).
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <p className="text-sm font-semibold text-foreground mb-1">Como ativar entregue/lida/clique (1x)</p>
+            <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-0.5">
+              <li>Meta App → WhatsApp → Configuração → Webhook → Editar.</li>
+              <li>URL de callback: <code className="text-foreground">https://wfxeiuqxzrlnvlopcrwd.supabase.co/functions/v1/whatsapp-webhook</code></li>
+              <li>Token de verificação: o mesmo valor do secret <code className="text-foreground">WHATSAPP_VERIFY_TOKEN</code> (você define).</li>
+              <li>Assine os campos <b>messages</b> (status + recebidas).</li>
+            </ol>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="text-sm font-semibold text-foreground mb-2">Enviadas (recentes)</p>
+              <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
+                {waMsgs.slice(0, 100).map((m) => {
+                  const st = m.read_at ? "Lida" : m.delivered_at ? "Entregue" : m.status === "failed" ? "Falhou" : "Enviada";
+                  const color = m.read_at ? "text-blue-600" : m.delivered_at ? "text-emerald-600" : m.status === "failed" ? "text-red-600" : "text-muted-foreground";
+                  return (
+                    <div key={m.id} className="flex items-center justify-between text-xs border-b border-border/40 py-1">
+                      <span className="text-foreground">{m.to_phone || "—"} <span className="text-muted-foreground">· {m.template || "—"}</span></span>
+                      <span className="flex items-center gap-2 whitespace-nowrap ml-2">
+                        <span className={`font-medium ${color}`}>{st}</span>
+                        <span className="text-muted-foreground">{fmtDateTime(m.sent_at)}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+                {waMsgs.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">Sem envios ainda.</p>}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="text-sm font-semibold text-foreground mb-2">Respostas / cliques recebidos</p>
+              <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
+                {waInbound.slice(0, 100).map((i) => (
+                  <div key={i.id} className="flex items-center justify-between text-xs border-b border-border/40 py-1">
+                    <span className="text-foreground">{i.from_phone || "—"} <span className="text-muted-foreground">· {i.body || i.type}</span></span>
+                    <span className="text-muted-foreground whitespace-nowrap ml-2">{fmtDateTime(i.received_at)}</span>
+                  </div>
+                ))}
+                {waInbound.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">Sem respostas/cliques ainda (precisa do webhook).</p>}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {tab === "email" && (

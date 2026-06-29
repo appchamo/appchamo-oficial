@@ -111,6 +111,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, status: resp.status, error: result }), { status: 200 });
     }
     console.log("WhatsApp enviado:", to, "template:", template);
+    // Log no CRM (wa_messages) — não bloqueia o retorno em caso de erro.
+    try {
+      const waId = (result as any)?.messages?.[0]?.id ?? null;
+      const log = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      await log.from("wa_messages").insert({
+        wa_id: waId,
+        to_phone: to,
+        user_id: body.user_id ?? null,
+        template,
+        status: "sent",
+        payload: result,
+      });
+    } catch (_e) { /* log não-crítico */ }
     return new Response(JSON.stringify({ ok: true, result }), { status: 200 });
   } catch (e: any) {
     console.error("send-whatsapp erro:", e?.message);

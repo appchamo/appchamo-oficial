@@ -37,6 +37,29 @@ const pretty = (p: string | null) => (p ? PAGE_NAMES[p] || p : "—");
 export default function AdminAnalise() {
   const [tab, setTab] = useState<Tab>("geral");
   const [loading, setLoading] = useState(true);
+  const [reactBusy, setReactBusy] = useState(false);
+  const [reactMsg, setReactMsg] = useState("");
+
+  const sendReactivation = async (test: boolean) => {
+    setReactBusy(true); setReactMsg("");
+    try {
+      const reqBody: Record<string, unknown> = { dry_run: false };
+      if (test) {
+        const { data: { user } } = await supabase.auth.getUser();
+        reqBody.test_email = user?.email;
+      } else if (!window.confirm("Enviar o e-mail \"termine seu cadastro\" para TODOS os cadastros incompletos? Isso envia e-mails reais.")) {
+        setReactBusy(false); return;
+      }
+      const { data, error } = await supabase.functions.invoke("email-incomplete-signups", { body: reqBody });
+      if (error) throw error;
+      const d = data as { sent?: number; total?: number; failed?: number };
+      setReactMsg(test ? "Teste enviado para o seu e-mail." : `Enviados: ${d.sent}/${d.total} (falhas: ${d.failed}).`);
+    } catch (e) {
+      setReactMsg("Erro ao enviar: " + ((e as Error)?.message || "tente novamente"));
+    } finally {
+      setReactBusy(false);
+    }
+  };
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [providers, setProviders] = useState<{ provider: string; total: number; concluiu: number; abriu: number }[]>([]);
@@ -310,6 +333,30 @@ export default function AdminAnalise() {
               })}
             </div>
             <p className="text-[11px] text-muted-foreground mt-3">Coluna 1: total na etapa. Coluna 2: % sobre o total de contas. Coluna 3: queda em relação à etapa anterior.</p>
+          </Card>
+
+          <Card title="Reativar cadastros incompletos" sub="Envia um e-mail “termine seu cadastro” para quem iniciou (Google/Apple/e-mail) e não concluiu.">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => sendReactivation(true)}
+                disabled={reactBusy}
+                className="px-4 py-2 rounded-xl text-sm font-medium border border-border bg-card text-foreground disabled:opacity-60"
+              >
+                Enviar teste pra mim
+              </button>
+              <button
+                onClick={() => sendReactivation(false)}
+                disabled={reactBusy}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-60"
+              >
+                Enviar para os incompletos
+              </button>
+            </div>
+            {reactBusy && <p className="text-xs text-muted-foreground mt-2">Enviando… (pode levar 1–2 min)</p>}
+            {reactMsg && <p className="text-xs mt-2 text-foreground">{reactMsg}</p>}
+            <p className="text-[11px] text-muted-foreground mt-2">
+              LGPD: e-mail transacional (“termine seu cadastro”), não promocional. Faça primeiro o teste.
+            </p>
           </Card>
 
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">

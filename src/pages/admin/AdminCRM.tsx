@@ -217,9 +217,14 @@ export default function AdminCRM() {
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return users.slice(0, 60);
-    return users.filter((u) => (u.full_name || "").toLowerCase().includes(t) || (u.email || "").toLowerCase().includes(t)).slice(0, 60);
+    if (!t) return users;
+    return users.filter((u) => (u.full_name || "").toLowerCase().includes(t) || (u.email || "").toLowerCase().includes(t));
   }, [users, q]);
+
+  // Paginação "Ver mais" (10 em 10). Ao buscar, mostra todos os resultados de uma vez.
+  const [shown, setShown] = useState(10);
+  useEffect(() => { setShown(10); }, [q]);
+  const visible = q.trim() ? filtered : filtered.slice(0, shown);
 
   const j = useMemo(() => computeJourney(events), [events]);
 
@@ -250,15 +255,24 @@ export default function AdminCRM() {
                 className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <div className="overflow-y-auto flex-1 -mx-1 px-1">
-              {filtered.map((u) => (
+              {visible.map((u) => (
                 <button key={u.user_id} onClick={() => setSelected(u)}
                   className={`w-full text-left px-3 py-2 rounded-xl mb-1 transition-colors ${selected?.user_id === u.user_id ? "bg-primary/10 border border-primary/30" : "hover:bg-muted"}`}>
                   <p className="text-sm font-medium text-foreground truncate">{u.full_name || "—"}</p>
                   <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                 </button>
               ))}
-              {filtered.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">Nenhum usuário.</p>}
+              {visible.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">Nenhum usuário.</p>}
+              {!q.trim() && shown < filtered.length && (
+                <button onClick={() => setShown((n) => n + 10)}
+                  className="w-full mt-1 py-2 rounded-xl text-sm font-medium text-primary border border-primary/30 hover:bg-primary/5 transition-colors">
+                  Ver mais ({filtered.length - shown} restantes)
+                </button>
+              )}
             </div>
+            <p className="text-[11px] text-muted-foreground text-center pt-2 shrink-0">
+              {q.trim() ? `${filtered.length} resultado(s)` : `Mostrando ${Math.min(shown, filtered.length)} de ${filtered.length}`}
+            </p>
           </div>
 
           {/* jornada */}

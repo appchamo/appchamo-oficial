@@ -13,6 +13,7 @@ import {
 } from "@/lib/pendingEmailSignup";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
 import { forwardGeocodeBrazil } from "@/lib/geocode";
+import { fetchRegionGate, checkRegion } from "@/lib/regionGate";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ticket, MailCheck, Mail, Home } from "lucide-react";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
@@ -669,6 +670,32 @@ const Signup = () => {
 
       setLoading(true);
       try {
+        // Trava de região (cadastro): só permite cidade/raio configurados no admin.
+        try {
+          const cfg = await fetchRegionGate();
+          if (cfg.enabled && cfg.blockSignup) {
+            let lat: number | null = null;
+            let lng: number | null = null;
+            if (data.addressCity?.trim() && data.addressState?.trim()) {
+              try {
+                const g = await forwardGeocodeBrazil({
+                  cep: data.addressZip,
+                  city: data.addressCity,
+                  state: data.addressState,
+                  street: data.addressStreet,
+                  neighborhood: data.addressNeighborhood,
+                });
+                if (g) { lat = g.lat; lng = g.lng; }
+              } catch { /* ignore geocode */ }
+            }
+            const check = checkRegion(cfg, { city: data.addressCity, lat, lng });
+            if (!check.allowed) {
+              toast({ title: "Fora da área de atendimento", description: check.reason, variant: "destructive" });
+              return;
+            }
+          }
+        } catch { /* nunca bloqueia por erro de config */ }
+
         if (emailNorm && !createdUserId) {
           let existsRaw: unknown = null;
           let rpcError: { message?: string } | null = null;

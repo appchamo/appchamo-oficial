@@ -188,6 +188,7 @@ export default function AdminCRM() {
   const [emErr, setEmErr] = useState("");
   const [emSel, setEmSel] = useState<{ uid: string; date: string | null; subject: string; from: string; to: string } | null>(null);
   const [emBody, setEmBody] = useState("");
+  const [emBodyType, setEmBodyType] = useState("text/plain");
   const [emBodyLoading, setEmBodyLoading] = useState(false);
 
   useEffect(() => {
@@ -206,10 +207,11 @@ export default function AdminCRM() {
   }, [tab, emFolder]);
 
   const openEmail = async (m: { uid: string; date: string | null; subject: string; from: string; to: string }) => {
-    setEmSel(m); setEmBody(""); setEmBodyLoading(true);
+    setEmSel(m); setEmBody(""); setEmBodyType("text/plain"); setEmBodyLoading(true);
     const { data } = await supabase.functions.invoke("email-imap", { body: { action: "body", folder: emFolder, uid: m.uid } });
-    const d = data as { text?: string } | null;
-    setEmBody(d?.text || "(sem conteúdo de texto)");
+    const d = data as { content?: string; contentType?: string } | null;
+    setEmBody(d?.content || "(sem conteúdo)");
+    setEmBodyType(d?.contentType || "text/plain");
     setEmBodyLoading(false);
   };
 
@@ -492,11 +494,18 @@ export default function AdminCRM() {
                   <p className="text-xs text-muted-foreground"><b>Para:</b> {emSel.to}</p>
                   {emSel.date && <p className="text-xs text-muted-foreground">{emSel.date}</p>}
                 </div>
-                <div className="flex-1 overflow-y-auto p-5">
+                <div className="flex-1 min-h-0">
                   {emBodyLoading ? (
-                    <div className="flex items-center text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin mr-2" />Carregando mensagem…</div>
+                    <div className="flex items-center text-muted-foreground p-5"><Loader2 className="w-4 h-4 animate-spin mr-2" />Carregando mensagem…</div>
+                  ) : emBodyType === "text/html" ? (
+                    <iframe
+                      title="email"
+                      sandbox=""
+                      className="w-full h-full border-0 bg-white"
+                      srcDoc={`<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a1a;margin:16px;font-size:14px;line-height:1.5}img{max-width:100%}</style></head><body>${emBody}</body></html>`}
+                    />
                   ) : (
-                    <pre className="whitespace-pre-wrap break-words text-sm text-foreground" style={{ fontFamily: "inherit" }}>{emBody}</pre>
+                    <pre className="whitespace-pre-wrap break-words text-sm text-foreground p-5" style={{ fontFamily: "inherit" }}>{emBody}</pre>
                   )}
                 </div>
               </>

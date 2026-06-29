@@ -1,7 +1,7 @@
 import AdminLayout from "@/components/AdminLayout";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Users, MessageCircle, Mail, Search, Clock, MousePointerClick, Activity, Bug, Loader2, ChevronRight, Check, CheckCheck, ExternalLink } from "lucide-react";
+import { Users, MessageCircle, Mail, Search, Clock, MousePointerClick, Activity, Bug, Loader2, ChevronRight, Check, CheckCheck, ExternalLink, Inbox, Send, FileText, Trash2, AlertOctagon } from "lucide-react";
 
 type Tab = "usuarios" | "whatsapp" | "email";
 
@@ -37,6 +37,14 @@ const fmtPhone = (d: string) => {
   const m = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
   return m ? `+55 (${m[1]}) ${m[2]}-${m[3]}` : (d ? `+${d}` : "—");
 };
+const fmtMailDate = (s: string | null) => { if (!s) return ""; const d = new Date(s); return isNaN(d.getTime()) ? s : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }); };
+const EMAIL_FOLDERS = [
+  { id: "INBOX", label: "Caixa de entrada", icon: Inbox },
+  { id: "INBOX.Junk", label: "Spam", icon: AlertOctagon },
+  { id: "INBOX.Sent", label: "Enviados", icon: Send },
+  { id: "INBOX.Drafts", label: "Rascunhos", icon: FileText },
+  { id: "INBOX.Trash", label: "Lixeira", icon: Trash2 },
+];
 
 const GAP_CAP = 30 * 60; // tempo máximo atribuído a um intervalo entre eventos (s)
 
@@ -172,6 +180,38 @@ export default function AdminCRM() {
     return s;
   }, [waInbound]);
   const openUserProfile = (c: { phone: string; userId: string | null }) => { const p = profForConv(c); if (p) { setSelected(p); setTab("usuarios"); } };
+
+  // ----- aba E-mail (IMAP) -----
+  const [emFolder, setEmFolder] = useState<string>("INBOX");
+  const [emMsgs, setEmMsgs] = useState<{ uid: string; date: string | null; subject: string; from: string; to: string; seen: boolean }[]>([]);
+  const [emLoading, setEmLoading] = useState(false);
+  const [emErr, setEmErr] = useState("");
+  const [emSel, setEmSel] = useState<{ uid: string; date: string | null; subject: string; from: string; to: string } | null>(null);
+  const [emBody, setEmBody] = useState("");
+  const [emBodyLoading, setEmBodyLoading] = useState(false);
+
+  useEffect(() => {
+    if (tab !== "email") return;
+    let cancelled = false;
+    (async () => {
+      setEmLoading(true); setEmErr(""); setEmSel(null); setEmBody("");
+      const { data, error } = await supabase.functions.invoke("email-imap", { body: { action: "fetch", folder: emFolder, limit: 40 } });
+      if (cancelled) return;
+      const d = data as { messages?: typeof emMsgs; error?: string } | null;
+      if (error || d?.error) { setEmErr("Não foi possível ler a caixa." + (d?.error ? ` (${d.error})` : "")); setEmMsgs([]); }
+      else setEmMsgs(d?.messages || []);
+      setEmLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [tab, emFolder]);
+
+  const openEmail = async (m: { uid: string; date: string | null; subject: string; from: string; to: string }) => {
+    setEmSel(m); setEmBody(""); setEmBodyLoading(true);
+    const { data } = await supabase.functions.invoke("email-imap", { body: { action: "body", folder: emFolder, uid: m.uid } });
+    const d = data as { text?: string } | null;
+    setEmBody(d?.text || "(sem conteúdo de texto)");
+    setEmBodyLoading(false);
+  };
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -406,15 +446,63 @@ export default function AdminCRM() {
       )}
 
       {tab === "email" && (
-        <Placeholder
-          icon={<Mail className="w-10 h-10" />}
-          title="Caixa de e-mail estilo Gmail (em montagem)"
-          lines={[
-            "Enviados: dá pra montar já — basta eu registrar cada e-mail que o sistema dispara.",
-            "Caixa de entrada e Spam: precisam CONECTAR a caixa de e-mail (IMAP ou API do provedor). Só com o SMTP de envio atual não dá pra ler recebidos.",
-            "Me diz qual e-mail conectar (ex.: o do appchamo.com) e o tipo de acesso, que eu integro a visualização completa (entrada/spam/enviados/lixeira).",
-          ]}
-        />
+        <div className="rounded-2xl border border-border overflow-hidden bg-card grid grid-cols-1 md:grid-cols-[210px_340px_1fr] h-[74vh]">
+          {/* Pastas */}
+          <div className="border-r border-border p-2 space-y-1">
+            {EMAIL_FOLDERS.map((f) => (
+              <button key={f.id} onClick={() => setEmFolder(f.id)}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-colors ${emFolder === f.id ? "bg-primary/10 text-primary font-semibold" : "hover:bg-muted text-foreground"}`}>
+                <f.icon className="w-4 h-4 shrink-0" />{f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Lista */}
+          <div className="border-r border-border flex flex-col min-h-0">
+            {emLoading ? (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" />Lendo caixa…</div>
+            ) : emErr ? (
+              <div className="p-4 text-sm text-red-600">{emErr}</div>
+            ) : (
+              <div className="overflow-y-auto flex-1">
+                {emMsgs.map((m) => (
+                  <button key={m.uid} onClick={() => openEmail(m)}
+                    className={`w-full text-left px-3 py-2.5 border-b border-border/40 transition-colors ${emSel?.uid === m.uid ? "bg-primary/10" : "hover:bg-muted"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`text-sm truncate ${m.seen ? "text-foreground" : "font-bold text-foreground"}`}>{(emFolder === "INBOX.Sent" ? m.to : m.from) || "—"}</p>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{fmtMailDate(m.date)}</span>
+                    </div>
+                    <p className={`text-xs truncate ${m.seen ? "text-muted-foreground" : "text-foreground font-medium"}`}>{m.subject}</p>
+                  </button>
+                ))}
+                {emMsgs.length === 0 && <p className="text-xs text-muted-foreground text-center py-10">Pasta vazia.</p>}
+              </div>
+            )}
+          </div>
+
+          {/* Preview */}
+          <div className="flex flex-col min-h-0">
+            {!emSel ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground"><Mail className="w-12 h-12 mb-3 opacity-30" /><p className="text-sm">Selecione um e-mail para ler.</p></div>
+            ) : (
+              <>
+                <div className="px-5 py-3 border-b border-border">
+                  <p className="text-base font-bold text-foreground">{emSel.subject}</p>
+                  <p className="text-xs text-muted-foreground mt-1"><b>De:</b> {emSel.from}</p>
+                  <p className="text-xs text-muted-foreground"><b>Para:</b> {emSel.to}</p>
+                  {emSel.date && <p className="text-xs text-muted-foreground">{emSel.date}</p>}
+                </div>
+                <div className="flex-1 overflow-y-auto p-5">
+                  {emBodyLoading ? (
+                    <div className="flex items-center text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin mr-2" />Carregando mensagem…</div>
+                  ) : (
+                    <pre className="whitespace-pre-wrap break-words text-sm text-foreground" style={{ fontFamily: "inherit" }}>{emBody}</pre>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </AdminLayout>
   );
@@ -425,20 +513,6 @@ function Kpi({ icon, label, value }: { icon: ReactNode; label: string; value: st
     <div className="rounded-xl border border-border bg-background p-3">
       <div className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">{icon}{label}</div>
       <p className="text-lg font-bold text-foreground mt-1">{value}</p>
-    </div>
-  );
-}
-
-function Placeholder({ icon, title, lines }: { icon: ReactNode; title: string; lines: string[] }) {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-8 max-w-2xl">
-      <div className="text-primary mb-3">{icon}</div>
-      <h2 className="text-lg font-bold text-foreground mb-3">{title}</h2>
-      <ul className="space-y-2">
-        {lines.map((l, i) => (
-          <li key={i} className="text-sm text-muted-foreground flex gap-2"><span className="text-primary">•</span><span>{l}</span></li>
-        ))}
-      </ul>
     </div>
   );
 }

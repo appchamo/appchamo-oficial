@@ -52,6 +52,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: r.ok, status: r.status, result: jr }), { status: 200 });
     }
 
+    // Inscreve/verifica a WABA no app (resolve status que não chegam no webhook).
+    if (body.action === "subscribe" || body.action === "subscribed_status") {
+      const waba = String(body.waba_id || "").trim();
+      const method = body.action === "subscribe" ? "POST" : "GET";
+      const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${waba}/subscribed_apps`, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
+      const jr = await r.json().catch(() => ({}));
+      console.log("WhatsApp subscribed_apps:", method, r.status, JSON.stringify(jr));
+      return new Response(JSON.stringify({ ok: r.ok, status: r.status, result: jr }), { status: 200 });
+    }
+
     const template: string = body.template || "nova_chamada";
     const lang: string = body.lang || "pt_BR";
     let params: string[] = Array.isArray(body.params) ? body.params : [];

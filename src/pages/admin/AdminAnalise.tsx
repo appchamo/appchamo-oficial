@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  FunnelChart, Funnel, LabelList, AreaChart, Area,
+  AreaChart, Area,
 } from "recharts";
 import { Loader2, Users, UserCheck, Activity, AlertCircle } from "lucide-react";
 
@@ -39,18 +39,21 @@ export default function AdminAnalise() {
   const [loading, setLoading] = useState(true);
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
+  const [providers, setProviders] = useState<{ provider: string; total: number; concluiu: number; abriu: number }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [{ data: pData }, { data: eData }] = await Promise.all([
+      const [{ data: pData }, { data: eData }, { data: provData }] = await Promise.all([
         supabase.from("profiles").select("user_type, accepted_terms_at, signup_completed_at, phone, address_city, last_seen_at, created_at").limit(20000),
         supabase.from("app_events" as never).select("type, path, platform, created_at").order("created_at", { ascending: false }).limit(8000),
+        supabase.rpc("admin_signup_breakdown" as never),
       ]);
       if (!cancelled) {
         setProfiles(((pData as unknown) as ProfileRow[]) || []);
         setEvents(((eData as unknown) as EventRow[]) || []);
+        setProviders(((provData as unknown) as { provider: string; total: number; concluiu: number; abriu: number }[]) || []);
         setLoading(false);
       }
     })();
@@ -84,15 +87,25 @@ export default function AdminAnalise() {
     { name: "Não concluíram", value: Math.max(0, stats.total - stats.concluiu) },
   ].filter((d) => d.value > 0)), [stats]);
 
+  // Plataforma: só app (iOS/Android). Web é o admin/site — não conta como uso do app.
   const plataformaData = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const e of events) { const k = e.platform || "—"; m[k] = (m[k] || 0) + 1; }
-    return Object.entries(m).map(([name, value]) => ({ name, value }));
+    let ios = 0, android = 0;
+    for (const e of events) {
+      if (e.platform === "ios") ios++;
+      else if (e.platform === "android") android++;
+    }
+    return [
+      { name: "iOS", value: ios },
+      { name: "Android", value: android },
+    ].filter((d) => d.value > 0);
   }, [events]);
 
+  // Jornada: só páginas de usuário comum (exclui admin e suporte-desk).
+  const isUserPath = (p: string | null) =>
+    !!p && !p.startsWith("/admin") && !p.startsWith("/suporte-desk");
   const topPages = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const e of events) if (e.type === "page_view") { const k = e.path || "—"; m[k] = (m[k] || 0) + 1; }
+    for (const e of events) if (e.type === "page_view" && isUserPath(e.path)) { const k = e.path as string; m[k] = (m[k] || 0) + 1; }
     return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([path, qtd]) => ({ name: pretty(path), qtd }));
   }, [events]);
 
@@ -209,15 +222,71 @@ export default function AdminAnalise() {
         // ---- Fluxo de cadastro ----
         <div className="space-y-4">
           <Card title="Funil de cadastro" sub="Quantas pessoas avançam em cada etapa (dados históricos dos perfis).">
-            <ResponsiveContainer width="100%" height={300}>
-              <FunnelChart>
-                <Tooltip />
-                <Funnel dataKey="value" data={funnel} isAnimationActive>
-                  <LabelList position="right" fill="hsl(var(--foreground))" stroke="none" dataKey="name" />
-                  <LabelList position="left" fill="hsl(var(--foreground))" stroke="none" dataKey="value" />
-                </Funnel>
-              </FunnelChart>
-            </ResponsiveContainer>
+            <div className="space-y-1.5 py-1">
+              {funnel.map((s, i) => {
+                const total = funnel[0].value || 1;
+                const w = Math.max(30, (s.value / total) * 100);
+                const nextW = i < funnel.length - 1 ? Math.max(30, (funnel[i + 1].value / total) * 100) : 0;
+                const inset = Math.min(50, Math.max(0, ((1 - nextW / w) / 2) * 100));
+                const convTotal = pct(s.value, total);
+                const dropPrev = i === 0 ? 0 : 100 - pct(s.value, funnel[i - 1].value);
+                return (
+                  <div key={s.name} className="grid grid-cols-[42%_58%] gap-3 items-center">
+                    <div className="flex justify-center">
+                      <div
+                        className="h-14 flex items-center justify-center text-white font-extrabold text-lg shadow-sm"
+                        style={{
+                          width: `${w}%`,
+                          background: s.fill,
+                          clipPath: `polygon(0 0, 100% 0, ${100 - inset}% 100%, ${inset}% 100%)`,
+                        }}
+                      >
+                        {s.value}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-muted px-4 py-2.5">
+                      <p className="text-sm font-semibold text-foreground leading-tight">{s.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {convTotal}% do total{i > 0 && dropPrev > 0 ? <span className="text-red-600 font-medium"> · −{dropPrev}% vs etapa anterior</span> : null}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Card title="Cadastro por método" sub="Google / Apple x e-mail e senha — e quantos concluíram.">
+            {providers.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">Sem dados.</p>
+            ) : (
+              <div className="space-y-2">
+                {[...providers].sort((a, b) => b.total - a.total).map((p) => {
+                  const label = p.provider === "google" ? "Google" : p.provider === "apple" ? "Apple" : "E-mail e senha";
+                  const soOauth = Math.max(0, p.total - p.concluiu);
+                  return (
+                    <div key={p.provider} className="rounded-lg border border-border p-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-semibold text-foreground">{label}</span>
+                        <span className="text-sm text-muted-foreground">{p.total} contas</span>
+                      </div>
+                      <div className="w-full h-2.5 rounded-full bg-muted overflow-hidden flex">
+                        <div className="h-full bg-emerald-500" style={{ width: `${pct(p.concluiu, p.total)}%` }} title="Concluíram" />
+                        <div className="h-full bg-red-400" style={{ width: `${pct(soOauth, p.total)}%` }} title="Só autenticaram" />
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-xs">
+                        <span className="text-emerald-700">✓ Concluíram: <b>{p.concluiu}</b> ({pct(p.concluiu, p.total)}%)</span>
+                        <span className="text-red-600">✗ Só autenticaram: <b>{soOauth}</b> ({pct(soOauth, p.total)}%)</span>
+                        <span className="text-muted-foreground">Abriram o app: <b>{p.abriu}</b></span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[11px] text-muted-foreground pt-1">
+                  "Só autenticaram" = entrou (Google/Apple/e-mail) mas não terminou o cadastro (sem termos/dados).
+                </p>
+              </div>
+            )}
           </Card>
 
           <Card title="Conversão entre etapas">

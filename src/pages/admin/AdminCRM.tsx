@@ -29,9 +29,9 @@ const fmtDateTime = (s: string) => new Date(s).toLocaleString("pt-BR");
 const fmtDate = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 const fmtTime = (s: string) => new Date(s).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
-interface WaMsg { id: number; to_phone: string | null; template: string | null; body: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null; }
+interface WaMsg { id: number; to_phone: string | null; template: string | null; body: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null; user_id?: string | null; }
 interface WaInb { id: number; from_phone: string | null; type: string | null; body: string | null; received_at: string; }
-type ChatMsg = { dir: "in" | "out"; text: string; time: string; status: string; template?: string | null };
+type ChatMsg = { dir: "in" | "out"; text: string; time: string; status: string; template?: string | null; userId?: string | null };
 const onlyDigits = (s: string | null) => (s || "").replace(/\D/g, "");
 const fmtPhone = (d: string) => {
   const m = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
@@ -112,7 +112,7 @@ export default function AdminCRM() {
     if (tab !== "whatsapp" || waLoaded) return;
     (async () => {
       const [{ data: m }, { data: inb }] = await Promise.all([
-        supabase.from("wa_messages" as never).select("id, to_phone, template, body, status, sent_at, read_at, delivered_at").order("sent_at", { ascending: false }).limit(2000),
+        supabase.from("wa_messages" as never).select("id, to_phone, template, body, status, sent_at, read_at, delivered_at, user_id").order("sent_at", { ascending: false }).limit(2000),
         supabase.from("wa_inbound" as never).select("id, from_phone, type, body, received_at").order("received_at", { ascending: false }).limit(2000),
       ]);
       setWaMsgs(((m as unknown) as WaMsg[]) || []);
@@ -130,12 +130,13 @@ export default function AdminCRM() {
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(msg);
     };
-    for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent"), template: m.template });
+    for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent"), template: m.template, userId: m.user_id ?? null });
     for (const i of waInbound) push(i.from_phone, { dir: "in", text: i.body || `(${i.type || "mensagem"})`, time: i.received_at, status: "in" });
     const list = Array.from(map.entries()).map(([phone, msgs]) => {
       msgs.sort((a, b) => a.time.localeCompare(b.time));
       const last = msgs[msgs.length - 1];
-      return { phone, msgs, last };
+      const userId = msgs.find((m) => m.userId)?.userId ?? null;
+      return { phone, msgs, last, userId };
     });
     list.sort((a, b) => b.last.time.localeCompare(a.last.time));
     return list;
@@ -149,18 +150,28 @@ export default function AdminCRM() {
 
   const activeConv = useMemo(() => conversations.find((c) => c.phone === waPhone) || null, [conversations, waPhone]);
 
-  const profileByPhone = useMemo(() => {
+  const profileByUserId = useMemo(() => {
     const m = new Map<string, UserRow>();
-    for (const u of users) { const k = normalizeBR(u.phone || null); if (k) m.set(k, u); }
+    for (const u of users) m.set(u.user_id, u);
     return m;
   }, [users]);
-  const profForPhone = (phone: string) => profileByPhone.get(normalizeBR(phone)) || null;
+  const phoneProfiles = useMemo(() => {
+    const m = new Map<string, UserRow[]>();
+    for (const u of users) { const k = normalizeBR(u.phone || null); if (!k) continue; if (!m.has(k)) m.set(k, []); m.get(k)!.push(u); }
+    return m;
+  }, [users]);
+  // Perfil da conversa: 1) usa o usuário vinculado ao envio; 2) senão, só identifica se o número pertencer a um único perfil.
+  const profForConv = (c: { phone: string; userId: string | null }): UserRow | null => {
+    if (c.userId && profileByUserId.has(c.userId)) return profileByUserId.get(c.userId)!;
+    const arr = phoneProfiles.get(normalizeBR(c.phone)) || [];
+    return arr.length === 1 ? arr[0] : null;
+  };
   const clickedPhones = useMemo(() => {
     const s = new Set<string>();
     for (const i of waInbound) if (i.type === "button" || i.type === "interactive") s.add(normalizeBR(i.from_phone));
     return s;
   }, [waInbound]);
-  const openUserProfile = (phone: string) => { const p = profForPhone(phone); if (p) { setSelected(p); setTab("usuarios"); } };
+  const openUserProfile = (c: { phone: string; userId: string | null }) => { const p = profForConv(c); if (p) { setSelected(p); setTab("usuarios"); } };
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -309,7 +320,7 @@ export default function AdminCRM() {
             </div>
             <div className="overflow-y-auto flex-1">
               {waFilteredConvs.map((c) => {
-                const prof = profForPhone(c.phone);
+                const prof = profForConv(c);
                 return (
                 <button key={c.phone} onClick={() => setWaPhone(c.phone)}
                   className={`w-full text-left px-3 py-3 flex items-center gap-3 border-b border-border/40 transition-colors ${waPhone === c.phone ? "bg-primary/10" : "hover:bg-muted"}`}>
@@ -340,12 +351,12 @@ export default function AdminCRM() {
             ) : (
               <>
                 {(() => {
-                  const prof = profForPhone(activeConv.phone);
+                  const prof = profForConv(activeConv);
                   const clicked = clickedPhones.has(normalizeBR(activeConv.phone));
                   const anyRead = activeConv.msgs.some((m) => m.dir === "out" && m.status === "read");
                   return (
                     <div className="px-4 py-3 border-b border-border flex items-center gap-3">
-                      <button onClick={() => openUserProfile(activeConv.phone)} disabled={!prof} className="flex items-center gap-3 text-left disabled:cursor-default group">
+                      <button onClick={() => openUserProfile(activeConv)} disabled={!prof} className="flex items-center gap-3 text-left disabled:cursor-default group">
                         {prof?.avatar_url
                           ? <img src={prof.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover" />
                           : <div className="w-10 h-10 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center font-bold">{prof ? initials(prof.full_name) : <MessageCircle className="w-5 h-5" />}</div>}

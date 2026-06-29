@@ -6,9 +6,35 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   AreaChart, Area,
 } from "recharts";
-import { Loader2, Users, UserCheck, Activity, AlertCircle } from "lucide-react";
+import { Loader2, Users, UserCheck, Activity, AlertCircle, Search, Send, Clock, CheckCircle2 } from "lucide-react";
 
 type Tab = "geral" | "cadastro";
+
+interface IncompleteRow {
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+  created_at: string | null;
+  signup_reminder_sent_at: string | null;
+  signup_reminder_count: number | null;
+}
+const RESEND_MS = 24 * 60 * 60 * 1000;
+const fmtAgo = (iso: string | null) => {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  return `há ${d}d`;
+};
+const fmtIn = (iso: string) => {
+  const diff = new Date(iso).getTime() - Date.now();
+  const h = Math.ceil(diff / 3600000);
+  return h <= 1 ? "~1h" : `${h}h`;
+};
 
 interface ProfileRow {
   user_type: string | null;
@@ -63,6 +89,53 @@ export default function AdminAnalise() {
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [providers, setProviders] = useState<{ provider: string; total: number; concluiu: number; abriu: number }[]>([]);
+
+  // ---- cadastros incompletos (lista por usuário) ----
+  const [incompletes, setIncompletes] = useState<IncompleteRow[]>([]);
+  const [incQ, setIncQ] = useState("");
+  const [incShown, setIncShown] = useState(15);
+  const [incBusy, setIncBusy] = useState<string | null>(null); // user_id em envio
+  const [incMsg, setIncMsg] = useState<Record<string, string>>({});
+
+  const loadIncompletes = async () => {
+    const { data } = await supabase.from("profiles")
+      .select("user_id, full_name, email, created_at, signup_reminder_sent_at, signup_reminder_count")
+      .is("signup_completed_at", null).not("email", "is", null)
+      .order("created_at", { ascending: false }).limit(3000);
+    setIncompletes(((data as unknown) as IncompleteRow[]) || []);
+  };
+  useEffect(() => { loadIncompletes(); }, []);
+  useEffect(() => { setIncShown(15); }, [incQ]);
+
+  const sendToUser = async (u: IncompleteRow, force = false) => {
+    setIncBusy(u.user_id); setIncMsg((m) => ({ ...m, [u.user_id]: "" }));
+    try {
+      const { data, error } = await supabase.functions.invoke("email-incomplete-signups", { body: { user_id: u.user_id, force } });
+      if (error) throw error;
+      const d = data as { ok?: boolean; error?: string; next_at?: string };
+      if (d?.ok) {
+        const nowIso = new Date().toISOString();
+        setIncompletes((list) => list.map((x) => x.user_id === u.user_id
+          ? { ...x, signup_reminder_sent_at: nowIso, signup_reminder_count: (x.signup_reminder_count || 0) + 1 } : x));
+        setIncMsg((m) => ({ ...m, [u.user_id]: "✓ E-mail enviado." }));
+      } else if (d?.error === "aguarde_24h") {
+        setIncMsg((m) => ({ ...m, [u.user_id]: `Aguarde ${d.next_at ? fmtIn(d.next_at) : "24h"} para reenviar.` }));
+      } else {
+        setIncMsg((m) => ({ ...m, [u.user_id]: "Erro: " + (d?.error || "tente novamente") }));
+      }
+    } catch (e) {
+      setIncMsg((m) => ({ ...m, [u.user_id]: "Erro: " + ((e as Error)?.message || "tente novamente") }));
+    } finally {
+      setIncBusy(null);
+    }
+  };
+
+  const incFiltered = useMemo(() => {
+    const t = incQ.trim().toLowerCase();
+    if (!t) return incompletes;
+    return incompletes.filter((u) => (u.full_name || "").toLowerCase().includes(t) || (u.email || "").toLowerCase().includes(t));
+  }, [incompletes, incQ]);
+  const incVisible = incQ.trim() ? incFiltered : incFiltered.slice(0, incShown);
 
   useEffect(() => {
     let cancelled = false;
@@ -356,6 +429,63 @@ export default function AdminAnalise() {
             {reactMsg && <p className="text-xs mt-2 text-foreground">{reactMsg}</p>}
             <p className="text-[11px] text-muted-foreground mt-2">
               LGPD: e-mail transacional (“termine seu cadastro”), não promocional. Faça primeiro o teste.
+            </p>
+          </Card>
+
+          <Card title="Cadastros incompletos" sub={`${incompletes.length} pessoa(s) iniciaram e não concluíram. Envie individualmente; reenvio só após 24h.`}>
+            <div className="relative mb-3">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={incQ} onChange={(e) => setIncQ(e.target.value)} placeholder="Buscar por nome ou e-mail…"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+            <div className="space-y-1.5">
+              {incVisible.map((u) => {
+                const lastAt = u.signup_reminder_sent_at ? new Date(u.signup_reminder_sent_at).getTime() : 0;
+                const locked = !!lastAt && Date.now() - lastAt < RESEND_MS;
+                const nextAt = lastAt ? new Date(lastAt + RESEND_MS).toISOString() : null;
+                const busy = incBusy === u.user_id;
+                const count = u.signup_reminder_count || 0;
+                return (
+                  <div key={u.user_id} className="flex items-center gap-3 rounded-xl border border-border p-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">{u.full_name || "—"}</p>
+                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {count > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700">
+                            <CheckCircle2 className="w-3 h-3" /> Enviado {fmtAgo(u.signup_reminder_sent_at)}{count > 1 ? ` · ${count}x` : ""}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">Nunca enviado</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <button
+                        onClick={() => sendToUser(u)}
+                        disabled={busy || locked}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-60 ${count > 0 ? "border border-border bg-card text-foreground" : "bg-primary text-primary-foreground"}`}
+                        title={locked && nextAt ? `Reenvio liberado em ${fmtIn(nextAt)}` : ""}
+                      >
+                        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : locked ? <><Clock className="w-3.5 h-3.5" /> {nextAt ? fmtIn(nextAt) : "24h"}</>
+                          : <><Send className="w-3.5 h-3.5" /> {count > 0 ? "Reenviar" : "Enviar"}</>}
+                      </button>
+                      {incMsg[u.user_id] && <p className="text-[10px] text-muted-foreground mt-1 max-w-[140px]">{incMsg[u.user_id]}</p>}
+                    </div>
+                  </div>
+                );
+              })}
+              {incVisible.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">Nenhum cadastro incompleto.</p>}
+            </div>
+            {!incQ.trim() && incShown < incFiltered.length && (
+              <button onClick={() => setIncShown((n) => n + 15)}
+                className="w-full mt-2 py-2 rounded-xl text-sm font-medium text-primary border border-primary/30 hover:bg-primary/5 transition-colors">
+                Ver mais ({incFiltered.length - incShown} restantes)
+              </button>
+            )}
+            <p className="text-[11px] text-muted-foreground text-center pt-2">
+              {incQ.trim() ? `${incFiltered.length} resultado(s)` : `Mostrando ${Math.min(incShown, incFiltered.length)} de ${incFiltered.length}`}
             </p>
           </Card>
 

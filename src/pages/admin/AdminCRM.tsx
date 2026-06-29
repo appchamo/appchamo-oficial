@@ -1,7 +1,7 @@
 import AdminLayout from "@/components/AdminLayout";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Users, MessageCircle, Mail, Search, Clock, MousePointerClick, Activity, Bug, Loader2, ChevronRight } from "lucide-react";
+import { Users, MessageCircle, Mail, Search, Clock, MousePointerClick, Activity, Bug, Loader2, ChevronRight, Check, CheckCheck } from "lucide-react";
 
 type Tab = "usuarios" | "whatsapp" | "email";
 
@@ -22,6 +22,16 @@ const fmtDur = (sec: number) => {
 };
 const fmtDateTime = (s: string) => new Date(s).toLocaleString("pt-BR");
 const fmtDate = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+const fmtTime = (s: string) => new Date(s).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+interface WaMsg { id: number; to_phone: string | null; template: string | null; body: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null; }
+interface WaInb { id: number; from_phone: string | null; type: string | null; body: string | null; received_at: string; }
+type ChatMsg = { dir: "in" | "out"; text: string; time: string; status: string };
+const onlyDigits = (s: string | null) => (s || "").replace(/\D/g, "");
+const fmtPhone = (d: string) => {
+  const m = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
+  return m ? `+55 (${m[1]}) ${m[2]}-${m[3]}` : (d ? `+${d}` : "—");
+};
 
 const GAP_CAP = 30 * 60; // tempo máximo atribuído a um intervalo entre eventos (s)
 
@@ -88,31 +98,51 @@ export default function AdminCRM() {
   }, [selected]);
 
   // ----- aba WhatsApp -----
-  const [waMsgs, setWaMsgs] = useState<{ id: number; to_phone: string | null; template: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null }[]>([]);
-  const [waInbound, setWaInbound] = useState<{ id: number; from_phone: string | null; type: string | null; body: string | null; received_at: string }[]>([]);
+  const [waMsgs, setWaMsgs] = useState<WaMsg[]>([]);
+  const [waInbound, setWaInbound] = useState<WaInb[]>([]);
   const [waLoaded, setWaLoaded] = useState(false);
+  const [waPhone, setWaPhone] = useState<string | null>(null);
+  const [waSearch, setWaSearch] = useState("");
   useEffect(() => {
     if (tab !== "whatsapp" || waLoaded) return;
     (async () => {
       const [{ data: m }, { data: inb }] = await Promise.all([
-        supabase.from("wa_messages" as never).select("id, to_phone, template, status, sent_at, read_at, delivered_at").order("sent_at", { ascending: false }).limit(500),
-        supabase.from("wa_inbound" as never).select("id, from_phone, type, body, received_at").order("received_at", { ascending: false }).limit(200),
+        supabase.from("wa_messages" as never).select("id, to_phone, template, body, status, sent_at, read_at, delivered_at").order("sent_at", { ascending: false }).limit(2000),
+        supabase.from("wa_inbound" as never).select("id, from_phone, type, body, received_at").order("received_at", { ascending: false }).limit(2000),
       ]);
-      setWaMsgs(((m as unknown) as typeof waMsgs) || []);
-      setWaInbound(((inb as unknown) as typeof waInbound) || []);
+      setWaMsgs(((m as unknown) as WaMsg[]) || []);
+      setWaInbound(((inb as unknown) as WaInb[]) || []);
       setWaLoaded(true);
     })();
   }, [tab, waLoaded]);
 
-  const waStats = useMemo(() => {
-    const total = waMsgs.length;
-    const entregues = waMsgs.filter((m) => m.status === "delivered" || m.status === "read" || !!m.delivered_at || !!m.read_at).length;
-    const lidas = waMsgs.filter((m) => m.status === "read" || !!m.read_at).length;
-    const falhas = waMsgs.filter((m) => m.status === "failed").length;
-    const cliques = waInbound.filter((i) => i.type === "button" || i.type === "interactive").length;
-    const respostas = waInbound.length;
-    return { total, entregues, lidas, falhas, cliques, respostas };
+  // Conversas estilo WhatsApp Web (agrupadas por telefone)
+  const conversations = useMemo(() => {
+    const map = new Map<string, ChatMsg[]>();
+    const push = (phone: string | null, msg: ChatMsg) => {
+      const k = onlyDigits(phone);
+      if (!k) return;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(msg);
+    };
+    for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent") });
+    for (const i of waInbound) push(i.from_phone, { dir: "in", text: i.body || `(${i.type || "mensagem"})`, time: i.received_at, status: "in" });
+    const list = Array.from(map.entries()).map(([phone, msgs]) => {
+      msgs.sort((a, b) => a.time.localeCompare(b.time));
+      const last = msgs[msgs.length - 1];
+      return { phone, msgs, last };
+    });
+    list.sort((a, b) => b.last.time.localeCompare(a.last.time));
+    return list;
   }, [waMsgs, waInbound]);
+
+  const waFilteredConvs = useMemo(() => {
+    const t = onlyDigits(waSearch);
+    if (!t) return conversations;
+    return conversations.filter((c) => c.phone.includes(t));
+  }, [conversations, waSearch]);
+
+  const activeConv = useMemo(() => conversations.find((c) => c.phone === waPhone) || null, [conversations, waPhone]);
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -249,64 +279,73 @@ export default function AdminCRM() {
       )}
 
       {tab === "whatsapp" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            <Kpi icon={<MessageCircle className="w-3.5 h-3.5" />} label="Enviadas" value={String(waStats.total)} />
-            <Kpi icon={<Activity className="w-3.5 h-3.5" />} label="Entregues" value={String(waStats.entregues)} />
-            <Kpi icon={<Activity className="w-3.5 h-3.5" />} label="Lidas" value={String(waStats.lidas)} />
-            <Kpi icon={<Bug className="w-3.5 h-3.5" />} label="Falhas" value={String(waStats.falhas)} />
-            <Kpi icon={<MousePointerClick className="w-3.5 h-3.5" />} label="Cliques/Respostas" value={String(waStats.respostas)} />
-          </div>
-
-          {waMsgs.length === 0 && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              Ainda sem mensagens registradas. A captação já está ativa: cada WhatsApp enviado pelo sistema passa a aparecer aqui.
-              Para registrar <b>entregue/lida/clique</b>, configure o webhook na Meta (instruções abaixo).
+        <div className="rounded-2xl border border-border overflow-hidden bg-card grid grid-cols-1 md:grid-cols-[340px_1fr] h-[74vh]">
+          {/* Lista de conversas */}
+          <div className="border-r border-border flex flex-col min-h-0">
+            <div className="p-3 border-b border-border">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input value={waSearch} onChange={(e) => setWaSearch(e.target.value)} placeholder="Pesquisar conversa…"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
             </div>
-          )}
-
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="text-sm font-semibold text-foreground mb-1">Como ativar entregue/lida/clique (1x)</p>
-            <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-0.5">
-              <li>Meta App → WhatsApp → Configuração → Webhook → Editar.</li>
-              <li>URL de callback: <code className="text-foreground">https://wfxeiuqxzrlnvlopcrwd.supabase.co/functions/v1/whatsapp-webhook</code></li>
-              <li>Token de verificação: o mesmo valor do secret <code className="text-foreground">WHATSAPP_VERIFY_TOKEN</code> (você define).</li>
-              <li>Assine os campos <b>messages</b> (status + recebidas).</li>
-            </ol>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="text-sm font-semibold text-foreground mb-2">Enviadas (recentes)</p>
-              <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
-                {waMsgs.slice(0, 100).map((m) => {
-                  const st = m.read_at ? "Lida" : m.delivered_at ? "Entregue" : m.status === "failed" ? "Falhou" : "Enviada";
-                  const color = m.read_at ? "text-blue-600" : m.delivered_at ? "text-emerald-600" : m.status === "failed" ? "text-red-600" : "text-muted-foreground";
-                  return (
-                    <div key={m.id} className="flex items-center justify-between text-xs border-b border-border/40 py-1">
-                      <span className="text-foreground">{m.to_phone || "—"} <span className="text-muted-foreground">· {m.template || "—"}</span></span>
-                      <span className="flex items-center gap-2 whitespace-nowrap ml-2">
-                        <span className={`font-medium ${color}`}>{st}</span>
-                        <span className="text-muted-foreground">{fmtDateTime(m.sent_at)}</span>
-                      </span>
+            <div className="overflow-y-auto flex-1">
+              {waFilteredConvs.map((c) => (
+                <button key={c.phone} onClick={() => setWaPhone(c.phone)}
+                  className={`w-full text-left px-3 py-3 flex items-center gap-3 border-b border-border/40 transition-colors ${waPhone === c.phone ? "bg-primary/10" : "hover:bg-muted"}`}>
+                  <div className="w-10 h-10 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0"><MessageCircle className="w-5 h-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">{fmtPhone(c.phone)}</p>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{fmtTime(c.last.time)}</span>
                     </div>
-                  );
-                })}
-                {waMsgs.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">Sem envios ainda.</p>}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="text-sm font-semibold text-foreground mb-2">Respostas / cliques recebidos</p>
-              <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
-                {waInbound.slice(0, 100).map((i) => (
-                  <div key={i.id} className="flex items-center justify-between text-xs border-b border-border/40 py-1">
-                    <span className="text-foreground">{i.from_phone || "—"} <span className="text-muted-foreground">· {i.body || i.type}</span></span>
-                    <span className="text-muted-foreground whitespace-nowrap ml-2">{fmtDateTime(i.received_at)}</span>
+                    <p className="text-xs text-muted-foreground truncate">{c.last.dir === "out" ? "✓ " : ""}{c.last.text}</p>
                   </div>
-                ))}
-                {waInbound.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">Sem respostas/cliques ainda (precisa do webhook).</p>}
-              </div>
+                </button>
+              ))}
+              {waFilteredConvs.length === 0 && <p className="text-xs text-muted-foreground text-center py-12">Nenhuma conversa ainda.<br />Os WhatsApps enviados aparecem aqui.</p>}
             </div>
+          </div>
+
+          {/* Thread */}
+          <div className="flex flex-col min-h-0">
+            {!activeConv ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+                <MessageCircle className="w-12 h-12 mb-3 opacity-30" />
+                <p className="text-sm">Selecione uma conversa para ver as mensagens.</p>
+              </div>
+            ) : (
+              <>
+                <div className="px-4 py-3 border-b border-border flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center"><MessageCircle className="w-5 h-5" /></div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{fmtPhone(activeConv.phone)}</p>
+                    <p className="text-[11px] text-muted-foreground">Conta comercial · {activeConv.msgs.length} mensagens</p>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-muted/30">
+                  {activeConv.msgs.map((m, idx) => (
+                    <div key={idx} className={`flex ${m.dir === "out" ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm ${m.dir === "out" ? "bg-emerald-600 text-white rounded-br-sm" : "bg-card text-foreground rounded-bl-sm border border-border"}`}>
+                        <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                        <div className={`flex items-center gap-1 justify-end mt-1 text-[10px] ${m.dir === "out" ? "text-white/80" : "text-muted-foreground"}`}>
+                          <span>{fmtTime(m.time)}</span>
+                          {m.dir === "out" && (
+                            m.status === "read" ? <CheckCheck className="w-3.5 h-3.5 text-sky-300" />
+                              : m.status === "delivered" ? <CheckCheck className="w-3.5 h-3.5" />
+                              : m.status === "failed" ? <span className="text-red-200 font-bold">!</span>
+                              : <Check className="w-3.5 h-3.5" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-4 py-2.5 border-t border-border text-center text-[11px] text-muted-foreground">
+                  Somente leitura · ✓ enviada · ✓✓ entregue · <span className="text-sky-500">✓✓</span> lida · respostas chegam pelo webhook
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

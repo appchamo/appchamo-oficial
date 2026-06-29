@@ -113,6 +113,11 @@ Deno.serve(async (req) => {
     console.log("WhatsApp enviado:", to, "template:", template);
     // Log no CRM (wa_messages) — não bloqueia o retorno em caso de erro.
     try {
+      const TEMPLATE_BODY: Record<string, (p: string[]) => string> = {
+        nova_chamada: (p) => `Olá ${p[0] || ""}! Você recebeu uma nova chamada no Chamô. Abra o app para responder e não perder o cliente.`,
+        alerta_admin: (p) => `Chamô • ${p[0] || ""}. ${p[1] || ""}. Acesse o painel admin para os detalhes.`,
+      };
+      const bodyText = (TEMPLATE_BODY[template]?.(params)) || `[${template}]`;
       const waId = (result as any)?.messages?.[0]?.id ?? null;
       const log = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
       await log.from("wa_messages").insert({
@@ -120,6 +125,7 @@ Deno.serve(async (req) => {
         to_phone: to,
         user_id: body.user_id ?? null,
         template,
+        body: bodyText,
         status: "sent",
         payload: result,
       });

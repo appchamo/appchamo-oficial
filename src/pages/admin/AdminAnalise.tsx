@@ -1,0 +1,253 @@
+import AdminLayout from "@/components/AdminLayout";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  FunnelChart, Funnel, LabelList, AreaChart, Area,
+} from "recharts";
+import { Loader2, Users, UserCheck, Activity, AlertCircle } from "lucide-react";
+
+type Tab = "geral" | "cadastro";
+
+interface ProfileRow {
+  user_type: string | null;
+  accepted_terms_at: string | null;
+  signup_completed_at: string | null;
+  phone: string | null;
+  address_city: string | null;
+  last_seen_at: string | null;
+  created_at: string | null;
+}
+interface EventRow {
+  type: string;
+  path: string | null;
+  platform: string | null;
+  created_at: string;
+}
+
+const COLORS = ["#ea580c", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ef4444", "#6b7280", "#14b8a6"];
+const PAGE_NAMES: Record<string, string> = {
+  "/home": "Início", "/search": "Busca", "/messages": "Mensagens", "/rewards": "Recompensas",
+  "/profile": "Perfil", "/signup": "Cadastro", "/login": "Login", "/subscriptions": "Planos",
+  "/notifications": "Notificações", "/community": "Comunidade", "/categories": "Categorias",
+};
+const pretty = (p: string | null) => (p ? PAGE_NAMES[p] || p : "—");
+
+export default function AdminAnalise() {
+  const [tab, setTab] = useState<Tab>("geral");
+  const [loading, setLoading] = useState(true);
+  const [profiles, setProfiles] = useState<ProfileRow[]>([]);
+  const [events, setEvents] = useState<EventRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const [{ data: pData }, { data: eData }] = await Promise.all([
+        supabase.from("profiles").select("user_type, accepted_terms_at, signup_completed_at, phone, address_city, last_seen_at, created_at").limit(20000),
+        supabase.from("app_events" as never).select("type, path, platform, created_at").order("created_at", { ascending: false }).limit(8000),
+      ]);
+      if (!cancelled) {
+        setProfiles(((pData as unknown) as ProfileRow[]) || []);
+        setEvents(((eData as unknown) as EventRow[]) || []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ---- agregações ----
+  const stats = useMemo(() => {
+    const total = profiles.length;
+    const has = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== "";
+    const clientes = profiles.filter((p) => p.user_type === "client").length;
+    const pros = profiles.filter((p) => p.user_type === "professional").length;
+    const empresas = profiles.filter((p) => p.user_type === "company" || p.user_type === "enterprise").length;
+    const outros = total - clientes - pros - empresas;
+    const termos = profiles.filter((p) => has(p.accepted_terms_at)).length;
+    const concluiu = profiles.filter((p) => has(p.signup_completed_at)).length;
+    const telefone = profiles.filter((p) => has(p.phone)).length;
+    const abriu = profiles.filter((p) => has(p.last_seen_at)).length;
+    return { total, clientes, pros, empresas, outros, termos, concluiu, telefone, abriu };
+  }, [profiles]);
+
+  const tipoData = useMemo(() => ([
+    { name: "Clientes", value: stats.clientes },
+    { name: "Profissionais", value: stats.pros },
+    { name: "Empresas", value: stats.empresas },
+    ...(stats.outros > 0 ? [{ name: "Outros/Incompletos", value: stats.outros }] : []),
+  ].filter((d) => d.value > 0)), [stats]);
+
+  const cadastroData = useMemo(() => ([
+    { name: "Concluíram", value: stats.concluiu },
+    { name: "Não concluíram", value: Math.max(0, stats.total - stats.concluiu) },
+  ].filter((d) => d.value > 0)), [stats]);
+
+  const plataformaData = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const e of events) { const k = e.platform || "—"; m[k] = (m[k] || 0) + 1; }
+    return Object.entries(m).map(([name, value]) => ({ name, value }));
+  }, [events]);
+
+  const topPages = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const e of events) if (e.type === "page_view") { const k = e.path || "—"; m[k] = (m[k] || 0) + 1; }
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([path, qtd]) => ({ name: pretty(path), qtd }));
+  }, [events]);
+
+  const perDay = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const e of events) { const d = (e.created_at || "").slice(0, 10); if (d) m[d] = (m[d] || 0) + 1; }
+    return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
+      .map(([d, qtd]) => ({ dia: d.slice(5), qtd }));
+  }, [events]);
+
+  const funnel = useMemo(() => {
+    const steps = [
+      { name: "Contas criadas", value: stats.total, fill: COLORS[0] },
+      { name: "Aceitaram termos", value: stats.termos, fill: COLORS[1] },
+      { name: "Preencheram telefone", value: stats.telefone, fill: COLORS[2] },
+      { name: "Concluíram cadastro", value: stats.concluiu, fill: COLORS[3] },
+      { name: "Abriram o app", value: stats.abriu, fill: COLORS[4] },
+    ];
+    return steps;
+  }, [stats]);
+
+  const Card = ({ title, children, sub }: { title: string; children: ReactNode; sub?: string }) => (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <p className="text-sm font-semibold text-foreground mb-1">{title}</p>
+      {sub && <p className="text-xs text-muted-foreground mb-2">{sub}</p>}
+      {children}
+    </div>
+  );
+  const Kpi = ({ icon, label, value }: { icon: ReactNode; label: string; value: string }) => (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">{icon}{label}</div>
+      <p className="text-2xl font-bold text-foreground mt-1">{value}</p>
+    </div>
+  );
+  const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
+
+  return (
+    <AdminLayout title="Análise">
+      <p className="text-sm text-muted-foreground mb-4">Usabilidade do app e funil de cadastro.</p>
+
+      <div className="flex gap-2 mb-5">
+        <button onClick={() => setTab("geral")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "geral" ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}>Visão geral</button>
+        <button onClick={() => setTab("cadastro")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "cadastro" ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}>Fluxo de cadastro</button>
+      </div>
+
+      {loading ? (
+        <div className="py-24 flex items-center justify-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Carregando…</div>
+      ) : tab === "geral" ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Kpi icon={<Users className="w-3.5 h-3.5" />} label="Usuários" value={String(stats.total)} />
+            <Kpi icon={<UserCheck className="w-3.5 h-3.5" />} label="Cadastro concluído" value={`${stats.concluiu} (${pct(stats.concluiu, stats.total)}%)`} />
+            <Kpi icon={<Activity className="w-3.5 h-3.5" />} label="Abriram o app" value={String(stats.abriu)} />
+            <Kpi icon={<AlertCircle className="w-3.5 h-3.5" />} label="Eventos coletados" value={String(events.length)} />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Card title="Tipos de conta">
+              <ResponsiveContainer width="100%" height={240}>
+                <PieChart>
+                  <Pie data={tipoData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                    {tipoData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip /><Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </Card>
+            <Card title="Cadastro concluído x não concluído">
+              <ResponsiveContainer width="100%" height={240}>
+                <PieChart>
+                  <Pie data={cadastroData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} label>
+                    <Cell fill={COLORS[2]} /><Cell fill={COLORS[5]} />
+                  </Pie>
+                  <Tooltip /><Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </Card>
+            <Card title="Páginas mais acessadas (jornada)" sub="A partir do registro de uso (dados recentes).">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={topPages} layout="vertical" margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 12 }} />
+                  <Tooltip /><Bar dataKey="qtd" fill={COLORS[0]} radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+            <Card title="Plataforma (eventos)" sub="Web / iOS / Android.">
+              {plataformaData.length ? (
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie data={plataformaData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                      {plataformaData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip /><Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <p className="text-sm text-muted-foreground py-12 text-center">Sem dados de uso ainda.</p>}
+            </Card>
+          </div>
+
+          <Card title="Atividade por dia (últimos 14 dias)" sub="Total de eventos registrados.">
+            {perDay.length ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <AreaChart data={perDay}>
+                  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[0]} stopOpacity={0.6} /><stop offset="95%" stopColor={COLORS[0]} stopOpacity={0} /></linearGradient></defs>
+                  <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 12 }} /><YAxis />
+                  <Tooltip /><Area type="monotone" dataKey="qtd" stroke={COLORS[0]} fill="url(#g)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : <p className="text-sm text-muted-foreground py-12 text-center">Sem dados de uso ainda.</p>}
+          </Card>
+        </div>
+      ) : (
+        // ---- Fluxo de cadastro ----
+        <div className="space-y-4">
+          <Card title="Funil de cadastro" sub="Quantas pessoas avançam em cada etapa (dados históricos dos perfis).">
+            <ResponsiveContainer width="100%" height={300}>
+              <FunnelChart>
+                <Tooltip />
+                <Funnel dataKey="value" data={funnel} isAnimationActive>
+                  <LabelList position="right" fill="hsl(var(--foreground))" stroke="none" dataKey="name" />
+                  <LabelList position="left" fill="hsl(var(--foreground))" stroke="none" dataKey="value" />
+                </Funnel>
+              </FunnelChart>
+            </ResponsiveContainer>
+          </Card>
+
+          <Card title="Conversão entre etapas">
+            <div className="space-y-2">
+              {funnel.map((s, i) => {
+                const prev = i === 0 ? s.value : funnel[i - 1].value;
+                const convTotal = pct(s.value, funnel[0].value);
+                const convPrev = i === 0 ? 100 : pct(s.value, prev);
+                const dropPrev = 100 - convPrev;
+                return (
+                  <div key={s.name} className="flex items-center gap-3">
+                    <span className="w-3 h-3 rounded-full shrink-0" style={{ background: s.fill }} />
+                    <span className="flex-1 text-sm text-foreground">{s.name}</span>
+                    <span className="text-sm font-semibold text-foreground w-16 text-right">{s.value}</span>
+                    <span className="text-xs text-muted-foreground w-14 text-right">{convTotal}%</span>
+                    <span className={`text-xs w-20 text-right ${i > 0 && dropPrev > 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                      {i > 0 ? `-${dropPrev}%` : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-3">Coluna 1: total na etapa. Coluna 2: % sobre o total de contas. Coluna 3: queda em relação à etapa anterior.</p>
+          </Card>
+
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            A maioria dos cadastros incompletos entra com Google/Apple (1 toque) e abandona antes dos termos/dados. O registro de uso (página Analytics do usuário) mostra, daqui pra frente, em qual tela cada pessoa para.
+          </div>
+        </div>
+      )}
+    </AdminLayout>
+  );
+}

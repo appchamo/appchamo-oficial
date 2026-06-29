@@ -101,6 +101,7 @@ const AdminTransactions = lazy(() => import("./pages/admin/AdminTransactions"));
 const AdminWallet = lazy(() => import("./pages/admin/AdminWallet"));
 const ProWallet = lazy(() => import("./pages/ProWallet"));
 const AdminReports = lazy(() => import("./pages/admin/AdminReports"));
+const AdminAnalise = lazy(() => import("./pages/admin/AdminAnalise"));
 const AdminCoupons = lazy(() => import("./pages/admin/AdminCoupons"));
 const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
 const AdminLogs = lazy(() => import("./pages/admin/AdminLogs"));
@@ -629,6 +630,7 @@ const AppContent = () => {
         <Route path="/admin/transactions" element={<ProtectedRoute><AdminTransactions /></ProtectedRoute>} />
         <Route path="/admin/wallet" element={<ProtectedRoute><AdminWallet /></ProtectedRoute>} />
         <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
+        <Route path="/admin/analise" element={<ProtectedRoute><AdminAnalise /></ProtectedRoute>} />
         <Route path="/admin/coupons" element={<ProtectedRoute><AdminCoupons /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/logs" element={<ProtectedRoute><AdminLogs /></ProtectedRoute>} />

@@ -1,11 +1,16 @@
 import AdminLayout from "@/components/AdminLayout";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Users, MessageCircle, Mail, Search, Clock, MousePointerClick, Activity, Bug, Loader2, ChevronRight, Check, CheckCheck } from "lucide-react";
+import { Users, MessageCircle, Mail, Search, Clock, MousePointerClick, Activity, Bug, Loader2, ChevronRight, Check, CheckCheck, ExternalLink } from "lucide-react";
 
 type Tab = "usuarios" | "whatsapp" | "email";
 
-interface UserRow { user_id: string; full_name: string | null; email: string | null; user_type: string | null; last_seen_at: string | null; }
+interface UserRow { user_id: string; full_name: string | null; email: string | null; user_type: string | null; last_seen_at: string | null; phone?: string | null; avatar_url?: string | null; }
+const normalizeBR = (s: string | null) => { let d = (s || "").replace(/\D/g, ""); if (d.startsWith("55") && d.length >= 12) d = d.slice(2); return d; };
+const initials = (name: string | null) => (name || "").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+const typeLabel = (t: string | null | undefined) => t === "professional" ? "Profissional" : t === "company" || t === "enterprise" ? "Empresa" : t === "client" ? "Cliente" : "—";
+// Botões dos templates (visual, igual WhatsApp)
+const TEMPLATE_BUTTONS: Record<string, string[]> = { nova_chamada: ["Abrir no Chamô"], alerta_admin: [] };
 interface EventRow { id: number; type: string; path: string | null; label: string | null; platform: string | null; session_id: string | null; created_at: string; }
 
 const PAGE_NAMES: Record<string, string> = {
@@ -26,7 +31,7 @@ const fmtTime = (s: string) => new Date(s).toLocaleTimeString("pt-BR", { hour: "
 
 interface WaMsg { id: number; to_phone: string | null; template: string | null; body: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null; }
 interface WaInb { id: number; from_phone: string | null; type: string | null; body: string | null; received_at: string; }
-type ChatMsg = { dir: "in" | "out"; text: string; time: string; status: string };
+type ChatMsg = { dir: "in" | "out"; text: string; time: string; status: string; template?: string | null };
 const onlyDigits = (s: string | null) => (s || "").replace(/\D/g, "");
 const fmtPhone = (d: string) => {
   const m = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
@@ -82,8 +87,8 @@ export default function AdminCRM() {
   const [loadingEvents, setLoadingEvents] = useState(false);
 
   useEffect(() => {
-    supabase.from("profiles").select("user_id, full_name, email, user_type, last_seen_at")
-      .order("last_seen_at", { ascending: false, nullsFirst: false }).limit(2000)
+    supabase.from("profiles").select("user_id, full_name, email, user_type, last_seen_at, phone, avatar_url")
+      .order("last_seen_at", { ascending: false, nullsFirst: false }).limit(5000)
       .then(({ data }) => setUsers(((data as unknown) as UserRow[]) || []));
   }, []);
 
@@ -125,7 +130,7 @@ export default function AdminCRM() {
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(msg);
     };
-    for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent") });
+    for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent"), template: m.template });
     for (const i of waInbound) push(i.from_phone, { dir: "in", text: i.body || `(${i.type || "mensagem"})`, time: i.received_at, status: "in" });
     const list = Array.from(map.entries()).map(([phone, msgs]) => {
       msgs.sort((a, b) => a.time.localeCompare(b.time));
@@ -143,6 +148,19 @@ export default function AdminCRM() {
   }, [conversations, waSearch]);
 
   const activeConv = useMemo(() => conversations.find((c) => c.phone === waPhone) || null, [conversations, waPhone]);
+
+  const profileByPhone = useMemo(() => {
+    const m = new Map<string, UserRow>();
+    for (const u of users) { const k = normalizeBR(u.phone || null); if (k) m.set(k, u); }
+    return m;
+  }, [users]);
+  const profForPhone = (phone: string) => profileByPhone.get(normalizeBR(phone)) || null;
+  const clickedPhones = useMemo(() => {
+    const s = new Set<string>();
+    for (const i of waInbound) if (i.type === "button" || i.type === "interactive") s.add(normalizeBR(i.from_phone));
+    return s;
+  }, [waInbound]);
+  const openUserProfile = (phone: string) => { const p = profForPhone(phone); if (p) { setSelected(p); setTab("usuarios"); } };
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -290,19 +308,24 @@ export default function AdminCRM() {
               </div>
             </div>
             <div className="overflow-y-auto flex-1">
-              {waFilteredConvs.map((c) => (
+              {waFilteredConvs.map((c) => {
+                const prof = profForPhone(c.phone);
+                return (
                 <button key={c.phone} onClick={() => setWaPhone(c.phone)}
                   className={`w-full text-left px-3 py-3 flex items-center gap-3 border-b border-border/40 transition-colors ${waPhone === c.phone ? "bg-primary/10" : "hover:bg-muted"}`}>
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0"><MessageCircle className="w-5 h-5" /></div>
+                  {prof?.avatar_url
+                    ? <img src={prof.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+                    : <div className="w-10 h-10 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0 text-sm font-bold">{prof ? initials(prof.full_name) : <MessageCircle className="w-5 h-5" />}</div>}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-foreground truncate">{fmtPhone(c.phone)}</p>
+                      <p className="text-sm font-semibold text-foreground truncate">{prof?.full_name || fmtPhone(c.phone)}</p>
                       <span className="text-[11px] text-muted-foreground shrink-0">{fmtTime(c.last.time)}</span>
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{c.last.dir === "out" ? "✓ " : ""}{c.last.text}</p>
                   </div>
                 </button>
-              ))}
+                );
+              })}
               {waFilteredConvs.length === 0 && <p className="text-xs text-muted-foreground text-center py-12">Nenhuma conversa ainda.<br />Os WhatsApps enviados aparecem aqui.</p>}
             </div>
           </div>
@@ -316,13 +339,29 @@ export default function AdminCRM() {
               </div>
             ) : (
               <>
-                <div className="px-4 py-3 border-b border-border flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center"><MessageCircle className="w-5 h-5" /></div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">{fmtPhone(activeConv.phone)}</p>
-                    <p className="text-[11px] text-muted-foreground">Conta comercial · {activeConv.msgs.length} mensagens</p>
-                  </div>
-                </div>
+                {(() => {
+                  const prof = profForPhone(activeConv.phone);
+                  const clicked = clickedPhones.has(normalizeBR(activeConv.phone));
+                  const anyRead = activeConv.msgs.some((m) => m.dir === "out" && m.status === "read");
+                  return (
+                    <div className="px-4 py-3 border-b border-border flex items-center gap-3">
+                      <button onClick={() => openUserProfile(activeConv.phone)} disabled={!prof} className="flex items-center gap-3 text-left disabled:cursor-default group">
+                        {prof?.avatar_url
+                          ? <img src={prof.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover" />
+                          : <div className="w-10 h-10 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center font-bold">{prof ? initials(prof.full_name) : <MessageCircle className="w-5 h-5" />}</div>}
+                        <div>
+                          <p className="text-sm font-semibold text-foreground group-hover:underline">{prof?.full_name || fmtPhone(activeConv.phone)}</p>
+                          <p className="text-[11px] text-muted-foreground">{prof ? `${typeLabel(prof.user_type)} · ` : "Conta comercial · "}{fmtPhone(activeConv.phone)}</p>
+                        </div>
+                      </button>
+                      <div className="ml-auto flex items-center gap-2">
+                        {anyRead && <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium">Visualizou</span>}
+                        {clicked && <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Clicou no botão</span>}
+                        {prof && <span className="text-[11px] text-primary font-medium">ver perfil →</span>}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-muted/30">
                   {activeConv.msgs.map((m, idx) => (
                     <div key={idx} className={`flex ${m.dir === "out" ? "justify-end" : "justify-start"}`}>
@@ -337,6 +376,11 @@ export default function AdminCRM() {
                               : <Check className="w-3.5 h-3.5" />
                           )}
                         </div>
+                        {m.dir === "out" && m.template && (TEMPLATE_BUTTONS[m.template] || []).map((b, bi) => (
+                          <div key={bi} className="mt-1.5 -mx-3 -mb-1 border-t border-white/25 pt-1.5 pb-0.5 text-center text-[13px] font-medium text-white flex items-center justify-center gap-1.5">
+                            <ExternalLink className="w-3.5 h-3.5" />{b}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}

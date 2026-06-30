@@ -184,8 +184,16 @@ const Home = () => {
   const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
   const nameFromAuth = (user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined;
   const userName = nameFromProfile || nameFromAuth?.trim().split(/\s+/)[0] || "Usuário";
-  const isPro = profile?.user_type === "professional" || profile?.user_type === "company";
-  const isClientUser = profile?.user_type === "client";
+  // Preview do admin (Layout da Home): ?as=pro | ?as=client força a visão.
+  const previewAs = (() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get("preview") === "1") { const a = sp.get("as"); return a === "pro" || a === "client" ? a : null; }
+    } catch { /* */ }
+    return null;
+  })();
+  const isPro = previewAs ? previewAs === "pro" : (profile?.user_type === "professional" || profile?.user_type === "company");
+  const isClientUser = previewAs ? previewAs === "client" : profile?.user_type === "client";
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletLoaded, setWalletLoaded] = useState(false);
   const [proId, setProId] = useState<string | null>(null);

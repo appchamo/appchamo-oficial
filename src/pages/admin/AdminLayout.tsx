@@ -46,6 +46,7 @@ const AdminLayoutPage = () => {
   const [saving, setSaving] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const previewReadyRef = useRef(false);
+  const [previewAs, setPreviewAs] = useState<"client" | "pro">("client");
 
   // Envia o rascunho atual para o preview (iframe da home real).
   const postPreview = useCallback(() => {
@@ -250,19 +251,31 @@ const AdminLayoutPage = () => {
 
       {/* Preview ao vivo — iPhone com a home real */}
       <div className="hidden lg:flex flex-col items-center sticky top-4">
-        <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-foreground">
+        <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-foreground">
           <Smartphone className="w-4 h-4 text-primary" /> Preview ao vivo
           <button onClick={reloadPreview} title="Recarregar preview" className="ml-1 p-1.5 rounded-lg hover:bg-muted transition-colors">
             <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
           </button>
         </div>
+        {/* Alternar visão */}
+        <div className="inline-flex p-0.5 rounded-full bg-muted border mb-3">
+          {(["client", "pro"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => { if (previewAs !== mode) { previewReadyRef.current = false; setPreviewAs(mode); } }}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${previewAs === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {mode === "client" ? "Como cliente" : "Como profissional"}
+            </button>
+          ))}
+        </div>
         {/* Moldura do iPhone */}
-        <div className="relative w-[320px] h-[660px] rounded-[44px] bg-neutral-900 p-3 shadow-2xl ring-1 ring-black/10">
+        <div className="relative w-[320px] h-[640px] rounded-[44px] bg-neutral-900 p-3 shadow-2xl ring-1 ring-black/10">
           <div className="absolute top-3 left-1/2 -translate-x-1/2 w-32 h-6 bg-neutral-900 rounded-b-2xl z-10" />
           <iframe
             ref={iframeRef}
             title="Preview da Home"
-            src="/home?preview=1"
+            src={`/home?preview=1&as=${previewAs}`}
             className="w-full h-full rounded-[32px] bg-white border-0"
           />
         </div>

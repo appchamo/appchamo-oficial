@@ -221,17 +221,14 @@ export default function HomeProCarousel({
       <div className="absolute top-4 right-16 w-10 h-10 bg-white/10 rounded-full pointer-events-none z-0" />
 
       {/* Localização em destaque — acima do bloco de boas-vindas / carteira */}
-      <div className="relative z-[2] px-4 lg:px-7 pt-4 lg:pt-6 pb-1 lg:pb-2">
-        <p className="text-[10px] lg:text-xs font-semibold text-white/90 uppercase tracking-wide mb-1.5 lg:mb-2 px-0.5">
-          A localização que você atende
-        </p>
+      <div className="relative z-[2] px-4 lg:px-7 pt-3.5 lg:pt-5 pb-1">
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onLocationClick();
           }}
-          className="w-full flex items-center gap-2.5 lg:gap-3 rounded-xl lg:rounded-2xl bg-white/20 backdrop-blur-sm border border-white/45 px-3 py-2.5 lg:px-4 lg:py-3.5 text-left shadow-md shadow-black/15 active:scale-[0.99] transition-transform"
+          className="w-full flex items-center gap-2.5 lg:gap-3 rounded-xl lg:rounded-2xl bg-white/20 backdrop-blur-sm border border-white/45 px-3 py-2.5 lg:px-4 lg:py-3 text-left shadow-md shadow-black/15 active:scale-[0.99] transition-transform"
         >
           <MapPin className="w-4 h-4 lg:w-5 lg:h-5 text-white shrink-0" />
           <span className="flex-1 text-sm lg:text-base font-bold text-white truncate">{locationLabel}</span>
@@ -248,11 +245,11 @@ export default function HomeProCarousel({
         {/* ════ SLIDE 0 — Carteira ════ */}
         <div className="min-w-full">
           <div
-            className="px-5 lg:px-7 pt-2 lg:pt-3 pb-5 lg:pb-7 cursor-pointer active:opacity-90"
+            className="px-5 lg:px-7 pt-2 lg:pt-3 pb-4 lg:pb-6 cursor-pointer active:opacity-90"
             onClick={() => navigate("/pro/financeiro")}
           >
             {/* avatar + saudação + prévia da próxima missão */}
-            <div className={`flex items-start gap-2 lg:gap-4 mb-4 lg:mb-5 ${hasAgenda ? "pr-10 lg:pr-14" : ""}`}>
+            <div className={`flex items-start gap-2 lg:gap-4 mb-3 lg:mb-4 ${hasAgenda ? "pr-10 lg:pr-14" : ""}`}>
               <div className="flex items-center gap-3 lg:gap-4 flex-1 min-w-0">
                 {profile?.avatar_url ? (
                   <img
@@ -308,7 +305,7 @@ export default function HomeProCarousel({
             </div>
 
             {/* saldo */}
-            <div className="bg-white/15 backdrop-blur-sm rounded-xl lg:rounded-2xl p-3.5 lg:p-5 flex items-center justify-between">
+            <div className="bg-white/15 backdrop-blur-sm rounded-xl lg:rounded-2xl p-3 lg:p-4 flex items-center justify-between">
               <div className="flex items-center gap-2.5 lg:gap-3.5">
                 <div className="w-9 h-9 lg:w-11 lg:h-11 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                   <Wallet className="w-[18px] h-[18px] lg:w-5 lg:h-5 text-white" />

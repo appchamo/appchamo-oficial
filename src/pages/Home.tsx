@@ -713,7 +713,7 @@ const Home = () => {
         </div>
       ) : (
         <div
-          className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto px-4 lg:px-8 xl:px-12 py-2 lg:py-6 flex flex-col gap-4 lg:gap-6 bg-secondary transition-opacity duration-300"
+          className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto px-4 lg:px-8 xl:px-12 py-2 lg:py-6 flex flex-col gap-3 lg:gap-5 bg-secondary transition-opacity duration-300"
           style={{ opacity: isRefreshing ? 0.7 : 1 }}
         >
           <TermsReacceptBanner />

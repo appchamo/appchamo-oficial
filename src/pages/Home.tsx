@@ -178,12 +178,6 @@ const Home = () => {
   }, [user?.id, linkedSponsor?.id, linkedSponsor?.name, linkedSponsor?.logo_url, refreshProfile]);
   const { isFreePlan, callsRemaining, loading: subLoading, plan } = useSubscription();
   const isBusiness = plan?.id === "business";
-  const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout();
-  const isRefreshing = useIsRefreshing();
-  // Fallback para user_metadata (ex.: OAuth) enquanto o perfil ainda não carregou
-  const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
-  const nameFromAuth = (user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined;
-  const userName = nameFromProfile || nameFromAuth?.trim().split(/\s+/)[0] || "Usuário";
   // Preview do admin (Layout da Home): ?as=pro | ?as=client força a visão.
   const previewAs = (() => {
     try {
@@ -194,6 +188,13 @@ const Home = () => {
   })();
   const isPro = previewAs ? previewAs === "pro" : (profile?.user_type === "professional" || profile?.user_type === "company");
   const isClientUser = previewAs ? previewAs === "client" : profile?.user_type === "client";
+  const homeAudience: "client" | "pro" = isPro ? "pro" : "client";
+  const { sections, isVisible, getSection, refresh: refreshLayout, footerText } = useHomeLayout(homeAudience);
+  const isRefreshing = useIsRefreshing();
+  // Fallback para user_metadata (ex.: OAuth) enquanto o perfil ainda não carregou
+  const nameFromProfile = profile?.full_name?.trim().split(/\s+/)[0];
+  const nameFromAuth = (user?.user_metadata?.full_name || user?.user_metadata?.name) as string | undefined;
+  const userName = nameFromProfile || nameFromAuth?.trim().split(/\s+/)[0] || "Usuário";
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletLoaded, setWalletLoaded] = useState(false);
   const [proId, setProId] = useState<string | null>(null);

@@ -23,8 +23,11 @@ const DEFAULT_SECTIONS: SectionConfig[] = [
   { id: "tutorials", label: "Tutoriais", visible: true, order: 7 },
 ];
 
-async function fetchHomeLayout(): Promise<SectionConfig[]> {
-  const { data } = await supabase.from("platform_settings").select("value").eq("key", "home_layout").single();
+export type HomeAudience = "client" | "pro";
+export const homeLayoutKey = (audience: HomeAudience) => (audience === "pro" ? "home_layout_pro" : "home_layout");
+
+async function fetchHomeLayout(audience: HomeAudience = "client"): Promise<SectionConfig[]> {
+  const { data } = await supabase.from("platform_settings").select("value").eq("key", homeLayoutKey(audience)).single();
   if (data?.value && Array.isArray(data.value)) {
     const saved = data.value as unknown as SectionConfig[];
     const savedMap = new Map(saved.map(s => [s.id, s]));
@@ -42,23 +45,23 @@ async function fetchFooterText(): Promise<string> {
   return DEFAULT_FOOTER;
 }
 
-export const useHomeLayout = () => {
+export const useHomeLayout = (audience: HomeAudience = "client") => {
   const [sections, setSections] = useState<SectionConfig[]>(DEFAULT_SECTIONS);
   const [footerText, setFooterText] = useState<string>(DEFAULT_FOOTER);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const [nextSections, nextFooter] = await Promise.all([fetchHomeLayout(), fetchFooterText()]);
+    const [nextSections, nextFooter] = await Promise.all([fetchHomeLayout(audience), fetchFooterText()]);
     setSections(nextSections);
     setFooterText(nextFooter);
-  }, []);
+  }, [audience]);
 
   useEffect(() => {
-    Promise.all([fetchHomeLayout(), fetchFooterText()]).then(([nextSections, nextFooter]) => {
+    Promise.all([fetchHomeLayout(audience), fetchFooterText()]).then(([nextSections, nextFooter]) => {
       setSections(nextSections);
       setFooterText(nextFooter);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [audience]);
 
   // Preview ao vivo: quando renderizado dentro do editor (iframe), aplica o rascunho
   // recebido por postMessage sem precisar salvar no banco.

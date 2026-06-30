@@ -46,7 +46,30 @@ const AdminLayoutPage = () => {
   const [saving, setSaving] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const previewReadyRef = useRef(false);
-  const [previewAs, setPreviewAs] = useState<"client" | "pro">("client");
+  const [editAudience, setEditAudience] = useState<"client" | "pro">("client");
+  const previewAs = editAudience;
+  const layoutKey = (a: "client" | "pro") => (a === "pro" ? "home_layout_pro" : "home_layout");
+
+  const loadSectionsFor = async (a: "client" | "pro") => {
+    const res = await supabase.from("platform_settings").select("value").eq("key", layoutKey(a)).single();
+    if (res.data?.value && Array.isArray(res.data.value)) {
+      const saved = res.data.value as unknown as SectionConfig[];
+      const savedMap = new Map(saved.map(s => [s.id, s]));
+      const merged = DEFAULT_SECTIONS.map(def => savedMap.get(def.id) || def);
+      saved.forEach(s => { if (!merged.find(m => m.id === s.id)) merged.push(s); });
+      merged.sort((x, y) => x.order - y.order);
+      setSections(merged);
+    } else {
+      setSections([...DEFAULT_SECTIONS]);
+    }
+  };
+
+  const switchAudience = async (a: "client" | "pro") => {
+    if (a === editAudience) return;
+    setEditAudience(a);
+    previewReadyRef.current = false;
+    await loadSectionsFor(a);
+  };
 
   // Envia o rascunho atual para o preview (iframe da home real).
   const postPreview = useCallback(() => {
@@ -132,7 +155,7 @@ const AdminLayoutPage = () => {
   const handleSave = async () => {
     setSaving(true);
     const [layoutErr, footerErr, tutorialsErr] = await Promise.all([
-      supabase.from("platform_settings").upsert({ key: "home_layout", value: sections as any }, { onConflict: "key" }).then(r => r.error),
+      supabase.from("platform_settings").upsert({ key: layoutKey(editAudience), value: sections as any }, { onConflict: "key" }).then(r => r.error),
       supabase.from("platform_settings").upsert({ key: "home_footer_text", value: footerText }, { onConflict: "key" }).then(r => r.error),
       supabase.from("platform_settings").upsert({ key: "home_tutorials", value: tutorialsConfig as any }, { onConflict: "key" }).then(r => r.error),
     ]);
@@ -152,8 +175,22 @@ const AdminLayoutPage = () => {
     <AdminLayout title="Layout da Home">
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(300px,360px)] gap-6 items-start">
       <div className="space-y-3 min-w-0">
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
+            Editando: home do {editAudience === "pro" ? "Profissional" : "Cliente"}
+          </span>
+          {/* Toggle também aqui (visível no mobile, onde o preview fica oculto) */}
+          <div className="inline-flex p-0.5 rounded-full bg-muted border lg:hidden">
+            {(["client", "pro"] as const).map((mode) => (
+              <button key={mode} onClick={() => void switchAudience(mode)}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${editAudience === mode ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+                {mode === "client" ? "Cliente" : "Profissional"}
+              </button>
+            ))}
+          </div>
+        </div>
         <p className="text-sm text-muted-foreground mb-4">
-          Arrume a ordem das seções da página inicial. Você pode ativar/desativar e editar textos. As mudanças aparecem ao vivo no preview ao lado.
+          Arrume a ordem e a visibilidade das seções. Use o botão <b>Cliente / Profissional</b> para escolher qual home editar. As mudanças aparecem ao vivo no preview.
         </p>
 
         {sections.map((section, index) => (
@@ -257,15 +294,15 @@ const AdminLayoutPage = () => {
             <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
           </button>
         </div>
-        {/* Alternar visão */}
+        {/* Alternar visão / público editado */}
         <div className="inline-flex p-0.5 rounded-full bg-muted border mb-3">
           {(["client", "pro"] as const).map((mode) => (
             <button
               key={mode}
-              onClick={() => { if (previewAs !== mode) { previewReadyRef.current = false; setPreviewAs(mode); } }}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${previewAs === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => void switchAudience(mode)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${editAudience === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
             >
-              {mode === "client" ? "Como cliente" : "Como profissional"}
+              {mode === "client" ? "Cliente" : "Profissional"}
             </button>
           ))}
         </div>

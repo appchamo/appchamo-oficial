@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Camera, FileText, X, CheckCircle2, ImageIcon } from "lucide-react";
+import { Camera, FileText, X, CheckCircle2, ImageIcon, ScanFace } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { registerChamoSignupOverlayConsumer } from "@/lib/chamoSignupBack";
@@ -254,13 +254,15 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
                           >
                             Tirar outra
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => openFilePicker(slot.label)}
-                            className="text-[11px] font-semibold text-primary hover:underline"
-                          >
-                            Trocar arquivo
-                          </button>
+                          {slot.key !== "selfie" && (
+                            <button
+                              type="button"
+                              onClick={() => openFilePicker(slot.label)}
+                              className="text-[11px] font-semibold text-primary hover:underline"
+                            >
+                              Trocar arquivo
+                            </button>
+                          )}
                         </div>
                       </div>
                       <button
@@ -272,6 +274,18 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
                         <X className="w-4 h-4" />
                       </button>
                     </div>
+                  ) : slot.key === "selfie" ? (
+                    /* Selfie: só câmera ao vivo (sem galeria), com ícone de rosto. */
+                    <button
+                      type="button"
+                      onClick={() => openCamera(slot.label)}
+                      className="group flex w-full items-center justify-center gap-3 py-4 px-2 rounded-2xl bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90 active:scale-[0.98] transition-all"
+                    >
+                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+                        <ScanFace className="w-5 h-5 shrink-0" />
+                      </span>
+                      <span className="text-sm font-bold leading-tight">Fazer reconhecimento facial</span>
+                    </button>
                   ) : (
                     <div className="grid grid-cols-2 gap-3">
                       <button

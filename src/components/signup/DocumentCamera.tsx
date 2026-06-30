@@ -1,5 +1,31 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Camera, X, Loader2 } from "lucide-react";
+import { Camera, X, Loader2, ScanFace } from "lucide-react";
+
+// Carrega o face-api.js (detecção de rosto no aparelho) sob demanda, via CDN.
+let faceApiPromise: Promise<any | null> | null = null;
+function loadFaceApi(): Promise<any | null> {
+  if (faceApiPromise) return faceApiPromise;
+  faceApiPromise = (async () => {
+    try {
+      const w = window as any;
+      if (!w.faceapi) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js";
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("face-api load failed"));
+          document.head.appendChild(s);
+        });
+      }
+      const faceapi = (window as any).faceapi;
+      await faceapi.nets.tinyFaceDetector.loadFromUri("https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model");
+      return faceapi;
+    } catch {
+      return null;
+    }
+  })();
+  return faceApiPromise;
+}
 
 interface DocumentCameraProps {
   label: string;
@@ -16,6 +42,11 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const isSelfie = facing === "user";
+  const [faceFitted, setFaceFitted] = useState(false);
+  const [aiOn, setAiOn] = useState(false);
+  const fittedSinceRef = useRef<number | null>(null);
+  const autoShotRef = useRef(false);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -80,6 +111,47 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
     );
   }, [ready, stopCamera, onCapture]);
 
+  // Detecção de rosto (selfie): círculo fica verde e tira a foto sozinho ao encaixar.
+  useEffect(() => {
+    if (!isSelfie || !ready) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    (async () => {
+      const faceapi = await loadFaceApi();
+      if (cancelled) return;
+      if (!faceapi) { setAiOn(false); return; }
+      setAiOn(true);
+      const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+      timer = setInterval(async () => {
+        const video = videoRef.current;
+        if (!video || cancelled || autoShotRef.current) return;
+        let res: any = null;
+        try { res = await faceapi.detectSingleFace(video, opts); } catch { return; }
+        if (cancelled) return;
+        const vw = video.videoWidth || 1, vh = video.videoHeight || 1;
+        let fitted = false;
+        if (res?.box) {
+          const b = res.box;
+          const cx = (b.x + b.width / 2) / vw;
+          const cy = (b.y + b.height / 2) / vh;
+          const wRatio = b.width / vw;
+          fitted = wRatio > 0.22 && wRatio < 0.72 && Math.abs(cx - 0.5) < 0.2 && Math.abs(cy - 0.5) < 0.22;
+        }
+        setFaceFitted(fitted);
+        if (fitted) {
+          if (fittedSinceRef.current == null) fittedSinceRef.current = Date.now();
+          else if (Date.now() - fittedSinceRef.current > 700 && !autoShotRef.current) {
+            autoShotRef.current = true;
+            capturePhoto();
+          }
+        } else {
+          fittedSinceRef.current = null;
+        }
+      }, 250);
+    })();
+    return () => { cancelled = true; if (timer) clearInterval(timer); };
+  }, [isSelfie, ready, capturePhoto]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col" style={{ touchAction: "none" }}>
       {/* Header */}
@@ -103,7 +175,7 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
           autoPlay
           playsInline
           muted
-          className="absolute inset-0 w-full h-full object-cover"
+          className={`absolute inset-0 w-full h-full object-cover ${isSelfie ? "scale-x-[-1]" : ""}`}
         />
 
         {error ? (
@@ -115,6 +187,21 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
             >
               Fechar
             </button>
+          </div>
+        ) : isSelfie ? (
+          /* Selfie: círculo de IA (laranja → verde ao encaixar o rosto) */
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/30">
+            <div className="relative" style={{ width: "72vw", maxWidth: 300, aspectRatio: "1 / 1" }}>
+              <div className={`absolute inset-0 rounded-full border-[5px] transition-colors duration-200 ${faceFitted ? "border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.5)]" : "border-primary"}`} />
+            </div>
+            <div className="mt-6 flex flex-col items-center gap-1 px-6">
+              <p className={`text-sm font-bold text-center ${faceFitted ? "text-emerald-300" : "text-white/90"}`}>
+                {faceFitted ? "Rosto encaixado! Segure firme…" : "Encaixe seu rosto no círculo"}
+              </p>
+              <p className="text-white/55 text-[11px] text-center">
+                {aiOn ? "A foto é tirada automaticamente quando o círculo fica verde" : "Toque no botão abaixo para tirar a foto"}
+              </p>
+            </div>
           </div>
         ) : (
           /* Document frame overlay */
@@ -183,12 +270,14 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
           <span className="w-[58px] h-[58px] rounded-full bg-white flex items-center justify-center">
             {capturing ? (
               <Loader2 className="w-7 h-7 text-black animate-spin" />
+            ) : isSelfie ? (
+              <ScanFace className="w-7 h-7 text-black" />
             ) : (
               <Camera className="w-7 h-7 text-black" />
             )}
           </span>
         </button>
-        <p className="text-white/70 text-xs">Tirar foto</p>
+        <p className="text-white/70 text-xs">{isSelfie ? (aiOn ? "Encaixe o rosto (foto automática)" : "Tirar selfie") : "Tirar foto"}</p>
       </div>
     </div>
   );

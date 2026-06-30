@@ -193,10 +193,7 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
-        <header
-          className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b px-3 md:px-6 py-3 flex items-center justify-between gap-2"
-          style={{ paddingTop: "calc(0.75rem + env(safe-area-inset-top, 0px))" }}
-        >
+        <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b px-3 md:px-6 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"

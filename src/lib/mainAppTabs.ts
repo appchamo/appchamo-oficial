@@ -41,6 +41,8 @@ const FULL_PAGE_SCROLL_EXACT = new Set([
 
 export function isFullPageScrollRoute(pathname: string): boolean {
   if (FULL_PAGE_SCROLL_EXACT.has(pathname)) return true;
+  // Painel admin: rola a página inteira (senão o shell corta o conteúdo no app).
+  if (pathname.startsWith("/admin")) return true;
   if (pathname.startsWith("/profile/settings")) return true;
   if (pathname === "/solicitar-servico") return true;
   if (pathname === "/client/pedidos-abertos" || pathname.startsWith("/client/pedidos-abertos/")) return true;

@@ -148,15 +148,15 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <aside className="hidden md:flex w-64 bg-card border-r flex-col flex-shrink-0 sticky top-0 h-screen">
+    <div className="flex min-h-0 flex-1 bg-background">
+      <aside className="hidden md:flex w-64 bg-card border-r flex-col flex-shrink-0 min-h-0">
         <div className="p-4 border-b">
           <Link to="/admin" className="text-xl font-extrabold text-gradient">Chamô Admin</Link>
         </div>
@@ -192,8 +192,8 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
-        <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b px-3 md:px-6 py-3 flex items-center justify-between gap-2">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-x-hidden">
+        <header className="z-30 bg-card/95 backdrop-blur-md border-b px-3 md:px-6 py-3 flex items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
@@ -291,7 +291,7 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
           </SheetContent>
         </Sheet>
 
-        <main className="flex-1 p-3 md:p-6 overflow-x-hidden safe-area-bottom">
+        <main className="flex-1 min-h-0 p-3 md:p-6 overflow-y-auto overflow-x-hidden safe-area-bottom">
           {children}
         </main>
       </div>

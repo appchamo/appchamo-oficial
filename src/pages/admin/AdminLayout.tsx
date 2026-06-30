@@ -1,8 +1,8 @@
 import AdminLayout from "@/components/AdminLayout";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Save, Loader2, GripVertical, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
+import { Save, Loader2, GripVertical, Eye, EyeOff, ChevronUp, ChevronDown, RefreshCw, Smartphone } from "lucide-react";
 
 interface SectionConfig {
   id: string;
@@ -44,6 +44,40 @@ const AdminLayoutPage = () => {
   const [tutorialsConfig, setTutorialsConfig] = useState(DEFAULT_TUTORIALS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const previewReadyRef = useRef(false);
+
+  // Envia o rascunho atual para o preview (iframe da home real).
+  const postPreview = useCallback(() => {
+    try {
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: "chamo-home-preview", sections, footerText },
+        "*",
+      );
+    } catch { /* */ }
+  }, [sections, footerText]);
+
+  // Reaplica o rascunho sempre que algo muda (atualização ao vivo).
+  useEffect(() => {
+    if (previewReadyRef.current) postPreview();
+  }, [postPreview]);
+
+  // Quando o preview avisa que está pronto, manda o rascunho inicial.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === "chamo-home-preview-ready") {
+        previewReadyRef.current = true;
+        postPreview();
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [postPreview]);
+
+  const reloadPreview = () => {
+    previewReadyRef.current = false;
+    if (iframeRef.current) iframeRef.current.src = iframeRef.current.src;
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -115,9 +149,10 @@ const AdminLayoutPage = () => {
 
   return (
     <AdminLayout title="Layout da Home">
-      <div className="max-w-lg space-y-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(300px,360px)] gap-6 items-start">
+      <div className="space-y-3 min-w-0">
         <p className="text-sm text-muted-foreground mb-4">
-          Arrume a ordem das seções da página inicial. Você pode ativar/desativar e editar textos.
+          Arrume a ordem das seções da página inicial. Você pode ativar/desativar e editar textos. As mudanças aparecem ao vivo no preview ao lado.
         </p>
 
         {sections.map((section, index) => (
@@ -211,6 +246,30 @@ const AdminLayoutPage = () => {
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           {saving ? "Salvando..." : "Salvar layout"}
         </button>
+      </div>
+
+      {/* Preview ao vivo — iPhone com a home real */}
+      <div className="hidden lg:flex flex-col items-center sticky top-4">
+        <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-foreground">
+          <Smartphone className="w-4 h-4 text-primary" /> Preview ao vivo
+          <button onClick={reloadPreview} title="Recarregar preview" className="ml-1 p-1.5 rounded-lg hover:bg-muted transition-colors">
+            <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+          </button>
+        </div>
+        {/* Moldura do iPhone */}
+        <div className="relative w-[320px] h-[660px] rounded-[44px] bg-neutral-900 p-3 shadow-2xl ring-1 ring-black/10">
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 w-32 h-6 bg-neutral-900 rounded-b-2xl z-10" />
+          <iframe
+            ref={iframeRef}
+            title="Preview da Home"
+            src="/home?preview=1"
+            className="w-full h-full rounded-[32px] bg-white border-0"
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-3 text-center max-w-[280px]">
+          O preview reflete o rascunho em tempo real. Lembre de tocar em <b>Salvar layout</b> para aplicar de verdade no app.
+        </p>
+      </div>
       </div>
     </AdminLayout>
   );

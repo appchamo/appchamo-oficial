@@ -60,6 +60,25 @@ export const useHomeLayout = () => {
     }).finally(() => setLoading(false));
   }, []);
 
+  // Preview ao vivo: quando renderizado dentro do editor (iframe), aplica o rascunho
+  // recebido por postMessage sem precisar salvar no banco.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data;
+      if (!d || d.type !== "chamo-home-preview") return;
+      if (Array.isArray(d.sections)) {
+        const sorted = [...(d.sections as SectionConfig[])].sort((a, b) => a.order - b.order);
+        setSections(sorted);
+      }
+      if (typeof d.footerText === "string") setFooterText(d.footerText);
+      setLoading(false);
+    };
+    window.addEventListener("message", onMsg);
+    // Avisa o pai que o preview está pronto para receber o rascunho.
+    try { window.parent?.postMessage({ type: "chamo-home-preview-ready" }, "*"); } catch { /* */ }
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
   const getSection = (id: string) => sections.find(s => s.id === id);
   const isVisible = (id: string) => getSection(id)?.visible !== false;
 

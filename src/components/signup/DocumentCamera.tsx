@@ -5,9 +5,11 @@ interface DocumentCameraProps {
   label: string;
   onCapture: (file: File, preview: string) => void;
   onClose: () => void;
+  /** "user" para selfie (câmera frontal); padrão "environment" (traseira, documentos). */
+  facing?: "environment" | "user";
 }
 
-const DocumentCamera = ({ label, onCapture, onClose }: DocumentCameraProps) => {
+const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: DocumentCameraProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -26,7 +28,7 @@ const DocumentCamera = ({ label, onCapture, onClose }: DocumentCameraProps) => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { ideal: "environment" },
+            facingMode: { ideal: facing },
             width: { ideal: 1920 },
             height: { ideal: 1080 },
           },

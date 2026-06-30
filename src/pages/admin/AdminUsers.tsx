@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy, Users as UsersIcon, Archive, Wifi, Smartphone, ShieldAlert, Loader2 } from "lucide-react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy, Users as UsersIcon, Archive, Wifi, Smartphone, ShieldAlert, Loader2, AlertTriangle } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { useOnlineUsers, formatRelativeFromNow } from "@/lib/presence";
@@ -77,6 +77,8 @@ interface Profile {
   accepted_terms_version?: string | null;
   accepted_terms_at?: string | null;
   last_seen_at?: string | null;
+  selfie_check_status?: string | null;
+  selfie_check_reason?: string | null;
 }
 
 async function copyText(value: string | null | undefined, successTitle: string) {
@@ -769,8 +771,9 @@ const AdminUsers = () => {
                     ? new Date(user.last_seen_at).toLocaleString("pt-BR")
                     : null;
 
+                  const selfieFlag = user.selfie_check_status === "review" || user.selfie_check_status === "reject";
                   return (
-                    <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                    <tr key={user.id} className={`border-b last:border-0 transition-colors ${selfieFlag ? "bg-destructive/5 hover:bg-destructive/10" : "hover:bg-muted/30"}`}>
                       <td className="p-3 font-medium text-foreground">
                         <div className="flex items-center gap-2">
                           <span
@@ -779,6 +782,15 @@ const AdminUsers = () => {
                             }`}
                             title={isOnline ? "Online agora" : "Offline"}
                           />
+                          {selfieFlag && (
+                            <span
+                              className="relative inline-flex shrink-0"
+                              title={`Selfie/documento com problema: ${user.selfie_check_reason || "verificar"}`}
+                            >
+                              <AlertTriangle className="w-4 h-4 text-destructive" />
+                              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-destructive ring-2 ring-background" />
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => setAnalyticsTarget({ user_id: user.user_id, full_name: user.full_name, email: user.email })}
@@ -788,6 +800,11 @@ const AdminUsers = () => {
                             {user.full_name || "—"}
                           </button>
                         </div>
+                        {selfieFlag && (
+                          <p className="text-[10px] text-destructive font-semibold mt-0.5 ml-4">
+                            ⚠ Selfie/documento: {user.selfie_check_reason || "revisar qualidade"}
+                          </p>
+                        )}
                       </td>
                       <td className="p-3 text-muted-foreground">{user.email}</td>
                       <td className="p-3">

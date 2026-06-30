@@ -4,6 +4,16 @@ import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { registerChamoSignupOverlayConsumer } from "@/lib/chamoSignupBack";
 import DocumentCamera from "./DocumentCamera";
+import { supabase } from "@/integrations/supabase/client";
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
 
 interface UploadedDoc {
   file: File;
@@ -47,16 +57,19 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
     });
   }, []);
 
+  const SELFIE_LABEL = "Reconhecimento facial (selfie)";
   const slots =
     documentType === "cnpj"
       ? [
           { key: "id_front", label: "Documento com foto (frente)" },
           { key: "id_back", label: "Documento com foto (verso)" },
           { key: "cnpj_doc", label: "Comprovante de CNPJ" },
+          { key: "selfie", label: SELFIE_LABEL },
         ]
       : [
           { key: "id_front", label: "Documento com foto (frente)" },
           { key: "id_back", label: "Documento com foto (verso)" },
+          { key: "selfie", label: SELFIE_LABEL },
         ];
 
   useEffect(() => {
@@ -155,6 +168,20 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
       return;
     }
     setMissingSlotKeys([]);
+
+    // Checagem de qualidade (IA) da selfie + documento — não bloqueia o cadastro.
+    const selfieDoc = docs.find((d) => d.label === SELFIE_LABEL && !d.isPdf);
+    const frontDoc = docs.find((d) => d.label === "Documento com foto (frente)" && !d.isPdf);
+    if (selfieDoc) {
+      (async () => {
+        try {
+          const selfie = await fileToDataUrl(selfieDoc.file);
+          const document = frontDoc ? await fileToDataUrl(frontDoc.file) : undefined;
+          await supabase.functions.invoke("analyze-selfie-quality", { body: { selfie, document } });
+        } catch { /* análise é best-effort */ }
+      })();
+    }
+
     onNext(docs.map((d) => d.file));
   };
 
@@ -312,6 +339,7 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
       {cameraOpen && (
         <DocumentCamera
           label={currentSlot}
+          facing={currentSlot === SELFIE_LABEL ? "user" : "environment"}
           onCapture={handleCapture}
           onClose={() => setCameraOpen(false)}
         />

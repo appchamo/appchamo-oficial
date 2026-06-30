@@ -1,4 +1,4 @@
-import { Gift, Ticket, Timer, Percent } from "lucide-react";
+import { Gift, Ticket, Timer, Percent, QrCode, Store, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -66,44 +66,73 @@ const BenefitsPanel = ({ section }: BenefitsPanelProps) => {
     if (diff <= 0) return "Hoje!";
     const days = Math.floor(diff / 86400000);
     const hours = Math.floor((diff % 86400000) / 3600000);
-    return `${days} dias, ${hours}h`;
+    return `${days}d ${hours}h`;
   };
 
   return (
-    <div className="gradient-card rounded-2xl p-5 text-primary-foreground shadow-elevated">
-      <div className="flex items-center gap-2 mb-4">
+    <div className="gradient-card rounded-2xl p-4 text-primary-foreground shadow-elevated flex flex-col gap-3">
+      <div className="flex items-center gap-2">
         <Gift className="w-5 h-5" />
         <h2 className="font-bold text-base">{section?.title ?? "Seus Benefícios"}</h2>
       </div>
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="bg-primary-foreground/15 backdrop-blur-sm rounded-xl p-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Ticket className="w-3.5 h-3.5 opacity-80" />
+
+      {/* Contadores compactos */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-primary-foreground/15 backdrop-blur-sm rounded-xl px-3 py-2">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Ticket className="w-3 h-3 opacity-80" />
             <p className="text-[10px] opacity-80">Sorteio</p>
           </div>
-          <p className="text-2xl font-extrabold">{raffleCouponCount}</p>
+          <p className="text-xl font-extrabold leading-none">{raffleCouponCount}</p>
         </div>
-        <div className="bg-primary-foreground/15 backdrop-blur-sm rounded-xl p-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Percent className="w-3.5 h-3.5 opacity-80" />
-            <p className="text-[10px] opacity-80">Desconto</p>
+        <div className="bg-primary-foreground/15 backdrop-blur-sm rounded-xl px-3 py-2">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Percent className="w-3 h-3 opacity-80" />
+            <p className="text-[10px] opacity-80">Descontos</p>
           </div>
-          <p className="text-2xl font-extrabold">{discountCouponCount}</p>
+          <p className="text-xl font-extrabold leading-none">{discountCouponCount}</p>
         </div>
-        <div className="bg-primary-foreground/15 backdrop-blur-sm rounded-xl p-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Timer className="w-3.5 h-3.5 opacity-80" />
-            <p className="text-[10px] opacity-80">Sorteio</p>
+        <div className="bg-primary-foreground/15 backdrop-blur-sm rounded-xl px-3 py-2">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Timer className="w-3 h-3 opacity-80" />
+            <p className="text-[10px] opacity-80">Próx. sorteio</p>
           </div>
-          <p className="text-xs font-bold">{getCountdown()}</p>
+          <p className="text-sm font-bold leading-none mt-1">{getCountdown()}</p>
         </div>
       </div>
+
+      {/* Validar no caixa — explica o benefício principal */}
       <Link
-        to="/coupons"
-        className="w-full block text-center bg-primary-foreground text-primary font-semibold py-2.5 rounded-xl text-sm hover:bg-primary-foreground/90 transition-colors"
+        to="/qr-scan?mode=checkin"
+        className="flex items-center gap-3 bg-primary-foreground/15 hover:bg-primary-foreground/25 rounded-xl p-3 transition-colors"
       >
-        Ver meus cupons
+        <div className="w-9 h-9 rounded-lg bg-primary-foreground/20 flex items-center justify-center shrink-0">
+          <QrCode className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold leading-tight">Validar no caixa</p>
+          <p className="text-[11px] opacity-85 leading-snug">
+            Mostre seu cupom no caixa dos parceiros e ganhe desconto na hora.
+          </p>
+        </div>
+        <ChevronRight className="w-4 h-4 opacity-80 shrink-0" />
       </Link>
+
+      {/* Ações */}
+      <div className="grid grid-cols-2 gap-2">
+        <Link
+          to="/coupons"
+          className="text-center bg-primary-foreground text-primary font-semibold py-2.5 rounded-xl text-sm hover:bg-primary-foreground/90 transition-colors"
+        >
+          Meus cupons
+        </Link>
+        <Link
+          to="/coupons?tab=parceiros"
+          className="flex items-center justify-center gap-1.5 bg-primary-foreground/15 hover:bg-primary-foreground/25 font-semibold py-2.5 rounded-xl text-sm transition-colors"
+        >
+          <Store className="w-4 h-4" /> Parceiros
+        </Link>
+      </div>
     </div>
   );
 };

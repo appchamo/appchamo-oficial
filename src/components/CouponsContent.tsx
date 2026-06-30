@@ -4,6 +4,7 @@
  */
 import { Ticket, Percent, Gift, X, Calendar, Clock, Tag, CheckCircle2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -35,9 +36,12 @@ const fmtDateTime = (s: string | null) => {
 };
 
 export default function CouponsContent() {
+  const [searchParams] = useSearchParams();
+  const initialTab: "raffle" | "discount" =
+    ["discount", "parceiros", "desconto"].includes((searchParams.get("tab") || "").toLowerCase()) ? "discount" : "raffle";
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"raffle" | "discount">("raffle");
+  const [tab, setTab] = useState<"raffle" | "discount">(initialTab);
   const [selected, setSelected] = useState<Coupon | null>(null);
 
   useEffect(() => {

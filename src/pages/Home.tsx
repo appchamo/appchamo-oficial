@@ -821,9 +821,6 @@ const Home = () => {
                   <BenefitsPanel key="benefits-client-top" section={getSection("benefits")} />
                 </div>
               ) : null}
-              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground px-0.5 -mb-1">
-                A região onde você vê profissionais e destaques
-              </p>
               {needsLocationSetup ? (
                 <button
                   type="button"

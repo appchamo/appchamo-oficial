@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Briefcase, MapPin, DollarSign, Clock, Search, Building2, ChevronRight, FileText } from "lucide-react";
+import { Briefcase, MapPin, DollarSign, Clock, Search, Building2, ChevronRight, FileText, Plus } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchActiveJobPostings } from "@/lib/jobRegionFilter";
@@ -55,7 +55,18 @@ const Jobs = () => {
   const [myCandidaturasOpen, setMyCandidaturasOpen] = useState(false);
   const [myApplications, setMyApplications] = useState<MyApplication[]>([]);
   const [loadingMyApps, setLoadingMyApps] = useState(false);
+  const [canPost, setCanPost] = useState(false);
   const loadSeq = useRef(0);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: p } = await supabase.from("profiles").select("user_type").eq("user_id", user.id).maybeSingle();
+      const t = (p as { user_type?: string } | null)?.user_type;
+      setCanPost(t === "professional" || t === "company");
+    })();
+  }, []);
 
   useEffect(() => {
     const seq = ++loadSeq.current;
@@ -230,13 +241,36 @@ const Jobs = () => {
   return (
     <AppLayout>
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        <Link
-          to="/my-jobs"
-          className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl border-2 border-primary/35 bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors shadow-sm mb-5"
-        >
-          <Briefcase className="w-5 h-5 shrink-0" />
-          MINHAS VAGAS
-        </Link>
+        {canPost ? (
+          <div className="flex items-stretch gap-2 mb-5">
+            <Link
+              to="/my-jobs"
+              className="flex flex-1 items-center gap-3 rounded-xl bg-primary px-4 py-3 text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
+            >
+              <div className="w-9 h-9 rounded-lg bg-primary-foreground/20 flex items-center justify-center shrink-0">
+                <Plus className="w-5 h-5" />
+              </div>
+              <div className="min-w-0 text-left">
+                <p className="text-sm font-bold leading-tight">Publicar vaga grátis</p>
+                <p className="text-[11px] opacity-90 leading-snug">Sua 1ª vaga é grátis. Alcance gente da sua região.</p>
+              </div>
+            </Link>
+            <Link
+              to="/my-jobs"
+              className="flex items-center justify-center px-3 rounded-xl border-2 border-primary/30 text-primary font-semibold text-xs hover:bg-primary/5 transition-colors shrink-0"
+              title="Minhas vagas"
+            >
+              <Briefcase className="w-5 h-5" />
+            </Link>
+          </div>
+        ) : (
+          <Link
+            to="/my-jobs"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-primary/30 text-primary font-bold text-sm hover:bg-primary/5 transition-colors mb-5"
+          >
+            <Briefcase className="w-5 h-5 shrink-0" /> Minhas vagas
+          </Link>
+        )}
 
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>

@@ -22,6 +22,7 @@ import RoletaGate from "@/components/RoletaGate";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import RegionGate from "@/components/RegionGate";
 import ForceUpdateGate from "@/components/ForceUpdateGate";
+import BlockedGate from "@/components/BlockedGate";
 import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
 import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
@@ -539,6 +540,7 @@ const AppContent = () => {
     <>
       <OAuthCallbackRedirectGuard />
       <ForceUpdateGate />
+      {session ? <BlockedGate /> : null}
       {session ? <RoletaGate /> : null}
       {session ? <RegionGate /> : null}
       <Suspense fallback={<PageFallback />}>

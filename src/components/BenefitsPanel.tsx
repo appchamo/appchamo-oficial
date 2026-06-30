@@ -1,4 +1,4 @@
-import { Gift, Ticket, Timer, Percent, QrCode, Store, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
+import { Gift, Ticket, Timer, Percent, Store, ChevronDown, ChevronUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -115,23 +115,6 @@ const BenefitsPanel = ({ section }: BenefitsPanelProps) => {
           <p className="text-sm font-bold leading-none mt-1">{getCountdown()}</p>
         </div>
       </div>
-
-      {/* Validar no caixa — explica o benefício principal */}
-      <Link
-        to="/qr-scan?mode=checkin"
-        className="flex items-center gap-3 bg-primary-foreground/15 hover:bg-primary-foreground/25 rounded-xl p-3 transition-colors"
-      >
-        <div className="w-9 h-9 rounded-lg bg-primary-foreground/20 flex items-center justify-center shrink-0">
-          <QrCode className="w-5 h-5" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold leading-tight">Validar no caixa</p>
-          <p className="text-[11px] opacity-85 leading-snug">
-            Mostre seu cupom no caixa dos parceiros e ganhe desconto na hora.
-          </p>
-        </div>
-        <ChevronRight className="w-4 h-4 opacity-80 shrink-0" />
-      </Link>
 
       {/* Ações */}
       <div className="grid grid-cols-2 gap-2">

@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Plus, ExternalLink, MoreHorizontal, Eye, EyeOff, Pencil, Trash2, Power, MapPin, Package, Save, Loader2, Settings2, QrCode, Printer, Download } from "lucide-react";
+import { Plus, ExternalLink, MoreHorizontal, Eye, EyeOff, Pencil, Trash2, Power, MapPin, Package, Save, Loader2, Settings2, QrCode, Printer, Download, Ticket } from "lucide-react";
 import { buildCheckinQrData, buildQrImageUrl, printCheckinQr } from "@/lib/sponsorCheckin";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -46,6 +46,11 @@ interface Sponsor {
   checkin_active: boolean;
   checkin_discount_percent: number;
   checkin_rules: string | null;
+  coupon_active: boolean;
+  coupon_code: string | null;
+  coupon_link: string | null;
+  coupon_discount_percent: number | null;
+  coupon_rules: string | null;
 }
 
 const PLAN_LABELS: Record<WeeklyPlan, string> = {
@@ -83,6 +88,44 @@ const AdminSponsors = () => {
   const [discountInput, setDiscountInput] = useState("");
   const [rulesInput, setRulesInput] = useState("");
   const [activatingCheckin, setActivatingCheckin] = useState(false);
+
+  // Cupom de desconto do parceiro
+  const [couponSponsor, setCouponSponsor] = useState<Sponsor | null>(null);
+  const [couponCode, setCouponCode] = useState("");
+  const [couponLink, setCouponLink] = useState("");
+  const [couponPct, setCouponPct] = useState("");
+  const [couponRules, setCouponRules] = useState("");
+  const [savingCoupon, setSavingCoupon] = useState(false);
+
+  useEffect(() => {
+    if (couponSponsor) {
+      setCouponCode(couponSponsor.coupon_code ?? "");
+      setCouponLink(couponSponsor.coupon_link ?? "");
+      setCouponPct(couponSponsor.coupon_discount_percent ? String(couponSponsor.coupon_discount_percent) : "");
+      setCouponRules(couponSponsor.coupon_rules ?? "");
+    }
+  }, [couponSponsor?.id]);
+
+  const saveCoupon = async (active: boolean) => {
+    if (!couponSponsor) return;
+    if (active && !couponCode.trim()) { toast({ title: "Informe o cupom", description: "Digite o código do cupom.", variant: "destructive" }); return; }
+    setSavingCoupon(true);
+    const pct = Math.max(0, Math.min(100, Number(couponPct) || 0));
+    const payload = {
+      coupon_active: active,
+      coupon_code: couponCode.trim() || null,
+      coupon_link: couponLink.trim() || null,
+      coupon_discount_percent: pct,
+      coupon_rules: couponRules.trim() || null,
+    };
+    const { error } = await supabase.from("sponsors").update(payload as any).eq("id", couponSponsor.id);
+    setSavingCoupon(false);
+    if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); return; }
+    toast({ title: active ? "Cupom ativado!" : "Cupom desativado" });
+    const updated = { ...couponSponsor, ...payload } as Sponsor;
+    setCouponSponsor(updated);
+    setSponsors((list) => list.map((s) => (s.id === updated.id ? updated : s)));
+  };
 
   useEffect(() => {
     if (qrSponsor) {
@@ -396,6 +439,7 @@ const AdminSponsors = () => {
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5 mr-2" /> Editar</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setQrSponsor(s)}><QrCode className="w-3.5 h-3.5 mr-2" /> QR Code do caixa</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setCouponSponsor(s)}><Ticket className="w-3.5 h-3.5 mr-2" /> Cupom de desconto</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleResetAccess(s)}><Eye className="w-3.5 h-3.5 mr-2" /> Redefinir acesso</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => toggleActive(s)}><Power className="w-3.5 h-3.5 mr-2" /> {s.active ? "Desativar" : "Ativar"}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setDeleteId(s.id)} className="text-destructive"><Trash2 className="w-3.5 h-3.5 mr-2" /> Excluir</DropdownMenuItem>
@@ -619,6 +663,54 @@ const AdminSponsors = () => {
                     </button>
                   </div>
                 </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Cupom de desconto do parceiro */}
+      <Dialog open={!!couponSponsor} onOpenChange={(o) => !o && setCouponSponsor(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Ticket className="w-4 h-4 text-primary" /> Cupom de desconto</DialogTitle></DialogHeader>
+          {couponSponsor && (
+            <div className="flex flex-col gap-3 text-left">
+              <p className="font-semibold text-sm text-foreground text-center">{couponSponsor.name}</p>
+              {couponSponsor.coupon_active && (
+                <span className="mx-auto px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 text-[11px] font-bold">
+                  Ativo · {couponSponsor.coupon_discount_percent || 0}% · {couponSponsor.coupon_code}
+                </span>
+              )}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Código do cupom</label>
+                <input value={couponCode} onChange={(e) => setCouponCode(e.target.value.toUpperCase())} placeholder="Ex: CHAMO10"
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-background mt-1 outline-none focus:ring-2 focus:ring-primary/30 font-mono uppercase" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Desconto (%)</label>
+                <input type="number" min={0} max={100} inputMode="numeric" value={couponPct} onChange={(e) => setCouponPct(e.target.value)} placeholder="Ex: 10"
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-background mt-1 outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Link do site / menu (para onde redireciona)</label>
+                <input value={couponLink} onChange={(e) => setCouponLink(e.target.value)} placeholder="https://..."
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-background mt-1 outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Regras (aparece na página de Parceiros)</label>
+                <textarea value={couponRules} onChange={(e) => setCouponRules(e.target.value)} rows={2} placeholder="Ex: Válido na primeira compra pelo site."
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-background mt-1 outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+              </div>
+              <button onClick={() => saveCoupon(true)} disabled={savingCoupon}
+                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-1.5">
+                {savingCoupon ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {couponSponsor.coupon_active ? "Salvar cupom" : "Ativar cupom"}
+              </button>
+              {couponSponsor.coupon_active && (
+                <button onClick={() => saveCoupon(false)} disabled={savingCoupon}
+                  className="w-full py-2 rounded-xl text-xs font-semibold text-destructive hover:bg-destructive/5 transition-colors">
+                  Desativar cupom
+                </button>
               )}
             </div>
           )}

@@ -18,6 +18,9 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Meta SDK: necessário para coletar Advertising ID e atribuir installs -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+    <!-- Localização: trava de região (só Patrocínio) valida o GPS real do aparelho -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <application
         android:allowBackup="true"

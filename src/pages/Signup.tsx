@@ -14,6 +14,7 @@ import {
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
 import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { fetchRegionGate, checkRegion } from "@/lib/regionGate";
+import { getDeviceLocation } from "@/lib/deviceLocation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ticket, MailCheck, Mail, Home } from "lucide-react";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
@@ -212,6 +213,8 @@ const Signup = () => {
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
   const didAdvanceFromOAuth = useRef(false);
+  /** GPS real capturado na trava de região (cadastro). Persiste no perfil ao finalizar. */
+  const regionGpsRef = useRef<{ lat: number; lng: number } | null>(null);
   /** Evita duplo envio de complete-signup (duplo toque em Finalizar / corrida de estado). */
   const signupSubmitLockRef = useRef(false);
   const signupDraftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -670,25 +673,24 @@ const Signup = () => {
 
       setLoading(true);
       try {
-        // Trava de região (cadastro): só permite cidade/raio configurados no admin.
+        // Trava de região (cadastro): exige o GPS REAL do aparelho.
+        // Se a permissão for negada, bloqueia. Decisão pela posição real (raio).
         try {
           const cfg = await fetchRegionGate();
           if (cfg.enabled && cfg.blockSignup) {
-            let lat: number | null = null;
-            let lng: number | null = null;
-            if (data.addressCity?.trim() && data.addressState?.trim()) {
-              try {
-                const g = await forwardGeocodeBrazil({
-                  cep: data.addressZip,
-                  city: data.addressCity,
-                  state: data.addressState,
-                  street: data.addressStreet,
-                  neighborhood: data.addressNeighborhood,
-                });
-                if (g) { lat = g.lat; lng = g.lng; }
-              } catch { /* ignore geocode */ }
+            const loc = await getDeviceLocation();
+            if (!loc.ok) {
+              toast({
+                title: "Ative a localização",
+                description: loc.error === "denied"
+                  ? `Para concluir o cadastro, ative a permissão de localização. O Chamô está disponível apenas em ${cfg.allowedCities.join(", ")}.`
+                  : "Não foi possível obter sua localização. Ative o GPS e tente novamente.",
+                variant: "destructive",
+              });
+              return;
             }
-            const check = checkRegion(cfg, { city: data.addressCity, lat, lng });
+            regionGpsRef.current = { lat: loc.lat, lng: loc.lng };
+            const check = checkRegion(cfg, { city: data.addressCity, lat: loc.lat, lng: loc.lng });
             if (!check.allowed) {
               toast({ title: "Fora da área de atendimento", description: check.reason, variant: "destructive" });
               return;
@@ -828,7 +830,11 @@ const Signup = () => {
       const { password: _pw, ...basicWithoutPassword } = basicData;
       void _pw;
       const basicPayload: Record<string, unknown> = { ...basicWithoutPassword };
-      if (accountType === "professional" && basicData.addressCity?.trim() && basicData.addressState?.trim()) {
+      // Prioriza o GPS real capturado na trava de região (posição do aparelho).
+      if (regionGpsRef.current) {
+        basicPayload.latitude = regionGpsRef.current.lat;
+        basicPayload.longitude = regionGpsRef.current.lng;
+      } else if (accountType === "professional" && basicData.addressCity?.trim() && basicData.addressState?.trim()) {
         try {
           const geo = await forwardGeocodeBrazil({
             cep: basicData.addressZip,

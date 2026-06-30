@@ -33,6 +33,15 @@ interface Sponsor {
   location_city: string | null;
   checkin_active?: boolean;
   checkin_discount_percent?: number;
+  coupon_active?: boolean;
+  coupon_discount_percent?: number;
+}
+
+/** Maior desconto disponível do parceiro (QR ou cupom). 0 se nenhum. */
+function sponsorDiscount(s: Sponsor): number {
+  const qr = s.checkin_active ? Number(s.checkin_discount_percent) || 0 : 0;
+  const cp = s.coupon_active ? Number(s.coupon_discount_percent) || 0 : 0;
+  return Math.max(qr, cp);
 }
 
 function sponsorMatchesLocation(
@@ -134,8 +143,8 @@ const SponsorCarousel = ({
 
     const fetchSponsors = (withLocation = true) => {
       const select = withLocation
-        ? "id, name, niche, link_url, logo_url, location_scope, location_state, location_city, checkin_active, checkin_discount_percent"
-        : "id, name, niche, link_url, logo_url, checkin_active, checkin_discount_percent";
+        ? "id, name, niche, link_url, logo_url, location_scope, location_state, location_city, checkin_active, checkin_discount_percent, coupon_active, coupon_discount_percent"
+        : "id, name, niche, link_url, logo_url, checkin_active, checkin_discount_percent, coupon_active, coupon_discount_percent";
       diagLog("info", "sponsors", "fetch start", { withLocation });
       let aborted = false;
       const timeoutMs = Capacitor.isNativePlatform() ? 22_000 : 12_000;
@@ -191,6 +200,8 @@ const SponsorCarousel = ({
               location_city: r.location_city ?? null,
               checkin_active: r.checkin_active ?? false,
               checkin_discount_percent: r.checkin_discount_percent ?? 0,
+              coupon_active: r.coupon_active ?? false,
+              coupon_discount_percent: r.coupon_discount_percent ?? 0,
             }));
             setAllSponsors(list as Sponsor[]);
           }
@@ -459,9 +470,9 @@ const SponsorCarousel = ({
                       )}
                     </div>
                   </div>
-                  {sponsor.checkin_active && Number(sponsor.checkin_discount_percent) > 0 && (
+                  {sponsorDiscount(sponsor) > 0 && (
                     <span className="absolute -top-1 -right-1 flex items-center gap-0.5 bg-emerald-500 text-white text-[9px] lg:text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-md ring-2 ring-background leading-none">
-                      {Number(sponsor.checkin_discount_percent)}%
+                      {sponsorDiscount(sponsor)}%
                     </span>
                   )}
                 </div>

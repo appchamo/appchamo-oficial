@@ -10,9 +10,13 @@
  * porém com destaque laranja e o chip do desconto bem prominente à direita).
  */
 import { useEffect, useMemo, useState } from "react";
-import { BadgeCheck, Star, Ticket, ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { BadgeCheck, Star, Ticket, ChevronRight, ChevronDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { CouponShowcaseDialog } from "@/components/coupon/CouponShowcaseDialog";
+
+const COUPON_VISIBLE_INITIAL = 3;
+const COUPON_VISIBLE_MAX = 6;
 
 interface CouponRow {
   id: string;
@@ -77,6 +81,7 @@ function pickBestCouponForPro(coupons: CouponRow[]): CouponRow {
 const CouponProfessionals = () => {
   const [items, setItems] = useState<ProRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [openCouponProId, setOpenCouponProId] = useState<string | null>(null);
 
   const load = async () => {
@@ -168,7 +173,7 @@ const CouponProfessionals = () => {
         return b.rating - a.rating;
       });
 
-      setItems(rows.slice(0, 5));
+      setItems(rows.slice(0, 50));
       setLoaded(true);
     } catch (err) {
       console.warn("[CouponProfessionals] load failed:", err);
@@ -204,6 +209,12 @@ const CouponProfessionals = () => {
   if (!loaded) return null;
   if (items.length === 0) return null;
 
+  const total = items.length;
+  const visibleCount = expanded ? Math.min(COUPON_VISIBLE_MAX, total) : Math.min(COUPON_VISIBLE_INITIAL, total);
+  const visible = items.slice(0, visibleCount);
+  const canExpand = !expanded && total > COUPON_VISIBLE_INITIAL;
+  const showAll = total > COUPON_VISIBLE_MAX;
+
   return (
     <section className="w-full min-w-0">
       <div className="px-1 mb-3 flex items-center gap-2">
@@ -213,20 +224,32 @@ const CouponProfessionals = () => {
         <h3 className="font-bold text-foreground tracking-tight text-[15px] lg:text-base">
           Contrate com desconto
         </h3>
-        <span className="ml-auto text-[11px] font-semibold text-primary/80 uppercase tracking-wide">
-          {items.length} {items.length === 1 ? "oferta" : "ofertas"}
-        </span>
+        {showAll && (
+          <Link to="/search?discount=1" className="ml-auto inline-flex items-center gap-0.5 text-[12px] font-semibold text-primary">
+            Ver todos <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        )}
       </div>
 
       <div className="bg-card border-2 border-primary/30 rounded-2xl overflow-hidden shadow-sm">
-        {items.map((pro, i) => (
+        {visible.map((pro, i) => (
           <CouponProRow
             key={pro.id}
             pro={pro}
-            isLast={i === items.length - 1}
+            isLast={i === visible.length - 1 && !canExpand}
             onOpenCoupon={() => setOpenCouponProId(pro.id)}
           />
         ))}
+        {canExpand && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5 transition-colors"
+          >
+            Ver mais {Math.min(COUPON_VISIBLE_MAX, total) - COUPON_VISIBLE_INITIAL > 0 ? `(${Math.min(COUPON_VISIBLE_MAX, total) - COUPON_VISIBLE_INITIAL})` : ""}
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <CouponShowcaseDialog

@@ -9,7 +9,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 
@@ -68,6 +68,79 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [adminUser?.id]);
 
+  // ----- Badges de "novidades" por seção (zera ao abrir a página) -----
+  const [secCounts, setSecCounts] = useState<Record<string, number>>({});
+
+  const countSince = async (section: string, seenAt: string | null): Promise<number> => {
+    const q = (qb: any) => (seenAt ? qb.gt("created_at", seenAt) : qb);
+    if (section === "chamadas") {
+      const { count } = await q(supabase.from("service_requests").select("*", { count: "exact", head: true }));
+      return count ?? 0;
+    }
+    if (section === "suporte") {
+      const { count } = await q(supabase.from("support_tickets").select("*", { count: "exact", head: true }));
+      return count ?? 0;
+    }
+    if (section === "profissionais") {
+      const { count } = await q(
+        supabase.from("professionals").select("*", { count: "exact", head: true }).eq("profile_status", "pending"),
+      );
+      return count ?? 0;
+    }
+    return 0;
+  };
+
+  const loadSecCounts = useCallback(async () => {
+    if (!adminUser?.id) return;
+    const { data: seenRows } = await supabase
+      .from("admin_section_seen" as never)
+      .select("section, seen_at")
+      .eq("admin_user_id", adminUser.id);
+    const seenBy: Record<string, string> = {};
+    ((seenRows as { section: string; seen_at: string }[]) || []).forEach((r) => { seenBy[r.section] = r.seen_at; });
+    const [chamadas, suporte, profissionais] = await Promise.all([
+      countSince("chamadas", seenBy["chamadas"] ?? null),
+      countSince("suporte", seenBy["suporte"] ?? null),
+      countSince("profissionais", seenBy["profissionais"] ?? null),
+    ]);
+    setSecCounts({ chamadas, suporte, profissionais });
+  }, [adminUser?.id]);
+
+  const markSeen = useCallback(async (section: string) => {
+    if (!adminUser?.id) return;
+    setSecCounts((c) => ({ ...c, [section]: 0 }));
+    await supabase.from("admin_section_seen" as never).upsert(
+      { admin_user_id: adminUser.id, section, seen_at: new Date().toISOString() } as never,
+      { onConflict: "admin_user_id,section" } as never,
+    );
+  }, [adminUser?.id]);
+
+  // Carrega contadores + atualiza ao chegar novidades (realtime).
+  useEffect(() => {
+    if (!adminUser?.id) return;
+    loadSecCounts();
+    const ch = supabase
+      .channel("admin-sec-counts")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "service_requests" }, loadSecCounts)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "support_tickets" }, loadSecCounts)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "professionals" }, loadSecCounts)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [adminUser?.id, loadSecCounts]);
+
+  // Ao abrir uma página com badge, marca como visto (zera).
+  const SECTION_BY_PATH: Record<string, string> = {
+    "/admin/protocols": "chamadas",
+    "/admin/support": "suporte",
+    "/admin/pros": "profissionais",
+  };
+  useEffect(() => {
+    const section = SECTION_BY_PATH[location.pathname];
+    if (section) void markSeen(section);
+  }, [location.pathname, markSeen]);
+
+  const badgeFor = (path: string): number => secCounts[SECTION_BY_PATH[path]] ?? 0;
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/login";
@@ -100,6 +173,11 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
               >
                 <item.icon className="w-4 h-4" />
                 {item.label}
+                {badgeFor(item.path) > 0 && (
+                  <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
+                    {badgeFor(item.path)}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -164,6 +242,11 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
               >
                 <item.icon className="w-3.5 h-3.5" />
                 {item.label}
+                {badgeFor(item.path) > 0 && (
+                  <span className="min-w-[16px] h-[16px] px-1 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center">
+                    {badgeFor(item.path)}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -188,6 +271,11 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
                   >
                     <item.icon className="w-4 h-4 shrink-0" />
                     {item.label}
+                    {badgeFor(item.path) > 0 && (
+                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
+                        {badgeFor(item.path)}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

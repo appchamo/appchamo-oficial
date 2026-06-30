@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy, Users as UsersIcon, Archive, Wifi } from "lucide-react";
+import { Search, MoreHorizontal, Ban, CheckCircle, Trash2, Eye, FileText, CreditCard, Briefcase, Contact, Copy, Users as UsersIcon, Archive, Wifi, Smartphone, ShieldAlert, Loader2 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase, SUPABASE_PUBLIC_API_KEY } from "@/integrations/supabase/client";
 import { useOnlineUsers, formatRelativeFromNow } from "@/lib/presence";
@@ -460,11 +460,45 @@ const AdminUsers = () => {
       }
     });
 
-  const toggleBlock = async (user: Profile) => {
-    const { error } = await supabase.from("profiles").update({ is_blocked: !user.is_blocked }).eq("id", user.id);
+  // ----- Bloqueio (usuário / aparelho) -----
+  const [blockTarget, setBlockTarget] = useState<Profile | null>(null);
+  const [blockType, setBlockType] = useState<"user" | "device" | null>(null);
+  const [blockReason, setBlockReason] = useState("");
+  const [blockBusy, setBlockBusy] = useState(false);
+
+  const openBlock = (user: Profile) => { setBlockTarget(user); setBlockType(null); setBlockReason(""); };
+  const closeBlock = () => { setBlockTarget(null); setBlockType(null); setBlockReason(""); };
+
+  const confirmBlock = async () => {
+    if (!blockTarget || !blockType) return;
+    const reason = blockReason.trim();
+    if (reason.length < 10) { toast({ title: "Descreva o motivo", description: "O motivo precisa ter pelo menos 10 caracteres.", variant: "destructive" }); return; }
+    setBlockBusy(true);
+    if (blockType === "user") {
+      const { error } = await supabase.rpc("admin_block_user" as never, { p_user_id: blockTarget.user_id, p_reason: reason } as never);
+      setBlockBusy(false);
+      if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); return; }
+      await logAction("block_user", "user", blockTarget.user_id);
+      toast({ title: "Usuário bloqueado" });
+    } else {
+      const { data, error } = await supabase.rpc("admin_block_device" as never, { p_user_id: blockTarget.user_id, p_reason: reason } as never);
+      setBlockBusy(false);
+      if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); return; }
+      await logAction("block_device", "user", blockTarget.user_id);
+      const n = Number(data) || 0;
+      toast(n > 0
+        ? { title: "Aparelho bloqueado", description: `${n} aparelho(s) impedido(s) de criar novas contas.` }
+        : { title: "Nenhum aparelho registrado", description: "Este usuário ainda não tem aparelho registrado para bloquear." });
+    }
+    closeBlock();
+    fetchUsers();
+  };
+
+  const unblockUser = async (user: Profile) => {
+    const { error } = await supabase.rpc("admin_unblock_user" as never, { p_user_id: user.user_id } as never);
     if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); return; }
-    await logAction(user.is_blocked ? "unblock_user" : "block_user", "user", user.user_id);
-    toast({ title: user.is_blocked ? "Usuário desbloqueado" : "Usuário bloqueado" });
+    await logAction("unblock_user", "user", user.user_id);
+    toast({ title: "Usuário desbloqueado" });
     fetchUsers();
   };
 
@@ -613,11 +647,19 @@ const AdminUsers = () => {
             <UsersIcon className="w-3.5 h-3.5 mr-1" />
             Ativos
           </TabsTrigger>
+          <TabsTrigger value="blocked" className="shrink-0">
+            <Ban className="w-3.5 h-3.5 mr-1" />
+            Bloqueados
+          </TabsTrigger>
           <TabsTrigger value="deleted" className="shrink-0">
             <Archive className="w-3.5 h-3.5 mr-1" />
             Excluídos
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="blocked">
+          <BlockedTab />
+        </TabsContent>
 
         <TabsContent value="deleted">
           <DeletedUsersTab />
@@ -792,9 +834,15 @@ const AdminUsers = () => {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toggleBlock(user)}>
-                              {user.is_blocked ? <><CheckCircle className="w-3.5 h-3.5 mr-2" /> Desbloquear</> : <><Ban className="w-3.5 h-3.5 mr-2" /> Bloquear</>}
-                            </DropdownMenuItem>
+                            {user.is_blocked ? (
+                              <DropdownMenuItem onClick={() => unblockUser(user)}>
+                                <CheckCircle className="w-3.5 h-3.5 mr-2" /> Desbloquear
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={() => openBlock(user)} className="text-destructive">
+                                <Ban className="w-3.5 h-3.5 mr-2" /> Bloquear
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => setDetailsUser(user)}>
                               <Contact className="w-3.5 h-3.5 mr-2" /> Ver detalhes
                             </DropdownMenuItem>
@@ -1065,8 +1113,191 @@ const AdminUsers = () => {
       </Tabs>
 
       <UserAnalyticsModal target={analyticsTarget} onClose={() => setAnalyticsTarget(null)} />
+
+      {/* Modal de bloqueio (usuário / aparelho) */}
+      <Dialog open={!!blockTarget} onOpenChange={(o) => !o && closeBlock()}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Bloquear {blockTarget?.full_name || "usuário"}</DialogTitle>
+          </DialogHeader>
+          {blockType === null ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">Escolha o tipo de bloqueio:</p>
+              <button
+                type="button"
+                onClick={() => setBlockType("user")}
+                className="flex items-start gap-3 rounded-xl border p-3 text-left hover:bg-muted transition-colors"
+              >
+                <Ban className="w-5 h-5 text-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Bloqueio de usuário</p>
+                  <p className="text-xs text-muted-foreground">Impede esta conta de usar o app.</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBlockType("device")}
+                className="flex items-start gap-3 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-3 text-left hover:bg-destructive/10 transition-colors"
+              >
+                <Smartphone className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-destructive">Bloqueio de aparelho</p>
+                  <p className="text-xs text-destructive/80">Bloqueio pesado — impede o aparelho de criar novas contas.</p>
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {blockType === "device" && (
+                <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                  <p className="leading-snug">
+                    Este aparelho ficará <b>impossibilitado de criar novas contas</b> no Chamô.
+                    Você pode desfazer isso depois na aba <b>Bloqueados</b>.
+                  </p>
+                </div>
+              )}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Motivo do bloqueio (mínimo 10 caracteres)</label>
+                <textarea
+                  value={blockReason}
+                  onChange={(e) => setBlockReason(e.target.value)}
+                  rows={3}
+                  placeholder="Ex: Conta fake usada para aplicar golpe em clientes."
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-background mt-1 outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                />
+                <p className={`text-[10px] mt-0.5 ${blockReason.trim().length < 10 ? "text-destructive" : "text-muted-foreground"}`}>
+                  {blockReason.trim().length}/10
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBlockType(null)}
+                  className="flex-1 py-2.5 rounded-xl border text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmBlock}
+                  disabled={blockBusy || blockReason.trim().length < 10}
+                  className="flex-1 py-2.5 rounded-xl bg-destructive text-destructive-foreground text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                >
+                  {blockBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                  Bloquear
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 };
+
+interface BlockedUserRow { user_id: string; full_name: string | null; email: string | null; blocked_reason: string | null; blocked_at: string | null; }
+interface BlockedDeviceRow { device_id: string; reason: string | null; source_user_id: string | null; created_at: string; ownerName?: string | null; }
+
+function BlockedTab() {
+  const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<BlockedUserRow[]>([]);
+  const [devices, setDevices] = useState<BlockedDeviceRow[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [{ data: u }, { data: d }] = await Promise.all([
+      supabase.from("profiles").select("user_id, full_name, email, blocked_reason, blocked_at").eq("is_blocked", true).order("blocked_at", { ascending: false }),
+      supabase.from("blocked_devices" as never).select("device_id, reason, source_user_id, created_at").eq("active", true).order("created_at", { ascending: false }),
+    ]);
+    const devRows = ((d as unknown) as BlockedDeviceRow[]) || [];
+    const ownerIds = [...new Set(devRows.map((r) => r.source_user_id).filter(Boolean))] as string[];
+    let nameById: Record<string, string> = {};
+    if (ownerIds.length) {
+      const { data: profs } = await supabase.from("profiles").select("user_id, full_name").in("user_id", ownerIds);
+      nameById = Object.fromEntries(((profs as { user_id: string; full_name: string | null }[]) || []).map((p) => [p.user_id, p.full_name || "—"]));
+    }
+    setUsers(((u as unknown) as BlockedUserRow[]) || []);
+    setDevices(devRows.map((r) => ({ ...r, ownerName: r.source_user_id ? nameById[r.source_user_id] : null })));
+    setLoading(false);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const unblockUser = async (userId: string) => {
+    setBusy("u:" + userId);
+    const { error } = await supabase.rpc("admin_unblock_user" as never, { p_user_id: userId } as never);
+    setBusy(null);
+    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Usuário desbloqueado" });
+    void load();
+  };
+  const unblockDevice = async (deviceId: string) => {
+    setBusy("d:" + deviceId);
+    const { error } = await supabase.rpc("admin_unblock_device" as never, { p_device_id: deviceId } as never);
+    setBusy(null);
+    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Aparelho desbloqueado" });
+    void load();
+  };
+
+  if (loading) return <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+
+  const fmt = (s: string | null) => (s ? new Date(s).toLocaleString("pt-BR") : "—");
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <h3 className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5"><Ban className="w-4 h-4 text-destructive" /> Usuários bloqueados ({users.length})</h3>
+        {users.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-3">Nenhum usuário bloqueado.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {users.map((u) => (
+              <div key={u.user_id} className="flex items-start gap-3 rounded-xl border p-3 bg-card">
+                <Ban className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">{u.full_name || "—"}</p>
+                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                  <p className="text-xs text-foreground mt-1"><span className="font-medium">Motivo:</span> {u.blocked_reason || "—"}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Bloqueado em {fmt(u.blocked_at)}</p>
+                </div>
+                <button onClick={() => unblockUser(u.user_id)} disabled={busy === "u:" + u.user_id}
+                  className="shrink-0 px-3 py-1.5 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors disabled:opacity-60 inline-flex items-center gap-1.5">
+                  {busy === "u:" + u.user_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Desbloquear
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5"><Smartphone className="w-4 h-4 text-destructive" /> Aparelhos bloqueados ({devices.length})</h3>
+        {devices.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-3">Nenhum aparelho bloqueado.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {devices.map((d) => (
+              <div key={d.device_id} className="flex items-start gap-3 rounded-xl border-2 border-destructive/30 p-3 bg-destructive/5">
+                <Smartphone className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">{d.ownerName || "Aparelho"}</p>
+                  <p className="text-[10px] text-muted-foreground font-mono truncate">{d.device_id}</p>
+                  <p className="text-xs text-foreground mt-1"><span className="font-medium">Motivo:</span> {d.reason || "—"}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Bloqueado em {fmt(d.created_at)}</p>
+                </div>
+                <button onClick={() => unblockDevice(d.device_id)} disabled={busy === "d:" + d.device_id}
+                  className="shrink-0 px-3 py-1.5 rounded-lg border text-xs font-semibold hover:bg-muted transition-colors disabled:opacity-60 inline-flex items-center gap-1.5">
+                  {busy === "d:" + d.device_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Desbloquear
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
 
 export default AdminUsers;

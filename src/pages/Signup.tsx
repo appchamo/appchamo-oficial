@@ -15,6 +15,7 @@ import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunct
 import { forwardGeocodeBrazil } from "@/lib/geocode";
 import { fetchRegionGate, checkRegion } from "@/lib/regionGate";
 import { getDeviceLocation } from "@/lib/deviceLocation";
+import { getOrCreateDeviceId } from "@/lib/deviceId";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ticket, MailCheck, Mail, Home } from "lucide-react";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
@@ -673,6 +674,22 @@ const Signup = () => {
 
       setLoading(true);
       try {
+        // Bloqueio por aparelho: impede criar novas contas em aparelho bloqueado.
+        try {
+          const devId = getOrCreateDeviceId();
+          if (devId) {
+            const { data: devBlocked } = await supabase.rpc("is_device_blocked" as never, { p_device_id: devId } as never);
+            if (devBlocked === true) {
+              toast({
+                title: "Não foi possível continuar",
+                description: "Este aparelho está impedido de criar novas contas. Se você acha que é um engano, fale com o suporte.",
+                variant: "destructive",
+              });
+              return;
+            }
+          }
+        } catch { /* nunca bloqueia por erro */ }
+
         // Trava de região (cadastro): exige o GPS REAL do aparelho.
         // Se a permissão for negada, bloqueia. Decisão pela posição real (raio).
         try {

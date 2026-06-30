@@ -23,6 +23,7 @@ import AnalyticsTracker from "@/components/AnalyticsTracker";
 import RegionGate from "@/components/RegionGate";
 import ForceUpdateGate from "@/components/ForceUpdateGate";
 import BlockedGate from "@/components/BlockedGate";
+import { fetchHomeTheme, applyAccent } from "@/lib/homeTheme";
 import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
 import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
@@ -230,6 +231,20 @@ const AdminRedirectGuard = () => {
     navigate("/admin", { replace: true });
   }, [loading, session?.user, location.pathname, navigate]);
 
+  return null;
+};
+
+/** Aplica a cor de destaque configurável (Layout da Home) globalmente, e reflete o preview ao vivo. */
+const ThemeApplier = () => {
+  useEffect(() => {
+    let mounted = true;
+    fetchHomeTheme().then((t) => { if (mounted) applyAccent(t.accent); });
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === "chamo-home-theme") applyAccent(e.data.accent);
+    };
+    window.addEventListener("message", onMsg);
+    return () => { mounted = false; window.removeEventListener("message", onMsg); };
+  }, []);
   return null;
 };
 
@@ -541,6 +556,7 @@ const AppContent = () => {
   return (
     <>
       <OAuthCallbackRedirectGuard />
+      <ThemeApplier />
       <ForceUpdateGate />
       {session ? <BlockedGate /> : null}
       {session ? <RoletaGate /> : null}

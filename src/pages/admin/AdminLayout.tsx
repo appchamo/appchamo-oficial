@@ -44,6 +44,7 @@ const AdminLayoutPage = () => {
   const [tutorialsConfig, setTutorialsConfig] = useState(DEFAULT_TUTORIALS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [accent, setAccent] = useState<string>("#ea580c");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const previewReadyRef = useRef(false);
   const [editAudience, setEditAudience] = useState<"client" | "pro">("client");
@@ -74,12 +75,11 @@ const AdminLayoutPage = () => {
   // Envia o rascunho atual para o preview (iframe da home real).
   const postPreview = useCallback(() => {
     try {
-      iframeRef.current?.contentWindow?.postMessage(
-        { type: "chamo-home-preview", sections, footerText },
-        "*",
-      );
+      const w = iframeRef.current?.contentWindow;
+      w?.postMessage({ type: "chamo-home-preview", sections, footerText }, "*");
+      w?.postMessage({ type: "chamo-home-theme", accent }, "*");
     } catch { /* */ }
-  }, [sections, footerText]);
+  }, [sections, footerText, accent]);
 
   // Reaplica o rascunho sempre que algo muda (atualização ao vivo).
   useEffect(() => {
@@ -105,11 +105,14 @@ const AdminLayoutPage = () => {
 
   useEffect(() => {
     const load = async () => {
-      const [layoutRes, footerRes, tutorialsRes] = await Promise.all([
+      const [layoutRes, footerRes, tutorialsRes, themeRes] = await Promise.all([
         supabase.from("platform_settings").select("value").eq("key", "home_layout").single(),
         supabase.from("platform_settings").select("value").eq("key", "home_footer_text").single(),
         supabase.from("platform_settings").select("value").eq("key", "home_tutorials").single(),
+        supabase.from("platform_settings").select("value").eq("key", "home_theme").single(),
       ]);
+      const theme = themeRes.data?.value as { accent?: string } | null;
+      if (theme?.accent) setAccent(theme.accent);
       if (layoutRes.data?.value && Array.isArray(layoutRes.data.value)) {
         const saved = layoutRes.data.value as unknown as SectionConfig[];
         const savedMap = new Map(saved.map(s => [s.id, s]));
@@ -154,12 +157,13 @@ const AdminLayoutPage = () => {
 
   const handleSave = async () => {
     setSaving(true);
-    const [layoutErr, footerErr, tutorialsErr] = await Promise.all([
+    const [layoutErr, footerErr, tutorialsErr, themeErr] = await Promise.all([
       supabase.from("platform_settings").upsert({ key: layoutKey(editAudience), value: sections as any }, { onConflict: "key" }).then(r => r.error),
       supabase.from("platform_settings").upsert({ key: "home_footer_text", value: footerText }, { onConflict: "key" }).then(r => r.error),
       supabase.from("platform_settings").upsert({ key: "home_tutorials", value: tutorialsConfig as any }, { onConflict: "key" }).then(r => r.error),
+      supabase.from("platform_settings").upsert({ key: "home_theme", value: { accent } as any }, { onConflict: "key" }).then(r => r.error),
     ]);
-    if (layoutErr || footerErr || tutorialsErr) {
+    if (layoutErr || footerErr || tutorialsErr || themeErr) {
       toast({ title: "Erro ao salvar", variant: "destructive" });
     } else {
       toast({ title: "Layout e textos salvos com sucesso!" });
@@ -192,6 +196,17 @@ const AdminLayoutPage = () => {
         <p className="text-sm text-muted-foreground mb-4">
           Arrume a ordem e a visibilidade das seções. Use o botão <b>Cliente / Profissional</b> para escolher qual home editar. As mudanças aparecem ao vivo no preview.
         </p>
+
+        <div className="bg-card border rounded-xl p-4 mb-4">
+          <h4 className="font-semibold text-sm text-foreground mb-1">Cor de destaque</h4>
+          <p className="text-[10px] text-muted-foreground mb-2">Cor principal do app (botões, ícones, realces). Vale para o app todo.</p>
+          <div className="flex items-center gap-3">
+            <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="w-12 h-10 rounded-lg border bg-background cursor-pointer p-0.5" />
+            <input value={accent} onChange={(e) => setAccent(e.target.value)} placeholder="#ea580c"
+              className="flex-1 border rounded-lg px-3 py-2 text-xs bg-background font-mono uppercase outline-none focus:ring-2 focus:ring-primary/30" />
+            <button onClick={() => setAccent("#ea580c")} className="text-xs font-semibold text-muted-foreground px-2 py-2 rounded-lg hover:bg-muted transition-colors">Padrão</button>
+          </div>
+        </div>
 
         {sections.map((section, index) => (
           <div key={section.id} className={`bg-card border rounded-xl p-4 transition-all ${!section.visible ? "opacity-50" : ""}`}>

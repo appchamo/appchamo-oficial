@@ -2,7 +2,7 @@ import AdminLayout from "@/components/AdminLayout";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Save, Loader2, GripVertical, Eye, EyeOff, ChevronUp, ChevronDown, RefreshCw, Smartphone } from "lucide-react";
+import { Save, Loader2, GripVertical, Eye, EyeOff, ChevronUp, ChevronDown, RefreshCw, Smartphone, Lock } from "lucide-react";
 
 interface SectionConfig {
   id: string;
@@ -208,6 +208,27 @@ const AdminLayoutPage = () => {
           </div>
         </div>
 
+        {/* Blocos fixos da home (posição fixa no app) — mostrados bloqueados para referência */}
+        <div className="bg-muted/40 border border-dashed rounded-xl p-3 mb-3">
+          <p className="text-xs font-bold text-foreground mb-2 flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5 text-muted-foreground" /> Blocos fixos (posição fixa no app)
+          </p>
+          <div className="space-y-1.5">
+            {(editAudience === "pro"
+              ? ["Check-in diário", "Carteira / Saldo", "Dicas para vender mais", "Localização"]
+              : ["Check-in diário", "Cabeçalho de boas-vindas", "Convite \"Tornar-se profissional\"", "Localização"]
+            ).map((label) => (
+              <div key={label} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border text-xs text-muted-foreground">
+                <Lock className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                <span className="flex-1">{label}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide opacity-60">Fixo</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2">Aparecem na home mas não podem ser reordenados ou ocultados (ainda).</p>
+        </div>
+
+        <p className="text-xs font-bold text-foreground mb-1 px-0.5">Seções que você pode reorganizar</p>
         {sections.map((section, index) => (
           <div key={section.id} className={`bg-card border rounded-xl p-4 transition-all ${!section.visible ? "opacity-50" : ""}`}>
             <div className="flex items-center gap-3">

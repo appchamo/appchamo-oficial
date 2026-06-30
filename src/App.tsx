@@ -21,6 +21,7 @@ import DeepLinkRouter from "@/components/DeepLinkRouter";
 import RoletaGate from "@/components/RoletaGate";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import RegionGate from "@/components/RegionGate";
+import ForceUpdateGate from "@/components/ForceUpdateGate";
 import MainTabPersistentLayers, { TabRoutePlaceholder } from "@/components/MainTabPersistentLayers";
 import RoutesOverlayShell from "@/components/RoutesOverlayShell";
 import { Capacitor } from "@capacitor/core";
@@ -536,6 +537,7 @@ const AppContent = () => {
   return (
     <>
       <OAuthCallbackRedirectGuard />
+      <ForceUpdateGate />
       {session ? <RoletaGate /> : null}
       {session ? <RegionGate /> : null}
       <Suspense fallback={<PageFallback />}>

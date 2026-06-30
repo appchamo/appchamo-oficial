@@ -39,7 +39,10 @@ const MyJobPostings = () => {
   const [loading, setLoading] = useState(true);
   const [proId, setProId] = useState<string | null>(null);
   const [sponsorId, setSponsorId] = useState<string | null>(null);
-  const [isBusinessPlan, setIsBusinessPlan] = useState(false);
+  // canPost: tem conta de profissional/empresa/patrocinador. unlimited: plano pago/admin/patrocinador.
+  const [canPost, setCanPost] = useState(false);
+  const [unlimited, setUnlimited] = useState(false);
+  const FREE_JOB_LIMIT = 1;
   const [createOpen, setCreateOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState<string | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
@@ -72,11 +75,12 @@ const MyJobPostings = () => {
     }
 
     const { data: profile } = await supabase.from("profiles").select("user_type, job_posting_enabled").eq("user_id", authUser.id).maybeSingle();
-    const { data: sub } = await supabase.from("subscriptions").select("plan_id").eq("user_id", authUser.id).maybeSingle();
-    const businessCanPost = sub?.plan_id === "business" && profile?.user_type === "company";
+    const { data: sub } = await supabase.from("subscriptions").select("plan_id, status").eq("user_id", authUser.id).maybeSingle();
+    // Profissional ou empresa pode publicar (free = 1 vaga; pago = ilimitado).
+    const isPaid = !!sub && ["pro", "vip", "business"].includes(String(sub.plan_id)) && String(sub.status || "").toLowerCase() === "active";
     const adminAllowedPost = profile?.job_posting_enabled === true;
-    const sponsorCanPost = !!sid;
-    setIsBusinessPlan(sponsorCanPost || businessCanPost || adminAllowedPost);
+    setCanPost(!!pro?.id || !!sid);
+    setUnlimited(isPaid || adminAllowedPost || !!sid);
 
     const orFilter = [
       pro?.id ? `professional_id.eq.${pro.id}` : null,
@@ -171,6 +175,12 @@ const MyJobPostings = () => {
       toast({ title: "Informe um CEP válido para definir a localização da vaga.", variant: "destructive" });
       return;
     }
+    const activeCount = jobs.filter((j) => j.active).length;
+    if (!unlimited && activeCount >= FREE_JOB_LIMIT) {
+      toast({ title: "Limite do plano grátis", description: "No plano grátis você pode ter 1 vaga ativa. Assine um plano para publicar mais.", variant: "destructive" });
+      navigate("/subscriptions");
+      return;
+    }
     setSaving(true);
     const uf = (form.state ?? "").trim().toUpperCase().slice(0, 2) || null;
     const row: Record<string, unknown> = {
@@ -191,7 +201,10 @@ const MyJobPostings = () => {
       .select("id")
       .maybeSingle();
     if (error || !createdJob?.id) {
-      toast({ title: "Erro ao criar vaga.", variant: "destructive" });
+      const isLimit = String(error?.message || "").includes("free_job_limit");
+      toast(isLimit
+        ? { title: "Limite do plano grátis", description: "No plano grátis você pode ter 1 vaga ativa. Assine um plano para publicar mais.", variant: "destructive" }
+        : { title: "Erro ao criar vaga.", variant: "destructive" });
     } else {
       // Notificar usuários da mesma cidade
       try {
@@ -256,7 +269,23 @@ const MyJobPostings = () => {
   };
 
   const handleToggle = async (jobId: string, active: boolean) => {
-    await supabase.from("job_postings").update({ active: !active }).eq("id", jobId);
+    // Reativar uma vaga estando no limite do plano grátis (já com 1 ativa) não é permitido.
+    if (!active && !unlimited) {
+      const activeCount = jobs.filter((j) => j.active).length;
+      if (activeCount >= FREE_JOB_LIMIT) {
+        toast({ title: "Limite do plano grátis", description: "No plano grátis você pode ter 1 vaga ativa. Pause a outra ou assine um plano.", variant: "destructive" });
+        navigate("/subscriptions");
+        return;
+      }
+    }
+    const { error } = await supabase.from("job_postings").update({ active: !active }).eq("id", jobId);
+    if (error) {
+      const isLimit = String(error?.message || "").includes("free_job_limit");
+      toast(isLimit
+        ? { title: "Limite do plano grátis", description: "No plano grátis você pode ter 1 vaga ativa. Assine um plano para publicar mais.", variant: "destructive" }
+        : { title: "Erro ao atualizar vaga.", variant: "destructive" });
+      return;
+    }
     toast({ title: active ? "Vaga pausada." : "Vaga ativada." });
     notifyJobPostingsChanged();
     fetchJobs();
@@ -289,8 +318,13 @@ const MyJobPostings = () => {
           </div>
           <button
             onClick={() => {
-              if (!isBusinessPlan) {
-                toast({ title: "Recurso exclusivo do plano Business", description: "Faça upgrade para publicar vagas.", variant: "destructive" });
+              if (!canPost) {
+                toast({ title: "Disponível para profissionais e empresas", description: "Crie um perfil de profissional ou empresa para publicar vagas.", variant: "destructive" });
+                return;
+              }
+              const activeCount = jobs.filter((j) => j.active).length;
+              if (!unlimited && activeCount >= FREE_JOB_LIMIT) {
+                toast({ title: "Limite do plano grátis", description: "No plano grátis você pode ter 1 vaga ativa. Assine um plano para publicar mais.", variant: "destructive" });
                 navigate("/subscriptions");
                 return;
               }
@@ -302,14 +336,14 @@ const MyJobPostings = () => {
           </button>
         </div>
 
-        {!loading && !!proId && !isBusinessPlan && (
+        {!loading && canPost && !unlimited && (
           <Link to="/subscriptions" className="flex items-center gap-3 p-4 rounded-2xl border border-primary/20 bg-primary/5 mb-5 hover:border-primary/40 transition-all">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <Crown className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1">
-              <p className="text-sm font-semibold text-foreground">Plano Business</p>
-              <p className="text-xs text-muted-foreground">Faça upgrade para publicar vagas</p>
+              <p className="text-sm font-semibold text-foreground">Plano grátis: 1 vaga ativa</p>
+              <p className="text-xs text-muted-foreground">Assine um plano e publique vagas ilimitadas</p>
             </div>
             <ChevronRight className="w-4 h-4 text-primary" />
           </Link>
@@ -326,7 +360,7 @@ const MyJobPostings = () => {
             </div>
             <p className="text-sm font-medium">Minhas vagas</p>
             <p className="text-xs max-w-xs">
-              Disponível para empresas no plano Business ou para contas de patrocinador.
+              Disponível para profissionais e empresas. Crie seu perfil para publicar vagas.
             </p>
           </div>
         ) : jobs.length === 0 ? (

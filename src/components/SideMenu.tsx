@@ -43,7 +43,8 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
   const { sponsor: menuLinkedSponsor } = useLinkedSponsor(profile?.user_id);
   const { plan } = useSubscription();
   const isBusiness = plan?.id === "business";
-  const canPostJobs = profile?.user_type === "company" || profile?.job_posting_enabled === true;
+  // Profissional e empresa podem publicar vagas (free = 1 vaga; pago = ilimitado).
+  const canPostJobs = profile?.user_type === "company" || profile?.user_type === "professional" || profile?.job_posting_enabled === true;
 
   const isProOrCompany = profile?.user_type === "professional" || profile?.user_type === "company";
 

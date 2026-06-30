@@ -222,6 +222,8 @@ const AdminRedirectGuard = () => {
 
     const path = location.pathname;
     if (path.startsWith("/admin")) return;
+    // Preview do Layout da Home (iframe): admin pode ver a home sem ser redirecionado.
+    if (new URLSearchParams(location.search).get("preview") === "1") return;
     if (path === "/login" || path === "/signup" || path === "/reset-password" || path === "/admin/login") return;
     if (path === "/terms-of-use" || path === "/privacy" || path === "/exclusao-de-conta") return;
 

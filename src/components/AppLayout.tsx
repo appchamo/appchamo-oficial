@@ -51,6 +51,16 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
     return () => clearTimeout(t);
   }, []);
 
+  // Modo preview (iframe do Layout da Home no admin): só visualização, sem cliques.
+  useEffect(() => {
+    let isPreview = false;
+    try { isPreview = new URLSearchParams(window.location.search).get("preview") === "1"; } catch { /* */ }
+    if (isPreview) {
+      document.body.classList.add("chamo-preview-mode");
+      return () => document.body.classList.remove("chamo-preview-mode");
+    }
+  }, []);
+
   const closeOauthWelcome = useCallback(() => {
     try {
       sessionStorage.removeItem("chamo_oauth_just_landed");

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Menu, Clock, Crown, Bell, LogIn, XCircle, CalendarCheck } from "lucide-react";
+import { Menu, Clock, Bell, LogIn, XCircle, CalendarCheck, Wallet } from "lucide-react";
 import { useNavigate, useLocation, useSearchParams, Link } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import SideMenu from "./SideMenu";
@@ -246,6 +246,23 @@ const Header = () => {
   const hidePlanos =
     profile?.user_type === "sponsor" || !!headerLinkedSponsor;
 
+  // Saldo a receber (substitui o badge VIP no topo, para profissional/empresa).
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  useEffect(() => {
+    if (!user?.id || !isPro) { setWalletBalance(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data: pro } = await supabase.from("professionals").select("id").eq("user_id", user.id).maybeSingle();
+      if (cancelled || !pro?.id) return;
+      const { data } = await supabase
+        .from("wallet_transactions").select("amount")
+        .eq("professional_id", pro.id).eq("status", "pending");
+      if (cancelled) return;
+      setWalletBalance((data || []).reduce((s, t) => s + Number(t.amount), 0));
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, isPro]);
+
   // Regra de Exibição dos Selos
   const showRejectedBadge = !isPro && proStatus === "rejected";
   /** Ocupa o mesmo espaço do botão Planos (evita sobrepor as abas Início | Comunidade). */
@@ -365,13 +382,15 @@ const Header = () => {
             {user && isPro && !hidePlanos && !pendingReplacesPlanos && (
               <button
                 type="button"
-                onClick={handleVipOrPlanosClick}
-                aria-label="Ver planos e assinatura VIP"
-                className="flex items-center gap-1 max-w-[7.5rem] sm:max-w-[9rem] px-2 py-1.5 rounded-xl border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 active:scale-95 transition-all touch-manipulation flex-shrink-0"
+                onClick={() => navigate("/pro/financeiro")}
+                aria-label="Ver carteira / saldo a receber"
+                className="flex items-center gap-1.5 max-w-[8.5rem] sm:max-w-[10rem] px-2.5 py-1.5 rounded-xl border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 active:scale-95 transition-all touch-manipulation flex-shrink-0"
               >
-                <Crown className="w-3 h-3 flex-shrink-0 text-primary" />
+                <Wallet className="w-3.5 h-3.5 flex-shrink-0 text-primary" />
                 <span className="text-[11px] font-bold leading-none truncate">
-                  {showPlanBadge ? planName : "Planos"}
+                  {walletBalance == null
+                    ? "Carteira"
+                    : walletBalance.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </span>
               </button>
             )}

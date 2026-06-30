@@ -40,8 +40,12 @@ export const formatCep = (v: string) => {
  * Rejeita sequências repetidas (000.000.000-00, 111.111.111-11 etc.) que
  * passariam no algoritmo mas nunca são CPFs reais.
  */
+/** CPFs reservados para contas de TESTE — passam na validação e podem repetir. */
+export const TEST_CPFS = new Set<string>(["00000000000"]);
+
 export const validateCpf = (v: string): boolean => {
   const d = v.replace(/\D/g, "");
+  if (TEST_CPFS.has(d)) return true; // CPF de teste reservado
   if (d.length !== 11) return false;
   if (/^(\d)\1{10}$/.test(d)) return false;
 

@@ -7,7 +7,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// CPFs reservados para contas de teste (passam na validação e podem repetir).
+const TEST_CPFS = ["00000000000"];
 function isValidCpf(d: string): boolean {
+  if (TEST_CPFS.includes(d)) return true; // CPF de teste
   if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
   const digits = d.split("").map(Number);
   for (const k of [9, 10] as const) {

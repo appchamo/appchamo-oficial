@@ -174,6 +174,7 @@ export default function ProSellMoreChecklist({ professionalId, userId }: Props) 
   );
 
   if (!loaded) return null;
+  if (dismissed) return null;
 
   const doneCount = items.filter((i) => i.done).length;
   const allDone = doneCount === items.length;
@@ -194,28 +195,38 @@ export default function ProSellMoreChecklist({ professionalId, userId }: Props) 
   return (
     <section className="w-full min-w-0">
       <div className="bg-card border-2 border-primary/20 rounded-2xl overflow-hidden shadow-sm">
-        {/* Cabeçalho (clicável: minimiza / expande) */}
-        <button
-          type="button"
-          onClick={toggleMinimized}
-          aria-expanded={!minimized}
-          className="w-full flex items-center gap-2 px-4 pt-4 pb-3 text-left active:bg-primary/[0.04] transition-colors"
-        >
-          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-primary to-amber-500 shadow-sm">
-            <TrendingUp className="w-4 h-4 text-white" />
-          </div>
-          <h3 className="font-bold text-foreground tracking-tight text-[15px] lg:text-base">
-            Dicas para vender mais
-          </h3>
-          <span className="ml-auto text-[11px] font-bold text-primary uppercase tracking-wide">
-            {doneCount}/{items.length}
-          </span>
-          {minimized ? (
-            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
-          ) : (
-            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
-          )}
-        </button>
+        {/* Cabeçalho: área clicável (minimiza/expande) + botão X (fecha de vez) */}
+        <div className="w-full flex items-center gap-2 px-4 pt-4 pb-3">
+          <button
+            type="button"
+            onClick={toggleMinimized}
+            aria-expanded={!minimized}
+            className="flex items-center gap-2 flex-1 min-w-0 text-left active:opacity-80 transition-opacity"
+          >
+            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-primary to-amber-500 shadow-sm shrink-0">
+              <TrendingUp className="w-4 h-4 text-white" />
+            </div>
+            <h3 className="font-bold text-foreground tracking-tight text-[15px] lg:text-base truncate">
+              Dicas para vender mais
+            </h3>
+            <span className="ml-auto text-[11px] font-bold text-primary uppercase tracking-wide shrink-0">
+              {doneCount}/{items.length}
+            </span>
+            {minimized ? (
+              <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label="Fechar dicas"
+            className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
         {!minimized && (
           <>

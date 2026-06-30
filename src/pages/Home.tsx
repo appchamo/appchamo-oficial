@@ -732,6 +732,7 @@ const Home = () => {
                 professionalId={proId}
               />
               <ProSellMoreChecklist professionalId={proId} userId={user.id} />
+              <BenefitsPanel key="benefits-pro" section={getSection("benefits")} />
             </>
           ) : user && isPro ? (
             /* ── Placeholder enquanto proId carrega ── */
@@ -912,7 +913,7 @@ const Home = () => {
 
 
           {sections
-            .filter((s) => s.visible && !(isClientUser && s.id === "benefits"))
+            .filter((s) => s.visible && !(s.id === "benefits" && (isClientUser || (isPro && !!proId))))
             .map((section) => {
             const isJobsEmpty = section.id === "jobs" && jobCount <= 0;
             const isWelcomeCollapsed = section.id === "welcome";

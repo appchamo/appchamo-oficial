@@ -9,12 +9,10 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Wallet, ChevronRight, ChevronLeft, MapPin,
-  CalendarCheck, Clock, User, Target,
+  CalendarCheck, Clock, User,
 } from "lucide-react";
 import { format, isToday, isTomorrow, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ProfessionalSealIcon } from "@/components/seals/ProfessionalSealIcon";
-import { parseSealIconVariant } from "@/lib/sealIconVariant";
 
 /* ── tipos ──────────────────────────────────────────────── */
 interface NextAppointment {
@@ -66,12 +64,6 @@ export default function HomeProCarousel({
   const [next, setNext] = useState<NextAppointment | null>(null);
   const [totalToday, setTotalToday] = useState(0);
   const [agendaLoaded, setAgendaLoaded] = useState(false);
-  const [nextMission, setNextMission] = useState<{
-    title: string;
-    icon_variant: string;
-    progress: number;
-    allDone: boolean;
-  } | null>(null);
 
   /* swipe tracking */
   const touchStartX = useRef(0);
@@ -140,44 +132,10 @@ export default function HomeProCarousel({
 
   useEffect(() => { loadAgenda(); }, [loadAgenda]);
 
+  /* mantém a premiação de selos rodando ao abrir a Home (sem UI de missão) */
   useEffect(() => {
     if (!professionalId) return;
-    let cancelled = false;
-    (async () => {
-      await supabase.rpc("try_award_my_call_seals");
-      const { data, error } = await supabase.rpc("get_my_seal_missions");
-      if (cancelled || error) {
-        if (error) console.warn("get_my_seal_missions:", error.message);
-        if (!cancelled) setNextMission(null);
-        return;
-      }
-      const rows = (data || []) as {
-        title: string;
-        icon_variant: string;
-        awarded: boolean;
-        progress_ratio: number;
-      }[];
-      const pending = rows.filter((r) => !r.awarded);
-      if (pending.length === 0) {
-        setNextMission({
-          title: "Todas as missões concluídas!",
-          icon_variant: "seal_chamo",
-          progress: 1,
-          allDone: true,
-        });
-        return;
-      }
-      const next = pending[0];
-      setNextMission({
-        title: next.title,
-        icon_variant: next.icon_variant || "seal_default",
-        progress: Math.min(1, Math.max(0, Number(next.progress_ratio) || 0)),
-        allDone: false,
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void supabase.rpc("try_award_my_call_seals");
   }, [professionalId]);
 
   /* volta para slide 0 se a agenda desaparecer */
@@ -248,8 +206,8 @@ export default function HomeProCarousel({
             className="px-5 lg:px-7 pt-2 lg:pt-3 pb-4 lg:pb-6 cursor-pointer active:opacity-90"
             onClick={() => navigate("/pro/financeiro")}
           >
-            {/* avatar + saudação + prévia da próxima missão */}
-            <div className={`flex items-start gap-2 lg:gap-4 mb-3 lg:mb-4 ${hasAgenda ? "pr-10 lg:pr-14" : ""}`}>
+            {/* avatar + saudação */}
+            <div className="flex items-start gap-2 lg:gap-4 mb-3 lg:mb-4">
               <div className="flex items-center gap-3 lg:gap-4 flex-1 min-w-0">
                 {profile?.avatar_url ? (
                   <img
@@ -268,40 +226,6 @@ export default function HomeProCarousel({
                   <p className="text-white font-bold text-lg lg:text-2xl leading-tight truncate">{userName} 👋</p>
                 </div>
               </div>
-              {nextMission && (
-                <button
-                  type="button"
-                  onClick={e => {
-                    e.stopPropagation();
-                    navigate("/rewards?tab=missions");
-                  }}
-                  className="shrink-0 w-[118px] sm:w-[128px] lg:w-[148px] rounded-xl lg:rounded-2xl bg-white/15 backdrop-blur-sm px-2.5 py-2 lg:px-3 lg:py-2.5 text-left border border-white/25 shadow-sm active:scale-[0.98] transition-transform"
-                >
-                  <div className="flex items-center gap-0.5 lg:gap-1 text-white/85 mb-1 lg:mb-1.5">
-                    <Target className="w-2.5 h-2.5 lg:w-3 lg:h-3 shrink-0" />
-                    <span className="text-[8px] lg:text-[9px] font-bold uppercase tracking-wide leading-none">
-                      {nextMission.allDone ? "Programa" : "Próxima missão"}
-                    </span>
-                  </div>
-                  <div className="flex items-start gap-1.5 lg:gap-2 mb-1.5">
-                    <ProfessionalSealIcon
-                      variant={parseSealIconVariant(nextMission.icon_variant)}
-                      size={26}
-                      earned={nextMission.allDone}
-                      className="shrink-0 scale-90 lg:scale-100 origin-top-left"
-                    />
-                    <span className="text-[10px] lg:text-xs font-semibold text-white leading-tight line-clamp-2 min-w-0 pt-0.5">
-                      {nextMission.title}
-                    </span>
-                  </div>
-                  <div className="h-1.5 lg:h-2 rounded-full bg-black/25 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-white/95 transition-all duration-500"
-                      style={{ width: `${Math.round(nextMission.progress * 100)}%` }}
-                    />
-                  </div>
-                </button>
-              )}
             </div>
 
             {/* saldo */}

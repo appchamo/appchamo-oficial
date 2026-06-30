@@ -45,6 +45,7 @@ interface Sponsor {
   checkin_token: string;
   checkin_active: boolean;
   checkin_discount_percent: number;
+  checkin_rules: string | null;
 }
 
 const PLAN_LABELS: Record<WeeklyPlan, string> = {
@@ -80,24 +81,29 @@ const AdminSponsors = () => {
   const [loadingCities, setLoadingCities] = useState(false);
   const [qrSponsor, setQrSponsor] = useState<Sponsor | null>(null);
   const [discountInput, setDiscountInput] = useState("");
+  const [rulesInput, setRulesInput] = useState("");
   const [activatingCheckin, setActivatingCheckin] = useState(false);
 
   useEffect(() => {
-    if (qrSponsor) setDiscountInput(qrSponsor.checkin_discount_percent ? String(qrSponsor.checkin_discount_percent) : "");
+    if (qrSponsor) {
+      setDiscountInput(qrSponsor.checkin_discount_percent ? String(qrSponsor.checkin_discount_percent) : "");
+      setRulesInput(qrSponsor.checkin_rules ?? "");
+    }
   }, [qrSponsor?.id]);
 
   const saveCheckinActivation = async (active: boolean) => {
     if (!qrSponsor) return;
     const pct = active ? Math.max(0, Math.min(100, Number(discountInput) || 0)) : 0;
+    const rules = active ? (rulesInput.trim() || null) : qrSponsor.checkin_rules ?? null;
     setActivatingCheckin(true);
     const { error } = await supabase
       .from("sponsors")
-      .update({ checkin_active: active, checkin_discount_percent: pct } as any)
+      .update({ checkin_active: active, checkin_discount_percent: pct, checkin_rules: rules } as any)
       .eq("id", qrSponsor.id);
     setActivatingCheckin(false);
     if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); return; }
     toast({ title: active ? "Check-in ativado!" : "Check-in desativado" });
-    const updated = { ...qrSponsor, checkin_active: active, checkin_discount_percent: pct };
+    const updated = { ...qrSponsor, checkin_active: active, checkin_discount_percent: pct, checkin_rules: rules };
     setQrSponsor(updated);
     setSponsors((list) => list.map((s) => (s.id === updated.id ? updated : s)));
   };
@@ -589,6 +595,21 @@ const AdminSponsors = () => {
                         Salvar
                       </button>
                     </div>
+                    <label className="text-xs font-medium text-muted-foreground mt-3 block">Regras do desconto (aparece na página de Parceiros)</label>
+                    <textarea
+                      value={rulesInput}
+                      onChange={(e) => setRulesInput(e.target.value)}
+                      rows={3}
+                      placeholder="Ex: Válido de seg a sex, exceto promoções. 1 uso por dia."
+                      className="w-full border rounded-xl px-3 py-2 text-sm bg-background mt-1 outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                    />
+                    <button
+                      onClick={() => saveCheckinActivation(true)}
+                      disabled={activatingCheckin}
+                      className="w-full mt-1.5 py-2 rounded-xl bg-primary/10 text-primary text-xs font-semibold disabled:opacity-60"
+                    >
+                      Salvar regras
+                    </button>
                     <button
                       onClick={() => saveCheckinActivation(false)}
                       disabled={activatingCheckin}

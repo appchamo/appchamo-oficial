@@ -1,6 +1,8 @@
 // Bloqueia o uso do app para usuários fora da região permitida (cidade/raio),
 // quando a trava está ativada no admin. Desligado por padrão.
-// Staff (admin/suporte) nunca é bloqueado. Sem dados de localização -> não bloqueia.
+// Staff (admin/suporte) nunca é bloqueado. Quem não concluiu o cadastro também
+// não é bloqueado aqui (a trava ocorre na tela de cadastro). Modo estrito:
+// usuário concluído sem prova de localização é bloqueado.
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -26,10 +28,13 @@ export default function RegionGate() {
         if (!cfg.enabled || !cfg.blockApp) { if (!cancelled) setBlocked(false); return; }
         const { data: prof } = await supabase
           .from("profiles")
-          .select("address_city, latitude, longitude")
+          .select("address_city, latitude, longitude, signup_completed_at")
           .eq("user_id", user.id)
           .maybeSingle();
-        const p = (prof || {}) as { address_city?: string | null; latitude?: number | null; longitude?: number | null };
+        const p = (prof || {}) as { address_city?: string | null; latitude?: number | null; longitude?: number | null; signup_completed_at?: string | null };
+        // Quem ainda não concluiu o cadastro não é bloqueado aqui: a trava de
+        // região acontece na própria tela de cadastro (ao informar a cidade).
+        if (!p.signup_completed_at) { if (!cancelled) setBlocked(false); return; }
         const check = checkRegion(cfg, { city: p.address_city, lat: p.latitude ?? null, lng: p.longitude ?? null });
         if (!cancelled) { setBlocked(!check.allowed); setReason(check.reason); }
       } catch {

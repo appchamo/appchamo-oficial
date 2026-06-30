@@ -19,7 +19,7 @@ const DEFAULTS: RegionGateConfig = {
   allowedCities: ["Patrocínio"],
   centerLat: -18.9441,
   centerLng: -46.9925,
-  radiusKm: 40,
+  radiusKm: 15,
 };
 
 let cache: RegionGateConfig | null = null;
@@ -74,9 +74,9 @@ export function distanceKm(aLat: number, aLng: number, bLat: number, bLng: numbe
 export interface RegionCheckInput { city?: string | null; lat?: number | null; lng?: number | null; }
 
 /**
- * Permite se a cidade está na lista OU o ponto está dentro do raio.
- * Bloqueia apenas quando há informação e ela reprova. Sem dados -> permite
- * (não trava por falta de informação).
+ * Modo estrito: só libera quando há PROVA de estar na região permitida
+ * (cidade na lista OU ponto dentro do raio). Sem nenhum dado de localização
+ * -> bloqueia e pede para ativar a localização / informar a cidade.
  */
 export function checkRegion(cfg: RegionGateConfig, input: RegionCheckInput): { allowed: boolean; reason: string } {
   if (!cfg.enabled) return { allowed: true, reason: "" };
@@ -88,12 +88,18 @@ export function checkRegion(cfg: RegionGateConfig, input: RegionCheckInput): { a
     ? distanceKm(input.lat as number, input.lng as number, cfg.centerLat, cfg.centerLng) <= cfg.radiusKm
     : null;
 
+  // Qualquer prova positiva libera.
   if (cityOk === true || radiusOk === true) return { allowed: true, reason: "" };
+  // Reprovou por cidade ou raio -> está fora da área.
   if (cityOk === false || radiusOk === false) {
     return {
       allowed: false,
-      reason: `O Chamô está disponível apenas em ${cfg.allowedCities.join(", ")} e região.`,
+      reason: `O Chamô está disponível apenas em ${cfg.allowedCities.join(", ")}.`,
     };
   }
-  return { allowed: true, reason: "" };
+  // Sem nenhuma informação de localização -> bloqueia (modo estrito).
+  return {
+    allowed: false,
+    reason: `Ative a localização ou informe sua cidade para usar o Chamô. Ele está disponível apenas em ${cfg.allowedCities.join(", ")}.`,
+  };
 }

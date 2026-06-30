@@ -1,5 +1,5 @@
 import AppLayout from "@/components/AppLayout";
-import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, ChevronDown, Clock } from "lucide-react";
+import { Search as SearchIcon, SlidersHorizontal, Star, BadgeCheck, MapPin, CheckCircle2, ChevronDown, Clock, Sparkles, Ticket } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -152,7 +152,41 @@ const Search = () => {
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [filterMinRating, setFilterMinRating] = useState<number>(0);
   const [filterVerified, setFilterVerified] = useState(false);
-  
+  const [filterFeatured, setFilterFeatured] = useState(false);
+  const [filterDiscount, setFilterDiscount] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("discount") === "1"; } catch { return false; }
+  });
+  const [discountProIds, setDiscountProIds] = useState<Set<string>>(new Set());
+  const [featuredUserIds, setFeaturedUserIds] = useState<Set<string>>(new Set());
+
+  // Conjuntos para os filtros "Com desconto" e "Em destaque".
+  useEffect(() => {
+    (async () => {
+      const now = Date.now();
+      const { data: coupons } = await supabase
+        .from("professional_coupons")
+        .select("professional_id, expires_at, max_uses, used_count, active")
+        .eq("active", true).limit(500);
+      const dset = new Set<string>();
+      for (const c of (coupons || []) as any[]) {
+        if (c.expires_at && new Date(c.expires_at).getTime() <= now) continue;
+        if (c.max_uses != null && (c.used_count ?? 0) >= c.max_uses) continue;
+        dset.add(c.professional_id);
+      }
+      setDiscountProIds(dset);
+
+      const { data: subs } = await supabase
+        .from("subscriptions")
+        .select("user_id, plan_id, status")
+        .in("plan_id", ["vip", "business"]);
+      const fset = new Set<string>();
+      for (const s of (subs || []) as any[]) {
+        if (String(s.status || "").toLowerCase() === "active") fset.add(s.user_id);
+      }
+      setFeaturedUserIds(fset);
+    })();
+  }, []);
+
   const [filterState, setFilterState] = useState<string>("");
   const [statesList, setStatesList] = useState<{ sigla: string; nome: string }[]>(ESTADOS_BR_FALLBACK);
   const [filterCity, setFilterCity] = useState<string>("");
@@ -329,6 +363,8 @@ const Search = () => {
       if (filterProfession && p.profession_id !== filterProfession) return false;
       if (filterMinRating > 0 && p.rating < filterMinRating) return false;
       if (filterVerified && !p.verified) return false;
+      if (filterFeatured && !(p.verified && featuredUserIds.has(p.user_id))) return false;
+      if (filterDiscount && !discountProIds.has(p.id)) return false;
       
       return true;
     });
@@ -344,12 +380,12 @@ const Search = () => {
     });
 
     return result;
-  }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified]);
+  }, [pros, search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, filterFeatured, filterDiscount, featuredUserIds, discountProIds]);
 
   // Reset paginação quando filtros ou busca mudam
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified]);
+  }, [search, filterState, filterCity, filterCategory, filterProfession, filterMinRating, filterVerified, filterFeatured, filterDiscount]);
 
   const prosToShow = filteredAndSorted.slice(0, visibleCount);
   const hasMore = visibleCount < filteredAndSorted.length;
@@ -515,13 +551,31 @@ const Search = () => {
                   <Switch checked={filterVerified} onCheckedChange={setFilterVerified} />
                 </div>
 
+                <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="w-5 h-5 text-primary" />
+                    <span className="text-sm font-bold text-foreground">Profissionais em destaque</span>
+                  </div>
+                  <Switch checked={filterFeatured} onCheckedChange={setFilterFeatured} />
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-muted/20 rounded-2xl border border-transparent">
+                  <div className="flex items-center gap-3">
+                    <Ticket className="w-5 h-5 text-primary" />
+                    <span className="text-sm font-bold text-foreground">Profissionais com desconto</span>
+                  </div>
+                  <Switch checked={filterDiscount} onCheckedChange={setFilterDiscount} />
+                </div>
+
                 <div className="grid grid-cols-2 gap-4 pt-4">
                   <button onClick={() => { 
                     setFilterCategory(""); 
                     setFilterProfession(""); 
-                    setFilterMinRating(0); 
-                    setFilterVerified(false); 
-                    setFilterState(userState || ""); 
+                    setFilterMinRating(0);
+                    setFilterVerified(false);
+                    setFilterFeatured(false);
+                    setFilterDiscount(false);
+                    setFilterState(userState || "");
                     setFilterCity(userCity || ""); 
                     setShowStateList(false);
                   }} className="py-3 text-sm font-semibold text-muted-foreground bg-muted/50 rounded-xl">Limpar</button>

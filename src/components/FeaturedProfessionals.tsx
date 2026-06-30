@@ -26,7 +26,7 @@ const FEATURED_FETCH_LIMIT = 320;
 /** Máximo de candidatos na região antes de escolher os exibidos no carrossel. */
 const FEATURED_POOL_MAX = 200;
 /** Quantos profissionais aparecem no carrossel (aleatório ou ordenado); o último slide é o CTA “Ver todos”. */
-const FEATURED_DISPLAY_COUNT = 12;
+const FEATURED_DISPLAY_COUNT = 8;
 /** Se a lista regional vier menor que isto, funde profissionais de todo o mesmo estado. */
 const MIN_MERGE_STATE_POOL = 28;
 
@@ -846,28 +846,27 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
   return (
     <section className="w-full min-w-0">
-      <div className="px-1 mb-3 lg:mb-4">
-        <h3 className="font-semibold lg:text-lg text-foreground text-center w-full mb-3 tracking-tight">
+      <div className="px-1 mb-3 flex items-center justify-between gap-2">
+        <h3 className="font-bold text-base lg:text-lg text-foreground tracking-tight truncate">
           {section?.title ?? "Profissionais em destaque"}
         </h3>
-        <div className="rounded-2xl border border-border/80 bg-gradient-to-b from-card to-muted/20 dark:to-muted/10 p-1.5 shadow-sm min-w-0">
-          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-border/70 bg-background/90 px-3 py-2.5 text-left text-xs sm:text-sm font-semibold text-foreground shadow-sm outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-primary/35"
-                aria-label="Ordenar profissionais em destaque"
-                aria-expanded={filterOpen}
-              >
-                <span className="min-w-0 flex-1 truncate">{sortTriggerLabel}</span>
-                <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="start"
-              sideOffset={6}
-              className="w-[min(100vw-1.5rem,17.5rem)] rounded-2xl border border-border/80 bg-card p-2 shadow-xl"
+        <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background px-3 py-1.5 text-xs font-semibold text-muted-foreground shadow-sm outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-primary/35"
+              aria-label="Ordenar profissionais em destaque"
+              aria-expanded={filterOpen}
             >
+              <ChevronsUpDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="max-w-[7.5rem] truncate">{sortTriggerLabel}</span>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            sideOffset={6}
+            className="w-[min(100vw-1.5rem,15rem)] rounded-2xl border border-border/80 bg-card p-2 shadow-xl"
+          >
               <p className="px-2 pt-1 pb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                 Ordenar por
               </p>
@@ -898,7 +897,6 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
               </ul>
             </PopoverContent>
           </Popover>
-        </div>
       </div>
 
       <div

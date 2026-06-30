@@ -177,24 +177,24 @@ const AdminLayoutPage = () => {
 
   return (
     <AdminLayout title="Layout da Home">
+      {/* Abas: cada público é uma "página" separada (editor + preview) */}
+      <div className="flex gap-2 mb-5 border-b border-border pb-3">
+        {(["client", "pro"] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => void switchAudience(mode)}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${editAudience === mode ? "bg-primary text-primary-foreground shadow-sm" : "bg-card border border-border text-foreground hover:bg-muted"}`}
+          >
+            <Smartphone className="w-4 h-4" />
+            {mode === "client" ? "Home do Cliente" : "Home do Profissional"}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(300px,360px)] gap-6 items-start">
       <div className="space-y-3 min-w-0">
-        <div className="mb-4 flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-            Editando: home do {editAudience === "pro" ? "Profissional" : "Cliente"}
-          </span>
-          {/* Toggle também aqui (visível no mobile, onde o preview fica oculto) */}
-          <div className="inline-flex p-0.5 rounded-full bg-muted border lg:hidden">
-            {(["client", "pro"] as const).map((mode) => (
-              <button key={mode} onClick={() => void switchAudience(mode)}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${editAudience === mode ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
-                {mode === "client" ? "Cliente" : "Profissional"}
-              </button>
-            ))}
-          </div>
-        </div>
         <p className="text-sm text-muted-foreground mb-4">
-          Arrume a ordem e a visibilidade das seções. Use o botão <b>Cliente / Profissional</b> para escolher qual home editar. As mudanças aparecem ao vivo no preview.
+          Editando a <b>home do {editAudience === "pro" ? "Profissional" : "Cliente"}</b>. Arrume a ordem e a visibilidade das seções — as mudanças aparecem ao vivo no preview. Troque de aba acima para editar a outra home.
         </p>
 
         <div className="bg-card border rounded-xl p-4 mb-4">
@@ -309,18 +309,9 @@ const AdminLayoutPage = () => {
             <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
           </button>
         </div>
-        {/* Alternar visão / público editado */}
-        <div className="inline-flex p-0.5 rounded-full bg-muted border mb-3">
-          {(["client", "pro"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => void switchAudience(mode)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${editAudience === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {mode === "client" ? "Cliente" : "Profissional"}
-            </button>
-          ))}
-        </div>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-primary mb-2">
+          {editAudience === "pro" ? "Home do Profissional" : "Home do Cliente"}
+        </p>
         {/* Moldura do iPhone */}
         <div className="relative w-[320px] h-[640px] rounded-[44px] bg-neutral-900 p-3 shadow-2xl ring-1 ring-black/10">
           <div className="absolute top-3 left-1/2 -translate-x-1/2 w-32 h-6 bg-neutral-900 rounded-b-2xl z-10" />

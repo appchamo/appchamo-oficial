@@ -67,26 +67,25 @@ Deno.serve(async (req) => {
   content.push({ type: "text", text: PROMPT });
 
   let verdict = { recommendation: "review", reason: "Não foi possível analisar.", selfie: {}, document: {} } as any;
-  try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-3-haiku-20240307",
-        max_tokens: 400,
-        messages: [{ role: "user", content }],
-      }),
-    });
-    const data = await r.json().catch(() => ({}));
-    const text = (data?.content?.[0]?.text || "").trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) verdict = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    console.error("anthropic error", String((e as Error)?.message || e));
+  // Modelos candidatos (com visão); usa o primeiro disponível na conta.
+  const MODELS = ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"];
+  for (const model of MODELS) {
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model, max_tokens: 400, messages: [{ role: "user", content }] }),
+      });
+      if (r.status === 404) continue; // modelo indisponível, tenta o próximo
+      const data = await r.json().catch(() => ({}));
+      const text = (data?.content?.[0]?.text || "").trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) verdict = JSON.parse(jsonMatch[0]);
+      break;
+    } catch (e) {
+      console.error("anthropic error", String((e as Error)?.message || e));
+      break;
+    }
   }
 
   const rec = ["approve", "review", "reject"].includes(verdict.recommendation) ? verdict.recommendation : "review";

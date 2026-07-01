@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "postinstall": "node scripts/copy-ffmpeg-core.mjs",
+    "postinstall": "node scripts/copy-ffmpeg-core.mjs && node scripts/copy-face-models.mjs",
     "dev": "vite",
     "build": "vite build",
     "build:android": "vite build && npx cap sync android",
@@ -72,6 +72,7 @@
     "@supabase/supabase-js": "^2.97.0",
     "@tanstack/react-query": "^5.83.0",
     "@vercel/edge": "^1.2.2",
+    "@vladmandic/face-api": "^1.7.15",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "class-variance-authority": "^0.7.1",

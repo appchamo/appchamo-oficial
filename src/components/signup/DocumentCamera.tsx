@@ -1,24 +1,15 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { Camera, X, Loader2, ScanFace } from "lucide-react";
 
-// Carrega o face-api.js (detecção de rosto no aparelho) sob demanda, via CDN.
+// Carrega o face-api.js (detecção de rosto no aparelho) sob demanda.
+// Pacote embutido no app (npm) + modelo local em /face-models (sem depender de CDN).
 let faceApiPromise: Promise<any | null> | null = null;
 function loadFaceApi(): Promise<any | null> {
   if (faceApiPromise) return faceApiPromise;
   faceApiPromise = (async () => {
     try {
-      const w = window as any;
-      if (!w.faceapi) {
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js";
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("face-api load failed"));
-          document.head.appendChild(s);
-        });
-      }
-      const faceapi = (window as any).faceapi;
-      await faceapi.nets.tinyFaceDetector.loadFromUri("https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model");
+      const faceapi = await import("@vladmandic/face-api");
+      await faceapi.nets.tinyFaceDetector.loadFromUri("/face-models");
       return faceapi;
     } catch {
       return null;
@@ -191,8 +182,9 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
         ) : isSelfie ? (
           /* Selfie: círculo de IA (laranja → verde ao encaixar o rosto) */
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/30">
-            <div className="relative" style={{ width: "72vw", maxWidth: 300, aspectRatio: "1 / 1" }}>
-              <div className={`absolute inset-0 rounded-full border-[5px] transition-colors duration-200 ${faceFitted ? "border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.5)]" : "border-primary"}`} />
+            <div className="relative" style={{ width: "64vw", maxWidth: 250, aspectRatio: "4 / 5" }}>
+              {/* Oval (formato de rosto) */}
+              <div className={`absolute inset-0 border-[5px] transition-colors duration-200 ${faceFitted ? "border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.5)]" : "border-primary"}`} style={{ borderRadius: "50%" }} />
             </div>
             <div className="mt-6 flex flex-col items-center gap-1 px-6">
               <p className={`text-sm font-bold text-center ${faceFitted ? "text-emerald-300" : "text-white/90"}`}>

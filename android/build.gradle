@@ -1,7 +1,7 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-    ext.kotlin_version = '1.9.25' // 1.9.25: suporta JVM target 21 (exigido pelo Capacitor/Java 21)
+    ext.kotlin_version = '2.2.20' // Capacitor 8: plugins compilados em Kotlin 2.x (coroutines 1.10.2). Suporta JVM 21.
     repositories {
         google()
         mavenCentral()

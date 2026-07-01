@@ -688,7 +688,8 @@ const Home = () => {
     search: "min-h-[132px]",
     featured: "min-h-[250px]",
     categories: "min-h-[300px]",
-    benefits: "min-h-[200px]",
+    // Sem reserva fixa: o card "Seus Benefícios" pode recolher, então a Home sobe/desce junto.
+    benefits: "",
     tutorials: "min-h-[220px]"
   };
 

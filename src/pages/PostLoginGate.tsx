@@ -117,10 +117,11 @@ export default function PostLoginGate() {
             const userType = row?.user_type;
             if (userType) {
               if (userType === "pending_signup") {
-                // Aguarda até 12s para o flushPendingEmailSignup (background) completar
-                // antes de jogar o usuário na tela de seleção CLIENTE/PROFISSIONAL
+                // Aguarda até ~5s para o flushPendingEmailSignup (background) completar
+                // antes de jogar o usuário na tela de seleção CLIENTE/PROFISSIONAL.
+                // (Era 12s: spinner longo demais se o flush falhasse.)
                 let finalType = userType;
-                for (let w = 0; w < 24 && !isCancelled(); w++) {
+                for (let w = 0; w < 10 && !isCancelled(); w++) {
                   await sleep(500);
                   try {
                     const { data: d2 } = await supabase

@@ -612,7 +612,8 @@ const Signup = () => {
           options: {
             redirectTo: "com.chamo.app://oauth",
             skipBrowserRedirect: true,
-            queryParams: { prompt: "select_account" },
+            // Apple só devolve o nome na 1ª autorização e apenas se pedirmos "name".
+            queryParams: provider === "apple" ? { scope: "name email" } : { prompt: "select_account" },
           },
         });
         if (error) throw error;
@@ -622,7 +623,7 @@ const Signup = () => {
           provider,
           options: {
             redirectTo: `${window.location.origin}/signup`,
-            queryParams: { prompt: "select_account" },
+            queryParams: provider === "apple" ? { scope: "name email" } : { prompt: "select_account" },
           },
         });
         if (error) throw error;

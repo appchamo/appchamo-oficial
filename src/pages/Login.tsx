@@ -594,6 +594,7 @@ const Login = () => {
         if (projectRef) localStorage.removeItem(`sb-${projectRef}-auth-token`);
       } catch { /* ignore */ }
 
+      localStorage.removeItem("manual_login_intent"); // não deixar vazar após falha
       const type = getErrorType(error.message);
       setErrorType(type);
       toast({ title: friendlyError(type), variant: "destructive" });

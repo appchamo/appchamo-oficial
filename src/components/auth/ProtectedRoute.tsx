@@ -24,7 +24,17 @@ export default function ProtectedRoute({ children }: Props) {
     return <Navigate to="/login" replace state={{ from }} />;
   }
 
-  if (profile && !isProfileSignupComplete(profile)) {
+  // Sessão existe mas o perfil ainda não carregou (corrida pós-OAuth): mostra spinner
+  // em vez de piscar a página protegida por um instante.
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isProfileSignupComplete(profile)) {
     return <Navigate to="/signup" replace />;
   }
 

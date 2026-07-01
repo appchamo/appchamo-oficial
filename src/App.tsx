@@ -87,6 +87,7 @@ const QrAuthWeb = lazy(() => import("./pages/QrAuthWeb"));
 const QrScannerApp = lazy(() => import("./pages/QrScannerApp"));
 const CheckinConfirm = lazy(() => import("./pages/CheckinConfirm"));
 const Partners = lazy(() => import("./pages/Partners"));
+const VerificarIdentidade = lazy(() => import("./pages/VerificarIdentidade"));
 const JobApply = lazy(() => import("./pages/JobApply"));
 const BusinessCheckout = lazy(() => import("./pages/BusinessCheckout"));
 const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
@@ -591,6 +592,7 @@ const AppContent = () => {
         <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
         <Route path="/coupons" element={<ProtectedRoute><Coupons /></ProtectedRoute>} />
         <Route path="/parceiros" element={<ProtectedRoute><Partners /></ProtectedRoute>} />
+        <Route path="/verificar-identidade" element={<ProtectedRoute><VerificarIdentidade /></ProtectedRoute>} />
         <Route path="/profile" element={<TabRoutePlaceholder />} />
         <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
         <Route path="/rewards" element={<TabRoutePlaceholder />} />

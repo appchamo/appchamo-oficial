@@ -37,6 +37,7 @@ const FULL_PAGE_SCROLL_EXACT = new Set([
   "/exclusao-de-conta",
   "/admin/login",
   "/signup-pro",
+  "/verificar-identidade",
 ]);
 
 export function isFullPageScrollRoute(pathname: string): boolean {

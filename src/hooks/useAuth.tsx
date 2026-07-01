@@ -49,6 +49,8 @@ interface Profile {
   address_state?: string | null;
   /** Código único Indique e ganhe */
   invite_code?: string | null;
+  /** Verificação de identidade concluída (necessária para chamar profissionais). */
+  identity_verified?: boolean | null;
 }
 
 type AppRole =
@@ -120,7 +122,7 @@ async function fetchProfileWithStatus(userId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, cpf, cnpj, display_name, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_zip, address_neighborhood, address_city, address_state, invite_code, accepted_terms_version, signup_completed_at")
+    .select("id, user_id, full_name, email, phone, cpf, cnpj, display_name, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_zip, address_neighborhood, address_city, address_state, invite_code, accepted_terms_version, signup_completed_at, identity_verified")
     .eq("user_id", userId)
     .maybeSingle();
 

@@ -5,7 +5,6 @@ import BottomNav from "./BottomNav";
 import { DesktopSidebar } from "./SideMenu";
 import PullToRefresh from "./PullToRefresh";
 import { MenuProvider } from "@/contexts/MenuContext";
-import OnboardingTutorial from "./OnboardingTutorial";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import DiagPanel from "@/components/DiagPanel";
 
@@ -95,7 +94,6 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
             mainContent
           )}
           <MemoizedBottomNav />
-          <OnboardingTutorial />
           <DiagPanel />
 
           {/* Modal global pós-OAuth (Apple/Google): deve ficar acima da Home */}

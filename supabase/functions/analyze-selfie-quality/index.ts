@@ -60,11 +60,25 @@ Deno.serve(async (req) => {
   if (!selfie) return json({ error: "sem_selfie" }, 400);
   const doc = body.document ? parseImage(String(body.document)) : null;
 
+  // Tipo de documento declarado pelo usuário (para a IA conferir se bate).
+  const DOC_TYPE_NAMES: Record<string, string> = {
+    identidade: "Identidade / RG",
+    passaporte: "Passaporte",
+    cnh: "CNH (carteira de motorista)",
+  };
+  const declaredType = body.doc_type ? DOC_TYPE_NAMES[String(body.doc_type)] : "";
+  let promptText = PROMPT;
+  if (declaredType) {
+    promptText += `\n\nO usuário declarou que o DOCUMENTO é: ${declaredType}. \
+Verifique se o documento visível corresponde a esse tipo. Se claramente for OUTRO tipo de documento, \
+adicione em document.issues algo como "documento não parece ser ${declaredType}" e use recommendation "review".`;
+  }
+
   const content: unknown[] = [
     { type: "image", source: { type: "base64", media_type: selfie.media_type, data: selfie.data } },
   ];
   if (doc) content.push({ type: "image", source: { type: "base64", media_type: doc.media_type, data: doc.data } });
-  content.push({ type: "text", text: PROMPT });
+  content.push({ type: "text", text: promptText });
 
   let verdict = { recommendation: "review", reason: "Não foi possível analisar.", selfie: {}, document: {} } as any;
   // Modelos candidatos (com visão); usa o primeiro disponível na conta.

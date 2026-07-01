@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Camera, FileText, X, CheckCircle2, ImageIcon, ScanFace } from "lucide-react";
+import { Camera, FileText, X, CheckCircle2, ImageIcon, ScanFace, IdCard, Car, Plane } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { registerChamoSignupOverlayConsumer } from "@/lib/chamoSignupBack";
@@ -58,19 +58,50 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
   }, []);
 
   const SELFIE_LABEL = "Reconhecimento facial (selfie)";
+
+  // Tipo de documento (escolhido em modal obrigatório antes de tirar frente/verso).
+  type DocType = "identidade" | "passaporte" | "cnh";
+  const DOC_TYPES: { key: DocType; name: string; desc: string; Icon: typeof IdCard }[] = [
+    { key: "identidade", name: "Identidade (RG)", desc: "Carteira de identidade", Icon: IdCard },
+    { key: "cnh", name: "CNH", desc: "Carteira de motorista", Icon: Car },
+    { key: "passaporte", name: "Passaporte", desc: "Documento de viagem", Icon: Plane },
+  ];
+  const DOC_TYPE_LABELS: Record<DocType, { front: string; back: string }> = {
+    identidade: { front: "Identidade (RG) — frente", back: "Identidade (RG) — verso" },
+    cnh: { front: "CNH — frente", back: "CNH — verso" },
+    passaporte: { front: "Passaporte — página da foto", back: "Passaporte — verso" },
+  };
+  const [docType, setDocType] = useState<DocType | null>(null);
+  const docTypeName = docType ? DOC_TYPES.find((t) => t.key === docType)!.name : "";
+  const idFrontLabel = docType ? DOC_TYPE_LABELS[docType].front : "Documento (frente)";
+  const idBackLabel = docType ? DOC_TYPE_LABELS[docType].back : "Documento (verso)";
+
   const slots =
     documentType === "cnpj"
       ? [
-          { key: "id_front", label: "Documento com foto (frente)" },
-          { key: "id_back", label: "Documento com foto (verso)" },
+          { key: "id_front", label: idFrontLabel },
+          { key: "id_back", label: idBackLabel },
           { key: "cnpj_doc", label: "Comprovante de CNPJ" },
           { key: "selfie", label: SELFIE_LABEL },
         ]
       : [
-          { key: "id_front", label: "Documento com foto (frente)" },
-          { key: "id_back", label: "Documento com foto (verso)" },
+          { key: "id_front", label: idFrontLabel },
+          { key: "id_back", label: idBackLabel },
           { key: "selfie", label: SELFIE_LABEL },
         ];
+
+  // Ao trocar o tipo de documento, remove frente/verso já capturados (labels mudam).
+  const chooseDocType = (t: DocType) => {
+    setDocs((prev) =>
+      prev.filter((d) => {
+        const isId = d.label === idFrontLabel || d.label === idBackLabel;
+        if (isId && d.preview.startsWith("blob:")) URL.revokeObjectURL(d.preview);
+        return !isId;
+      }),
+    );
+    setMissingSlotKeys((prev) => prev.filter((k) => k !== "id_front" && k !== "id_back"));
+    setDocType(t);
+  };
 
   useEffect(() => {
     return () => {
@@ -171,13 +202,13 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
 
     // Checagem de qualidade (IA) da selfie + documento — não bloqueia o cadastro.
     const selfieDoc = docs.find((d) => d.label === SELFIE_LABEL && !d.isPdf);
-    const frontDoc = docs.find((d) => d.label === "Documento com foto (frente)" && !d.isPdf);
+    const frontDoc = docs.find((d) => d.label === idFrontLabel && !d.isPdf);
     if (selfieDoc) {
       (async () => {
         try {
           const selfie = await fileToDataUrl(selfieDoc.file);
           const document = frontDoc ? await fileToDataUrl(frontDoc.file) : undefined;
-          await supabase.functions.invoke("analyze-selfie-quality", { body: { selfie, document } });
+          await supabase.functions.invoke("analyze-selfie-quality", { body: { selfie, document, doc_type: docType } });
         } catch { /* análise é best-effort */ }
       })();
     }
@@ -211,6 +242,27 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
             <p className="text-xs text-muted-foreground leading-relaxed text-center px-1">
               Use a câmera ou envie <strong className="text-foreground font-semibold">foto ou PDF</strong>. Documento na horizontal e bem iluminado.
             </p>
+
+            {docType && (
+              <div className="flex items-center justify-between gap-2 rounded-xl bg-primary/[0.06] border border-primary/15 px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {(() => {
+                    const T = DOC_TYPES.find((t) => t.key === docType)!;
+                    return <T.Icon className="w-4 h-4 text-primary shrink-0" />;
+                  })()}
+                  <span className="text-xs font-semibold text-foreground truncate">
+                    Documento: {docTypeName}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDocType(null)}
+                  className="text-[11px] font-semibold text-primary hover:underline shrink-0"
+                >
+                  Trocar tipo
+                </button>
+              </div>
+            )}
 
             {slots.map((slot) => {
               const uploaded = docs.find((d) => d.label === slot.label);
@@ -357,6 +409,45 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
           onCapture={handleCapture}
           onClose={() => setCameraOpen(false)}
         />
+      )}
+
+      {/* Modal obrigatório: escolher o tipo de documento antes de tirar frente/verso. */}
+      {docType === null && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 px-4 pb-6 pt-safe-top">
+          <div className="w-full max-w-sm rounded-3xl bg-card border border-border shadow-xl p-5 space-y-4">
+            <div className="text-center space-y-1">
+              <h2 className="text-lg font-extrabold text-foreground">Qual documento você vai enviar?</h2>
+              <p className="text-xs text-muted-foreground">
+                Escolha o tipo. Depois pedimos a <strong>frente</strong> e o <strong>verso</strong>.
+              </p>
+            </div>
+            <div className="space-y-2.5">
+              {DOC_TYPES.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => chooseDocType(t.key)}
+                  className="flex w-full items-center gap-3 rounded-2xl border-2 border-primary/20 bg-card px-4 py-3.5 text-left hover:border-primary/50 hover:bg-primary/[0.04] active:scale-[0.99] transition-all"
+                >
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary shrink-0">
+                    <t.Icon className="w-5 h-5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold text-foreground">{t.name}</span>
+                    <span className="block text-[11px] text-muted-foreground">{t.desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={onBack}
+              className="w-full py-2.5 rounded-xl border text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+            >
+              Voltar
+            </button>
+          </div>
+        </div>
       )}
     </>
   );

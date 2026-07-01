@@ -29,13 +29,16 @@ interface DocumentCameraProps {
 const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: DocumentCameraProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const detectCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const isSelfie = facing === "user";
-  const [faceFitted, setFaceFitted] = useState(false);
+  const [fitted, setFitted] = useState(false);
   const [aiOn, setAiOn] = useState(false);
+  // Documento: se a detecção falhar por muito tempo, libera o botão mesmo assim (não travar o usuário).
+  const [forceEnable, setForceEnable] = useState(false);
   const fittedSinceRef = useRef<number | null>(null);
   const autoShotRef = useRef(false);
 
@@ -102,7 +105,7 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
     );
   }, [ready, stopCamera, onCapture]);
 
-  // Detecção de rosto (selfie): círculo fica verde e tira a foto sozinho ao encaixar.
+  // Detecção de ROSTO (selfie): círculo fica verde e tira a foto sozinho ao encaixar.
   useEffect(() => {
     if (!isSelfie || !ready) return;
     let cancelled = false;
@@ -120,16 +123,16 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
         try { res = await faceapi.detectSingleFace(video, opts); } catch { return; }
         if (cancelled) return;
         const vw = video.videoWidth || 1, vh = video.videoHeight || 1;
-        let fitted = false;
+        let ok = false;
         if (res?.box) {
           const b = res.box;
           const cx = (b.x + b.width / 2) / vw;
           const cy = (b.y + b.height / 2) / vh;
           const wRatio = b.width / vw;
-          fitted = wRatio > 0.22 && wRatio < 0.72 && Math.abs(cx - 0.5) < 0.2 && Math.abs(cy - 0.5) < 0.22;
+          ok = wRatio > 0.22 && wRatio < 0.72 && Math.abs(cx - 0.5) < 0.2 && Math.abs(cy - 0.5) < 0.22;
         }
-        setFaceFitted(fitted);
-        if (fitted) {
+        setFitted(ok);
+        if (ok) {
           if (fittedSinceRef.current == null) fittedSinceRef.current = Date.now();
           else if (Date.now() - fittedSinceRef.current > 700 && !autoShotRef.current) {
             autoShotRef.current = true;
@@ -143,13 +146,75 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
     return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [isSelfie, ready, capturePhoto]);
 
+  // Detecção de DOCUMENTO: o quadro fica verde e libera o botão quando o documento
+  // está enquadrado, nítido e bem iluminado. (Não tira sozinho — o usuário aperta.)
+  useEffect(() => {
+    if (isSelfie || !ready) return;
+    setAiOn(true);
+    let cancelled = false;
+    let stable = 0;
+    const analyze = (): boolean => {
+      const video = videoRef.current;
+      const c = detectCanvasRef.current;
+      if (!video || !c) return false;
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh) return false;
+      // Região central (aprox. área do quadro guia).
+      const cropW = vw * 0.82, cropH = vh * 0.46;
+      const sx = (vw - cropW) / 2, sy = (vh - cropH) / 2;
+      const SW = 180, SH = Math.max(1, Math.round(SW * (cropH / cropW)));
+      c.width = SW; c.height = SH;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return false;
+      ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, SW, SH);
+      let data: Uint8ClampedArray;
+      try { data = ctx.getImageData(0, 0, SW, SH).data; } catch { return false; }
+      const n = SW * SH;
+      const gray = new Float32Array(n);
+      let sum = 0;
+      for (let i = 0, p = 0; p < n; i += 4, p++) {
+        const g = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        gray[p] = g; sum += g;
+      }
+      const mean = sum / n;
+      let varSum = 0, edges = 0, gcount = 0;
+      for (let y = 1; y < SH - 1; y++) {
+        for (let x = 1; x < SW - 1; x++) {
+          const idx = y * SW + x;
+          const gx = gray[idx + 1] - gray[idx - 1];
+          const gy = gray[idx + SW] - gray[idx - SW];
+          if (Math.abs(gx) + Math.abs(gy) > 36) edges++;
+          const d = gray[idx] - mean; varSum += d * d;
+          gcount++;
+        }
+      }
+      const std = Math.sqrt(varSum / gcount);
+      const edgeDensity = edges / gcount;
+      const brightnessOk = mean > 55 && mean < 238; // nem escuro nem estourado
+      const focusOk = edgeDensity > 0.06;           // nítido, tem detalhe
+      const contentOk = std > 20;                   // tem conteúdo/contraste (não é superfície vazia)
+      return brightnessOk && focusOk && contentOk;
+    };
+    const timer = setInterval(() => {
+      if (cancelled || autoShotRef.current) return;
+      const ok = analyze();
+      if (ok) stable = Math.min(stable + 1, 5); else stable = 0;
+      setFitted(stable >= 2); // ~500ms estável
+    }, 250);
+    // Rede de segurança: se em 15s não detectar, libera o botão mesmo assim.
+    const fallback = setTimeout(() => { if (!cancelled) setForceEnable(true); }, 15000);
+    return () => { cancelled = true; clearInterval(timer); clearTimeout(fallback); };
+  }, [isSelfie, ready]);
+
+  const canShoot = ready && !error && !capturing && (isSelfie || fitted || forceEnable);
+
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col" style={{ touchAction: "none" }}>
       {/* Header */}
       <div className="relative z-10 flex items-center justify-between px-4 pt-safe-top py-3 bg-black/70">
         <button
           onClick={handleClose}
-          className="p-2 rounded-full text-white active:bg-white/10 transition-colors"
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-black/50 text-white active:bg-white/20 transition-colors"
           aria-label="Fechar câmera"
         >
           <X className="w-6 h-6" />
@@ -184,11 +249,11 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/30">
             <div className="relative" style={{ width: "64vw", maxWidth: 250, aspectRatio: "4 / 5" }}>
               {/* Oval (formato de rosto) */}
-              <div className={`absolute inset-0 border-[5px] transition-colors duration-200 ${faceFitted ? "border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.5)]" : "border-primary"}`} style={{ borderRadius: "50%" }} />
+              <div className={`absolute inset-0 border-[5px] transition-colors duration-200 ${fitted ? "border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.5)]" : "border-primary"}`} style={{ borderRadius: "50%" }} />
             </div>
             <div className="mt-6 flex flex-col items-center gap-1 px-6">
-              <p className={`text-sm font-bold text-center ${faceFitted ? "text-emerald-300" : "text-white/90"}`}>
-                {faceFitted ? "Rosto encaixado! Segure firme…" : "Encaixe seu rosto no círculo"}
+              <p className={`text-sm font-bold text-center ${fitted ? "text-emerald-300" : "text-white/90"}`}>
+                {fitted ? "Rosto encaixado! Segure firme…" : "Encaixe seu rosto no círculo"}
               </p>
               <p className="text-white/55 text-[11px] text-center">
                 {aiOn ? "A foto é tirada automaticamente quando o círculo fica verde" : "Toque no botão abaixo para tirar a foto"}
@@ -208,13 +273,20 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
 
               {/* The document frame — transparent window */}
               <div className="relative flex-1">
-                {/* Subtle white border on the frame */}
-                <div className="absolute inset-0 rounded-xl border border-white/30" />
+                {/* Border on the frame — verde ao encaixar */}
+                <div className={`absolute inset-0 rounded-xl border-2 transition-colors duration-200 ${fitted ? "border-emerald-400 shadow-[0_0_28px_rgba(52,211,153,0.45)]" : "border-white/30"}`} />
                 {/* Animated corner markers */}
-                <span className="absolute top-0 left-0 w-6 h-6 border-t-[3px] border-l-[3px] border-primary rounded-tl-lg" />
-                <span className="absolute top-0 right-0 w-6 h-6 border-t-[3px] border-r-[3px] border-primary rounded-tr-lg" />
-                <span className="absolute bottom-0 left-0 w-6 h-6 border-b-[3px] border-l-[3px] border-primary rounded-bl-lg" />
-                <span className="absolute bottom-0 right-0 w-6 h-6 border-b-[3px] border-r-[3px] border-primary rounded-br-lg" />
+                {(() => {
+                  const cc = fitted ? "border-emerald-400" : "border-primary";
+                  return (
+                    <>
+                      <span className={`absolute top-0 left-0 w-6 h-6 border-t-[3px] border-l-[3px] rounded-tl-lg ${cc}`} />
+                      <span className={`absolute top-0 right-0 w-6 h-6 border-t-[3px] border-r-[3px] rounded-tr-lg ${cc}`} />
+                      <span className={`absolute bottom-0 left-0 w-6 h-6 border-b-[3px] border-l-[3px] rounded-bl-lg ${cc}`} />
+                      <span className={`absolute bottom-0 right-0 w-6 h-6 border-b-[3px] border-r-[3px] rounded-br-lg ${cc}`} />
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Right dark strip */}
@@ -226,8 +298,8 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
               className="w-full bg-black/55 flex flex-col items-center justify-start pt-3 gap-1"
               style={{ flex: "1 1 0" }}
             >
-              <p className="text-white/90 text-xs font-medium text-center px-4">
-                Posicione o documento dentro da área
+              <p className={`text-xs font-semibold text-center px-4 ${fitted ? "text-emerald-300" : "text-white/90"}`}>
+                {fitted ? "Documento encaixado! Toque para tirar a foto" : "Posicione o documento dentro da área"}
               </p>
               <p className="text-white/50 text-[11px] text-center px-4">
                 Mantenha o documento na horizontal e bem iluminado
@@ -244,22 +316,29 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
         )}
       </div>
 
-      {/* Hidden canvas for capture */}
+      {/* Hidden canvases (capture + detecção) */}
       <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={detectCanvasRef} className="hidden" />
 
       {/* Shutter button bar */}
       <div className="bg-black/70 flex flex-col items-center justify-center py-8 gap-3">
+        {/* Aviso quando o documento ainda não encaixou (botão travado). */}
+        {!isSelfie && !canShoot && !error && ready && (
+          <p className="text-white/85 text-[12px] font-medium text-center px-6">
+            Encaixe o documento na imagem para tirar a foto
+          </p>
+        )}
         <button
           onClick={capturePhoto}
-          disabled={!ready || !!error || capturing}
+          disabled={!canShoot}
           aria-label="Tirar foto"
           className="relative flex items-center justify-center disabled:opacity-40 transition-transform active:scale-95"
           style={{ width: 76, height: 76 }}
         >
-          {/* Outer ring */}
-          <span className="absolute inset-0 rounded-full border-4 border-white" />
+          {/* Outer ring — verde quando liberado (documento) */}
+          <span className={`absolute inset-0 rounded-full border-4 ${!isSelfie && fitted ? "border-emerald-400" : "border-white"}`} />
           {/* Inner fill */}
-          <span className="w-[58px] h-[58px] rounded-full bg-white flex items-center justify-center">
+          <span className={`w-[58px] h-[58px] rounded-full flex items-center justify-center ${!isSelfie && fitted ? "bg-emerald-400" : "bg-white"}`}>
             {capturing ? (
               <Loader2 className="w-7 h-7 text-black animate-spin" />
             ) : isSelfie ? (

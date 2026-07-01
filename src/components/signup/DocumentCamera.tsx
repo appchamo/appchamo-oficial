@@ -24,9 +24,14 @@ interface DocumentCameraProps {
   onClose: () => void;
   /** "user" para selfie (câmera frontal); padrão "environment" (traseira, documentos). */
   facing?: "environment" | "user";
+  /**
+   * Validação da foto ANTES de aceitar (ex.: IA confere o tipo do documento).
+   * Se retornar { ok:false }, a foto é descartada e o usuário tira outra.
+   */
+  validate?: (file: File) => Promise<{ ok: boolean; message?: string }>;
 }
 
-const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: DocumentCameraProps) => {
+const DocumentCamera = ({ label, onCapture, onClose, facing = "environment", validate }: DocumentCameraProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detectCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -34,6 +39,8 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validateError, setValidateError] = useState<string | null>(null);
   const isSelfie = facing === "user";
   const [fitted, setFitted] = useState(false);
   const [aiOn, setAiOn] = useState(false);
@@ -85,6 +92,7 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
     const canvas = canvasRef.current;
     if (!video || !canvas || !ready) return;
     setCapturing(true);
+    setValidateError(null);
 
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
@@ -97,13 +105,32 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
         if (!blob) { setCapturing(false); return; }
         const file = new File([blob], `doc_${Date.now()}.jpg`, { type: "image/jpeg" });
         const preview = URL.createObjectURL(blob);
+        if (validate) {
+          setValidating(true);
+          void (async () => {
+            let res: { ok: boolean; message?: string };
+            try { res = await validate(file); } catch { res = { ok: true }; } // erro de rede: não trava
+            setValidating(false);
+            setCapturing(false);
+            if (!res.ok) {
+              URL.revokeObjectURL(preview);
+              setValidateError(res.message || "Não foi possível validar. Tire a foto novamente.");
+              autoShotRef.current = false;
+              fittedSinceRef.current = null;
+              return;
+            }
+            stopCamera();
+            onCapture(file, preview);
+          })();
+          return;
+        }
         stopCamera();
         onCapture(file, preview);
       },
       "image/jpeg",
       0.82
     );
-  }, [ready, stopCamera, onCapture]);
+  }, [ready, stopCamera, onCapture, validate]);
 
   // Detecção de ROSTO (selfie): círculo fica verde e tira a foto sozinho ao encaixar.
   useEffect(() => {
@@ -314,6 +341,15 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
             <Loader2 className="w-8 h-8 text-white animate-spin" />
           </div>
         )}
+
+        {/* Validação por IA em andamento */}
+        {validating && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70">
+            <Loader2 className="w-9 h-9 text-white animate-spin" />
+            <p className="text-white text-sm font-semibold">Analisando documento…</p>
+            <p className="text-white/60 text-[11px]">Verificando se está tudo certo</p>
+          </div>
+        )}
       </div>
 
       {/* Hidden canvases (capture + detecção) */}
@@ -322,8 +358,14 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment" }: D
 
       {/* Shutter button bar */}
       <div className="bg-black/70 flex flex-col items-center justify-center py-8 gap-3">
+        {/* Erro de validação da IA (tipo errado / não é documento). */}
+        {validateError && !validating && (
+          <div className="mx-6 mb-1 rounded-xl bg-red-500/15 border border-red-400/40 px-3 py-2">
+            <p className="text-red-200 text-[12px] font-semibold text-center leading-snug">{validateError}</p>
+          </div>
+        )}
         {/* Aviso quando o documento ainda não encaixou (botão travado). */}
-        {!isSelfie && !canShoot && !error && ready && (
+        {!isSelfie && !canShoot && !error && ready && !validating && !validateError && (
           <p className="text-white/85 text-[12px] font-medium text-center px-6">
             Encaixe o documento na imagem para tirar a foto
           </p>

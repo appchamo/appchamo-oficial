@@ -72,6 +72,22 @@ const VerificarIdentidade = () => {
 
   const acceptTerms = () => { setTermsOpen(false); setStep("docs"); };
 
+  // Validação na hora da foto: a IA confere se o documento bate com o tipo escolhido.
+  const validateDoc = useCallback(async (file: File): Promise<{ ok: boolean; message?: string }> => {
+    if (!docType || currentSlot === "selfie") return { ok: true };
+    try {
+      const image = await fileToDataUrl(file);
+      const { data, error } = await supabase.functions.invoke("classify-document", {
+        body: { image, expected_type: docType, side: currentSlot },
+      });
+      if (error) return { ok: true }; // fail-open: não trava por erro de rede
+      if (data && data.ok === false) return { ok: false, message: String(data.reason || "Documento não confere.") };
+      return { ok: true };
+    } catch {
+      return { ok: true };
+    }
+  }, [docType, currentSlot]);
+
   const uploadKyc = useCallback(async (uid: string, file: File, kind: Slot) => {
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const path = `${uid}/${kind}_${Date.now()}.${ext}`;
@@ -315,6 +331,7 @@ const VerificarIdentidade = () => {
           facing={currentSlot === "selfie" ? "user" : "environment"}
           onCapture={handleCapture}
           onClose={() => setCameraOpen(false)}
+          validate={currentSlot === "selfie" ? undefined : validateDoc}
         />
       )}
     </div>

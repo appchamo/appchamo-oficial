@@ -117,6 +117,24 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
     setCameraOpen(true);
   };
 
+  // Validação na hora da foto (frente/verso): IA confere o tipo do documento.
+  const validateDoc = async (file: File): Promise<{ ok: boolean; message?: string }> => {
+    if (!docType) return { ok: true };
+    const side = currentSlot === idFrontLabel ? "front" : currentSlot === idBackLabel ? "back" : null;
+    if (!side) return { ok: true };
+    try {
+      const image = await fileToDataUrl(file);
+      const { data, error } = await supabase.functions.invoke("classify-document", {
+        body: { image, expected_type: docType, side },
+      });
+      if (error) return { ok: true };
+      if (data && data.ok === false) return { ok: false, message: String(data.reason || "Documento não confere.") };
+      return { ok: true };
+    } catch {
+      return { ok: true };
+    }
+  };
+
   const openFilePicker = (slotLabel: string) => {
     setPickForSlot(slotLabel);
     suppressHardwareBackUntilRef.current = Date.now() + 1400;
@@ -408,6 +426,7 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
           facing={currentSlot === SELFIE_LABEL ? "user" : "environment"}
           onCapture={handleCapture}
           onClose={() => setCameraOpen(false)}
+          validate={currentSlot === idFrontLabel || currentSlot === idBackLabel ? validateDoc : undefined}
         />
       )}
 

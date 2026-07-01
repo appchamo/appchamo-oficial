@@ -1,11 +1,10 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from "react";
+import React, { memo, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import Header from "./Header";
 import BottomNav from "./BottomNav";
 import { DesktopSidebar } from "./SideMenu";
 import PullToRefresh from "./PullToRefresh";
 import { MenuProvider } from "@/contexts/MenuContext";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import DiagPanel from "@/components/DiagPanel";
 
 interface AppLayoutProps {
@@ -28,26 +27,12 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
 
   const mainScrollRef = useRef<HTMLElement | null>(null);
 
-  // Modal global pós-OAuth: precisa ficar acima da Home (não dentro da Home)
-  const [oauthWelcomeOpen, setOauthWelcomeOpen] = useState(false);
+  // Pós-OAuth: limpa a flag de "acabou de logar" (o modal de boas-vindas foi removido).
   useEffect(() => {
-    const hasFlag = (() => {
-      try {
-        if (localStorage.getItem("chamo_oauth_just_landed") === "1") return true;
-        if (sessionStorage.getItem("chamo_oauth_just_landed") === "1") return true;
-      } catch (_) {}
-      return false;
-    })();
-    if (!hasFlag) return;
-    // Limpa a flag imediatamente para que, se o usuário matar o app antes de
-    // interagir com o modal, a flag não persista no localStorage e o modal
-    // "Bem-vindo" não reapareça numa abertura seguinte fora de contexto.
     try {
       sessionStorage.removeItem("chamo_oauth_just_landed");
       localStorage.removeItem("chamo_oauth_just_landed");
     } catch (_) {}
-    const t = setTimeout(() => setOauthWelcomeOpen(true), 700);
-    return () => clearTimeout(t);
   }, []);
 
   // Modo preview (iframe do Layout da Home no admin): só visualização, sem cliques.
@@ -58,14 +43,6 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
       document.body.classList.add("chamo-preview-mode");
       return () => document.body.classList.remove("chamo-preview-mode");
     }
-  }, []);
-
-  const closeOauthWelcome = useCallback(() => {
-    try {
-      sessionStorage.removeItem("chamo_oauth_just_landed");
-      localStorage.removeItem("chamo_oauth_just_landed");
-    } catch (_) {}
-    setOauthWelcomeOpen(false);
   }, []);
 
   const mainContent = (
@@ -95,29 +72,6 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
           )}
           <MemoizedBottomNav />
           <DiagPanel />
-
-          {/* Modal global pós-OAuth (Apple/Google): deve ficar acima da Home */}
-          <Dialog open={oauthWelcomeOpen} onOpenChange={() => {}}>
-            <DialogContent
-              className="max-w-sm text-center"
-              onPointerDownOutside={(e) => e.preventDefault()}
-              onEscapeKeyDown={(e) => e.preventDefault()}
-            >
-              <DialogHeader>
-                <DialogTitle className="text-center">Seja bem-vindo</DialogTitle>
-              </DialogHeader>
-              <p className="text-sm text-muted-foreground py-2">
-                Toque em Fechar para carregar seu app com tudo certinho.
-              </p>
-              <button
-                type="button"
-                onClick={closeOauthWelcome}
-                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-              >
-                Fechar
-              </button>
-            </DialogContent>
-          </Dialog>
         </div>
       </div>
     </MenuProvider>

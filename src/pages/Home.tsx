@@ -698,6 +698,17 @@ const Home = () => {
   const showClientSignupProEndCta =
     contentReady && !!user && profile?.user_type === "client" && !linkedSponsor;
 
+  // Avisa (uma única vez) quando a Home está 100% carregada e visível.
+  // A roleta escuta este evento e abre 3s depois (um modal só, sem travar a entrada).
+  const homeReadyFiredRef = useRef(false);
+  useEffect(() => {
+    if (homeReadyFiredRef.current) return;
+    if (contentReady && heavySectionsReady) {
+      homeReadyFiredRef.current = true;
+      window.dispatchEvent(new Event("chamo-home-ready"));
+    }
+  }, [contentReady, heavySectionsReady]);
+
   return (
     <AppLayout>
       {!contentReady ? (

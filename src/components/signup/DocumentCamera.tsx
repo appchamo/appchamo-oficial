@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Camera, X, Loader2, ScanFace } from "lucide-react";
+import { Camera, Loader2, ScanFace, ArrowLeft } from "lucide-react";
 
 // Carrega o face-api.js (detecção de rosto no aparelho) sob demanda.
 // Pacote embutido no app (npm) + modelo local em /face-models (sem depender de CDN).
@@ -238,16 +238,19 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment", val
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col" style={{ touchAction: "none" }}>
       {/* Header */}
-      <div className="relative z-10 flex items-center justify-between px-4 pt-safe-top py-3 bg-black/70">
+      <div
+        className="relative z-20 flex items-center justify-between px-4 py-3 bg-black/80"
+        style={{ paddingTop: "max(env(safe-area-inset-top), 3rem)" }}
+      >
         <button
           onClick={handleClose}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-black/50 text-white active:bg-white/20 transition-colors"
-          aria-label="Fechar câmera"
+          className="flex items-center gap-1.5 pl-2.5 pr-3.5 py-2 rounded-full bg-white/15 text-white active:bg-white/30 transition-colors"
+          aria-label="Voltar"
         >
-          <X className="w-6 h-6" />
+          <ArrowLeft className="w-5 h-5" />
+          <span className="text-sm font-bold">Voltar</span>
         </button>
-        <p className="text-white text-sm font-semibold truncate max-w-[200px]">{label}</p>
-        <div className="w-10" />
+        <p className="text-white text-xs font-semibold truncate max-w-[150px] text-right">{label}</p>
       </div>
 
       {/* Camera + overlay */}
@@ -360,8 +363,16 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment", val
       <div className="bg-black/70 flex flex-col items-center justify-center py-8 gap-3">
         {/* Erro de validação da IA (tipo errado / não é documento). */}
         {validateError && !validating && (
-          <div className="mx-6 mb-1 rounded-xl bg-red-500/15 border border-red-400/40 px-3 py-2">
-            <p className="text-red-200 text-[12px] font-semibold text-center leading-snug">{validateError}</p>
+          <div className="mx-6 mb-1 flex flex-col items-center gap-2">
+            <div className="rounded-xl bg-red-500/15 border border-red-400/40 px-3 py-2">
+              <p className="text-red-200 text-[12px] font-semibold text-center leading-snug">{validateError}</p>
+            </div>
+            <button
+              onClick={handleClose}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/15 text-white text-[13px] font-bold active:bg-white/30 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" /> Voltar e trocar o tipo
+            </button>
           </div>
         )}
         {/* Aviso quando o documento ainda não encaixou (botão travado). */}

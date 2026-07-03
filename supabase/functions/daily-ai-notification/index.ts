@@ -20,8 +20,8 @@ const MODELS = ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4
 
 function buildPrompt(period: string, recentTitles: string[]): string {
   const momento = period === "afternoon"
-    ? "FIM DE TARDE (por volta das 17h30) — tom de quem está encerrando o dia / resolvendo pendências"
-    : "MANHÃ (por volta das 9h) — tom de começo de dia, disposição";
+    ? "FIM DE TARDE, por volta das 17h30 (tom de quem encerra o dia / resolve pendencias). Se cumprimentar, use APENAS Boa tarde; NUNCA use Bom dia nem Boa noite."
+    : "MANHA, por volta das 9h (tom de comeco de dia, disposicao). Se cumprimentar, use APENAS Bom dia; NUNCA use Boa tarde nem Boa noite.";
   const evitar = recentTitles.length
     ? `\n\nNÃO repita nem pareça com estes títulos já enviados recentemente:\n- ${recentTitles.join("\n- ")}`
     : "";

@@ -3,7 +3,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
-/** Modal de um único termo (Uso ou Privacidade): texto rolável; só habilita "Aceitar" quando rolar até o fim. */
+/** Modal de um único termo (Uso ou Privacidade): texto rolável.
+ *  - Padrão: só habilita "Aceitar" quando rolar até o fim.
+ *  - readOnly: só visualização (botão "Fechar"), sem exigir rolagem. */
 const TermsScrollModal = ({
   open,
   onClose,
@@ -11,13 +13,15 @@ const TermsScrollModal = ({
   title,
   content,
   loading,
+  readOnly = false,
 }: {
   open: boolean;
   onClose: () => void;
-  onAccept: () => void;
+  onAccept?: () => void;
   title: string;
   content: string;
   loading: boolean;
+  readOnly?: boolean;
 }) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
@@ -44,7 +48,7 @@ const TermsScrollModal = ({
       toast({ title: "Leia por completo os termos antes de aceitar.", variant: "destructive" });
       return;
     }
-    onAccept();
+    onAccept?.();
   };
 
   return (
@@ -64,18 +68,30 @@ const TermsScrollModal = ({
             >
               {content || "Nenhum texto cadastrado."}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">Arraste até o final para habilitar o botão Aceitar.</p>
-            <button
-              type="button"
-              onClick={handleAcceptClick}
-              className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-colors mt-2 ${
-                scrolledToBottom
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                  : "bg-muted text-muted-foreground cursor-not-allowed"
-              }`}
-            >
-              Aceitar
-            </button>
+            {readOnly ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors mt-2"
+              >
+                Fechar
+              </button>
+            ) : (
+              <>
+                <p className="text-[10px] text-muted-foreground mt-1">Arraste até o final para habilitar o botão Aceitar.</p>
+                <button
+                  type="button"
+                  onClick={handleAcceptClick}
+                  className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-colors mt-2 ${
+                    scrolledToBottom
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  }`}
+                >
+                  Aceitar
+                </button>
+              </>
+            )}
           </>
         )}
       </DialogContent>
@@ -172,6 +188,109 @@ export const TermsDialogFromAdmin = ({
         title="Política de Privacidade (LGPD)"
         content={privacyPolicy}
         loading={false}
+      />
+    </>
+  );
+};
+
+/**
+ * Consentimento enxuto para o cadastro: mostra um RESUMO curto + checkbox de aceite,
+ * com "Termos de Uso" e "Política de Privacidade" clicáveis que abrem o texto COMPLETO
+ * (somente leitura). Substitui a rolagem obrigatória de dois documentos longos.
+ */
+export const TermsSummaryConsent = ({
+  accepted,
+  onChange,
+  variant = "client",
+  hasError = false,
+}: {
+  accepted: boolean;
+  onChange: (v: boolean) => void;
+  variant?: TermsVariant;
+  hasError?: boolean;
+}) => {
+  const [termsOfUse, setTermsOfUse] = useState("");
+  const [privacyPolicy, setPrivacyPolicy] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [viewer, setViewer] = useState<null | "use" | "privacy">(null);
+
+  useEffect(() => {
+    const isPro = variant === "professional";
+    const keys = isPro
+      ? ["terms_of_use_professional", "privacy_policy_professional"]
+      : ["terms_of_use", "privacy_policy"];
+    setLoading(true);
+    supabase
+      .from("platform_settings")
+      .select("key, value")
+      .in("key", keys)
+      .then(({ data }) => {
+        const parseVal = (v: unknown): string => {
+          if (v == null) return "";
+          if (typeof v === "string") return v;
+          return JSON.stringify(v).replace(/^"|"$/g, "");
+        };
+        for (const s of data ?? []) {
+          const val = parseVal((s as { value: unknown }).value);
+          if ((s as { key: string }).key === (isPro ? "terms_of_use_professional" : "terms_of_use")) setTermsOfUse(val);
+          if ((s as { key: string }).key === (isPro ? "privacy_policy_professional" : "privacy_policy")) setPrivacyPolicy(val);
+        }
+        setLoading(false);
+      });
+  }, [variant]);
+
+  return (
+    <>
+      <div
+        className={`border rounded-xl p-4 bg-muted/30 space-y-3 transition-colors ${
+          hasError ? "border-destructive border-2 ring-2 ring-destructive/25" : ""
+        }`}
+      >
+        <p className="text-sm font-semibold text-foreground">Termos e Privacidade</p>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Ao criar sua conta você concorda com nossos termos. Em resumo: coletamos seus dados de
+          cadastro e localização para conectar você a profissionais da sua região. Para verificação de
+          identidade podemos pedir um documento com foto e uma selfie — usados só para segurança e
+          prevenção a fraudes, guardados de forma protegida e <strong>nunca exibidos publicamente</strong>.
+          Você pode acessar, corrigir ou excluir seus dados a qualquer momento (LGPD).
+        </p>
+
+        <label className="flex items-start gap-2.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={accepted}
+            onChange={(e) => onChange(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
+          />
+          <span className="text-xs text-foreground leading-snug">
+            Li e aceito os{" "}
+            <button type="button" onClick={() => setViewer("use")} className="text-primary font-semibold underline">
+              Termos de Uso
+            </button>{" "}
+            e a{" "}
+            <button type="button" onClick={() => setViewer("privacy")} className="text-primary font-semibold underline">
+              Política de Privacidade
+            </button>
+            .
+          </span>
+        </label>
+      </div>
+
+      <TermsScrollModal
+        readOnly
+        open={viewer === "use"}
+        onClose={() => setViewer(null)}
+        title="Termos de Uso"
+        content={termsOfUse}
+        loading={loading}
+      />
+      <TermsScrollModal
+        readOnly
+        open={viewer === "privacy"}
+        onClose={() => setViewer(null)}
+        title="Política de Privacidade (LGPD)"
+        content={privacyPolicy}
+        loading={loading}
       />
     </>
   );

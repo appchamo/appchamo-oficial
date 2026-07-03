@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from "react";
-import { Mail, Lock, User, Phone, FileText, MapPin, Calendar, ScrollText, CheckCircle2, UserCircle } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { Mail, Lock, User, Phone, FileText, MapPin, Calendar, UserCircle } from "lucide-react";
+import { TermsSummaryConsent } from "./SignupTermsModals";
 import { PasswordInput } from "@/components/ui/password-input";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -89,10 +90,6 @@ import { fetchViaCep } from "@/lib/viacep";
 import { fetchMunicipioLabelsForUf, filterMunicipioLabels } from "@/lib/ibgeMunicipiosCache";
 import { cn } from "@/lib/utils";
 
-const TermsDialogFromAdmin = lazy(() =>
-  import("./SignupTermsModals").then((m) => ({ default: m.TermsDialogFromAdmin }))
-);
-
 const InputRow = ({
   icon: Icon,
   label,
@@ -153,7 +150,6 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
   /** Campo removido do formulário; enviamos sempre "prefiro não informar", exceto se o OAuth já trouxe valor. */
   const gender: GenderOption = (initialData?.gender as GenderOption | undefined) ?? "prefer_not_say";
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [termsOpen, setTermsOpen] = useState(false);
   const [referralCode, setReferralCode] = useState(() => {
     const fromProp = initialReferralCode?.trim();
     if (fromProp) return fromProp.toUpperCase();
@@ -1002,41 +998,20 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             ) : null}
           </div>
 
-          {/* Termos: só avança depois de ler e aceitar nos modais */}
-          <div
-            id="signup-field-terms"
-            className={cn(
-              "border rounded-xl p-4 bg-muted/30 space-y-3 transition-colors",
-              fieldErrors.terms && "border-destructive border-2 ring-2 ring-destructive/25",
-            )}
-          >
-            {termsAccepted ? (
-              <div className="flex items-center gap-3 text-foreground">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <CheckCircle2 className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">Termos aceitos</p>
-                  <p className="text-xs text-muted-foreground">Você leu e aceitou os Termos de Uso e a Política de Privacidade.</p>
-                </div>
-              </div>
-            ) : (
-              <>
-                <p className="text-sm text-foreground font-medium">Termos de Uso e Privacidade</p>
-                <p className="text-xs text-muted-foreground">Para continuar, é necessário ler e aceitar os termos na íntegra.</p>
-                {fieldErrors.terms ? (
-                  <p className="text-xs text-destructive font-medium">{fieldErrors.terms}</p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setTermsOpen(true)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors"
-                >
-                  <ScrollText className="w-4 h-4" />
-                  Ler termos
-                </button>
-              </>
-            )}
+          {/* Termos: resumo curto + checkbox; links abrem o texto completo. */}
+          <div id="signup-field-terms">
+            <TermsSummaryConsent
+              accepted={termsAccepted}
+              onChange={(v) => {
+                setTermsAccepted(v);
+                if (v) clearFieldError("terms");
+              }}
+              variant={accountType}
+              hasError={!!fieldErrors.terms}
+            />
+            {fieldErrors.terms ? (
+              <p className="text-xs text-destructive font-medium mt-1 px-0.5">{fieldErrors.terms}</p>
+            ) : null}
           </div>
 
           <button type="submit" disabled={validating || !termsAccepted}
@@ -1057,26 +1032,6 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
         </p>
       </div>
 
-      {termsOpen && (
-        <Suspense
-          fallback={
-            <div className="fixed inset-0 z-[100] bg-background/90 flex items-center justify-center">
-              <div className="w-9 h-9 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            </div>
-          }
-        >
-          <TermsDialogFromAdmin
-            open={termsOpen}
-            onClose={() => setTermsOpen(false)}
-            onAccept={() => {
-              setTermsAccepted(true);
-              setTermsOpen(false);
-              clearFieldError("terms");
-            }}
-            variant={accountType}
-          />
-        </Suspense>
-      )}
     </div>
   );
 };

@@ -119,18 +119,43 @@ Deno.serve(async (req) => {
   title = title.slice(0, 60);
   message = message.slice(0, 160);
 
-  // Insere o broadcast (a RPC valida o segredo e dispara o push via trigger).
-  const { data: count, error } = await admin.rpc("broadcast_daily_ai_notification", {
-    p_secret: hookSecret,
-    p_title: title,
-    p_message: message,
-    p_link: link,
-    p_period: period,
-  });
-  if (error) {
-    console.error("broadcast error", error.message);
-    return json({ ok: false, error: error.message }, error.message?.includes("unauthorized") ? 401 : 500);
+  // Valida o segredo (mesmo do hook, igual às outras funções server-side).
+  if (hookSecret !== (Deno.env.get("EMAIL_HOOK_SECRET") || "").trim()) {
+    return json({ ok: false, error: "unauthorized" }, 401);
   }
 
-  return json({ ok: true, period, sent_to: count ?? 0, title, message, link });
+  // Alvos: usuários com push token, menos os bloqueados/staff (conjunto pequeno de exclusão).
+  const devsRes = await admin.from("user_devices").select("user_id").not("push_token", "is", null).limit(5000);
+  const uidSet = new Set((devsRes.data ?? []).map((d: any) => d.user_id).filter(Boolean));
+  const exclRes = await admin.from("profiles")
+    .select("user_id")
+    .or("is_blocked.eq.true,email.eq.admin@appchamo.com,email.eq.suporte@appchamo.com");
+  const exclSet = new Set((exclRes.data ?? []).map((p: any) => p.user_id));
+  const eligible = Array.from(uidSet).filter((u) => !exclSet.has(u)) as string[];
+
+  if (body?.debug) {
+    return json({
+      ok: true, debug: true,
+      devs_count: uidSet.size, devs_error: devsRes.error?.message ?? null,
+      excl_count: exclSet.size, excl_error: exclRes.error?.message ?? null,
+      eligible: eligible.length,
+    });
+  }
+  if (eligible.length === 0) return json({ ok: true, period, sent_to: 0, title, message, link });
+
+  // Insere as notificações (cada linha dispara o push via trigger existente).
+  // Sem batch_id: ele tem FK para admin_notification_batches (só p/ broadcasts do admin).
+  const rows = eligible.map((uid) => ({
+    user_id: uid, title, message, type: "info", link,
+    metadata: { source: "daily_ai", period }, read: false,
+  }));
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await admin.from("notifications").insert(chunk);
+    if (error) console.error("insert error", error.message);
+    else inserted += chunk.length;
+  }
+
+  return json({ ok: true, period, sent_to: inserted, title, message, link });
 });

@@ -137,6 +137,19 @@ export default function AdminAnalise() {
   }, [incompletes, incQ]);
   const incVisible = incQ.trim() ? incFiltered : incFiltered.slice(0, incShown);
 
+  // Último envio automático (proxy: envio mais recente entre os incompletos).
+  const lastReminderLabel = useMemo(() => {
+    let max = 0;
+    for (const u of incompletes) {
+      const t = u.signup_reminder_sent_at ? new Date(u.signup_reminder_sent_at).getTime() : 0;
+      if (t > max) max = t;
+    }
+    if (!max) return null;
+    const d = new Date(max);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} às ${p(d.getHours())}h${p(d.getMinutes())}`;
+  }, [incompletes]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -408,8 +421,21 @@ export default function AdminAnalise() {
             <p className="text-[11px] text-muted-foreground mt-3">Coluna 1: total na etapa. Coluna 2: % sobre o total de contas. Coluna 3: queda em relação à etapa anterior.</p>
           </Card>
 
-          <Card title="Reativar cadastros incompletos" sub="Envia um e-mail “termine seu cadastro” para quem iniciou (Google/Apple/e-mail) e não concluiu.">
-            <div className="flex flex-wrap gap-2">
+          <Card title="Reativar cadastros incompletos" sub="O e-mail “termine seu cadastro” é enviado automaticamente para quem iniciou (Google/Apple/e-mail) e não concluiu.">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] px-3.5 py-3">
+              <p className="text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4" /> Envio automático ativo
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Todo dia às 10h · no máximo 3 lembretes por pessoa (não reenvia antes de 24h).
+              </p>
+              <p className="text-sm text-foreground mt-2">
+                {lastReminderLabel
+                  ? <>Último envio: <strong>{lastReminderLabel}</strong></>
+                  : <span className="text-muted-foreground">Nenhum envio ainda — o primeiro será no próximo horário (10h).</span>}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-3">
               <button
                 onClick={() => sendReactivation(true)}
                 disabled={reactBusy}
@@ -417,19 +443,9 @@ export default function AdminAnalise() {
               >
                 Enviar teste pra mim
               </button>
-              <button
-                onClick={() => sendReactivation(false)}
-                disabled={reactBusy}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-60"
-              >
-                Enviar para os incompletos
-              </button>
             </div>
-            {reactBusy && <p className="text-xs text-muted-foreground mt-2">Enviando… (pode levar 1–2 min)</p>}
+            {reactBusy && <p className="text-xs text-muted-foreground mt-2">Enviando…</p>}
             {reactMsg && <p className="text-xs mt-2 text-foreground">{reactMsg}</p>}
-            <p className="text-[11px] text-muted-foreground mt-2">
-              LGPD: e-mail transacional (“termine seu cadastro”), não promocional. Faça primeiro o teste.
-            </p>
           </Card>
 
           <Card title="Cadastros incompletos" sub={`${incompletes.length} pessoa(s) iniciaram e não concluíram. Envie individualmente; reenvio só após 24h.`}>

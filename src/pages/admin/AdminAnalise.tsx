@@ -35,6 +35,12 @@ const fmtIn = (iso: string) => {
   const h = Math.ceil(diff / 3600000);
   return h <= 1 ? "~1h" : `${h}h`;
 };
+const fmtDateTime = (iso: string | null) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} às ${p(d.getHours())}h${p(d.getMinutes())}`;
+};
 
 interface ProfileRow {
   user_type: string | null;
@@ -456,10 +462,6 @@ export default function AdminAnalise() {
             </div>
             <div className="space-y-1.5">
               {incVisible.map((u) => {
-                const lastAt = u.signup_reminder_sent_at ? new Date(u.signup_reminder_sent_at).getTime() : 0;
-                const locked = !!lastAt && Date.now() - lastAt < RESEND_MS;
-                const nextAt = lastAt ? new Date(lastAt + RESEND_MS).toISOString() : null;
-                const busy = incBusy === u.user_id;
                 const count = u.signup_reminder_count || 0;
                 return (
                   <div key={u.user_id} className="flex items-center gap-3 rounded-xl border border-border p-2.5">
@@ -477,17 +479,15 @@ export default function AdminAnalise() {
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
-                      <button
-                        onClick={() => sendToUser(u)}
-                        disabled={busy || locked}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-60 ${count > 0 ? "border border-border bg-card text-foreground" : "bg-primary text-primary-foreground"}`}
-                        title={locked && nextAt ? `Reenvio liberado em ${fmtIn(nextAt)}` : ""}
-                      >
-                        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          : locked ? <><Clock className="w-3.5 h-3.5" /> {nextAt ? fmtIn(nextAt) : "24h"}</>
-                          : <><Send className="w-3.5 h-3.5" /> {count > 0 ? "Reenviar" : "Enviar"}</>}
-                      </button>
-                      {incMsg[u.user_id] && <p className="text-[10px] text-muted-foreground mt-1 max-w-[140px]">{incMsg[u.user_id]}</p>}
+                      {count > 0 ? (
+                        <>
+                          <p className="text-[10px] text-muted-foreground leading-tight">Último envio</p>
+                          <p className="text-xs font-semibold text-foreground leading-tight">{fmtDateTime(u.signup_reminder_sent_at)}</p>
+                          <p className="text-[10px] text-muted-foreground leading-tight">{count} de 3 lembretes</p>
+                        </>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">Aguardando envio automático</span>
+                      )}
                     </div>
                   </div>
                 );

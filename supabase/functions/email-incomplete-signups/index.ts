@@ -17,6 +17,7 @@ const CORS = {
 const APP = (Deno.env.get("PUBLIC_APP_URL") || "https://appchamo.com").replace(/[/]+$/, "");
 const ADMINS = ["admin@appchamo.com", "suporte@appchamo.com"];
 const RESEND_MS = 24 * 60 * 60 * 1000; // 24h
+const MAX_REMINDERS = 3; // no máximo 3 lembretes por usuário (não vira spam)
 
 function esc(s: unknown) {
   return String(s ?? "").split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;");
@@ -65,15 +66,23 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") return json({ error: "metodo" }, 405);
 
-  // Auth: somente admin
-  const jwt = (req.headers.get("Authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
-  if (!jwt) return json({ error: "nao_autorizado" }, 401);
-  const appClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!);
-  const { data: { user } } = await appClient.auth.getUser(jwt);
-  if (!user || !ADMINS.includes((user.email || "").toLowerCase())) return json({ error: "forbidden" }, 403);
+  // Auth: cron (x-hook-secret) OU admin (JWT).
+  const hookSecret = (Deno.env.get("EMAIL_HOOK_SECRET") || "").trim();
+  const gotSecret = (req.headers.get("x-hook-secret") || "").trim();
+  const isCron = !!hookSecret && gotSecret === hookSecret;
+  if (!isCron) {
+    const jwt = (req.headers.get("Authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
+    if (!jwt) return json({ error: "nao_autorizado" }, 401);
+    const appClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!);
+    const { data: { user } } = await appClient.auth.getUser(jwt);
+    if (!user || !ADMINS.includes((user.email || "").toLowerCase())) return json({ error: "forbidden" }, 403);
+  }
 
   const body = await req.json().catch(() => ({}));
-  const dryRun = body.dry_run !== false; // por seguranca, default = dry-run
+  const dryRun = isCron ? false : (body.dry_run !== false); // cron sempre envia; admin default = dry-run
+  // Template de WhatsApp aprovado na Meta (ex.: "termine_cadastro"). Vazio = só e-mail.
+  const whatsappTemplate = body.whatsapp_template ? String(body.whatsapp_template).trim() : "";
+  const whatsappLang = String(body.whatsapp_lang || "pt_BR");
   const testEmail: string | null = body.test_email ? String(body.test_email).trim() : null;
   const targetUserId: string | null = body.user_id ? String(body.user_id) : null;
   const force = body.force === true;
@@ -136,11 +145,12 @@ Deno.serve(async (req) => {
   // ----- Lote: todos os incompletos elegiveis -----
   const { data } = await admin
     .from("profiles")
-    .select("user_id, email, full_name, email_notifications_enabled, signup_completed_at, signup_reminder_sent_at, signup_reminder_count")
+    .select("user_id, email, phone, full_name, email_notifications_enabled, signup_completed_at, signup_reminder_sent_at, signup_reminder_count")
     .is("signup_completed_at", null)
-    .not("email", "is", null);
+    .not("email", "is", null)
+    .lt("signup_reminder_count", MAX_REMINDERS);
   const seen = new Set<string>();
-  const recipients: { user_id: string; email: string; name: string; count: number }[] = [];
+  const recipients: { user_id: string; email: string; phone: string | null; name: string; count: number }[] = [];
   let skipped24h = 0;
   for (const r of (data || []) as any[]) {
     const em = String(r.email || "").trim().toLowerCase();
@@ -149,18 +159,30 @@ Deno.serve(async (req) => {
     const lastAt = r.signup_reminder_sent_at ? new Date(r.signup_reminder_sent_at).getTime() : 0;
     if (!force && lastAt && Date.now() - lastAt < RESEND_MS) { skipped24h++; continue; }
     seen.add(em);
-    recipients.push({ user_id: r.user_id, email: r.email, name: (r.full_name || "").split(" ")[0] || "tudo bem?", count: r.signup_reminder_count || 0 });
+    recipients.push({ user_id: r.user_id, email: r.email, phone: r.phone || null, name: (r.full_name || "").split(" ")[0] || "tudo bem?", count: r.signup_reminder_count || 0 });
   }
 
   if (dryRun) return json({ ok: true, dry_run: true, count: recipients.length, skipped_24h: skipped24h });
 
   if (!host || !userS || !pass) return json({ error: "smtp_not_configured" }, 500);
 
-  let sent = 0, failed = 0;
+  let sent = 0, failed = 0, whatsapp = 0;
+  const SUPA_URL = Deno.env.get("SUPABASE_URL")!;
   for (const r of recipients) {
     try { await sendOne(r.email, r.name, r.user_id, r.count); sent++; }
     catch (_e) { failed++; }
+    // WhatsApp (opcional): só dispara se houver template aprovado + telefone.
+    if (whatsappTemplate && r.phone) {
+      try {
+        await fetch(`${SUPA_URL}/functions/v1/send-whatsapp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-hook-secret": hookSecret },
+          body: JSON.stringify({ user_id: r.user_id, template: whatsappTemplate, lang: whatsappLang, params: [r.name] }),
+        });
+        whatsapp++;
+      } catch (_e) { /* WhatsApp não bloqueia o lote */ }
+    }
     await new Promise((res) => setTimeout(res, 250));
   }
-  return json({ ok: true, dry_run: false, total: recipients.length, sent, failed, skipped_24h: skipped24h });
+  return json({ ok: true, dry_run: false, total: recipients.length, sent, failed, whatsapp, skipped_24h: skipped24h });
 });

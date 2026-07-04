@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   AreaChart, Area,
 } from "recharts";
-import { Loader2, Users, UserCheck, Activity, AlertCircle, Search, Send, Clock, CheckCircle2 } from "lucide-react";
+import { Loader2, Users, UserCheck, Activity, AlertCircle, Search, Send, Clock, CheckCircle2, TrendingUp, MapPin, UserPlus, Zap } from "lucide-react";
 
 type Tab = "geral" | "cadastro";
 
@@ -66,9 +66,21 @@ const PAGE_NAMES: Record<string, string> = {
 };
 const pretty = (p: string | null) => (p ? PAGE_NAMES[p] || p : "—");
 
+const PERIODS = [
+  { k: "hoje", label: "Hoje", days: 1 },
+  { k: "7", label: "7 dias", days: 7 },
+  { k: "30", label: "30 dias", days: 30 },
+  { k: "90", label: "90 dias", days: 90 },
+  { k: "all", label: "Tudo", days: 0 },
+] as const;
+
 export default function AdminAnalise() {
   const [tab, setTab] = useState<Tab>("geral");
+  const [periodK, setPeriodK] = useState<string>("30");
   const [loading, setLoading] = useState(true);
+  const periodDays = PERIODS.find((p) => p.k === periodK)?.days ?? 0;
+  const periodLabel = PERIODS.find((p) => p.k === periodK)?.label ?? "Tudo";
+  const cutoff = periodDays ? Date.now() - periodDays * 86400000 : 0;
   const [reactBusy, setReactBusy] = useState(false);
   const [reactMsg, setReactMsg] = useState("");
 
@@ -202,10 +214,46 @@ export default function AdminAnalise() {
     { name: "Não concluíram", value: Math.max(0, stats.total - stats.concluiu) },
   ].filter((d) => d.value > 0)), [stats]);
 
+  // Eventos filtrados pelo período selecionado.
+  const evFiltered = useMemo(
+    () => (cutoff ? events.filter((e) => new Date(e.created_at).getTime() >= cutoff) : events),
+    [events, cutoff],
+  );
+
+  // Usuários ativos (janelas fixas, independem do filtro) — baseado no last_seen_at.
+  const active = useMemo(() => {
+    const now = Date.now();
+    const within = (d: string | null, days: number) => !!d && now - new Date(d).getTime() <= days * 86400000;
+    let dau = 0, wau = 0, mau = 0;
+    for (const p of profiles) {
+      if (within(p.last_seen_at, 1)) dau++;
+      if (within(p.last_seen_at, 7)) wau++;
+      if (within(p.last_seen_at, 30)) mau++;
+    }
+    return { dau, wau, mau };
+  }, [profiles]);
+
+  // Novos cadastros no período (total + série por dia).
+  const newSignups = useMemo(() => {
+    const inPeriod = profiles.filter((p) => p.created_at && (!cutoff || new Date(p.created_at).getTime() >= cutoff));
+    const m: Record<string, number> = {};
+    for (const p of inPeriod) { const d = (p.created_at || "").slice(0, 10); if (d) m[d] = (m[d] || 0) + 1; }
+    const series = Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).slice(-90)
+      .map(([d, qtd]) => ({ dia: d.slice(5), qtd }));
+    return { total: inPeriod.length, series };
+  }, [profiles, cutoff]);
+
+  // Top cidades.
+  const cities = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const p of profiles) { const c = (p.address_city || "").trim(); if (c) m[c] = (m[c] || 0) + 1; }
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, qtd]) => ({ name, qtd }));
+  }, [profiles]);
+
   // Plataforma: só app (iOS/Android). Web é o admin/site — não conta como uso do app.
   const plataformaData = useMemo(() => {
     let ios = 0, android = 0;
-    for (const e of events) {
+    for (const e of evFiltered) {
       if (e.platform === "ios") ios++;
       else if (e.platform === "android") android++;
     }
@@ -213,23 +261,23 @@ export default function AdminAnalise() {
       { name: "iOS", value: ios },
       { name: "Android", value: android },
     ].filter((d) => d.value > 0);
-  }, [events]);
+  }, [evFiltered]);
 
   // Jornada: só páginas de usuário comum (exclui admin e suporte-desk).
   const isUserPath = (p: string | null) =>
     !!p && !p.startsWith("/admin") && !p.startsWith("/suporte-desk");
   const topPages = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const e of events) if (e.type === "page_view" && isUserPath(e.path)) { const k = e.path as string; m[k] = (m[k] || 0) + 1; }
+    for (const e of evFiltered) if (e.type === "page_view" && isUserPath(e.path)) { const k = e.path as string; m[k] = (m[k] || 0) + 1; }
     return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([path, qtd]) => ({ name: pretty(path), qtd }));
-  }, [events]);
+  }, [evFiltered]);
 
   const perDay = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const e of events) { const d = (e.created_at || "").slice(0, 10); if (d) m[d] = (m[d] || 0) + 1; }
-    return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
+    for (const e of evFiltered) { const d = (e.created_at || "").slice(0, 10); if (d) m[d] = (m[d] || 0) + 1; }
+    return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).slice(-90)
       .map(([d, qtd]) => ({ dia: d.slice(5), qtd }));
-  }, [events]);
+  }, [evFiltered]);
 
   const funnel = useMemo(() => {
     const steps = [
@@ -270,12 +318,45 @@ export default function AdminAnalise() {
         <div className="py-24 flex items-center justify-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Carregando…</div>
       ) : tab === "geral" ? (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Kpi icon={<Users className="w-3.5 h-3.5" />} label="Usuários" value={String(stats.total)} />
-            <Kpi icon={<UserCheck className="w-3.5 h-3.5" />} label="Cadastro concluído" value={`${stats.concluiu} (${pct(stats.concluiu, stats.total)}%)`} />
-            <Kpi icon={<Activity className="w-3.5 h-3.5" />} label="Abriram o app" value={String(stats.abriu)} />
-            <Kpi icon={<AlertCircle className="w-3.5 h-3.5" />} label="Eventos coletados" value={String(events.length)} />
+          {/* Filtro de período */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground mr-1">Período:</span>
+            {PERIODS.map((p) => (
+              <button
+                key={p.k}
+                onClick={() => setPeriodK(p.k)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${periodK === p.k ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground hover:bg-muted"}`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Kpi icon={<Users className="w-3.5 h-3.5" />} label="Usuários (total)" value={String(stats.total)} />
+            <Kpi icon={<UserCheck className="w-3.5 h-3.5" />} label="Cadastro concluído" value={`${stats.concluiu} (${pct(stats.concluiu, stats.total)}%)`} />
+            <Kpi icon={<UserPlus className="w-3.5 h-3.5" />} label={`Novos (${periodLabel})`} value={String(newSignups.total)} />
+            <Kpi icon={<AlertCircle className="w-3.5 h-3.5" />} label={`Eventos (${periodLabel})`} value={String(evFiltered.length)} />
+          </div>
+
+          {/* Ativos DAU/WAU/MAU */}
+          <div className="grid grid-cols-3 gap-3">
+            <Kpi icon={<Zap className="w-3.5 h-3.5" />} label="Ativos hoje (DAU)" value={String(active.dau)} />
+            <Kpi icon={<Activity className="w-3.5 h-3.5" />} label="Ativos 7 dias (WAU)" value={String(active.wau)} />
+            <Kpi icon={<TrendingUp className="w-3.5 h-3.5" />} label="Ativos 30 dias (MAU)" value={String(active.mau)} />
+          </div>
+
+          <Card title={`Novos cadastros por dia (${periodLabel})`} sub="Crescimento da base de usuários.">
+            {newSignups.series.length ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <AreaChart data={newSignups.series}>
+                  <defs><linearGradient id="gnew" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[2]} stopOpacity={0.6} /><stop offset="95%" stopColor={COLORS[2]} stopOpacity={0} /></linearGradient></defs>
+                  <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} />
+                  <Tooltip /><Area type="monotone" dataKey="qtd" name="Novos cadastros" stroke={COLORS[2]} fill="url(#gnew)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : <p className="text-sm text-muted-foreground py-12 text-center">Sem cadastros no período.</p>}
+          </Card>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Card title="Tipos de conta">
@@ -321,16 +402,28 @@ export default function AdminAnalise() {
             </Card>
           </div>
 
-          <Card title="Atividade por dia (últimos 14 dias)" sub="Total de eventos registrados.">
+          <Card title={`Atividade por dia (${periodLabel})`} sub="Total de eventos de uso registrados.">
             {perDay.length ? (
               <ResponsiveContainer width="100%" height={240}>
                 <AreaChart data={perDay}>
                   <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[0]} stopOpacity={0.6} /><stop offset="95%" stopColor={COLORS[0]} stopOpacity={0} /></linearGradient></defs>
                   <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 12 }} /><YAxis />
-                  <Tooltip /><Area type="monotone" dataKey="qtd" stroke={COLORS[0]} fill="url(#g)" />
+                  <Tooltip /><Area type="monotone" dataKey="qtd" name="Eventos" stroke={COLORS[0]} fill="url(#g)" />
                 </AreaChart>
               </ResponsiveContainer>
             ) : <p className="text-sm text-muted-foreground py-12 text-center">Sem dados de uso ainda.</p>}
+          </Card>
+
+          <Card title="Top cidades" sub="Usuários por cidade (cadastro).">
+            {cities.length ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={cities} layout="vertical" margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 12 }} />
+                  <Tooltip /><Bar dataKey="qtd" name="Usuários" fill={COLORS[3]} radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <p className="text-sm text-muted-foreground py-12 text-center">Sem cidades cadastradas.</p>}
           </Card>
         </div>
       ) : (

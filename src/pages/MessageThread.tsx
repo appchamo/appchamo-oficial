@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Sparkles, UserPlus, UserCheck } from "lucide-react";
+import { ArrowLeft, Send, DollarSign, X, Check, Star, Mic, Square, Loader2, Lock, Ticket, Copy, CheckCircle2, Handshake, LogOut, Crown, BadgeDollarSign, FileUp, Info, Package, Calendar, ThumbsUp, ThumbsDown, Image as ImageIcon, Camera, Sparkles, UserPlus, UserCheck } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import BottomNav from "@/components/BottomNav";
 import AgendaRescheduleDialog from "@/components/AgendaRescheduleDialog";
@@ -144,6 +144,7 @@ const MessageThread = () => {
   const typingIdleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const msgLongPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isProfessional, setIsProfessional] = useState(false);
+  const [callLocked, setCallLocked] = useState(false);
   const [proAvailabilityStatus, setProAvailabilityStatus] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   /** Área rolável das mensagens — scroll explícito após layout (evita ficar no topo após o skeleton). */
@@ -214,6 +215,18 @@ const MessageThread = () => {
   const [ratingComment, setRatingComment] = useState("");
   const [requestStatus, setRequestStatus] = useState<string>("pending");
   const [requestKind, setRequestKind] = useState<"service" | "following">("service");
+
+  // Trava do chat pro profissional que estourou o limite de chamadas grátis.
+  // O cliente nunca vê trava; só o pro (chamada além da cota + plano free).
+  useEffect(() => {
+    if (!isProfessional || requestKind !== "service" || !threadId) { setCallLocked(false); return; }
+    let alive = true;
+    (async () => {
+      const { data, error } = await supabase.rpc("service_request_locked_for_pro", { p_request_id: threadId });
+      if (alive && !error) setCallLocked(data === true);
+    })();
+    return () => { alive = false; };
+  }, [isProfessional, requestKind, threadId]);
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   /** Cupom do app (tabela `coupons`) — até 1 por compra. */
   const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
@@ -3063,9 +3076,23 @@ const MessageThread = () => {
         )}
       </header>
 
+      {callLocked && (
+        <div className="pointer-events-none absolute inset-x-0 top-1/4 z-20 flex justify-center px-8">
+          <div className="bg-card/95 backdrop-blur border shadow-xl rounded-2xl px-5 py-5 flex flex-col items-center gap-2 text-center max-w-xs">
+            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+              <Lock className="w-6 h-6 text-primary" />
+            </div>
+            <p className="text-sm font-bold text-foreground">Chat bloqueado</p>
+            <p className="text-xs text-muted-foreground leading-snug">
+              Você atingiu o limite de chamadas grátis. Entre no plano Pro e responda seus clientes.
+            </p>
+          </div>
+        </div>
+      )}
+
       <main
         ref={messagesScrollRef}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2 bg-muted/20"
+        className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-screen-lg mx-auto w-full px-4 py-4 flex flex-col gap-2 bg-muted/20 ${callLocked ? "blur-[3px] pointer-events-none select-none" : ""}`}
       >
         {/* Banner de aviso: profissional sem resposta há +2h (antes das 4h) */}
         {(() => {
@@ -3380,9 +3407,30 @@ const MessageThread = () => {
             </p>
           </div>
         )
-      ) :
+      ) : callLocked ? (
+        <div
+          className="flex-shrink-0 bg-background border-t px-4 py-4"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 16px) + 12px)" }}
+        >
+          <div className="max-w-screen-lg mx-auto flex items-center gap-3">
+            <div className="w-10 h-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+              <Lock className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground leading-tight">Você está sem chamadas grátis</p>
+              <p className="text-[11px] text-muted-foreground leading-snug">Entre no plano Pro pra responder seus clientes.</p>
+            </div>
+            <button
+              onClick={() => navigate("/subscriptions")}
+              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-sm active:scale-95 transition-transform"
+            >
+              <Crown className="w-3.5 h-3.5" /> Planos
+            </button>
+          </div>
+        </div>
+      ) : (
 
-      <div 
+      <div
         className="flex-shrink-0 bg-background border-t px-4 py-3"
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 16px) + 12px)" }}
       >
@@ -3498,6 +3546,7 @@ const MessageThread = () => {
           }
           </div>
         </div>
+      )
       }
 
       <Dialog open={acceptSendOpen} onOpenChange={setAcceptSendOpen}>

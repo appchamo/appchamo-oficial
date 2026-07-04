@@ -7,6 +7,14 @@ import { peekPostAuthRedirect, clearPostAuthRedirect } from "@/lib/chamoAuthRetu
 import { Capacitor } from "@capacitor/core";
 import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
 
+/** Admin (qualquer papel *_admin, em cache) cai no painel /admin em vez de /home. */
+function isAdminCached(): boolean {
+  try {
+    const r = JSON.parse(localStorage.getItem("chamo_cached_roles") || "[]");
+    return Array.isArray(r) && r.some((x: unknown) => String(x).endsWith("_admin"));
+  } catch { return false; }
+}
+
 export default function PostLoginGate() {
   const navigate = useNavigate();
   const { session, profile, loading, refreshProfile, refreshRoles } = useAuth();
@@ -303,7 +311,7 @@ export default function PostLoginGate() {
       safeNavigate(pending);
       return;
     }
-    safeNavigate("/home");
+    safeNavigate(isAdminCached() ? "/admin" : "/home");
   }, [loading, session?.user?.id, fallbackUserId, profile?.user_id, navigate, refreshProfile, refreshRoles]);
 
   return (

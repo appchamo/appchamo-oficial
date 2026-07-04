@@ -255,7 +255,7 @@ const SPLASH_SHOWN_KEY = "chamo_splash_shown";
 /** No Android, cria o canal "default" logo na abertura do app para push em background aparecer. */
 /** Redireciona usuário logado: admin → /admin, suporte → /suporte-desk; demais → /home */
 const RedirectLoggedIn = () => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, isAdmin } = useAuth();
   const email = (user?.email || "").toLowerCase().trim();
   const [signupInProgress, setSignupInProgress] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -285,6 +285,9 @@ const RedirectLoggedIn = () => {
       </div>
     );
   }
+
+  // Admin (qualquer sócio com papel *_admin) cai direto no painel.
+  if (isAdmin) return <Navigate to="/admin" replace />;
 
   if (profile?.user_type === "sponsor") return <Navigate to="/home" replace />;
 

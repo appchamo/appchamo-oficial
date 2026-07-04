@@ -1,12 +1,270 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Eye, MousePointerClick, Users, ArrowDown, ArrowUp, Smartphone } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import { Eye, MousePointerClick, Users, ArrowDown, ArrowUp, Smartphone, TrendingUp, Phone, CreditCard, Star } from "lucide-react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+} from "recharts";
 
 type SortDir = "desc" | "asc";
+
+// ─── Helpers compartilhados (novas abas) ───
+const RCOLORS = ["#ea580c", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ef4444", "#14b8a6", "#6b7280"];
+const R_PERIODS = [
+  { k: "7", label: "7 dias", days: 7 },
+  { k: "30", label: "30 dias", days: 30 },
+  { k: "90", label: "90 dias", days: 90 },
+  { k: "all", label: "Tudo", days: 0 },
+] as const;
+const RSpinner = () => <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>;
+const PeriodBar = ({ value, onChange }: { value: string; onChange: (k: string) => void }) => (
+  <div className="flex flex-wrap items-center gap-1.5">
+    <span className="text-xs text-muted-foreground mr-1">Período:</span>
+    {R_PERIODS.map((p) => (
+      <button key={p.k} onClick={() => onChange(p.k)}
+        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${value === p.k ? "bg-primary text-primary-foreground" : "bg-card border text-foreground hover:bg-muted"}`}>
+        {p.label}
+      </button>
+    ))}
+  </div>
+);
+const RKpi = ({ icon, label, value }: { icon: ReactNode; label: string; value: string }) => (
+  <div className="bg-card border rounded-xl p-4">
+    <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">{icon}{label}</div>
+    <p className="text-2xl font-bold text-foreground mt-1">{value}</p>
+  </div>
+);
+const RCard = ({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) => (
+  <div className="bg-card border rounded-xl p-4">
+    <p className="text-sm font-semibold text-foreground">{title}</p>
+    {sub && <p className="text-xs text-muted-foreground mb-2">{sub}</p>}
+    {children}
+  </div>
+);
+const seriesByDay = (dates: (string | null)[], cutoff: number) => {
+  const m: Record<string, number> = {};
+  for (const iso of dates) {
+    if (!iso) continue;
+    if (cutoff && new Date(iso).getTime() < cutoff) continue;
+    const d = iso.slice(0, 10);
+    m[d] = (m[d] || 0) + 1;
+  }
+  return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).slice(-90).map(([d, qtd]) => ({ dia: d.slice(5), qtd }));
+};
+
+// ─── Crescimento ───
+const GrowthTab = () => {
+  const [rows, setRows] = useState<{ user_type: string | null; created_at: string | null }[]>([]);
+  const [period, setPeriod] = useState("30");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("profiles").select("user_type, created_at").limit(20000);
+      setRows((data as any) || []); setLoading(false);
+    })();
+  }, []);
+  const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const inPeriod = useMemo(() => rows.filter((r) => r.created_at && (!cutoff || new Date(r.created_at).getTime() >= cutoff)), [rows, cutoff]);
+  const perDay = useMemo(() => seriesByDay(inPeriod.map((r) => r.created_at), 0), [inPeriod]);
+  const byType = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const r of inPeriod) {
+      const k = r.user_type === "client" ? "Clientes" : r.user_type === "professional" ? "Profissionais" : (r.user_type === "company" || r.user_type === "enterprise") ? "Empresas" : "Outros";
+      t[k] = (t[k] || 0) + 1;
+    }
+    return Object.entries(t).map(([name, value]) => ({ name, value })).filter((d) => d.value > 0);
+  }, [inPeriod]);
+  if (loading) return <RSpinner />;
+  return (
+    <div className="space-y-4">
+      <PeriodBar value={period} onChange={setPeriod} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <RKpi icon={<Users className="w-3.5 h-3.5" />} label="Base total" value={String(rows.length)} />
+        <RKpi icon={<TrendingUp className="w-3.5 h-3.5" />} label="Novos no período" value={String(inPeriod.length)} />
+        <RKpi icon={<TrendingUp className="w-3.5 h-3.5" />} label="Média/dia" value={String(perDay.length ? Math.round(inPeriod.length / perDay.length) : 0)} />
+      </div>
+      <RCard title="Novos cadastros por dia">
+        {perDay.length ? (
+          <ResponsiveContainer width="100%" height={260}>
+            <AreaChart data={perDay}>
+              <defs><linearGradient id="rg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={RCOLORS[0]} stopOpacity={0.6} /><stop offset="95%" stopColor={RCOLORS[0]} stopOpacity={0} /></linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} />
+              <Tooltip /><Area type="monotone" dataKey="qtd" name="Cadastros" stroke={RCOLORS[0]} fill="url(#rg)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem dados no período.</p>}
+      </RCard>
+      <RCard title="Novos por tipo de conta (no período)">
+        {byType.length ? (
+          <ResponsiveContainer width="100%" height={240}>
+            <PieChart><Pie data={byType} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>{byType.map((_, i) => <Cell key={i} fill={RCOLORS[i % RCOLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem dados no período.</p>}
+      </RCard>
+    </div>
+  );
+};
+
+// ─── Serviços / Chamadas ───
+const ServicesTab = () => {
+  const [rows, setRows] = useState<{ status: string | null; created_at: string | null }[]>([]);
+  const [period, setPeriod] = useState("30");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("service_requests").select("status, created_at").limit(20000);
+      setRows((data as any) || []); setLoading(false);
+    })();
+  }, []);
+  const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const inPeriod = useMemo(() => rows.filter((r) => r.created_at && (!cutoff || new Date(r.created_at).getTime() >= cutoff)), [rows, cutoff]);
+  const STATUS_LABEL: Record<string, string> = { pending: "Pendentes", accepted: "Aceitas", completed: "Concluídas", cancelled: "Canceladas" };
+  const byStatus = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const r of inPeriod) { const k = STATUS_LABEL[r.status || ""] || (r.status || "Outros"); t[k] = (t[k] || 0) + 1; }
+    return Object.entries(t).map(([name, value]) => ({ name, value }));
+  }, [inPeriod]);
+  const perDay = useMemo(() => seriesByDay(inPeriod.map((r) => r.created_at), 0), [inPeriod]);
+  const total = inPeriod.length;
+  const concluidas = inPeriod.filter((r) => r.status === "completed").length;
+  const canceladas = inPeriod.filter((r) => r.status === "cancelled").length;
+  const taxa = total ? Math.round((concluidas / total) * 100) : 0;
+  if (loading) return <RSpinner />;
+  return (
+    <div className="space-y-4">
+      <PeriodBar value={period} onChange={setPeriod} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <RKpi icon={<Phone className="w-3.5 h-3.5" />} label="Chamadas" value={String(total)} />
+        <RKpi icon={<Phone className="w-3.5 h-3.5" />} label="Concluídas" value={String(concluidas)} />
+        <RKpi icon={<Phone className="w-3.5 h-3.5" />} label="Canceladas" value={String(canceladas)} />
+        <RKpi icon={<TrendingUp className="w-3.5 h-3.5" />} label="Taxa de conclusão" value={`${taxa}%`} />
+      </div>
+      <RCard title="Chamadas por status (no período)">
+        {byStatus.length ? (
+          <ResponsiveContainer width="100%" height={240}>
+            <PieChart><Pie data={byStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>{byStatus.map((_, i) => <Cell key={i} fill={RCOLORS[i % RCOLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem chamadas no período.</p>}
+      </RCard>
+      <RCard title="Chamadas por dia">
+        {perDay.length ? (
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={perDay}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="qtd" name="Chamadas" fill={RCOLORS[3]} radius={[4, 4, 0, 0]} /></BarChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem chamadas no período.</p>}
+      </RCard>
+    </div>
+  );
+};
+
+// ─── Assinaturas ───
+const SubscriptionsTab = () => {
+  const [rows, setRows] = useState<{ plan_id: string | null; status: string | null; started_at: string | null; created_at: string | null }[]>([]);
+  const [period, setPeriod] = useState("90");
+  const [loading, setLoading] = useState(true);
+  const PAID = ["vip", "pro", "business"];
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("subscriptions").select("plan_id, status, started_at, created_at").limit(20000);
+      setRows((data as any) || []); setLoading(false);
+    })();
+  }, []);
+  const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const ativas = rows.filter((r) => String(r.status || "").toLowerCase() === "active");
+  const pagasAtivas = ativas.filter((r) => PAID.includes(r.plan_id || ""));
+  const byPlan = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const r of pagasAtivas) { const k = (r.plan_id || "").toUpperCase(); t[k] = (t[k] || 0) + 1; }
+    return Object.entries(t).map(([name, value]) => ({ name, value }));
+  }, [pagasAtivas]);
+  const novasPagas = useMemo(() => {
+    const dates = pagasAtivas.map((r) => r.started_at || r.created_at).filter((d) => d && (!cutoff || new Date(d as string).getTime() >= cutoff)) as string[];
+    return seriesByDay(dates, 0);
+  }, [pagasAtivas, cutoff]);
+  if (loading) return <RSpinner />;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Pagas ativas" value={String(pagasAtivas.length)} />
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="VIP" value={String(pagasAtivas.filter((r) => r.plan_id === "vip").length)} />
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Pro" value={String(pagasAtivas.filter((r) => r.plan_id === "pro").length)} />
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Business" value={String(pagasAtivas.filter((r) => r.plan_id === "business").length)} />
+      </div>
+      <RCard title="Assinaturas pagas ativas por plano">
+        {byPlan.length ? (
+          <ResponsiveContainer width="100%" height={240}>
+            <PieChart><Pie data={byPlan} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} label>{byPlan.map((_, i) => <Cell key={i} fill={RCOLORS[i % RCOLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem assinaturas pagas.</p>}
+      </RCard>
+      <RCard title="Novas assinaturas pagas por dia" sub="">
+        <PeriodBar value={period} onChange={setPeriod} />
+        <div className="h-2" />
+        {novasPagas.length ? (
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={novasPagas}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="qtd" name="Novas pagas" fill={RCOLORS[2]} radius={[4, 4, 0, 0]} /></BarChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem novas assinaturas no período.</p>}
+      </RCard>
+    </div>
+  );
+};
+
+// ─── Avaliações ───
+const ReviewsTab = () => {
+  const [rows, setRows] = useState<{ rating: number | null; created_at: string | null }[]>([]);
+  const [period, setPeriod] = useState("90");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("reviews").select("rating, created_at").limit(20000);
+      setRows((data as any) || []); setLoading(false);
+    })();
+  }, []);
+  const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const inPeriod = useMemo(() => rows.filter((r) => r.created_at && (!cutoff || new Date(r.created_at).getTime() >= cutoff)), [rows, cutoff]);
+  const media = inPeriod.length ? (inPeriod.reduce((a, r) => a + (r.rating || 0), 0) / inPeriod.length) : 0;
+  const dist = useMemo(() => {
+    const t: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of inPeriod) { const n = Math.round(r.rating || 0); if (n >= 1 && n <= 5) t[n]++; }
+    return [5, 4, 3, 2, 1].map((n) => ({ name: `${n} ★`, qtd: t[n] }));
+  }, [inPeriod]);
+  const perDay = useMemo(() => seriesByDay(inPeriod.map((r) => r.created_at), 0), [inPeriod]);
+  if (loading) return <RSpinner />;
+  return (
+    <div className="space-y-4">
+      <PeriodBar value={period} onChange={setPeriod} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <RKpi icon={<Star className="w-3.5 h-3.5" />} label="Avaliações (total)" value={String(rows.length)} />
+        <RKpi icon={<Star className="w-3.5 h-3.5" />} label="No período" value={String(inPeriod.length)} />
+        <RKpi icon={<Star className="w-3.5 h-3.5" />} label="Nota média" value={media ? media.toFixed(1) : "—"} />
+      </div>
+      <RCard title="Distribuição de notas (no período)">
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={dist} layout="vertical" margin={{ left: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={40} tick={{ fontSize: 12 }} />
+            <Tooltip /><Bar dataKey="qtd" name="Avaliações" fill={RCOLORS[1]} radius={[0, 6, 6, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </RCard>
+      <RCard title="Avaliações por dia">
+        {perDay.length ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={perDay}><defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={RCOLORS[1]} stopOpacity={0.6} /><stop offset="95%" stopColor={RCOLORS[1]} stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Area type="monotone" dataKey="qtd" name="Avaliações" stroke={RCOLORS[1]} fill="url(#rev)" /></AreaChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem avaliações no período.</p>}
+      </RCard>
+    </div>
+  );
+};
 
 // ─── Views Tab ───
 const ViewsTab = () => {
@@ -797,12 +1055,28 @@ const DevicesTab = () => {
 };
 
 const AdminReports = () => {
-  const [activeTab, setActiveTab] = useState("views");
+  const [activeTab, setActiveTab] = useState("growth");
 
   return (
     <AdminLayout title="Relatórios">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-4 flex flex-wrap w-full gap-1 h-auto min-h-10">
+          <TabsTrigger value="growth" className="shrink-0">
+            <TrendingUp className="w-3.5 h-3.5 mr-1" />
+            Crescimento
+          </TabsTrigger>
+          <TabsTrigger value="services" className="shrink-0">
+            <Phone className="w-3.5 h-3.5 mr-1" />
+            Serviços
+          </TabsTrigger>
+          <TabsTrigger value="subs" className="shrink-0">
+            <CreditCard className="w-3.5 h-3.5 mr-1" />
+            Assinaturas
+          </TabsTrigger>
+          <TabsTrigger value="reviews" className="shrink-0">
+            <Star className="w-3.5 h-3.5 mr-1" />
+            Avaliações
+          </TabsTrigger>
           <TabsTrigger value="views" className="shrink-0">
             <Eye className="w-3.5 h-3.5 mr-1" />
             Resumo mercado
@@ -821,6 +1095,10 @@ const AdminReports = () => {
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="growth"><GrowthTab /></TabsContent>
+        <TabsContent value="services"><ServicesTab /></TabsContent>
+        <TabsContent value="subs"><SubscriptionsTab /></TabsContent>
+        <TabsContent value="reviews"><ReviewsTab /></TabsContent>
         <TabsContent value="views">
           <ViewsTab />
         </TabsContent>

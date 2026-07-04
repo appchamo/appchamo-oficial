@@ -56,6 +56,32 @@ Deno.serve(async (req) => {
     countFrom("subscriptions", (q) => q.ilike("status", "active").in("plan_id", PAID_PLANS).or("courtesy.is.null,courtesy.eq.false").gte("updated_at", cutoff)),
   ]);
 
+  // Buscas sem resultado dos últimos 7 dias (oportunidades de prospecção).
+  let unmetRowsHtml = "";
+  try {
+    const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
+    const { data: unmet } = await admin
+      .from("search_events")
+      .select("term, city, results_count, created_at")
+      .eq("results_count", 0)
+      .gte("created_at", since7)
+      .limit(5000);
+    const agg: Record<string, { term: string; city: string; count: number }> = {};
+    for (const u of (unmet || []) as any[]) {
+      const term = (u.term || "").trim();
+      if (!term) continue;
+      const city = (u.city || "").trim();
+      const k = `${term.toLowerCase()}|${city.toLowerCase()}`;
+      if (!agg[k]) agg[k] = { term, city, count: 0 };
+      agg[k].count++;
+    }
+    const top = Object.values(agg).sort((a, b) => b.count - a.count).slice(0, 8);
+    unmetRowsHtml = top.map((t) =>
+      `<tr><td style="padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#333">🔎 ${t.term}${t.city ? ` <span style="color:#999">· ${t.city}</span>` : ""}</td>`
+      + `<td style="padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:14px;font-weight:700;color:#dc2626;text-align:right">${t.count}×</td></tr>`
+    ).join("");
+  } catch (_e) { /* ignora */ }
+
   const hoje = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
   const row = (emoji: string, label: string, value: string) =>
     `<tr><td style="padding:10px 8px;border-bottom:1px solid #eee;font-size:14px;color:#333">${emoji} ${label}</td>`
@@ -75,6 +101,11 @@ Deno.serve(async (req) => {
     + row("💰", "Novos pagantes reais (24h)", String(novasPagas24h))
     + row("⏳", "Cadastros incompletos (pendentes)", String(incompletos))
     + '</table>'
+    + (unmetRowsHtml
+      ? '<p style="margin:22px 0 6px;font-size:14px;font-weight:800;color:#111">🎯 Buscas sem resultado (últimos 7 dias)</p>'
+        + '<p style="margin:0 0 8px;font-size:11px;color:#888">Gente procurou e não achou ninguém. Cada linha é um profissional que falta prospectar.</p>'
+        + `<table style="width:100%;border-collapse:collapse">${unmetRowsHtml}</table>`
+      : "")
     + '<p style="margin:18px 0 0;font-size:11px;color:#aaa">Enviado automaticamente pelo Chamô. Números aproximados para acompanhamento diário.</p>'
     + '</div></div>';
 

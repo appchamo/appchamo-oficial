@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
   const [
     novosTotal, novosCliente, novosPro, novosEmpresa,
     incompletos, ativos24h, chamadas24h, reviews24h,
-    pagasAtivas, novasPagas24h,
+    pagantesReais, cortesias, novasPagas24h,
   ] = await Promise.all([
     countFrom("profiles", (q) => q.gte("created_at", cutoff)),
     countFrom("profiles", (q) => q.gte("created_at", cutoff).eq("user_type", "client")),
@@ -49,8 +49,11 @@ Deno.serve(async (req) => {
     countFrom("profiles", (q) => q.gte("last_seen_at", cutoff)),
     countFrom("service_requests", (q) => q.gte("created_at", cutoff)),
     countFrom("reviews", (q) => q.gte("created_at", cutoff)),
-    countFrom("subscriptions", (q) => q.ilike("status", "active").in("plan_id", PAID_PLANS)),
-    countFrom("subscriptions", (q) => q.ilike("status", "active").in("plan_id", PAID_PLANS).gte("updated_at", cutoff)),
+    // Pagantes de verdade: plano pago, ativo e SEM cortesia
+    countFrom("subscriptions", (q) => q.ilike("status", "active").in("plan_id", PAID_PLANS).or("courtesy.is.null,courtesy.eq.false")),
+    // Cortesias: plano pago liberado grátis pelo admin (não é receita)
+    countFrom("subscriptions", (q) => q.ilike("status", "active").in("plan_id", PAID_PLANS).eq("courtesy", true)),
+    countFrom("subscriptions", (q) => q.ilike("status", "active").in("plan_id", PAID_PLANS).or("courtesy.is.null,courtesy.eq.false").gte("updated_at", cutoff)),
   ]);
 
   const hoje = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
@@ -67,8 +70,9 @@ Deno.serve(async (req) => {
     + row("👀", "Usuários ativos (abriram o app)", String(ativos24h))
     + row("📞", "Chamadas/serviços abertos", String(chamadas24h))
     + row("⭐", "Novas avaliações", String(reviews24h))
-    + row("💳", "Assinaturas pagas ativas", String(pagasAtivas))
-    + row("💰", "Novas assinaturas pagas", String(novasPagas24h))
+    + row("💳", "Pagantes reais (receita)", String(pagantesReais))
+    + row("🎁", "Cortesias (grátis, sem receita)", String(cortesias))
+    + row("💰", "Novos pagantes reais (24h)", String(novasPagas24h))
     + row("⏳", "Cadastros incompletos (pendentes)", String(incompletos))
     + '</table>'
     + '<p style="margin:18px 0 0;font-size:11px;color:#aaa">Enviado automaticamente pelo Chamô. Números aproximados para acompanhamento diário.</p>'
@@ -92,5 +96,5 @@ Deno.serve(async (req) => {
     } catch (_e) { /* continua */ }
   }
 
-  return json({ ok: true, sent, metrics: { novosTotal, ativos24h, chamadas24h, reviews24h, pagasAtivas, novasPagas24h, incompletos } });
+  return json({ ok: true, sent, metrics: { novosTotal, ativos24h, chamadas24h, reviews24h, pagantesReais, cortesias, novasPagas24h, incompletos } });
 });

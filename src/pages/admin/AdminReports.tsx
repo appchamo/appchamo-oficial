@@ -165,53 +165,61 @@ const ServicesTab = () => {
 
 // ─── Assinaturas ───
 const SubscriptionsTab = () => {
-  const [rows, setRows] = useState<{ plan_id: string | null; status: string | null; started_at: string | null; created_at: string | null }[]>([]);
+  const [rows, setRows] = useState<{ plan_id: string | null; status: string | null; started_at: string | null; created_at: string | null; courtesy: boolean | null }[]>([]);
   const [period, setPeriod] = useState("90");
   const [loading, setLoading] = useState(true);
   const PAID = ["vip", "pro", "business"];
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("subscriptions").select("plan_id, status, started_at, created_at").limit(20000);
+      const { data } = await supabase.from("subscriptions").select("plan_id, status, started_at, created_at, courtesy").limit(20000);
       setRows((data as any) || []); setLoading(false);
     })();
   }, []);
   const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
   const cutoff = days ? Date.now() - days * 86400000 : 0;
-  const ativas = rows.filter((r) => String(r.status || "").toLowerCase() === "active");
-  const pagasAtivas = ativas.filter((r) => PAID.includes(r.plan_id || ""));
+  const ativasPagas = rows.filter((r) => String(r.status || "").toLowerCase() === "active" && PAID.includes(r.plan_id || ""));
+  const pagantes = ativasPagas.filter((r) => r.courtesy !== true);   // pagantes de verdade
+  const cortesias = ativasPagas.filter((r) => r.courtesy === true);  // cortesia (grátis)
   const byPlan = useMemo(() => {
     const t: Record<string, number> = {};
-    for (const r of pagasAtivas) { const k = (r.plan_id || "").toUpperCase(); t[k] = (t[k] || 0) + 1; }
+    for (const r of pagantes) { const k = (r.plan_id || "").toUpperCase(); t[k] = (t[k] || 0) + 1; }
     return Object.entries(t).map(([name, value]) => ({ name, value }));
-  }, [pagasAtivas]);
+  }, [pagantes]);
   const novasPagas = useMemo(() => {
-    const dates = pagasAtivas.map((r) => r.started_at || r.created_at).filter((d) => d && (!cutoff || new Date(d as string).getTime() >= cutoff)) as string[];
+    const dates = pagantes.map((r) => r.started_at || r.created_at).filter((d) => d && (!cutoff || new Date(d as string).getTime() >= cutoff)) as string[];
     return seriesByDay(dates, 0);
-  }, [pagasAtivas, cutoff]);
+  }, [pagantes, cutoff]);
   if (loading) return <RSpinner />;
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Pagas ativas" value={String(pagasAtivas.length)} />
-        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="VIP" value={String(pagasAtivas.filter((r) => r.plan_id === "vip").length)} />
-        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Pro" value={String(pagasAtivas.filter((r) => r.plan_id === "pro").length)} />
-        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Business" value={String(pagasAtivas.filter((r) => r.plan_id === "business").length)} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Pagantes reais" value={String(pagantes.length)} />
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Cortesias (grátis)" value={String(cortesias.length)} />
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Total planos pagos ativos" value={String(ativasPagas.length)} />
       </div>
-      <RCard title="Assinaturas pagas ativas por plano">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+        <strong>Pagantes reais</strong> = quem paga de fato. <strong>Cortesias</strong> = plano pago liberado grátis pelo admin (não é receita). Bate com Financeiro → Assinantes.
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="VIP (pagante)" value={String(pagantes.filter((r) => r.plan_id === "vip").length)} />
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Pro (pagante)" value={String(pagantes.filter((r) => r.plan_id === "pro").length)} />
+        <RKpi icon={<CreditCard className="w-3.5 h-3.5" />} label="Business (pagante)" value={String(pagantes.filter((r) => r.plan_id === "business").length)} />
+      </div>
+      <RCard title="Pagantes reais por plano">
         {byPlan.length ? (
           <ResponsiveContainer width="100%" height={240}>
             <PieChart><Pie data={byPlan} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} label>{byPlan.map((_, i) => <Cell key={i} fill={RCOLORS[i % RCOLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart>
           </ResponsiveContainer>
-        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem assinaturas pagas.</p>}
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Nenhum pagante real ainda.</p>}
       </RCard>
-      <RCard title="Novas assinaturas pagas por dia" sub="">
+      <RCard title="Novos pagantes reais por dia">
         <PeriodBar value={period} onChange={setPeriod} />
         <div className="h-2" />
         {novasPagas.length ? (
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={novasPagas}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="qtd" name="Novas pagas" fill={RCOLORS[2]} radius={[4, 4, 0, 0]} /></BarChart>
+            <BarChart data={novasPagas}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="qtd" name="Novos pagantes" fill={RCOLORS[2]} radius={[4, 4, 0, 0]} /></BarChart>
           </ResponsiveContainer>
-        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem novas assinaturas no período.</p>}
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem novos pagantes no período.</p>}
       </RCard>
     </div>
   );
@@ -261,6 +269,93 @@ const ReviewsTab = () => {
             <AreaChart data={perDay}><defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={RCOLORS[1]} stopOpacity={0.6} /><stop offset="95%" stopColor={RCOLORS[1]} stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Area type="monotone" dataKey="qtd" name="Avaliações" stroke={RCOLORS[1]} fill="url(#rev)" /></AreaChart>
           </ResponsiveContainer>
         ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem avaliações no período.</p>}
+      </RCard>
+    </div>
+  );
+};
+
+// ─── Clientes ───
+const ClientsTab = () => {
+  const [profs, setProfs] = useState<{ user_id: string; full_name: string | null; created_at: string | null; last_seen_at: string | null; address_city: string | null }[]>([]);
+  const [reqs, setReqs] = useState<{ client_id: string | null }[]>([]);
+  const [reviewers, setReviewers] = useState<Set<string>>(new Set());
+  const [period, setPeriod] = useState("30");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const [p, r, rev] = await Promise.all([
+        supabase.from("profiles").select("user_id, full_name, created_at, last_seen_at, address_city").eq("user_type", "client").limit(20000),
+        supabase.from("service_requests").select("client_id").limit(50000),
+        supabase.from("reviews").select("client_id").limit(50000),
+      ]);
+      setProfs((p.data as any) || []);
+      setReqs((r.data as any) || []);
+      setReviewers(new Set(((rev.data as any) || []).map((x: any) => x.client_id).filter(Boolean)));
+      setLoading(false);
+    })();
+  }, []);
+  const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const novos = useMemo(() => profs.filter((r) => r.created_at && (!cutoff || new Date(r.created_at).getTime() >= cutoff)), [profs, cutoff]);
+  const ativos = useMemo(() => profs.filter((r) => r.last_seen_at && (!cutoff || new Date(r.last_seen_at).getTime() >= cutoff)), [profs, cutoff]);
+  const reqCount = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of reqs) { if (r.client_id) m[r.client_id] = (m[r.client_id] || 0) + 1; }
+    return m;
+  }, [reqs]);
+  const jaChamaram = useMemo(() => new Set(reqs.map((r) => r.client_id).filter(Boolean)).size, [reqs]);
+  const perDay = useMemo(() => seriesByDay(novos.map((r) => r.created_at), 0), [novos]);
+  const byCity = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const r of profs) { const c = (r.address_city || "").trim() || "Sem cidade"; t[c] = (t[c] || 0) + 1; }
+    return Object.entries(t).map(([name, qtd]) => ({ name, qtd })).sort((a, b) => b.qtd - a.qtd).slice(0, 10);
+  }, [profs]);
+  const topClientes = useMemo(() => {
+    const nameMap = new Map(profs.map((p) => [p.user_id, p.full_name]));
+    return Object.entries(reqCount).map(([id, qtd]) => ({ name: nameMap.get(id) || "—", qtd, reviewed: reviewers.has(id) }))
+      .sort((a, b) => b.qtd - a.qtd).slice(0, 15);
+  }, [reqCount, profs, reviewers]);
+  if (loading) return <RSpinner />;
+  return (
+    <div className="space-y-4">
+      <PeriodBar value={period} onChange={setPeriod} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <RKpi icon={<Users className="w-3.5 h-3.5" />} label="Clientes (total)" value={String(profs.length)} />
+        <RKpi icon={<Users className="w-3.5 h-3.5" />} label="Novos no período" value={String(novos.length)} />
+        <RKpi icon={<Users className="w-3.5 h-3.5" />} label="Ativos no período" value={String(ativos.length)} />
+        <RKpi icon={<Phone className="w-3.5 h-3.5" />} label="Já fizeram chamada" value={String(jaChamaram)} />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <RKpi icon={<Phone className="w-3.5 h-3.5" />} label="% que já chamou" value={profs.length ? `${Math.round((jaChamaram / profs.length) * 100)}%` : "—"} />
+        <RKpi icon={<Star className="w-3.5 h-3.5" />} label="Clientes que avaliaram" value={String(reviewers.size)} />
+        <RKpi icon={<Users className="w-3.5 h-3.5" />} label="Cidades" value={String(byCity.filter((c) => c.name !== "Sem cidade").length)} />
+      </div>
+      <RCard title="Novos clientes por dia">
+        {perDay.length ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={perDay}><defs><linearGradient id="cli" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={RCOLORS[3]} stopOpacity={0.6} /><stop offset="95%" stopColor={RCOLORS[3]} stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Area type="monotone" dataKey="qtd" name="Novos clientes" stroke={RCOLORS[3]} fill="url(#cli)" /></AreaChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem novos clientes no período.</p>}
+      </RCard>
+      <RCard title="Clientes por cidade (top 10)">
+        {byCity.length ? (
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={byCity} layout="vertical" margin={{ left: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="qtd" name="Clientes" fill={RCOLORS[3]} radius={[0, 6, 6, 0]} /></BarChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem dados de cidade.</p>}
+      </RCard>
+      <RCard title="Clientes que mais chamam (top 15)">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50"><th className="text-left p-2 font-medium text-muted-foreground">#</th><th className="text-left p-2 font-medium text-muted-foreground">Cliente</th><th className="text-left p-2 font-medium text-muted-foreground">Chamadas</th><th className="text-left p-2 font-medium text-muted-foreground">Avaliou?</th></tr></thead>
+            <tbody>
+              {topClientes.map((c, i) => (
+                <tr key={i} className="border-b last:border-0"><td className="p-2 text-muted-foreground">{i + 1}</td><td className="p-2 text-foreground">{c.name}</td><td className="p-2 font-bold text-primary">{c.qtd}</td><td className="p-2">{c.reviewed ? "⭐ Sim" : "—"}</td></tr>
+              ))}
+              {!topClientes.length && <tr><td colSpan={4} className="text-center py-6 text-muted-foreground">Sem chamadas ainda.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </RCard>
     </div>
   );
@@ -1065,6 +1160,14 @@ const AdminReports = () => {
             <TrendingUp className="w-3.5 h-3.5 mr-1" />
             Crescimento
           </TabsTrigger>
+          <TabsTrigger value="clients" className="shrink-0">
+            <Users className="w-3.5 h-3.5 mr-1" />
+            Clientes
+          </TabsTrigger>
+          <TabsTrigger value="professionals" className="shrink-0">
+            <Users className="w-3.5 h-3.5 mr-1" />
+            Profissionais
+          </TabsTrigger>
           <TabsTrigger value="services" className="shrink-0">
             <Phone className="w-3.5 h-3.5 mr-1" />
             Serviços
@@ -1079,15 +1182,11 @@ const AdminReports = () => {
           </TabsTrigger>
           <TabsTrigger value="views" className="shrink-0">
             <Eye className="w-3.5 h-3.5 mr-1" />
-            Resumo mercado
+            Categorias
           </TabsTrigger>
           <TabsTrigger value="clicks" className="shrink-0">
             <MousePointerClick className="w-3.5 h-3.5 mr-1" />
-            Cliques
-          </TabsTrigger>
-          <TabsTrigger value="professionals" className="shrink-0">
-            <Users className="w-3.5 h-3.5 mr-1" />
-            Profissionais
+            Patrocinadores
           </TabsTrigger>
           <TabsTrigger value="devices" className="shrink-0">
             <Smartphone className="w-3.5 h-3.5 mr-1" />
@@ -1096,21 +1195,14 @@ const AdminReports = () => {
         </TabsList>
 
         <TabsContent value="growth"><GrowthTab /></TabsContent>
+        <TabsContent value="clients"><ClientsTab /></TabsContent>
+        <TabsContent value="professionals"><ProfessionalsTab /></TabsContent>
         <TabsContent value="services"><ServicesTab /></TabsContent>
         <TabsContent value="subs"><SubscriptionsTab /></TabsContent>
         <TabsContent value="reviews"><ReviewsTab /></TabsContent>
-        <TabsContent value="views">
-          <ViewsTab />
-        </TabsContent>
-        <TabsContent value="clicks">
-          <ClicksTab />
-        </TabsContent>
-        <TabsContent value="professionals">
-          <ProfessionalsTab />
-        </TabsContent>
-        <TabsContent value="devices">
-          <DevicesTab />
-        </TabsContent>
+        <TabsContent value="views"><ViewsTab /></TabsContent>
+        <TabsContent value="clicks"><ClicksTab /></TabsContent>
+        <TabsContent value="devices"><DevicesTab /></TabsContent>
       </Tabs>
     </AdminLayout>
   );

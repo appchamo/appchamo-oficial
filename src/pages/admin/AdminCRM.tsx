@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, Fragment, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Users, MessageCircle, Mail, Search, Clock, MousePointerClick, Activity, Bug, Loader2, ChevronRight, Check, CheckCheck, ExternalLink, Inbox, Send, FileText, Trash2, AlertOctagon } from "lucide-react";
 
@@ -28,6 +28,15 @@ const fmtDur = (sec: number) => {
 const fmtDateTime = (s: string) => new Date(s).toLocaleString("pt-BR");
 const fmtDate = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 const fmtTime = (s: string) => new Date(s).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+const waDayKey = (s: string) => new Date(s).toLocaleDateString("pt-BR");
+const waDayLabel = (s: string) => {
+  const k = waDayKey(s);
+  const hoje = new Date();
+  const ontem = new Date(); ontem.setDate(hoje.getDate() - 1);
+  if (k === waDayKey(hoje.toISOString())) return "Hoje";
+  if (k === waDayKey(ontem.toISOString())) return "Ontem";
+  return new Date(s).toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+};
 
 interface WaMsg { id: number; to_phone: string | null; template: string | null; body: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null; user_id?: string | null; }
 interface WaInb { id: number; from_phone: string | null; type: string | null; body: string | null; received_at: string; }
@@ -430,8 +439,19 @@ export default function AdminCRM() {
                   );
                 })()}
                 <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-muted/30">
-                  {activeConv.msgs.map((m, idx) => (
-                    <div key={idx} className={`flex ${m.dir === "out" ? "justify-end" : "justify-start"}`}>
+                  {activeConv.msgs.map((m, idx) => {
+                    const prev = idx > 0 ? activeConv.msgs[idx - 1] : null;
+                    const showDay = !prev || waDayKey(m.time) !== waDayKey(prev.time);
+                    return (
+                    <Fragment key={idx}>
+                      {showDay && (
+                        <div className="flex justify-center my-2">
+                          <span className="text-[11px] font-medium text-muted-foreground bg-card border border-border rounded-full px-3 py-1 shadow-sm">
+                            {waDayLabel(m.time)}
+                          </span>
+                        </div>
+                      )}
+                      <div className={`flex ${m.dir === "out" ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm ${m.dir === "out" ? "bg-emerald-600 text-white rounded-br-sm" : "bg-card text-foreground rounded-bl-sm border border-border"}`}>
                         <p className="whitespace-pre-wrap break-words">{m.text}</p>
                         <div className={`flex items-center gap-1 justify-end mt-1 text-[10px] ${m.dir === "out" ? "text-white/80" : "text-muted-foreground"}`}>
@@ -450,7 +470,9 @@ export default function AdminCRM() {
                         ))}
                       </div>
                     </div>
-                  ))}
+                    </Fragment>
+                    );
+                  })}
                 </div>
                 <div className="px-4 py-2.5 border-t border-border text-center text-[11px] text-muted-foreground">
                   Somente leitura · ✓ enviada · ✓✓ entregue · <span className="text-sky-500">✓✓</span> lida · respostas chegam pelo webhook

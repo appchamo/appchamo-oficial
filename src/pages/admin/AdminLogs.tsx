@@ -208,7 +208,7 @@ const AdminLogs = () => {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>

@@ -16,7 +16,6 @@ import { useAdminAuth } from "@/hooks/useAdminAuth";
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
   { icon: Users, label: "Usuários", path: "/admin/users" },
-  { icon: PieChart, label: "Análise", path: "/admin/analise" },
   { icon: Contact, label: "CRM", path: "/admin/crm" },
   { icon: BadgeCheck, label: "Profissionais", path: "/admin/pros" },
   { icon: Megaphone, label: "Patrocinadores", path: "/admin/sponsors" },

@@ -1,5 +1,6 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Eye, MousePointerClick, Users, ArrowDown, ArrowUp, Smartphone, TrendingUp, Phone, CreditCard, Star, Search as SearchIcon } from "lucide-react";
+import AdminAnalise from "./AdminAnalise";
+import { Eye, MousePointerClick, Users, ArrowDown, ArrowUp, Smartphone, TrendingUp, Phone, CreditCard, Star, Search as SearchIcon, UserPlus } from "lucide-react";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1239,6 +1240,10 @@ const AdminReports = () => {
             <TrendingUp className="w-3.5 h-3.5 mr-1" />
             Crescimento
           </TabsTrigger>
+          <TabsTrigger value="signup" className="shrink-0">
+            <UserPlus className="w-3.5 h-3.5 mr-1" />
+            Cadastros & Jornada
+          </TabsTrigger>
           <TabsTrigger value="clients" className="shrink-0">
             <Users className="w-3.5 h-3.5 mr-1" />
             Clientes
@@ -1278,6 +1283,7 @@ const AdminReports = () => {
         </TabsList>
 
         <TabsContent value="growth"><GrowthTab /></TabsContent>
+        <TabsContent value="signup"><AdminAnalise embedded /></TabsContent>
         <TabsContent value="clients"><ClientsTab /></TabsContent>
         <TabsContent value="professionals"><ProfessionalsTab /></TabsContent>
         <TabsContent value="search"><SearchTermsTab /></TabsContent>

@@ -74,7 +74,7 @@ const PERIODS = [
   { k: "all", label: "Tudo", days: 0 },
 ] as const;
 
-export default function AdminAnalise() {
+export default function AdminAnalise({ embedded = false }: { embedded?: boolean }) {
   const [tab, setTab] = useState<Tab>("geral");
   const [periodK, setPeriodK] = useState<string>("30");
   const [loading, setLoading] = useState(true);
@@ -305,8 +305,8 @@ export default function AdminAnalise() {
   );
   const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
 
-  return (
-    <AdminLayout title="Análise">
+  const inner = (
+    <>
       <p className="text-sm text-muted-foreground mb-4">Usabilidade do app e funil de cadastro.</p>
 
       <div className="flex gap-2 mb-5">
@@ -603,6 +603,7 @@ export default function AdminAnalise() {
           </div>
         </div>
       )}
-    </AdminLayout>
+    </>
   );
+  return embedded ? inner : <AdminLayout title="Análise">{inner}</AdminLayout>;
 }

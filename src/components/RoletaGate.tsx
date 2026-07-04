@@ -38,6 +38,19 @@ function signupInProgress(): boolean {
   try { return localStorage.getItem("signup_in_progress") === "true"; } catch { return false; }
 }
 
+/**
+ * Há outro modal (Radix Dialog/AlertDialog) aberto? Se sim, a roleta NÃO pode
+ * abrir por cima: o Radix trava os cliques fora do seu conteúdo, então a roleta
+ * ficaria visível mas sem clique (bug dos "2 modais empilhados").
+ */
+function anyModalOpen(): boolean {
+  try {
+    return !!document.querySelector(
+      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+    );
+  } catch { return false; }
+}
+
 export default function RoletaGate() {
   const { user, profile, loading } = useAuth();
   const location = useLocation();
@@ -66,6 +79,8 @@ export default function RoletaGate() {
 
   const check = useCallback(async () => {
     if (!eligible || open || busyRef.current || isDismissed()) return;
+    // Não abre por cima de outro modal (termos, etc.). Re-tenta em 4s até liberar.
+    if (anyModalOpen()) { setTimeout(() => { void check(); }, 4000); return; }
     busyRef.current = true;
     try {
       const { data, error } = await supabase.rpc("roleta_pending" as any);

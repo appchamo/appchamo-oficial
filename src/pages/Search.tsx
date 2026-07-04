@@ -415,6 +415,28 @@ const Search = () => {
     return () => clearTimeout(t);
   }, [search, filteredAndSorted]);
 
+  // Log de termos de pesquisa (para relat\u00f3rio de demanda no admin).
+  // Debounce maior (1.2s) + m\u00ednimo de 3 letras + dedupe na sess\u00e3o pra n\u00e3o gravar cada prefixo.
+  const loggedTermsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const raw = search.trim();
+      const qn = raw
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase().replace(/\s+/g, " ").trim();
+      if (qn.length < 3) return;
+      if (loggedTermsRef.current.has(qn)) return;
+      loggedTermsRef.current.add(qn);
+      supabase.from("search_events").insert({
+        term: raw.slice(0, 120),
+        term_norm: qn.slice(0, 120),
+        results_count: filteredAndSorted.length,
+        city: userCity,
+      }).then(() => {}, () => {});
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [search, filteredAndSorted, userCity]);
+
   const stateLabel = filterState ? statesList.find((s) => s.sigla === filterState)?.nome + " (" + filterState + ")" : "Selecione o Estado";
 
   return (

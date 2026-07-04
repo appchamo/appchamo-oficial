@@ -1,5 +1,5 @@
 import AdminLayout from "@/components/AdminLayout";
-import { Eye, MousePointerClick, Users, ArrowDown, ArrowUp, Smartphone, TrendingUp, Phone, CreditCard, Star } from "lucide-react";
+import { Eye, MousePointerClick, Users, ArrowDown, ArrowUp, Smartphone, TrendingUp, Phone, CreditCard, Star, Search as SearchIcon } from "lucide-react";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -353,6 +353,85 @@ const ClientsTab = () => {
                 <tr key={i} className="border-b last:border-0"><td className="p-2 text-muted-foreground">{i + 1}</td><td className="p-2 text-foreground">{c.name}</td><td className="p-2 font-bold text-primary">{c.qtd}</td><td className="p-2">{c.reviewed ? "⭐ Sim" : "—"}</td></tr>
               ))}
               {!topClientes.length && <tr><td colSpan={4} className="text-center py-6 text-muted-foreground">Sem chamadas ainda.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </RCard>
+    </div>
+  );
+};
+
+// ─── Buscas (termos de pesquisa) ───
+const SearchTermsTab = () => {
+  const [rows, setRows] = useState<{ term: string | null; term_norm: string | null; results_count: number | null; created_at: string | null }[]>([]);
+  const [period, setPeriod] = useState("30");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("search_events").select("term, term_norm, results_count, created_at").order("created_at", { ascending: false }).limit(50000);
+      setRows((data as any) || []); setLoading(false);
+    })();
+  }, []);
+  const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const inPeriod = useMemo(() => rows.filter((r) => r.created_at && (!cutoff || new Date(r.created_at).getTime() >= cutoff)), [rows, cutoff]);
+  const agg = useMemo(() => {
+    const m: Record<string, { term: string; count: number; zero: number; totalResults: number }> = {};
+    for (const r of inPeriod) {
+      const k = (r.term_norm || r.term || "").trim();
+      if (!k) continue;
+      if (!m[k]) m[k] = { term: r.term || k, count: 0, zero: 0, totalResults: 0 };
+      m[k].count++;
+      m[k].totalResults += Number(r.results_count ?? 0);
+      if (Number(r.results_count ?? 0) === 0) m[k].zero++;
+    }
+    return Object.values(m).sort((a, b) => b.count - a.count);
+  }, [inPeriod]);
+  const semResultado = useMemo(() => agg.filter((t) => t.totalResults === 0).sort((a, b) => b.count - a.count).slice(0, 20), [agg]);
+  const perDay = useMemo(() => seriesByDay(inPeriod.map((r) => r.created_at), 0), [inPeriod]);
+  if (loading) return <RSpinner />;
+  return (
+    <div className="space-y-4">
+      <PeriodBar value={period} onChange={setPeriod} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <RKpi icon={<SearchIcon className="w-3.5 h-3.5" />} label="Buscas (no período)" value={String(inPeriod.length)} />
+        <RKpi icon={<SearchIcon className="w-3.5 h-3.5" />} label="Termos únicos" value={String(agg.length)} />
+        <RKpi icon={<SearchIcon className="w-3.5 h-3.5" />} label="Termos sem resultado" value={String(agg.filter((t) => t.totalResults === 0).length)} />
+      </div>
+      {!rows.length && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+          Ainda sem buscas registradas. O log começa a coletar assim que a nova versão do app estiver publicada e as pessoas usarem a busca.
+        </div>
+      )}
+      <RCard title="Buscas por dia">
+        {perDay.length ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={perDay}><defs><linearGradient id="srch" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={RCOLORS[4]} stopOpacity={0.6} /><stop offset="95%" stopColor={RCOLORS[4]} stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Area type="monotone" dataKey="qtd" name="Buscas" stroke={RCOLORS[4]} fill="url(#srch)" /></AreaChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm text-muted-foreground py-10 text-center">Sem buscas no período.</p>}
+      </RCard>
+      <RCard title="Termos mais buscados (top 30)" sub="Quantas vezes cada termo foi pesquisado.">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50"><th className="text-left p-2 font-medium text-muted-foreground">#</th><th className="text-left p-2 font-medium text-muted-foreground">Termo</th><th className="text-left p-2 font-medium text-muted-foreground">Buscas</th><th className="text-left p-2 font-medium text-muted-foreground">Média result.</th></tr></thead>
+            <tbody>
+              {agg.slice(0, 30).map((t, i) => (
+                <tr key={i} className="border-b last:border-0"><td className="p-2 text-muted-foreground">{i + 1}</td><td className="p-2 text-foreground">{t.term}</td><td className="p-2 font-bold text-primary">{t.count}</td><td className="p-2 text-muted-foreground">{(t.totalResults / t.count).toFixed(1)}</td></tr>
+              ))}
+              {!agg.length && <tr><td colSpan={4} className="text-center py-6 text-muted-foreground">Sem dados ainda.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </RCard>
+      <RCard title="🔴 Buscas sem nenhum resultado (oportunidades)" sub="Gente procurou e não achou ninguém. Cada termo aqui é uma categoria/profissional que falta na plataforma.">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50"><th className="text-left p-2 font-medium text-muted-foreground">#</th><th className="text-left p-2 font-medium text-muted-foreground">Termo</th><th className="text-left p-2 font-medium text-muted-foreground">Buscas sem achar</th></tr></thead>
+            <tbody>
+              {semResultado.map((t, i) => (
+                <tr key={i} className="border-b last:border-0"><td className="p-2 text-muted-foreground">{i + 1}</td><td className="p-2 text-foreground">{t.term}</td><td className="p-2 font-bold text-red-600">{t.count}</td></tr>
+              ))}
+              {!semResultado.length && <tr><td colSpan={3} className="text-center py-6 text-muted-foreground">Nenhuma busca sem resultado. 🎉</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1168,6 +1247,10 @@ const AdminReports = () => {
             <Users className="w-3.5 h-3.5 mr-1" />
             Profissionais
           </TabsTrigger>
+          <TabsTrigger value="search" className="shrink-0">
+            <SearchIcon className="w-3.5 h-3.5 mr-1" />
+            Buscas
+          </TabsTrigger>
           <TabsTrigger value="services" className="shrink-0">
             <Phone className="w-3.5 h-3.5 mr-1" />
             Serviços
@@ -1197,6 +1280,7 @@ const AdminReports = () => {
         <TabsContent value="growth"><GrowthTab /></TabsContent>
         <TabsContent value="clients"><ClientsTab /></TabsContent>
         <TabsContent value="professionals"><ProfessionalsTab /></TabsContent>
+        <TabsContent value="search"><SearchTermsTab /></TabsContent>
         <TabsContent value="services"><ServicesTab /></TabsContent>
         <TabsContent value="subs"><SubscriptionsTab /></TabsContent>
         <TabsContent value="reviews"><ReviewsTab /></TabsContent>

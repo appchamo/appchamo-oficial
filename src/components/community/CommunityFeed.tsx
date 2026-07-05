@@ -25,6 +25,8 @@ import {
   Sparkles,
   Megaphone,
   Info,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -362,6 +364,30 @@ export default function CommunityFeed({
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { getSection } = useHomeLayout();
+
+  // Sino: preferência de receber notificações de novas publicações da comunidade.
+  const [commNotif, setCommNotif] = useState<boolean | null>(null);
+  const [commNotifSaving, setCommNotifSaving] = useState(false);
+  useEffect(() => {
+    if (!user?.id) { setCommNotif(null); return; }
+    let alive = true;
+    (async () => {
+      const { data } = await supabase.from("profiles").select("community_notifications_enabled").eq("user_id", user.id).maybeSingle();
+      if (alive) setCommNotif((data as any)?.community_notifications_enabled !== false);
+    })();
+    return () => { alive = false; };
+  }, [user?.id]);
+  const toggleCommNotif = async () => {
+    if (!user?.id || commNotif === null || commNotifSaving) return;
+    const next = !commNotif;
+    setCommNotifSaving(true);
+    setCommNotif(next); // otimista
+    const { error } = await supabase.from("profiles").update({ community_notifications_enabled: next }).eq("user_id", user.id);
+    if (error) { setCommNotif(!next); toast({ title: "Não consegui salvar", description: "Tente de novo.", variant: "destructive" }); }
+    else toast({ title: next ? "Notificações da comunidade ativadas" : "Notificações da comunidade desativadas", description: next ? "Você será avisado de novas publicações." : "Você não recebe mais avisos de novas publicações." });
+    setCommNotifSaving(false);
+  };
+
   const [loading, setLoading] = useState(true);
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [authors, setAuthors] = useState<Record<string, AuthorRow>>({});
@@ -1884,6 +1910,25 @@ export default function CommunityFeed({
           "min-h-[60vh] rounded-2xl lg:rounded-3xl lg:shadow-xl lg:ring-1 lg:ring-black/[0.06] dark:lg:ring-white/10 lg:overflow-hidden",
       )}
     >
+      {user && commNotif !== null && !isSinglePostMode && (
+        <div className="flex justify-end mb-3">
+          <button
+            type="button"
+            onClick={toggleCommNotif}
+            disabled={commNotifSaving}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors disabled:opacity-60",
+              commNotif ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground",
+            )}
+            aria-label={commNotif ? "Desativar notificações da comunidade" : "Ativar notificações da comunidade"}
+            title={commNotif ? "Notificações da comunidade ativadas — tocar para desativar" : "Notificações da comunidade desativadas — tocar para ativar"}
+          >
+            {commNotif ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+            {commNotif ? "Notificações ativas" : "Notificações desativadas"}
+          </button>
+        </div>
+      )}
+
       {!embedded && !isSinglePostMode && (
         <div className="flex items-center gap-3 mb-6">
           <Link

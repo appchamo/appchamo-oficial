@@ -945,17 +945,8 @@ const MessageThread = () => {
             sender_id: params.userId,
             content: confirmContent,
           });
-          if (params.appCouponId) {
-            await supabase.from("coupons").update({ used: true } as any).eq("id", params.appCouponId);
-          }
-          if (params.proCouponId) {
-            await (supabase.rpc as unknown as (
-              fn: string,
-              args: Record<string, unknown>,
-            ) => Promise<{ error: { message: string } | null }>)("increment_pro_coupon_usage", {
-              p_coupon_id: params.proCouponId,
-            });
-          }
+          // Consumo de cupom agora é feito no servidor (gatilho consume_coupons_on_payment,
+          // atômico e idempotente quando a transação vira 'completed'). Não consome aqui.
           await sendNotification(params.userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${params.finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
           if (params.chatProUserId) await sendNotification(params.chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNet.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`, null, profile?.avatar_url ?? null);
           await awardPostPaymentCoupon(parseFloat(params.paymentDataAmount));
@@ -2423,18 +2414,7 @@ const MessageThread = () => {
                 content: confirmContent
               });
 
-              if (selectedCouponId) {
-                await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
-              }
-              if (proCoupon?.id) {
-                await (supabase.rpc as unknown as (
-                  fn: string,
-                  args: Record<string, unknown>,
-                ) => Promise<{ error: { message: string } | null }>)("increment_pro_coupon_usage", {
-                  p_coupon_id: proCoupon.id,
-                });
-              }
-
+              // Consumo de cupom feito no servidor (gatilho). Não consome aqui.
               await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via PIX de R$ ${finalAmount.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
               if (chatProUserId) await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetPoll.toFixed(2).replace(".", ",")} via PIX (líquido após taxas).`, null, profile?.avatar_url ?? null);
 
@@ -2475,18 +2455,7 @@ const MessageThread = () => {
         content: confirmContent
       });
 
-      if (selectedCouponId) {
-        await supabase.from("coupons").update({ used: true } as any).eq("id", selectedCouponId);
-      }
-      if (proCoupon?.id) {
-        await (supabase.rpc as unknown as (
-          fn: string,
-          args: Record<string, unknown>,
-        ) => Promise<{ error: { message: string } | null }>)("increment_pro_coupon_usage", {
-          p_coupon_id: proCoupon.id,
-        });
-      }
-
+      // Consumo de cupom feito no servidor (gatilho). Não consome aqui.
       await sendNotification(userId, "✅ Pagamento Aprovado", `Seu pagamento via Cartão de R$ ${chargedAmountCard.toFixed(2).replace(".", ",")} foi confirmado com sucesso.`, null, otherParty.avatar_url ?? null);
       await sendNotification(chatProUserId, "💰 Pagamento Recebido!", `Você vai receber R$ ${proNetCard.toFixed(2).replace(".", ",")} via Cartão (líquido após taxas).`, null, profile?.avatar_url ?? null);
 

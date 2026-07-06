@@ -155,6 +155,8 @@ const MessageThread = () => {
   const [chatProUserId, setChatProUserId] = useState<string | null>(null);
   /** PK do profissional na tabela `professionals` — usado para buscar/aplicar cupons do profissional. */
   const [chatProId, setChatProId] = useState<string | null>(null);
+  /** Categoria do profissional do chat — usado para validar cupons travados por categoria. */
+  const [chatProCategoryId, setChatProCategoryId] = useState<string | null>(null);
   /** Slug ou UUID do profissional — rota /professional/:key (cliente a ver o pro). */
   const [peerProfileNavKey, setPeerProfileNavKey] = useState<string | null>(null);
   const [peerClientPreviewOpen, setPeerClientPreviewOpen] = useState(false);
@@ -205,6 +207,12 @@ const MessageThread = () => {
   });
   const [billingCepLoading, setBillingCepLoading] = useState(false);
   const [savingBilling, setSavingBilling] = useState(false);
+  // Quando os dados já estão completos, mostra resumo; usuário pode expandir para editar.
+  const [editBilling, setEditBilling] = useState(false);
+  const isBillingComplete = (f: { cpf: string; cep: string; street: string; number: string; city: string; state: string }) =>
+    f.cpf.replace(/\D/g, "").length === 11 &&
+    f.cep.replace(/\D/g, "").length >= 8 &&
+    !!f.street.trim() && !!f.number.trim() && !!f.city.trim() && f.state.trim().length === 2;
   const [installments, setInstallments] = useState("1");
   const [processingPayment, setProcessingPayment] = useState(false);
   const [clientPassFee, setClientPassFee] = useState(false); 
@@ -559,7 +567,7 @@ const MessageThread = () => {
         const isClient = req.client_id === user.id;
 
         // ⚡ Paraleliza tudo que depende de req + user
-        const proQuery = supabase.from("professionals").select("id, user_id, availability_status, slug").eq("id", req.professional_id).maybeSingle();
+        const proQuery = supabase.from("professionals").select("id, user_id, availability_status, slug, category_id").eq("id", req.professional_id).maybeSingle();
         const clientProQuery = isClient
           ? Promise.resolve({ data: null as { id: string } | null })
           : supabase.from("professionals").select("id").eq("user_id", req.client_id).maybeSingle();
@@ -612,6 +620,7 @@ const MessageThread = () => {
 
         if (pro) {
           setChatProId((pro as { id: string }).id);
+          setChatProCategoryId((pro as any).category_id ?? null);
           if (isClient) {
             setProAvailabilityStatus((pro as any).availability_status || "available");
             const slug = (pro as { slug?: string | null }).slug;
@@ -1847,6 +1856,7 @@ const MessageThread = () => {
     }
 
     setBillingDataStep(true);
+    setEditBilling(false);
     setBillingForm(initialBillingForm);
     setPaymentOpen(true);
   };
@@ -1958,8 +1968,15 @@ const MessageThread = () => {
     return Math.max(0, parseFloat(paymentData.amount) - proCouponDiscountAmount);
   }, [paymentData, proCouponDiscountAmount]);
 
-  // Cupom do app se aplica a esse valor de serviço? (respeita faixa mín/máx)
+  // Cupom travado por categoria? Só vale se a categoria do pro do chat bater.
+  const couponFitsCategory = (c: any) => {
+    if (!c?.category_id) return true; // sem trava = qualquer categoria
+    return chatProCategoryId != null && c.category_id === chatProCategoryId;
+  };
+
+  // Cupom do app se aplica a esse valor de serviço? (respeita faixa mín/máx + categoria)
   const couponFitsService = (c: any, subtotal: number) => {
+    if (!couponFitsCategory(c)) return false;
     if (c?.min_service_value != null && subtotal < Number(c.min_service_value)) return false;
     if (c?.max_service_value != null && subtotal > Number(c.max_service_value)) return false;
     return true;
@@ -3814,11 +3831,14 @@ const MessageThread = () => {
           {billingStep === "app_form" &&
           <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Valor Base (R$) *</label>
-                <input
-                value={billingAmount} onChange={(e) => setBillingAmount(e.target.value)}
-                type="number" step="0.01" placeholder="0,00"
-                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Valor do serviço *</label>
+                <div className="flex items-center gap-2 border-2 rounded-2xl px-4 py-3 bg-background focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition">
+                  <span className="text-2xl font-bold text-muted-foreground">R$</span>
+                  <input
+                    value={billingAmount} onChange={(e) => setBillingAmount(e.target.value)}
+                    type="number" step="0.01" inputMode="decimal" placeholder="0,00"
+                    className="flex-1 min-w-0 text-3xl font-bold bg-transparent text-foreground outline-none placeholder:text-muted-foreground/40" />
+                </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Descrição</label>
@@ -3828,33 +3848,33 @@ const MessageThread = () => {
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
 
-              <div className="space-y-2 mt-2 pt-2 border-t">
-                <p className="text-xs font-medium text-muted-foreground">Quem pagará a taxa do sistema?</p>
+              <div className="space-y-2 mt-2 pt-3 border-t">
+                <p className="text-xs font-semibold text-muted-foreground">Quem paga a taxa do sistema?</p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setPassFeeToClient(false)}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all ${!passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    className={`flex-1 py-3 px-2 rounded-xl text-sm font-semibold border-2 transition-all ${!passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
                   >
-                    Sem Juros<br/><span className="text-[9px] font-normal">Eu assumo a taxa</span>
+                    Eu pago<br/><span className="text-[11px] font-normal opacity-80">sai do meu valor</span>
                   </button>
                   <button
                     onClick={() => setPassFeeToClient(true)}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all ${passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    className={`flex-1 py-3 px-2 rounded-xl text-sm font-semibold border-2 transition-all ${passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
                   >
-                    Com Juros<br/><span className="text-[9px] font-normal">Cliente paga a taxa</span>
+                    Cliente paga<br/><span className="text-[11px] font-normal opacity-80">soma no total dele</span>
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-2 mt-2 border-t pt-2">
-                <p className="text-xs font-medium text-muted-foreground">Forma de pagamento sugerida *</p>
+              <div className="space-y-2 mt-2 border-t pt-3">
+                <p className="text-xs font-semibold text-muted-foreground">Forma de pagamento sugerida *</p>
                 <button
                 onClick={() => {setBillingMethod("pix");setBillingInstallments("1");}}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${billingMethod === "pix" ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}>
                   <span className="text-lg">📱</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">PIX</p>
-                    <p className="text-[10px] text-muted-foreground">Pagamento instantâneo</p>
+                    <p className="text-[11px] text-muted-foreground">Pagamento instantâneo</p>
                   </div>
                 </button>
                 <button
@@ -3863,7 +3883,7 @@ const MessageThread = () => {
                   <span className="text-lg">💳</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">Cartão de crédito</p>
-                    <p className="text-[10px] text-muted-foreground">O cliente poderá escolher as parcelas</p>
+                    <p className="text-[11px] text-muted-foreground">O cliente poderá escolher as parcelas</p>
                   </div>
                 </button>
               </div>
@@ -4167,10 +4187,39 @@ const MessageThread = () => {
             <DialogTitle>
               {billingDataStep ? "Dados para pagamento" : cardStep ? "Dados do cartão" : "Resumo do Pagamento"}
             </DialogTitle>
+            <div className="flex items-center gap-1.5 pt-1">
+              <span className={`h-1.5 flex-1 rounded-full ${billingDataStep ? "bg-primary" : "bg-primary"}`} />
+              <span className={`h-1.5 flex-1 rounded-full ${billingDataStep ? "bg-muted" : "bg-primary"}`} />
+              <span className="text-[11px] text-muted-foreground font-medium ml-1">{billingDataStep ? "1 de 2" : "2 de 2"}</span>
+            </div>
           </DialogHeader>
 
+          {/* TELA 0a: dados já salvos → resumo compacto (menos atrito) */}
+          {paymentData && billingDataStep && isBillingComplete(billingForm) && !editBilling && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border bg-muted/40 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-foreground">Seus dados de pagamento</p>
+                  <button onClick={() => setEditBilling(true)} className="text-xs font-semibold text-primary hover:underline">Editar</button>
+                </div>
+                <div className="text-xs text-muted-foreground space-y-0.5">
+                  <p>CPF {formatCpf(billingForm.cpf)}</p>
+                  <p>{billingForm.street}, {billingForm.number}{billingForm.neighborhood ? ` · ${billingForm.neighborhood}` : ""}</p>
+                  <p>{billingForm.city}/{billingForm.state} · CEP {formatCep(billingForm.cep)}</p>
+                </div>
+              </div>
+              <button
+                onClick={handleSaveBillingAndContinue}
+                disabled={savingBilling}
+                className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {savingBilling ? "Salvando..." : "Continuar para o pagamento"}
+              </button>
+            </div>
+          )}
+
           {/* TELA 0: CPF + ENDEREÇO OBRIGATÓRIOS (antes de PIX ou cartão) */}
-          {paymentData && billingDataStep && (
+          {paymentData && billingDataStep && (!isBillingComplete(billingForm) || editBilling) && (
             <div className="space-y-4">
               <p className="text-xs text-muted-foreground">Preencha CPF e endereço para continuar. O CEP preenche rua, bairro, cidade e estado.</p>
               <div>

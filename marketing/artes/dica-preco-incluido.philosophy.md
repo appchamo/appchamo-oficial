@@ -1,0 +1,11 @@
+# Sinal Quente (Warm Signal)
+
+Uma filosofia visual construída sobre uma única ideia: o chamado que encontra resposta. Cada composição nasce de um ponto de origem e se propaga em ondas concêntricas, como um sinal que sai de alguém e chega em outro alguém. O espaço não é neutro; é o meio por onde a mensagem viaja. A arte respira dentro de margens generosas, deixando o vazio trabalhar tanto quanto a forma. Tudo é medido, alinhado, repousado, como se cada milímetro tivesse sido revisado dezenas de vezes por uma mão experiente que já não tem pressa.
+
+A cor é calor humano. Um laranja único e decidido carrega toda a energia, enquanto um creme morno segura o fundo com serenidade. Não há paleta ruidosa: há uma temperatura. O laranja aparece com intenção, nunca por decoração, sempre marcando o ponto onde a atenção deve pousar. O contraste entre o creme quieto e o laranja vivo é a batida do coração da peça, calibrado com paciência de artesão até parecer inevitável.
+
+A forma dominante é o arco que se repete. Ondas que emanam de um foco, acumulando-se em ritmo regular, constroem sentido pela repetição paciente, do jeito que um diagrama científico registra um fenômeno observável. Essa cadência recompensa o olhar demorado: quanto mais se olha, mais a estrutura se revela ordenada. Círculos perfeitos, espessuras constantes, espaçamentos que seguem uma lógica silenciosa. Nada é aleatório; tudo foi posicionado com precisão obsessiva.
+
+A tipografia é gesto, não parágrafo. Uma palavra grande pode carregar todo o peso; uma etiqueta minúscula sussurra o contexto. A escala cria hierarquia sem esforço: o essencial cresce, o acessório recolhe. O texto se integra à arquitetura visual como se sempre tivesse pertencido ali, cortado e alinhado com o rigor de quem domina o ofício. Poucas palavras, cada uma indispensável, nenhuma sobrando.
+
+O resultado deve parecer trabalhado à exaustão, o produto de horas de refinamento por alguém no topo da profissão. Cada alinhamento é fruto de incontáveis ajustes; cada respiro entre elementos foi conquistado, não deixado ao acaso. A peça não grita que é sofisticada; ela simplesmente é, com a calma de quem não precisa provar nada. É essa a assinatura: calor humano organizado com precisão de mestre.

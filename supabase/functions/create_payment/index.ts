@@ -315,6 +315,33 @@ serve(async (req) => {
     const professionalId = serviceReq.professional_id;
 
     // ===============================
+    // Trava de cupom por categoria (servidor)
+    // ===============================
+    // Cupom do app travado (category_id) só vale para profissional daquela categoria.
+    // Também barra cupom de outro usuário, já usado ou expirado.
+    if (appCouponId) {
+      const { data: coup } = await supabase
+        .from("coupons")
+        .select("id, user_id, used, expires_at, category_id")
+        .eq("id", appCouponId)
+        .maybeSingle();
+      if (!coup || coup.user_id !== user.id || coup.used === true ||
+          (coup.expires_at && new Date(coup.expires_at) < new Date())) {
+        throw new Error("Cupom inválido ou expirado.");
+      }
+      if (coup.category_id) {
+        const { data: proCat } = await supabase
+          .from("professionals")
+          .select("category_id")
+          .eq("id", professionalId)
+          .maybeSingle();
+        if (!proCat || proCat.category_id !== coup.category_id) {
+          throw new Error("Este cupom só vale para serviços da categoria específica.");
+        }
+      }
+    }
+
+    // ===============================
     // Reutilizar pagamento pendente (apenas PIX)
     // ===============================
     if (!isCreditCard) {

@@ -156,7 +156,7 @@ export default function CouponsContent() {
             onClick={() => setSelected(null)}
           >
             <motion.div
-              className="relative bg-card w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 overflow-hidden"
+              className="relative bg-card w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col max-h-[88vh]"
               initial={{ y: 40, opacity: 0, scale: 0.98 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}
               exit={{ y: 40, opacity: 0 }}
@@ -166,11 +166,12 @@ export default function CouponsContent() {
               <button
                 onClick={() => setSelected(null)}
                 aria-label="Fechar"
-                className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+                className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground bg-card/70 backdrop-blur hover:bg-muted transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
 
+              <div className="overflow-y-auto px-6 pt-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
               <div className="flex flex-col items-center text-center mb-5">
                 <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-3 ${
                   selected.coupon_type === "discount" ? "bg-gradient-to-br from-emerald-500 to-emerald-600" : "bg-gradient-to-br from-primary to-amber-500"
@@ -209,6 +210,7 @@ export default function CouponsContent() {
                   ? "Use este desconto na sua próxima compra dentro do app, antes de expirar."
                   : "Este bilhete concorre ao sorteio mensal do Chamô. Boa sorte! 🍀"}
               </p>
+              </div>
             </motion.div>
           </motion.div>
         )}

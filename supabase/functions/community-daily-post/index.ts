@@ -12,27 +12,34 @@ const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: 
 
 // Perfil oficial: Chamô Tecnologia (chamotecnologia@gmail.com)
 const CHAMO_AUTHOR_ID = "f0e03e07-fb41-4338-931a-ef7ac7ecc698";
-const MODELS = ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"];
+const MODELS = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-6"];
 
 function buildPrompt(recentPosts: string[]): string {
   const evitar = recentPosts.length
-    ? `\n\nNÃO repita nem pareça com estes posts recentes:\n- ${recentPosts.map((p) => p.slice(0, 120)).join("\n- ")}`
+    ? `\n\nNão repita nem pareça com estes posts recentes:\n- ${recentPosts.map((p) => p.slice(0, 120)).join("\n- ")}`
     : "";
-  return `Você escreve UM post curto para o feed da Comunidade do app "Chamô", publicando como o perfil oficial "Chamô Tecnologia".
+  return `Você escreve UM post curto e MUITO SIMPLES pro feed da Comunidade do app "Chamô", como o perfil oficial "Chamô Tecnologia".
 
-Sobre o Chamô: app que conecta clientes a profissionais de serviços locais (eletricista, encanador, diarista, pintor, montador, técnico, designer, jardineiro, etc.) em Patrocínio-MG e região. A Comunidade é um feed onde os PROFISSIONAIS e empresas interagem — uma rede dos prestadores de serviço.
+Sobre o Chamô: app que liga o cliente ao profissional de serviço da cidade (eletricista, encanador, diarista, pintor, montador, jardineiro, etc.) em Patrocínio-MG e região. Na Comunidade quem lê são os profissionais, gente simples que trabalha com as mãos.
 
-Escreva UMA dica, ideia ou novidade do dia. Escolha um destes ângulos (varie a cada dia):
-- Dica de negócio pro profissional: atendimento, captar mais clientes, precificar, pós-venda, reputação, foto de perfil, responder rápido.
-- Dica prática do ofício ou de organização do trabalho.
-- Como usar melhor o Chamô pra crescer (destaque, avaliações, responder chamadas rápido).
-- Uma novidade, motivação ou reflexão curta que engaje a comunidade.
+Tem que ser uma DICA CONCRETA e útil, que a pessoa aprende algo prático de verdade. Escolha um tema simples do dia a dia do profissional: conseguir mais clientes, atender bem, foto de perfil, responder rápido, combinar preço, organizar o trabalho, fidelizar cliente. Varie o tema todo dia.
 
-Regras:
-- Português do Brasil, tom humano, próximo e inspirador — NADA de corporativês nem robótico.
-- Entre 250 e 600 caracteres. Pode usar 1 a 3 emojis com bom senso e quebras de linha.
-- Pode terminar com uma pergunta pra estimular comentários.
-- Nada de promessa falsa, nada de link externo, nada de pedir dados.${evitar}
+PROIBIDO (isso deixa com cara de robô, NÃO faça):
+- Mensagem motivacional genérica tipo "bom dia, excelente segunda-feira, um dia de conquistas".
+- Frases de efeito vazias tipo "acreditamos que o sucesso acontece quando pessoas se conectam", "juntos vamos mais longe".
+- Travessão (— ou –). NUNCA use. Use vírgula ou ponto.
+- Palavra difícil ou de escritório: "otimize", "estratégia", "engajamento", "diferencial", "propósito", "excelência".
+- Tom de coach ou de LinkedIn. Sem "TODA diferença", sem "não é X, é Y".
+
+COMO ESCREVER:
+- Fale como um amigo falando, simples e direto, do jeito que a gente fala na rua.
+- Comece já pela dica, sem enrolação. Uma ideia só, clara na primeira lida.
+- Frases curtas. No máximo 1 emoji. Entre 200 e 420 caracteres (curto!). Pode terminar com uma pergunta simples.
+- Nada de promessa falsa, link externo ou pedir dados.
+
+Exemplos do TOM e do TAMANHO certo (não copie o conteúdo, faça outro tema):
+1) "Cliente gosta de resposta rápida. Se você demora, ele já chama outro. Deixa as notificações do app ligadas e responde assim que der. Já perdeu serviço por demorar?"
+2) "Uma foto sua trabalhando vale mais que mil palavras. Tira uma no próximo serviço e põe no perfil. Cliente confia mais em quem ele vê fazendo. Você já tem foto no seu?"${evitar}
 
 Responda APENAS um JSON válido, sem texto extra:
 {"body":"texto do post aqui"}`;
@@ -82,7 +89,8 @@ Deno.serve(async (req) => {
   if (!bodyText) {
     return json({ ok: false, error: "ia_sem_resposta" }, 200);
   }
-  bodyText = bodyText.slice(0, 1500);
+  // Rede de segurança: remove qualquer travessão que tenha escapado (cara de IA).
+  bodyText = bodyText.replace(/\s*[—–]\s*/g, ", ").replace(/,\s*,/g, ",").slice(0, 600);
 
   const { data: inserted, error } = await admin
     .from("community_posts")

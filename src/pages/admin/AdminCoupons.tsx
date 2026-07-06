@@ -189,7 +189,11 @@ const AdminCoupons = () => {
   const [distributeType, setDistributeType] = useState<CouponType>("raffle");
   const [distributeForm, setDistributeForm] = useState({
     target: "individual" as DistributeTarget,
+    discount_kind: "percent" as "percent" | "amount",
     discount_percent: "5",
+    discount_amount: "50",
+    min_service_value: "",
+    max_service_value: "",
     expires_days: "30",
   });
   const [distributeUserSearch, setDistributeUserSearch] = useState("");
@@ -576,7 +580,11 @@ const AdminCoupons = () => {
       source: string;
       coupon_type: CouponType;
       used: boolean;
+      discount_kind?: string;
       discount_percent?: number;
+      discount_amount?: number;
+      min_service_value?: number | null;
+      max_service_value?: number | null;
       expires_at?: string;
     } = {
       user_id: userId,
@@ -585,7 +593,12 @@ const AdminCoupons = () => {
       used: false,
     };
     if (distributeType === "discount") {
-      couponData.discount_percent = parseFloat(distributeForm.discount_percent) || 5;
+      const isAmount = distributeForm.discount_kind === "amount";
+      couponData.discount_kind = isAmount ? "amount" : "percent";
+      couponData.discount_percent = isAmount ? 0 : (parseFloat(distributeForm.discount_percent) || 5);
+      couponData.discount_amount = isAmount ? (parseFloat(distributeForm.discount_amount) || 0) : 0;
+      couponData.min_service_value = distributeForm.min_service_value.trim() ? (parseFloat(distributeForm.min_service_value) || null) : null;
+      couponData.max_service_value = distributeForm.max_service_value.trim() ? (parseFloat(distributeForm.max_service_value) || null) : null;
       couponData.expires_at = new Date(
         Date.now() + (parseInt(distributeForm.expires_days) || 30) * 86400000,
       ).toISOString();
@@ -599,6 +612,8 @@ const AdminCoupons = () => {
     message:
       distributeType === "raffle"
         ? "Você recebeu um cupom para o sorteio mensal!"
+        : distributeForm.discount_kind === "amount"
+        ? `Você recebeu um cupom de R$ ${(parseFloat(distributeForm.discount_amount) || 0).toFixed(2).replace(".", ",")} de desconto!`
         : `Você recebeu um cupom de ${distributeForm.discount_percent}% de desconto!`,
     type: "coupon",
     read: false,
@@ -2408,25 +2423,87 @@ const AdminCoupons = () => {
             )}
 
             {distributeType === "discount" && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-3">
+                {/* Tipo do desconto: % ou R$ */}
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">% de desconto</label>
-                  <input
-                    type="number"
-                    value={distributeForm.discount_percent}
-                    onChange={(e) => setDistributeForm((f) => ({ ...f, discount_percent: e.target.value }))}
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                  />
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Tipo de desconto</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDistributeForm((f) => ({ ...f, discount_kind: "percent" }))}
+                      className={`py-2.5 rounded-xl text-sm font-semibold border transition-colors ${distributeForm.discount_kind === "percent" ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"}`}
+                    >
+                      % Percentual
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDistributeForm((f) => ({ ...f, discount_kind: "amount" }))}
+                      className={`py-2.5 rounded-xl text-sm font-semibold border transition-colors ${distributeForm.discount_kind === "amount" ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"}`}
+                    >
+                      R$ Valor fixo
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Validade (dias)</label>
-                  <input
-                    type="number"
-                    value={distributeForm.expires_days}
-                    onChange={(e) => setDistributeForm((f) => ({ ...f, expires_days: e.target.value }))}
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                  />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                      {distributeForm.discount_kind === "amount" ? "Valor do desconto (R$)" : "% de desconto"}
+                    </label>
+                    {distributeForm.discount_kind === "amount" ? (
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={distributeForm.discount_amount}
+                        onChange={(e) => setDistributeForm((f) => ({ ...f, discount_amount: e.target.value }))}
+                        placeholder="Ex: 500"
+                        className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    ) : (
+                      <input
+                        type="number" min="0" max="100"
+                        value={distributeForm.discount_percent}
+                        onChange={(e) => setDistributeForm((f) => ({ ...f, discount_percent: e.target.value }))}
+                        className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Validade (dias)</label>
+                    <input
+                      type="number"
+                      value={distributeForm.expires_days}
+                      onChange={(e) => setDistributeForm((f) => ({ ...f, expires_days: e.target.value }))}
+                      className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
                 </div>
+
+                {/* Faixa de valor de serviço (opcional, útil principalmente no R$) */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Valor mín. do serviço (R$)</label>
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={distributeForm.min_service_value}
+                      onChange={(e) => setDistributeForm((f) => ({ ...f, min_service_value: e.target.value }))}
+                      placeholder="Sem mínimo"
+                      className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Valor máx. do serviço (R$)</label>
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={distributeForm.max_service_value}
+                      onChange={(e) => setDistributeForm((f) => ({ ...f, max_service_value: e.target.value }))}
+                      placeholder="Sem máximo"
+                      className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  A faixa de valor limita em quais serviços o cupom pode ser usado (ex.: cupom de R$500 só em serviços de R$1.000 a R$5.000). Deixe em branco pra não limitar.
+                </p>
               </div>
             )}
 

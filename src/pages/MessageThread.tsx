@@ -1967,17 +1967,33 @@ const MessageThread = () => {
     return Math.max(0, parseFloat(paymentData.amount) - proCouponDiscountAmount);
   }, [paymentData, proCouponDiscountAmount]);
 
+  // Cupom do app se aplica a esse valor de serviço? (respeita faixa mín/máx)
+  const couponFitsService = (c: any, subtotal: number) => {
+    if (c?.min_service_value != null && subtotal < Number(c.min_service_value)) return false;
+    if (c?.max_service_value != null && subtotal > Number(c.max_service_value)) return false;
+    return true;
+  };
+
   const appCouponDiscountAmount = useMemo(() => {
     if (!paymentData || !selectedCouponId) return 0;
     const c = availableCoupons.find((x) => x.id === selectedCouponId);
     if (!c) return 0;
-    const pct = Number(c.discount_percent ?? 0);
-    if (pct > 0) {
-      return Math.max(0, amountAfterProCoupon * pct / 100);
+    const subtotal = parseFloat(paymentData.amount);
+    if (!couponFitsService(c, subtotal)) return 0; // fora da faixa → não aplica
+    if ((c.discount_kind || "percent") === "amount") {
+      const fixed = Number(c.discount_amount ?? c.discount_value ?? 0);
+      return Math.max(0, Math.min(fixed, amountAfterProCoupon));
     }
-    const fixed = Number(c.discount_value ?? 0);
-    return Math.max(0, Math.min(fixed, amountAfterProCoupon));
+    const pct = Number(c.discount_percent ?? 0);
+    return Math.max(0, amountAfterProCoupon * pct / 100);
   }, [paymentData, selectedCouponId, availableCoupons, amountAfterProCoupon]);
+
+  // Só mostra cupons do app que se encaixam no valor do serviço.
+  const applicableAppCoupons = useMemo(() => {
+    if (!paymentData) return [] as any[];
+    const subtotal = parseFloat(paymentData.amount);
+    return availableCoupons.filter((c) => couponFitsService(c, subtotal));
+  }, [availableCoupons, paymentData]);
 
   const totalCouponDiscount = proCouponDiscountAmount + appCouponDiscountAmount;
   const hasAnyCouponApplied = !!proCoupon || !!selectedCouponId;
@@ -4295,21 +4311,26 @@ const MessageThread = () => {
               )}
 
               {/* Lista de cupons do app disponíveis — aparece enquanto nenhum estiver selecionado. */}
-              {!selectedCouponId && availableCoupons.length > 0 && (
+              {!selectedCouponId && applicableAppCoupons.length > 0 && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <p className="text-xs font-bold text-emerald-600 uppercase flex items-center gap-1">
                     <Ticket className="w-3.5 h-3.5" /> Seus Cupons do app
                   </p>
-                  {availableCoupons.slice(0, 5).map((c) => (
+                  {applicableAppCoupons.slice(0, 5).map((c) => (
                     <div key={c.id} className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 flex items-center justify-between shadow-sm hover:bg-emerald-500/20 transition-colors">
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
                           <Ticket className="w-4 h-4 text-emerald-600" />
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-emerald-700">{c.discount_percent}% de desconto</p>
+                          <p className="text-sm font-bold text-emerald-700">
+                            {(c.discount_kind || "percent") === "amount"
+                              ? `R$ ${Number(c.discount_amount ?? 0).toFixed(2).replace(".", ",")} de desconto`
+                              : `${c.discount_percent}% de desconto`}
+                          </p>
                           <p className="text-[9px] font-medium text-emerald-600/80">
                             {c.expires_at ? `Expira: ${new Date(c.expires_at).toLocaleDateString("pt-BR")}` : "Sem validade"}
+                            {(c.min_service_value != null || c.max_service_value != null) ? ` · serviços ${c.min_service_value != null ? `de R$ ${Number(c.min_service_value).toFixed(0)}` : ""}${c.max_service_value != null ? ` até R$ ${Number(c.max_service_value).toFixed(0)}` : ""}` : ""}
                           </p>
                         </div>
                       </div>

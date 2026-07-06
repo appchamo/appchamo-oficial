@@ -15,8 +15,16 @@ interface Coupon {
   used: boolean;
   coupon_type: string;
   discount_percent: number;
+  discount_kind?: string | null;
+  discount_amount?: number | null;
   expires_at: string | null;
 }
+
+/** Rótulo do desconto: R$ X ou Y%. */
+const couponDiscountLabel = (c: { discount_kind?: string | null; discount_amount?: number | null; discount_percent: number }) =>
+  (c.discount_kind || "percent") === "amount"
+    ? `R$ ${Number(c.discount_amount ?? 0).toFixed(2).replace(".", ",")}`
+    : `${c.discount_percent}%`;
 
 const sourceLabel = (s: string) => {
   switch (s) {
@@ -64,7 +72,9 @@ export default function CouponsContent() {
 
   const isExpired = (c: Coupon) => !!c.expires_at && new Date(c.expires_at) < new Date();
   const couponTitle = (c: Coupon) =>
-    c.coupon_type === "discount" && c.discount_percent > 0 ? `${c.discount_percent}% de desconto` : "Bilhete de sorteio";
+    c.coupon_type === "discount" && (c.discount_percent > 0 || Number(c.discount_amount ?? 0) > 0)
+      ? `${couponDiscountLabel(c)} de desconto`
+      : "Bilhete de sorteio";
   const statusOf = (c: Coupon) => c.used ? "Usado" : isExpired(c) ? "Expirado" : "Ativo";
 
   return (
@@ -166,7 +176,7 @@ export default function CouponsContent() {
                   selected.coupon_type === "discount" ? "bg-gradient-to-br from-emerald-500 to-emerald-600" : "bg-gradient-to-br from-primary to-amber-500"
                 } text-white shadow-lg`}>
                   {selected.coupon_type === "discount"
-                    ? <span className="text-xl font-black">{selected.discount_percent}%</span>
+                    ? <span className={(selected.discount_kind || "percent") === "amount" ? "text-sm font-black" : "text-xl font-black"}>{couponDiscountLabel(selected)}</span>
                     : <Ticket className="w-7 h-7" />}
                 </div>
                 <h2 className="text-lg font-extrabold text-foreground">{couponTitle(selected)}</h2>

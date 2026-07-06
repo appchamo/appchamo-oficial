@@ -146,7 +146,35 @@ const AdminNotifications = () => {
   const { adminUser } = useAdminAuth();
 
   // ── Aba ativa
-  const [activeTab, setActiveTab] = useState<"send" | "sent" | "audit">("send");
+  const [activeTab, setActiveTab] = useState<"send" | "sent" | "audit" | "historico">("send");
+
+  // ── Aba Histórico: todas as notificações enviadas (manual, IA, automática, app) ──
+  const [histRows, setHistRows] = useState<any[]>([]);
+  const [histLoading, setHistLoading] = useState(false);
+  const [histLoaded, setHistLoaded] = useState(false);
+  const [histSearch, setHistSearch] = useState("");
+  const [histMethod, setHistMethod] = useState<string>("todos");
+  useEffect(() => {
+    if (activeTab !== "historico" || histLoaded) return;
+    (async () => {
+      setHistLoading(true);
+      const { data } = await supabase
+        .from("admin_notification_history" as never)
+        .select("campaign_key, first_at, recipients, title, message, method, source, type, sent_by_name")
+        .order("first_at", { ascending: false })
+        .limit(400);
+      setHistRows((data as any[]) || []);
+      setHistLoading(false);
+      setHistLoaded(true);
+    })();
+  }, [activeTab, histLoaded]);
+  const histFiltered = useMemo(() => {
+    const t = histSearch.trim().toLowerCase();
+    return histRows.filter((r) =>
+      (histMethod === "todos" || r.method === histMethod) &&
+      (!t || `${r.title} ${r.message} ${r.sent_by_name} ${r.source || ""} ${r.type || ""}`.toLowerCase().includes(t)),
+    );
+  }, [histRows, histSearch, histMethod]);
 
   // ── Suas notificações (caixa pessoal do admin)
   const [myNotifications, setMyNotifications] = useState<AdminNotif[]>([]);
@@ -732,7 +760,7 @@ const AdminNotifications = () => {
   return (
     <AdminLayout title="Notificações">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 h-auto p-1 bg-muted">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto p-1 bg-muted">
           <TabsTrigger value="send" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
             <Send className="w-4 h-4" />
             <span className="hidden sm:inline">Enviar notificação</span>
@@ -742,6 +770,10 @@ const AdminNotifications = () => {
             <History className="w-4 h-4" />
             <span className="hidden sm:inline">Notificações enviadas</span>
             <span className="sm:hidden">Enviadas</span>
+          </TabsTrigger>
+          <TabsTrigger value="historico" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
+            <History className="w-4 h-4" />
+            <span>Histórico</span>
           </TabsTrigger>
           <TabsTrigger value="audit" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
             <Search className="w-4 h-4" />
@@ -1199,6 +1231,71 @@ const AdminNotifications = () => {
                   );
                 })}
               </ul>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* ────────────────  Aba Histórico: tudo que foi enviado  ──────────────── */}
+        <TabsContent value="historico" className="mt-5">
+          <div className="bg-card border rounded-xl p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <History className="w-4 h-4 text-primary" /> Histórico de envios
+              </h2>
+              <div className="flex items-center gap-2">
+                <select value={histMethod} onChange={(e) => setHistMethod(e.target.value)} className="text-xs border rounded-lg px-2 py-2 bg-background">
+                  <option value="todos">Todos os métodos</option>
+                  <option value="Manual">Manual</option>
+                  <option value="IA">IA</option>
+                  <option value="Automática">Automática</option>
+                  <option value="App/Sistema">App/Sistema</option>
+                </select>
+                <input value={histSearch} onChange={(e) => setHistSearch(e.target.value)} placeholder="Buscar..." className="text-xs border rounded-lg px-3 py-2 bg-background w-40" />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground mb-3">
+              Toda notificação enviada no app — manual (por admin), IA, automática ou evento do app. Envios em massa aparecem agrupados (1 linha por campanha/dia) com o total de destinatários.
+            </p>
+            {histLoading ? (
+              <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>
+            ) : histFiltered.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">Nenhum envio encontrado</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="text-left p-2.5 font-medium text-muted-foreground">Notificação</th>
+                      <th className="text-left p-2.5 font-medium text-muted-foreground">Método</th>
+                      <th className="text-left p-2.5 font-medium text-muted-foreground">Enviado por</th>
+                      <th className="text-left p-2.5 font-medium text-muted-foreground">Destinatários</th>
+                      <th className="text-left p-2.5 font-medium text-muted-foreground">Quando</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {histFiltered.map((r, i) => {
+                      const badge =
+                        r.method === "Manual" ? "bg-blue-100 text-blue-700" :
+                        r.method === "IA" ? "bg-purple-100 text-purple-700" :
+                        r.method === "Automática" ? "bg-emerald-100 text-emerald-700" :
+                        "bg-muted text-muted-foreground";
+                      return (
+                        <tr key={i} className="border-b last:border-0 align-top hover:bg-muted/20">
+                          <td className="p-2.5 max-w-[360px]">
+                            <p className="font-medium text-foreground">{r.title || "—"}</p>
+                            {r.message && <p className="text-xs text-muted-foreground line-clamp-2">{r.message}</p>}
+                            {r.source && <p className="text-[10px] text-muted-foreground/70 mt-0.5">fonte: {r.source}{r.type ? ` · ${r.type}` : ""}</p>}
+                          </td>
+                          <td className="p-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${badge}`}>{r.method}</span></td>
+                          <td className="p-2.5 text-foreground">{r.sent_by_name}</td>
+                          <td className="p-2.5 font-bold text-primary">{r.recipients}</td>
+                          <td className="p-2.5 text-xs text-muted-foreground whitespace-nowrap">{new Date(r.first_at).toLocaleString("pt-BR")}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </TabsContent>

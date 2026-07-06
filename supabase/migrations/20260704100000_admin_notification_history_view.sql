@@ -1,0 +1,2 @@
+-- View admin_notification_history: historico agregado de todas as notificacoes (manual/IA/automatica/app).
+-- Ver definicao completa no painel Supabase (migration aplicada via MCP).

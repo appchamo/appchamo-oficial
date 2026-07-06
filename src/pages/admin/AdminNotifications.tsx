@@ -158,12 +158,43 @@ const AdminNotifications = () => {
     if (activeTab !== "historico" || histLoaded) return;
     (async () => {
       setHistLoading(true);
-      const { data } = await supabase
-        .from("admin_notification_history" as never)
-        .select("campaign_key, first_at, recipients, title, message, method, source, type, sent_by_name")
-        .order("first_at", { ascending: false })
-        .limit(400);
-      setHistRows((data as any[]) || []);
+      // Lê direto da tabela notifications (admin tem policy de leitura total) e agrega no cliente,
+      // por campanha: lote manual (batch_id), fonte automática/IA (metadata.source)+dia, ou tipo de evento+dia.
+      const { data: notifs } = await supabase
+        .from("notifications")
+        .select("batch_id, metadata, type, title, message, created_at")
+        .order("created_at", { ascending: false })
+        .limit(6000);
+      const groups = new Map<string, any>();
+      for (const n of (notifs as any[]) || []) {
+        const source = n.metadata?.source || null;
+        const day = String(n.created_at).slice(0, 10);
+        const key = n.batch_id ? `batch:${n.batch_id}` : source ? `src:${source}:${day}` : `type:${n.type || "?"}:${day}`;
+        let g = groups.get(key);
+        if (!g) {
+          g = { campaign_key: key, batch_id: n.batch_id || null, source, type: n.type, title: n.title, message: n.message, first_at: n.created_at, recipients: 0 };
+          groups.set(key, g);
+        }
+        g.recipients++;
+      }
+      // Resolve o nome do sócio que enviou (lotes manuais).
+      const batchIds = [...groups.values()].map((g) => g.batch_id).filter(Boolean);
+      const batchSender = new Map<string, string>();
+      if (batchIds.length) {
+        const { data: batches } = await supabase.from("admin_notification_batches" as never).select("id, sent_by").in("id", batchIds);
+        const adminIds = [...new Set(((batches as any[]) || []).map((b) => b.sent_by).filter(Boolean))];
+        const { data: admins } = adminIds.length
+          ? await supabase.from("profiles").select("user_id, full_name, email").in("user_id", adminIds)
+          : { data: [] as any[] };
+        const adminMap = new Map(((admins as any[]) || []).map((a) => [a.user_id, a.full_name || a.email || "Admin"]));
+        for (const b of (batches as any[]) || []) batchSender.set(b.id, adminMap.get(b.sent_by) || "Admin");
+      }
+      const rows = [...groups.values()].map((g) => ({
+        ...g,
+        method: g.batch_id ? "Manual" : g.source === "daily_ai" ? "IA" : g.source ? "Automática" : "App/Sistema",
+        sent_by_name: g.batch_id ? (batchSender.get(g.batch_id) || "Admin") : "Sistema",
+      })).sort((a, b) => String(b.first_at).localeCompare(String(a.first_at)));
+      setHistRows(rows);
       setHistLoading(false);
       setHistLoaded(true);
     })();

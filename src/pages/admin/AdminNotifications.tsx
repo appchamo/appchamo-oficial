@@ -760,20 +760,16 @@ const AdminNotifications = () => {
   return (
     <AdminLayout title="Notificações">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto p-1 bg-muted">
+        <TabsList className="grid w-full grid-cols-3 h-auto p-1 bg-muted">
           <TabsTrigger value="send" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
             <Send className="w-4 h-4" />
             <span className="hidden sm:inline">Enviar notificação</span>
             <span className="sm:hidden">Enviar</span>
           </TabsTrigger>
-          <TabsTrigger value="sent" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
+          <TabsTrigger value="historico" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
             <History className="w-4 h-4" />
             <span className="hidden sm:inline">Notificações enviadas</span>
             <span className="sm:hidden">Enviadas</span>
-          </TabsTrigger>
-          <TabsTrigger value="historico" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
-            <History className="w-4 h-4" />
-            <span>Histórico</span>
           </TabsTrigger>
           <TabsTrigger value="audit" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm">
             <Search className="w-4 h-4" />

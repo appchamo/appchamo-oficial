@@ -2147,14 +2147,17 @@ const MessageThread = () => {
 
           if (validCampaign) {
             const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
-            await supabase.from("coupons").insert({
+            // request_id + índice único garantem 1 cupom-prêmio por pagamento (anti-duplicação).
+            const { error: rewardErr } = await supabase.from("coupons").insert({
               user_id: userId,
               coupon_type: "discount",
               source: "payment",
               discount_percent: validCampaign.discount_percent,
               used: false,
-              expires_at: expiresAt
+              expires_at: expiresAt,
+              request_id: threadId,
             } as any);
+            if (rewardErr) { console.warn("Cupom-prêmio já concedido para esta chamada — ignorando:", rewardErr.message); setRewardCoupon(null); return; }
 
             await supabase.from("coupon_campaigns").update({ used_quantity: validCampaign.used_quantity + 1 }).eq("id", validCampaign.id);
 
@@ -2166,13 +2169,15 @@ const MessageThread = () => {
       }
 
       if (!awardedDiscount && isRaffleActive) {
-        await supabase.from("coupons").insert({
+        const { error: raffleErr } = await supabase.from("coupons").insert({
           user_id: userId,
           coupon_type: "raffle",
           source: "payment",
           discount_percent: 0,
-          used: false
+          used: false,
+          request_id: threadId,
         } as any);
+        if (raffleErr) { console.warn("Cupom de sorteio já concedido para esta chamada — ignorando:", raffleErr.message); setRewardCoupon(null); return; }
 
         setRewardCoupon({ type: "raffle", value: 0 });
         await sendNotification(userId, "🎟️ Novo Cupom de Sorteio!", "Você ganhou um cupom para o Sorteio Mensal! Boa sorte.");

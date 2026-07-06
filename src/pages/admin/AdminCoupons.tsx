@@ -553,7 +553,7 @@ const AdminCoupons = () => {
   // ── Distribuir cupom (Modal compartilhado Aba 1 & 2) ─────────────────
   const openDistribute = (type: CouponType) => {
     setDistributeType(type);
-    setDistributeForm({ target: "individual", discount_percent: "5", expires_days: "30" });
+    setDistributeForm({ target: "individual", discount_kind: "percent", discount_percent: "5", discount_amount: "50", min_service_value: "", max_service_value: "", expires_days: "30" });
     setDistributeUserSearch("");
     setDistributeUserResults([]);
     setDistributeSelectedUser(null);
@@ -597,8 +597,8 @@ const AdminCoupons = () => {
       couponData.discount_kind = isAmount ? "amount" : "percent";
       couponData.discount_percent = isAmount ? 0 : (parseFloat(distributeForm.discount_percent) || 5);
       couponData.discount_amount = isAmount ? (parseFloat(distributeForm.discount_amount) || 0) : 0;
-      couponData.min_service_value = distributeForm.min_service_value.trim() ? (parseFloat(distributeForm.min_service_value) || null) : null;
-      couponData.max_service_value = distributeForm.max_service_value.trim() ? (parseFloat(distributeForm.max_service_value) || null) : null;
+      couponData.min_service_value = (distributeForm.min_service_value || "").trim() ? (parseFloat(distributeForm.min_service_value) || null) : null;
+      couponData.max_service_value = (distributeForm.max_service_value || "").trim() ? (parseFloat(distributeForm.max_service_value) || null) : null;
       couponData.expires_at = new Date(
         Date.now() + (parseInt(distributeForm.expires_days) || 30) * 86400000,
       ).toISOString();

@@ -189,9 +189,12 @@ const AdminNotifications = () => {
         const adminMap = new Map(((admins as any[]) || []).map((a) => [a.user_id, a.full_name || a.email || "Admin"]));
         for (const b of (batches as any[]) || []) batchSender.set(b.id, adminMap.get(b.sent_by) || "Admin");
       }
+      // IA = tudo que o sistema envia de forma automática/inteligente: fontes automáticas
+      // (daily_ai, winback, upgrade_nudge, etc.) + lembretes (responder cliente/profissional).
+      const IA_TYPES = ["reminder", "chat_reminder", "agenda"];
       const rows = [...groups.values()].map((g) => ({
         ...g,
-        method: g.batch_id ? "Manual" : g.source === "daily_ai" ? "IA" : g.source ? "Automática" : "App/Sistema",
+        method: g.batch_id ? "Manual" : (g.source || IA_TYPES.includes(g.type)) ? "IA" : "App/Sistema",
         sent_by_name: g.batch_id ? (batchSender.get(g.batch_id) || "Admin") : "Sistema",
       })).sort((a, b) => String(b.first_at).localeCompare(String(a.first_at)));
       setHistRows(rows);
@@ -1274,7 +1277,6 @@ const AdminNotifications = () => {
                   <option value="todos">Todos os métodos</option>
                   <option value="Manual">Manual</option>
                   <option value="IA">IA</option>
-                  <option value="Automática">Automática</option>
                   <option value="App/Sistema">App/Sistema</option>
                 </select>
                 <input value={histSearch} onChange={(e) => setHistSearch(e.target.value)} placeholder="Buscar..." className="text-xs border rounded-lg px-3 py-2 bg-background w-40" />

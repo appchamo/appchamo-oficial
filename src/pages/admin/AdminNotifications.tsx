@@ -23,7 +23,7 @@ import {
   Link2,
   CalendarDays,
 } from "lucide-react";
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
@@ -162,7 +162,7 @@ const AdminNotifications = () => {
       // por campanha: lote manual (batch_id), fonte automática/IA (metadata.source)+dia, ou tipo de evento+dia.
       const { data: notifs } = await supabase
         .from("notifications")
-        .select("batch_id, metadata, type, title, message, created_at")
+        .select("user_id, batch_id, metadata, type, title, message, created_at, read, read_at, deleted_at")
         .order("created_at", { ascending: false })
         .limit(6000);
       const groups = new Map<string, any>();
@@ -172,10 +172,14 @@ const AdminNotifications = () => {
         const key = n.batch_id ? `batch:${n.batch_id}` : source ? `src:${source}:${day}` : `type:${n.type || "?"}:${day}`;
         let g = groups.get(key);
         if (!g) {
-          g = { campaign_key: key, batch_id: n.batch_id || null, source, type: n.type, title: n.title, message: n.message, first_at: n.created_at, recipients: 0 };
+          g = { campaign_key: key, batch_id: n.batch_id || null, source, type: n.type, title: n.title, message: n.message, first_at: n.created_at, recipients: 0, vistas: 0, naoVistas: 0, excluidas: 0, people: [] as any[] };
           groups.set(key, g);
         }
         g.recipients++;
+        if (n.deleted_at) g.excluidas++;
+        else if (n.read) g.vistas++;
+        else g.naoVistas++;
+        g.people.push({ user_id: n.user_id, read: n.read, read_at: n.read_at, deleted_at: n.deleted_at });
       }
       // Resolve o nome do sócio que enviou (lotes manuais).
       const batchIds = [...groups.values()].map((g) => g.batch_id).filter(Boolean);
@@ -209,6 +213,26 @@ const AdminNotifications = () => {
       (!t || `${r.title} ${r.message} ${r.sent_by_name} ${r.source || ""} ${r.type || ""}`.toLowerCase().includes(t)),
     );
   }, [histRows, histSearch, histMethod]);
+
+  // Expandir uma campanha pra ver quem recebeu e o status (vista/não vista/excluída).
+  const [histExpanded, setHistExpanded] = useState<string | null>(null);
+  const [histNames, setHistNames] = useState<Record<string, { name: string; email: string | null }>>({});
+  const [histNamesLoading, setHistNamesLoading] = useState(false);
+  const toggleHistExpand = async (row: any) => {
+    if (histExpanded === row.campaign_key) { setHistExpanded(null); return; }
+    setHistExpanded(row.campaign_key);
+    const ids = [...new Set((row.people || []).map((p: any) => p.user_id).filter(Boolean))].filter((id: any) => !histNames[id]) as string[];
+    if (ids.length) {
+      setHistNamesLoading(true);
+      const { data } = await supabase.from("profiles").select("user_id, full_name, email").in("user_id", ids);
+      setHistNames((prev) => {
+        const m = { ...prev };
+        for (const p of (data as any[]) || []) m[p.user_id] = { name: p.full_name || p.email || String(p.user_id).slice(0, 8), email: p.email };
+        return m;
+      });
+      setHistNamesLoading(false);
+    }
+  };
 
   // ── Suas notificações (caixa pessoal do admin)
   const [myNotifications, setMyNotifications] = useState<AdminNotif[]>([]);
@@ -1297,6 +1321,7 @@ const AdminNotifications = () => {
                       <th className="text-left p-2.5 font-medium text-muted-foreground">Notificação</th>
                       <th className="text-left p-2.5 font-medium text-muted-foreground">Método</th>
                       <th className="text-left p-2.5 font-medium text-muted-foreground">Enviado por</th>
+                      <th className="text-left p-2.5 font-medium text-muted-foreground">Visualização</th>
                       <th className="text-left p-2.5 font-medium text-muted-foreground">Destinatários</th>
                       <th className="text-left p-2.5 font-medium text-muted-foreground">Quando</th>
                     </tr>
@@ -1306,10 +1331,12 @@ const AdminNotifications = () => {
                       const badge =
                         r.method === "Manual" ? "bg-blue-100 text-blue-700" :
                         r.method === "IA" ? "bg-purple-100 text-purple-700" :
-                        r.method === "Automática" ? "bg-emerald-100 text-emerald-700" :
                         "bg-muted text-muted-foreground";
+                      const pct = r.recipients ? Math.round((r.vistas / r.recipients) * 100) : 0;
+                      const isOpen = histExpanded === r.campaign_key;
                       return (
-                        <tr key={i} className="border-b last:border-0 align-top hover:bg-muted/20">
+                        <Fragment key={i}>
+                        <tr className="border-b last:border-0 align-top hover:bg-muted/20">
                           <td className="p-2.5 max-w-[360px]">
                             <p className="font-medium text-foreground">{r.title || "—"}</p>
                             {r.message && <p className="text-xs text-muted-foreground line-clamp-2">{r.message}</p>}
@@ -1317,9 +1344,47 @@ const AdminNotifications = () => {
                           </td>
                           <td className="p-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${badge}`}>{r.method}</span></td>
                           <td className="p-2.5 text-foreground">{r.sent_by_name}</td>
-                          <td className="p-2.5 font-bold text-primary">{r.recipients}</td>
+                          <td className="p-2.5 whitespace-nowrap">
+                            <span className="text-emerald-600 font-semibold">{r.vistas} vista{r.vistas === 1 ? "" : "s"}</span>
+                            <span className="text-muted-foreground"> · {r.naoVistas} não</span>
+                            {r.excluidas > 0 && <span className="text-red-500"> · {r.excluidas} excl.</span>}
+                            <span className="block text-[10px] text-muted-foreground">{pct}% abriram</span>
+                          </td>
+                          <td className="p-2.5">
+                            <button
+                              onClick={() => toggleHistExpand(r)}
+                              className="font-bold text-primary hover:underline inline-flex items-center gap-1"
+                              title="Ver quem recebeu"
+                            >
+                              {r.recipients}
+                              <span className="text-[10px] text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
+                            </button>
+                          </td>
                           <td className="p-2.5 text-xs text-muted-foreground whitespace-nowrap">{new Date(r.first_at).toLocaleString("pt-BR")}</td>
                         </tr>
+                        {isOpen && (
+                          <tr className="bg-muted/20 border-b last:border-0">
+                            <td colSpan={6} className="p-3">
+                              <p className="text-[11px] font-semibold text-muted-foreground mb-2">Quem recebeu ({r.people.length}){histNamesLoading ? " · carregando nomes…" : ""}</p>
+                              <div className="max-h-72 overflow-y-auto rounded-lg border bg-card divide-y">
+                                {[...r.people].sort((a: any, b: any) => Number(!!b.read) - Number(!!a.read)).slice(0, 500).map((p: any, pi: number) => (
+                                  <div key={pi} className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
+                                    <span className="text-foreground truncate">{histNames[p.user_id]?.name || (p.user_id ? String(p.user_id).slice(0, 8) + "…" : "—")}</span>
+                                    <span className="shrink-0">
+                                      {p.deleted_at
+                                        ? <span className="text-red-500 font-medium">Excluída</span>
+                                        : p.read
+                                        ? <span className="text-emerald-600 font-medium">Vista{p.read_at ? ` em ${new Date(p.read_at).toLocaleString("pt-BR")}` : ""}</span>
+                                        : <span className="text-muted-foreground">Não vista</span>}
+                                    </span>
+                                  </div>
+                                ))}
+                                {r.people.length > 500 && <div className="px-3 py-1.5 text-[10px] text-muted-foreground">Mostrando os 500 primeiros de {r.people.length}.</div>}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       );
                     })}
                   </tbody>

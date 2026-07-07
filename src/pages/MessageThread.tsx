@@ -173,6 +173,7 @@ const MessageThread = () => {
   // Billing state
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingStep, setBillingStep] = useState<"choose_type" | "app_form" | "presencial_confirm">("choose_type");
+  const [appStep, setAppStep] = useState<1 | 2>(1);
   const [billingAmount, setBillingAmount] = useState("");
   const [billingDesc, setBillingDesc] = useState("");
   const [billingMethod, setBillingMethod] = useState<"pix" | "card" | null>(null);
@@ -3730,7 +3731,7 @@ const MessageThread = () => {
         if (open) {loadFeeSettings();setBillingStep("choose_type");}
         if (!open) {setBillingStep("choose_type");setBillingMethod(null);setBillingAmount("");setBillingDesc("");setPassFeeToClient(false);}
       }}>
-        <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-1.5rem)] max-w-sm max-h-[88vh] overflow-y-auto overflow-x-hidden rounded-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><DollarSign className="w-5 h-5 text-primary" /> Cobrar</DialogTitle>
           </DialogHeader>
@@ -3740,7 +3741,7 @@ const MessageThread = () => {
               <p className="text-sm text-muted-foreground text-center">Como deseja cobrar?</p>
               {proPlanId !== "free" ?
             <button
-              onClick={() => setBillingStep("app_form")}
+              onClick={() => { setAppStep(1); setBillingStep("app_form"); }}
               className="w-full py-4 rounded-xl border-2 hover:border-primary/50 transition-all flex items-center gap-3 px-4 group">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                     <DollarSign className="w-5 h-5 text-primary" />
@@ -3830,6 +3831,14 @@ const MessageThread = () => {
 
           {billingStep === "app_form" &&
           <div className="space-y-3">
+              <div className="flex items-center gap-1.5">
+                <span className={`h-1.5 flex-1 rounded-full ${appStep >= 1 ? "bg-primary" : "bg-muted"}`} />
+                <span className={`h-1.5 flex-1 rounded-full ${appStep >= 2 ? "bg-primary" : "bg-muted"}`} />
+                <span className="text-[11px] text-muted-foreground font-medium ml-1 shrink-0">{appStep} de 2</span>
+              </div>
+
+              {appStep === 1 && (
+              <div className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground mb-1 block">Valor do serviço *</label>
                 <div className="flex items-center gap-2 border-2 rounded-2xl px-4 py-3 bg-background focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition">
@@ -3848,7 +3857,18 @@ const MessageThread = () => {
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
 
-              <div className="space-y-2 mt-2 pt-3 border-t">
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => { setBillingStep("choose_type"); setBillingMethod(null); }}
+                  className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Voltar</button>
+                <button onClick={() => setAppStep(2)} disabled={!billingAmount || parseFloat(billingAmount) <= 0}
+                  className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">Continuar</button>
+              </div>
+              </div>
+              )}
+
+              {appStep === 2 && (
+              <div className="space-y-3">
+              <div className="space-y-2 pt-1">
                 <p className="text-xs font-semibold text-muted-foreground">Quem paga a taxa do sistema?</p>
                 <div className="flex gap-2">
                   <button
@@ -4008,9 +4028,9 @@ const MessageThread = () => {
                 </div>
             }
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-1">
                 <button
-                onClick={() => {setBillingStep("choose_type");setBillingMethod(null);}}
+                onClick={() => setAppStep(1)}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
                   Voltar
                 </button>
@@ -4019,6 +4039,8 @@ const MessageThread = () => {
                   Enviar cobrança
                 </button>
               </div>
+              </div>
+              )}
             </div>
           }
         </DialogContent>

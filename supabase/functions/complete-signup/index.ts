@@ -204,6 +204,25 @@ Deno.serve(async (req) => {
       profileUpdates.longitude = lng;
     }
 
+    // Bloqueia CPF/CNPJ duplicado APENAS no cadastro de conta.
+    // (No pagamento é permitido reutilizar um CPF já cadastrado — a unicidade global foi removida.)
+    if (basicData.document && !TEST_CPFS.includes(basicData.document)) {
+      const docCol = basicData.documentType === "cnpj" ? "cnpj" : "cpf";
+      const { data: dupRow } = await supabase
+        .from("profiles")
+        .select("user_id")
+        .eq(docCol, basicData.document)
+        .neq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+      if (dupRow) {
+        return new Response(
+          JSON.stringify({ error: "CPF ou CNPJ já cadastrado. Verifique o número ou use outro." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     // 🔥 UPSERT (resolve conflito com o Trigger SQL que criamos antes)
     const { error: profileError } = await supabase
       .from("profiles")

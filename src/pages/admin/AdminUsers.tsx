@@ -569,10 +569,16 @@ const AdminUsers = () => {
   const handleChangePlan = async () => {
     if (!planUser) return;
     const { data: sub } = await supabase.from("subscriptions").select("id").eq("user_id", planUser.user_id).maybeSingle();
+    // cancel_at_period_end=false evita que o cron expire_cancelled_subscriptions reverta o plano pra free.
     if (sub) {
-      await supabase.from("subscriptions").update({ plan_id: selectedPlan, status: "active" }).eq("id", sub.id);
+      const { error: updErr } = await supabase.from("subscriptions")
+        .update({ plan_id: selectedPlan, status: "active", cancel_at_period_end: false })
+        .eq("id", sub.id);
+      if (updErr) { toast({ title: "Não foi possível alterar o plano", description: updErr.message, variant: "destructive" }); return; }
     } else {
-      await supabase.from("subscriptions").insert({ user_id: planUser.user_id, plan_id: selectedPlan, status: "active" });
+      const { error: insErr } = await supabase.from("subscriptions")
+        .insert({ user_id: planUser.user_id, plan_id: selectedPlan, status: "active", cancel_at_period_end: false });
+      if (insErr) { toast({ title: "Não foi possível alterar o plano", description: insErr.message, variant: "destructive" }); return; }
     }
     
     // Corrigido para usar "company" ao invés de "enterprise"

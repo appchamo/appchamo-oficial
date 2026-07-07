@@ -173,7 +173,6 @@ const MessageThread = () => {
   // Billing state
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingStep, setBillingStep] = useState<"choose_type" | "app_form" | "presencial_confirm">("choose_type");
-  const [appStep, setAppStep] = useState<1 | 2>(1);
   const [billingAmount, setBillingAmount] = useState("");
   const [billingDesc, setBillingDesc] = useState("");
   const [billingMethod, setBillingMethod] = useState<"pix" | "card" | null>(null);
@@ -3731,7 +3730,7 @@ const MessageThread = () => {
         if (open) {loadFeeSettings();setBillingStep("choose_type");}
         if (!open) {setBillingStep("choose_type");setBillingMethod(null);setBillingAmount("");setBillingDesc("");setPassFeeToClient(false);}
       }}>
-        <DialogContent className="w-[calc(100vw-1.5rem)] max-w-sm max-h-[88vh] overflow-y-auto overflow-x-hidden rounded-2xl [&>*]:min-w-0">
+        <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><DollarSign className="w-5 h-5 text-primary" /> Cobrar</DialogTitle>
           </DialogHeader>
@@ -3741,7 +3740,7 @@ const MessageThread = () => {
               <p className="text-sm text-muted-foreground text-center">Como deseja cobrar?</p>
               {proPlanId !== "free" ?
             <button
-              onClick={() => { setAppStep(1); setBillingStep("app_form"); }}
+              onClick={() => setBillingStep("app_form")}
               className="w-full py-4 rounded-xl border-2 hover:border-primary/50 transition-all flex items-center gap-3 px-4 group">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                     <DollarSign className="w-5 h-5 text-primary" />
@@ -3831,23 +3830,12 @@ const MessageThread = () => {
 
           {billingStep === "app_form" &&
           <div className="space-y-3">
-              <div className="flex items-center gap-1.5">
-                <span className={`h-1.5 flex-1 rounded-full ${appStep >= 1 ? "bg-primary" : "bg-muted"}`} />
-                <span className={`h-1.5 flex-1 rounded-full ${appStep >= 2 ? "bg-primary" : "bg-muted"}`} />
-                <span className="text-[11px] text-muted-foreground font-medium ml-1 shrink-0">{appStep} de 2</span>
-              </div>
-
-              {appStep === 1 && (
-              <div className="space-y-3">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Valor do serviço *</label>
-                <div className="flex items-center gap-2 border-2 rounded-2xl px-4 py-3 bg-background focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition min-w-0 w-full">
-                  <span className="text-2xl font-bold text-muted-foreground shrink-0">R$</span>
-                  <input
-                    value={billingAmount} onChange={(e) => setBillingAmount(e.target.value)}
-                    type="number" step="0.01" inputMode="decimal" placeholder="0,00" size={1}
-                    className="flex-1 w-full min-w-0 text-3xl font-bold bg-transparent text-foreground outline-none placeholder:text-muted-foreground/40" />
-                </div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Valor Base (R$) *</label>
+                <input
+                value={billingAmount} onChange={(e) => setBillingAmount(e.target.value)}
+                type="number" step="0.01" placeholder="0,00"
+                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Descrição</label>
@@ -3857,44 +3845,33 @@ const MessageThread = () => {
                 className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
 
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => { setBillingStep("choose_type"); setBillingMethod(null); }}
-                  className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">Voltar</button>
-                <button onClick={() => setAppStep(2)} disabled={!billingAmount || parseFloat(billingAmount) <= 0}
-                  className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">Continuar</button>
-              </div>
-              </div>
-              )}
-
-              {appStep === 2 && (
-              <div className="space-y-3">
-              <div className="space-y-2 pt-1">
-                <p className="text-xs font-semibold text-muted-foreground">Quem paga a taxa do sistema?</p>
+              <div className="space-y-2 mt-2 pt-2 border-t">
+                <p className="text-xs font-medium text-muted-foreground">Quem pagará a taxa do sistema?</p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setPassFeeToClient(false)}
-                    className={`flex-1 py-3 px-2 rounded-xl text-sm font-semibold border-2 transition-all ${!passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all ${!passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
                   >
-                    Eu pago<br/><span className="text-[11px] font-normal opacity-80">sai do meu valor</span>
+                    Sem Juros<br/><span className="text-[9px] font-normal">Eu assumo a taxa</span>
                   </button>
                   <button
                     onClick={() => setPassFeeToClient(true)}
-                    className={`flex-1 py-3 px-2 rounded-xl text-sm font-semibold border-2 transition-all ${passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all ${passFeeToClient ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
                   >
-                    Cliente paga<br/><span className="text-[11px] font-normal opacity-80">soma no total dele</span>
+                    Com Juros<br/><span className="text-[9px] font-normal">Cliente paga a taxa</span>
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-2 mt-2 border-t pt-3">
-                <p className="text-xs font-semibold text-muted-foreground">Forma de pagamento sugerida *</p>
+              <div className="space-y-2 mt-2 border-t pt-2">
+                <p className="text-xs font-medium text-muted-foreground">Forma de pagamento sugerida *</p>
                 <button
                 onClick={() => {setBillingMethod("pix");setBillingInstallments("1");}}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${billingMethod === "pix" ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}>
                   <span className="text-lg">📱</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">PIX</p>
-                    <p className="text-[11px] text-muted-foreground">Pagamento instantâneo</p>
+                    <p className="text-[10px] text-muted-foreground">Pagamento instantâneo</p>
                   </div>
                 </button>
                 <button
@@ -3903,7 +3880,7 @@ const MessageThread = () => {
                   <span className="text-lg">💳</span>
                   <div className="text-left">
                     <p className="text-sm font-semibold text-foreground">Cartão de crédito</p>
-                    <p className="text-[11px] text-muted-foreground">O cliente poderá escolher as parcelas</p>
+                    <p className="text-[10px] text-muted-foreground">O cliente poderá escolher as parcelas</p>
                   </div>
                 </button>
               </div>
@@ -4028,9 +4005,9 @@ const MessageThread = () => {
                 </div>
             }
 
-              <div className="flex gap-2 pt-1">
+              <div className="flex gap-2">
                 <button
-                onClick={() => setAppStep(1)}
+                onClick={() => {setBillingStep("choose_type");setBillingMethod(null);}}
                 className="flex-1 py-2.5 rounded-xl border text-sm font-medium text-foreground hover:bg-muted transition-colors">
                   Voltar
                 </button>
@@ -4039,8 +4016,6 @@ const MessageThread = () => {
                   Enviar cobrança
                 </button>
               </div>
-              </div>
-              )}
             </div>
           }
         </DialogContent>

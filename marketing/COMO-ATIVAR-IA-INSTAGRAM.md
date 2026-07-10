@@ -7,53 +7,50 @@ lado do Meta e alguns segredos — isso só você consegue fazer, porque envolve
 **URL do webhook (você vai colar no Meta):**
 `https://wfxeiuqxzrlnvlopcrwd.supabase.co/functions/v1/instagram-webhook`
 
+**App que vamos usar (já existe, é seu):** `WIZ MIDIA - CLAUDE` — App ID `1575920977424419`.
+**Página do Chamô:** id `824446207428224` · **Instagram:** @appchamo (id `17841477705977355`).
+
+> Boa notícia: esse app **já tem as permissões** `instagram_manage_messages` e `instagram_manage_comments`
+> concedidas, e já enxerga a Página do Chamô. Então NÃO precisa criar app novo nem passar de novo pela
+> App Review dessas permissões. Só falta plugar o webhook e os segredos.
+
 ---
 
-## Pré-requisitos
-- O Instagram do Chamô precisa ser conta **Comercial (Business) ou Criador**.
-- Precisa estar **ligado a uma Página do Facebook**.
-- Créditos na **Anthropic** (console.anthropic.com → Plans & Billing). Sem crédito, a IA não gera resposta.
+## Pré-requisitos (já atendidos)
+- Instagram do Chamô é conta Comercial ligada à Página "Chamô" ✅ (confirmado).
+- App com as permissões de mensagem/comentário ✅ (confirmado no app WIZ MIDIA - CLAUDE).
+- Falta: créditos na **Anthropic** (console.anthropic.com → Plans & Billing). Sem crédito a IA não responde.
+- Confirme que essas permissões estão em **Acesso Avançado** (App Review → Permissões e Recursos). Se
+  estiverem só em "Acesso Padrão", a IA responde só a quem tem papel no app até liberar o avançado.
 
-## Passo 1 — Criar o app no Meta
-1. Entra em **developers.facebook.com** → **Meus Apps** → **Criar app**.
-2. Tipo: **Empresa (Business)**.
-3. Dentro do app, adiciona o produto **Instagram** (API do Instagram com mensagens).
+## Passo 1 — Pegar o token da Página (longa duração)
+1. **Graph API Explorer** → escolhe o app **WIZ MIDIA - CLAUDE**.
+2. Gera um **User Token** com as permissões `instagram_manage_messages`, `instagram_manage_comments`, `pages_read_engagement`, `instagram_basic`.
+3. Em "Get Token" pega o **Page Access Token da Página Chamô** (id `824446207428224`).
+4. Troca por **token de longa duração** (long-lived). Esse valor vira o segredo `IG_PAGE_TOKEN`.
 
-## Passo 2 — Permissões que o app precisa
-- `instagram_manage_messages` (responder direct)
-- `instagram_manage_comments` (responder comentários)
-- `instagram_basic`, `pages_read_engagement`, `pages_manage_metadata`
-> Pra funcionar com o público geral (não só contas de teste), o Meta exige **Revisão do App (App Review)**
-> dessas permissões. Eles pedem um vídeo curto mostrando o uso. Leva alguns dias. Antes disso,
-> funciona só nas contas com papel no app (admin/testador) — dá pra você testar com a sua conta.
-
-## Passo 3 — Pegar o token da Página (longa duração)
-1. No **Graph API Explorer**, seleciona o app, gera um token com as permissões acima.
-2. Troca por um **token de longa duração** (long-lived page token).
-3. Guarda esse token — ele vai virar o segredo `IG_PAGE_TOKEN`.
-
-## Passo 4 — Definir os segredos no Supabase
+## Passo 2 — Definir os segredos no Supabase
 No painel do Supabase → **Project Settings → Edge Functions → Secrets**, adiciona:
 
 | Nome | Valor |
 |------|-------|
 | `IG_VERIFY_TOKEN` | uma senha que **você inventa** (ex.: `chamo-ig-2026`). Vai repetir no Meta. |
-| `IG_APP_SECRET` | o **App Secret** do app (Configurações → Básico). Valida a assinatura dos eventos. |
-| `IG_PAGE_TOKEN` | o token de longa duração do Passo 3. |
+| `IG_APP_SECRET` | o **App Secret** do app WIZ MIDIA - CLAUDE (Configurações → Básico). Valida a assinatura. |
+| `IG_PAGE_TOKEN` | o token de longa duração do Passo 1. |
 | `ANTHROPIC_API_KEY` | já existe (só garanta que tem crédito). |
 
 (Opcional: `IG_GRAPH_VERSION`, padrão `v21.0`.)
 > Você define esses segredos você mesmo. Nunca precisa me passar nenhum token.
 
-## Passo 5 — Configurar o Webhook no Meta
-1. No app, vai em **Instagram → Webhooks** (ou Produtos → Webhooks).
+## Passo 3 — Configurar o Webhook no Meta
+1. No app WIZ MIDIA - CLAUDE, vai em **Instagram → Webhooks** (ou Produtos → Webhooks).
 2. **Callback URL:** cola a URL do webhook (lá em cima).
 3. **Verify token:** o mesmo texto que você pôs em `IG_VERIFY_TOKEN`.
 4. Clica em **Verificar e salvar** (o Meta chama a URL e confirma).
 5. **Assina os campos:** `messages` e `comments` (pode marcar `mentions` também).
 6. Assina o app à conta: em **subscribed apps** da Página/Instagram (pela interface ou via Graph API).
 
-## Passo 6 — Liberar mensagens no Instagram
+## Passo 4 — Liberar mensagens no Instagram
 No app do Instagram do Chamô → **Configurações → Privacidade das mensagens → Ferramentas conectadas**:
 permita o acesso às mensagens pelo app conectado (senão o direct não chega no webhook).
 

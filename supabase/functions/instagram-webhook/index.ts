@@ -13,6 +13,14 @@ const MODELS = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4
 
 const admin = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
+// TRAVA DE SEGURANÇA: só processa eventos da(s) conta(s) do Chamô. Qualquer outra conta
+// (ex.: cliente da agência inscrita no mesmo app) é ignorada. Chamô: IG 17841477705977355, Página 824446207428224.
+// Dá pra sobrescrever via env IG_ALLOWED_ACCOUNTS (ids separados por vírgula).
+const ALLOWED_ACCOUNTS = new Set(
+  (Deno.env.get("IG_ALLOWED_ACCOUNTS") || "17841477705977355,824446207428224")
+    .split(",").map((s) => s.trim()).filter(Boolean),
+);
+
 async function validSignature(raw: string, header: string | null): Promise<boolean> {
   const secret = (Deno.env.get("IG_APP_SECRET") || "").trim();
   if (!secret) return true;
@@ -127,6 +135,8 @@ async function processEvent(body: any) {
   const db = admin();
   for (const entry of (Array.isArray(body?.entry) ? body.entry : [])) {
     const igAccount = String(entry?.id || "");
+    // Só a conta do Chamô. Ignora eventos de qualquer outra conta ligada ao mesmo app.
+    if (igAccount && ALLOWED_ACCOUNTS.size && !ALLOWED_ACCOUNTS.has(igAccount)) continue;
 
     // ---- Mensagens / reações / seen / referral (entry.messaging) ----
     for (const m of (Array.isArray(entry?.messaging) ? entry.messaging : []) as any[]) {

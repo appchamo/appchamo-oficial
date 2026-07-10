@@ -23,23 +23,23 @@ function copy(stage: number, nome: string, visitas: number) {
     case 1: return {
       title: "🔒 Você atingiu o limite do plano grátis",
       msg: "Você recebeu suas 3 chamadas grátis. Novos clientes já não conseguem te chamar. Ative o Pro e volte a receber agora.",
-      subject: `${nome ? nome + ", v" : "V"}ocê atingiu o limite de chamadas — reative com o Pro`,
+      subject: `${nome ? nome + ", v" : "V"}ocê atingiu o limite de chamadas. Reative com o Pro`,
       h1: `${nome ? nome + ", v" : "V"}ocê bateu o limite do plano grátis 🔒`,
       body: "Você já recebeu suas 3 chamadas gratuitas. A partir de agora, <b>novos clientes não conseguem mais te chamar</b> pelo seu perfil. Ative o plano <b>Pro</b> e volte a receber chamadas ilimitadas hoje mesmo.",
     };
     case 2: return {
       title: "👀 Clientes querendo te chamar",
-      msg: `${v}, mas não conseguem te chamar porque você está no limite do plano grátis. Ative o Pro e volte pro jogo.`,
+      msg: `${v}, mas não conseguem te chamar porque você está no limite do plano grátis. Ative o Pro e volte a receber.`,
       subject: `${nome ? nome + ", c" : "C"}lientes estão te procurando no Chamô`,
       h1: "Tem cliente querendo te chamar 👀",
-      body: `${v} nas últimas horas, mas <b>não conseguem te chamar</b> porque você atingiu o limite do plano grátis. Entre no <b>Pro</b> e teste agora — recebe chamadas sem limite.`,
+      body: `${v} nas últimas horas, mas <b>não conseguem te chamar</b> porque você atingiu o limite do plano grátis. Entre no <b>Pro</b> e volte a receber chamadas sem limite.`,
     };
     default: return {
       title: "💸 Uma semana sem receber chamadas",
       msg: "Faz 1 semana que você está no limite do plano grátis. Seus clientes continuam te procurando. Teste o Pro e volte a receber hoje.",
       subject: `${nome ? nome + ", " : ""}reative seu perfil no Chamô e volte a receber`,
       h1: "Uma semana sem novas chamadas 💸",
-      body: "Já faz <b>uma semana</b> que você está no limite grátis, e os clientes continuam procurando profissional como você. Teste o plano <b>Pro</b> e volte a receber chamadas — sem limite.",
+      body: "Já faz <b>uma semana</b> que você está no limite grátis, e os clientes continuam procurando profissional como você. Teste o plano <b>Pro</b> e volte a receber chamadas sem limite.",
     };
   }
 }

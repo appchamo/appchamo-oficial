@@ -20,17 +20,17 @@ const INACTIVE_DAYS = 7;
 const BATCH = 60; // por execução (evita timeout no envio de e-mails)
 const STAFF = ["admin@appchamo.com", "suporte@appchamo.com"];
 
-const PUSH_TITLE = "Sentimos sua falta! 👋";
-const PUSH_MSG = "Tem profissional de confiança pertinho de você no Chamô. Volta lá e resolve o que precisa!";
+const PUSH_TITLE = "Sentimos sua falta 👋";
+const PUSH_MSG = "Aquele serviço que ficou pra depois? Tem gente boa pertinho pra resolver rapidinho.";
 const PUSH_LINK = "/home";
 
 function emailHtml(name: string, appUrl: string) {
   return '<div style="background:#f5f5f5;padding:40px 20px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif">'
     + '<div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:40px 32px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06)">'
     + '<p style="margin:0 0 24px;font-size:28px;font-weight:800;color:#ea580c">CHAMÔ</p>'
-    + '<h1 style="margin:0 0 12px;font-size:22px;color:#1a1a1a">Sentimos sua falta! 👋</h1>'
+    + '<h1 style="margin:0 0 12px;font-size:22px;color:#1a1a1a">Sentimos sua falta 👋</h1>'
     + '<p style="margin:0 0 8px;font-size:14px;color:#525252">Olá, ' + esc(name) + '</p>'
-    + '<p style="margin:0 0 24px;font-size:15px;line-height:1.5;color:#525252">Faz um tempo que você não aparece por aqui. Tem profissionais de confiança perto de você prontos pra resolver o que precisa — reparo, limpeza, serviços e muito mais. Que tal dar uma passada?</p>'
+    + '<p style="margin:0 0 24px;font-size:15px;line-height:1.5;color:#525252">Faz um tempo que você não aparece por aqui. Aquele reparo, aquela limpeza ou montagem que ficou pra depois? Tem gente boa pertinho pra resolver rapidinho. Dá uma passada quando puder.</p>'
     + '<a href="' + appUrl + '" style="display:inline-block;padding:14px 28px;border-radius:10px;background:#ea580c;color:#fff;font-weight:600;text-decoration:none">Abrir o Chamô</a>'
     + '<p style="margin:24px 0 0;font-size:12px;color:#999">Você recebeu este e-mail porque tem uma conta no Chamô.</p>'
     + '</div></div>';

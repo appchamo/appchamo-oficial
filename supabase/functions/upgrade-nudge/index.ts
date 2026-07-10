@@ -76,10 +76,12 @@ Deno.serve(async (req) => {
       const nome = (pr.full_name || "").split(" ")[0] || "";
       const c = calls[p.id] || 0;
 
-      const title = c > 0 ? "🚀 Você está bombando no Chamô!" : "🚀 Vire destaque no Chamô!";
+      const title = c > 0
+        ? `${c} ${c === 1 ? "cliente te chamou" : "clientes te chamaram"} 👀`
+        : "Apareça no topo da busca";
       const message = c > 0
-        ? `${c} ${c === 1 ? "cliente te chamou" : "clientes te chamaram"} nos últimos 14 dias. Vire destaque e apareça no topo pra receber ainda mais.`
-        : `${nome ? nome + ", os" : "Os"} profissionais Pro aparecem no topo da busca e recebem muito mais chamadas. Ative o seu e apareça na frente.`;
+        ? `Isso já sem ser Pro. No plano Pro você aparece no topo da busca e recebe ainda mais. Vale a pena?`
+        : `${nome ? nome + ", o" : "O"} cliente clica primeiro em quem está no topo da busca. O plano Pro coloca você lá.`;
 
       await admin.from("notifications").insert({
         user_id: p.user_id,

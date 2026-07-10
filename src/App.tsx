@@ -111,6 +111,7 @@ const AdminCRM = lazy(() => import("./pages/admin/AdminCRM"));
 const AdminCoupons = lazy(() => import("./pages/admin/AdminCoupons"));
 const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
 const AdminLogs = lazy(() => import("./pages/admin/AdminLogs"));
+const AdminInstagram = lazy(() => import("./pages/admin/AdminInstagram"));
 const AdminCategories = lazy(() => import("./pages/admin/AdminCategories"));
 const AdminProfessions = lazy(() => import("./pages/admin/AdminProfessions"));
 const AdminBanners = lazy(() => import("./pages/admin/AdminBanners"));
@@ -665,6 +666,7 @@ const AppContent = () => {
         <Route path="/admin/coupons" element={<ProtectedRoute><AdminCoupons /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/logs" element={<ProtectedRoute><AdminLogs /></ProtectedRoute>} />
+        <Route path="/admin/instagram" element={<ProtectedRoute><AdminInstagram /></ProtectedRoute>} />
         <Route path="/admin/categories" element={<ProtectedRoute><AdminCategories /></ProtectedRoute>} />
         <Route path="/admin/professions" element={<ProtectedRoute><AdminProfessions /></ProtectedRoute>} />
         <Route path="/admin/banners" element={<ProtectedRoute><AdminBanners /></ProtectedRoute>} />

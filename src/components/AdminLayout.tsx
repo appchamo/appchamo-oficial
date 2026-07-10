@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
   LayoutDashboard, Users, BadgeCheck, Megaphone, 
-  CreditCard, Wallet, Ticket, Settings, FileText, LogOut, Grid3X3, Briefcase, Image, Hash, HelpCircle, Bell, LayoutList, BarChart3, BookOpen, UserSearch, Menu, PieChart, Contact
+  CreditCard, Wallet, Ticket, Settings, FileText, LogOut, Grid3X3, Briefcase, Image, Hash, HelpCircle, Bell, LayoutList, BarChart3, BookOpen, UserSearch, Menu, PieChart, Contact, Instagram
 } from "lucide-react";
 import {
   Sheet,
@@ -29,6 +29,7 @@ const navItems = [
   { icon: Hash, label: "Chamadas", path: "/admin/protocols" },
   { icon: HelpCircle, label: "Suporte", path: "/admin/support" },
   { icon: Bell, label: "Notificações", path: "/admin/notifications" },
+  { icon: Instagram, label: "Instagram (IA)", path: "/admin/instagram" },
   { icon: LayoutList, label: "Layout Home", path: "/admin/layout" },
   { icon: BookOpen, label: "Tutoriais", path: "/admin/tutorials" },
   { icon: UserSearch, label: "Ver Perfis", path: "/admin/profiles" },

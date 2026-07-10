@@ -638,7 +638,49 @@ serve(async (req) => {
     if (action === "create_sponsor_user") {
       await verifyAdmin();
       const { email, password, sponsorId } = body;
-      if (!email || !password || !sponsorId) throw new Error("email, password e sponsorId são obrigatórios.");
+      if (!sponsorId) throw new Error("sponsorId é obrigatório.");
+      if (!email && !password) throw new Error("Informe um email ou uma senha.");
+
+      // Verifica se o patrocinador JÁ tem conta vinculada
+      const { data: sp, error: spErr } = await supabase
+        .from("sponsors")
+        .select("id, user_id")
+        .eq("id", sponsorId)
+        .maybeSingle();
+      if (spErr) throw new Error("Erro ao carregar patrocinador: " + spErr.message);
+
+      // Fallback: se não estiver vinculado mas o email já existir em auth, reaproveita a conta
+      let existingUserId: string | null = (sp?.user_id as string | null) || null;
+      if (!existingUserId && email) {
+        const { data: list } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        const hit = list?.users?.find((u: any) => (u.email || "").toLowerCase() === email.toLowerCase());
+        if (hit) existingUserId = hit.id;
+      }
+
+      // JÁ TEM CONTA → atualiza email/senha (não cria outro usuário)
+      if (existingUserId) {
+        const upd: Record<string, unknown> = { email_confirm: true };
+        if (email) upd.email = email;
+        if (password) upd.password = password;
+        const { error: updErr } = await supabase.auth.admin.updateUserById(existingUserId, upd);
+        if (updErr) throw new Error("Erro ao atualizar acesso: " + updErr.message);
+
+        if (email) {
+          await supabase.from("profiles").upsert(
+            { user_id: existingUserId, email, user_type: "sponsor" },
+            { onConflict: "user_id" },
+          );
+        }
+        // Garante o vínculo
+        await supabase.from("sponsors").update({ user_id: existingUserId }).eq("id", sponsorId);
+
+        return new Response(JSON.stringify({ success: true, userId: existingUserId, updated: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // NÃO TEM CONTA → cria (precisa email e senha)
+      if (!email || !password) throw new Error("Para criar o acesso, informe email e senha.");
 
       const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
         email,

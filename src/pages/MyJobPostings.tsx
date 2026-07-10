@@ -227,12 +227,23 @@ const MyJobPostings = () => {
           publisherName = dn || fn || publisherName;
         }
 
-        const { data: recipients } = await supabase
-          .from("profiles")
-          .select("user_id")
-          .eq("address_city", form.city)
-          .eq("address_state", form.state)
-          .neq("user_id", publisherId ?? "");
+        // App focado em Patrocínio: notifica quem é da cidade da vaga
+        // + quem ainda não definiu cidade no perfil (quase sempre locais).
+        const [{ data: cityRec }, { data: noCityRec }] = await Promise.all([
+          supabase.from("profiles").select("user_id")
+            .eq("address_city", form.city)
+            .eq("address_state", form.state)
+            .neq("user_id", publisherId ?? ""),
+          supabase.from("profiles").select("user_id")
+            .or("address_city.is.null,address_city.eq.")
+            .neq("user_id", publisherId ?? ""),
+        ]);
+        const seenIds = new Set<string>();
+        const recipients = [...(cityRec || []), ...(noCityRec || [])].filter((r: any) => {
+          if (!r?.user_id || seenIds.has(r.user_id)) return false;
+          seenIds.add(r.user_id);
+          return true;
+        });
 
         const rows =
           (recipients || []).map((r: any) => ({

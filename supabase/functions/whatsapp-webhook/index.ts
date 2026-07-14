@@ -1,7 +1,8 @@
-// Webhook de ENTRADA do WhatsApp (Cloud API). Trata opt-out/opt-in automático.
+// Webhook de ENTRADA do WhatsApp (Cloud API). Trata:
+//  1) STATUS das mensagens enviadas (sent/delivered/read/failed) -> atualiza public.wa_messages.
+//  2) OPT-OUT/OPT-IN: se a pessoa responder PARAR/SAIR/STOP/CANCELAR -> desliga
+//     whatsapp_notifications_enabled e confirma. VOLTAR/ATIVAR/SIM -> religa.
 // - GET: verificação do webhook (hub.challenge) com WA_VERIFY_TOKEN.
-// - POST: se a pessoa responder PARAR/SAIR/STOP/CANCELAR -> desliga whatsapp_notifications_enabled
-//         e confirma. VOLTAR/ATIVAR/SIM -> religa.
 // Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WA_VERIFY_TOKEN (opcional; default abaixo).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -13,6 +14,11 @@ const START_WORDS = new Set(["voltar", "ativar", "sim", "start", "retornar"]);
 
 function norm(s: string): string {
   return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+}
+
+function tsToIso(t: unknown): string {
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : new Date().toISOString();
 }
 
 async function sendText(to: string, bodyText: string) {
@@ -47,18 +53,34 @@ Deno.serve(async (req) => {
   let payload: any = {};
   try { payload = await req.json(); } catch { /* ignore */ }
 
-  // Sempre responde 200 rápido pro Meta não reenviar.
-  const ack = () => new Response(JSON.stringify({ ok: true }), { status: 200 });
-
   try {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-
     const entries = Array.isArray(payload?.entry) ? payload.entry : [];
     for (const entry of entries) {
       const changes = Array.isArray(entry?.changes) ? entry.changes : [];
       for (const ch of changes) {
-        const msgs = ch?.value?.messages;
-        if (!Array.isArray(msgs)) continue;
+        const value = ch?.value || {};
+
+        // ── 1) STATUS de mensagens enviadas → atualiza wa_messages ──
+        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+        for (const st of statuses) {
+          const waId = String(st?.id || "");
+          const status = String(st?.status || "");
+          if (!waId || !status) continue;
+          const iso = tsToIso(st?.timestamp);
+          const patch: Record<string, unknown> = { status };
+          if (status === "sent") patch.sent_at = iso;
+          else if (status === "delivered") patch.delivered_at = iso;
+          else if (status === "read") patch.read_at = iso;
+          else if (status === "failed") {
+            patch.failed_at = iso;
+            try { patch.error = JSON.stringify(st?.errors ?? st ?? null); } catch { patch.error = "failed"; }
+          }
+          try { await admin.from("wa_messages").update(patch).eq("wa_id", waId); } catch (_e) { /* ignore */ }
+        }
+
+        // ── 2) Mensagens recebidas → opt-out/opt-in ──
+        const msgs = Array.isArray(value.messages) ? value.messages : [];
         for (const m of msgs) {
           if (m?.type !== "text") continue;
           const from = String(m?.from || "").replace(/\D/g, "");
@@ -94,5 +116,5 @@ Deno.serve(async (req) => {
   } catch (e) {
     console.error("[whatsapp-webhook] erro:", (e as Error)?.message);
   }
-  return ack();
+  return new Response(JSON.stringify({ ok: true }), { status: 200 });
 });

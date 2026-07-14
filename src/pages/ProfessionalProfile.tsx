@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRefreshAtKey } from "@/contexts/RefreshContext";
 import {
   ArrowLeft,
@@ -47,6 +47,7 @@ import { shareUrl } from "@/lib/shareUrl";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
 import { useAuth } from "@/hooks/useAuth";
 import { incrementProfessionalAnalytics } from "@/lib/proAnalytics";
+import { trackProfileView } from "@/lib/appAnalytics";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { cn } from "@/lib/utils";
 import ProfessionalSocialLinks from "@/components/ProfessionalSocialLinks";
@@ -347,6 +348,21 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
     if (!pro || isOwner) return;
     incrementProfessionalAnalytics(pro.user_id, "profile_click");
   }, [pro?.user_id, isOwner]);
+
+  // Registra a visita ao perfil no Analytics do usuário (uma vez por profissional).
+  const trackedProfileViewRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pro || isOwner) return;
+    if (trackedProfileViewRef.current === pro.id) return;
+    trackedProfileViewRef.current = pro.id;
+    const categoryLabel =
+      pro.profession_name && pro.profession_name !== "—"
+        ? pro.profession_name
+        : pro.category_name && pro.category_name !== "—"
+          ? pro.category_name
+          : null;
+    trackProfileView(pro.id, pro.full_name || null, categoryLabel);
+  }, [pro?.id, isOwner]);
 
   // Carrega flag "tem cupom ativo?" sempre que o perfil mudar (incluindo o owner,
   // para ele ver o badge no preview do próprio perfil).

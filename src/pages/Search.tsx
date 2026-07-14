@@ -11,6 +11,7 @@ import { useProProfileImpression } from "@/hooks/useProProfileImpression";
 import { incrementProfessionalAnalytics, searchQueryMatchesDisplayName } from "@/lib/proAnalytics";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { formatAvgResponseSeconds } from "@/lib/formatAvgResponse";
+import { trackSearch } from "@/lib/appAnalytics";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -433,9 +434,26 @@ const Search = () => {
         results_count: filteredAndSorted.length,
         city: userCity,
       }).then(() => {}, () => {});
+      // Log no Analytics do usuário (admin vê o que o cliente buscou).
+      trackSearch(raw.slice(0, 120));
     }, 1200);
     return () => clearTimeout(t);
   }, [search, filteredAndSorted, userCity]);
+
+  // Log da categoria/profissão escolhida no filtro (registra o interesse do cliente).
+  const loggedCategoryRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!filterCategory) return;
+    const catName = categories.find((c) => c.id === filterCategory)?.name || null;
+    const profName = filterProfession
+      ? professions.find((p) => p.id === filterProfession)?.name || null
+      : null;
+    const label = [catName, profName].filter(Boolean).join(" · ");
+    if (!label) return;
+    if (loggedCategoryRef.current.has(label)) return;
+    loggedCategoryRef.current.add(label);
+    trackSearch("", label);
+  }, [filterCategory, filterProfession, categories, professions]);
 
   const stateLabel = filterState ? statesList.find((s) => s.sigla === filterState)?.nome + " (" + filterState + ")" : "Selecione o Estado";
 

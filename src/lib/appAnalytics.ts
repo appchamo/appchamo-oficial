@@ -62,3 +62,30 @@ export async function trackAppEvent(
     } as never);
   } catch { /* silencioso */ }
 }
+
+/** Registra uma busca do cliente (termo e/ou categoria). Ignora buscas vazias. */
+export function trackSearch(query: string, category?: string | null): void {
+  const q = (query || "").trim();
+  const cat = category || null;
+  if (!q && !cat) return;
+  void trackAppEvent("action", {
+    label: "search",
+    meta: { query: q || null, category: cat },
+  });
+}
+
+/** Registra a visita a um perfil de profissional. */
+export function trackProfileView(
+  professionalId: string,
+  professionalName?: string | null,
+  category?: string | null,
+): void {
+  void trackAppEvent("action", {
+    label: "profile_view",
+    meta: {
+      professional_id: professionalId,
+      professional_name: professionalName || null,
+      category: category || null,
+    },
+  });
+}

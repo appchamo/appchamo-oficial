@@ -10,6 +10,7 @@ interface AppEvent {
   type: string;
   path: string | null;
   label: string | null;
+  meta?: any;
   platform: string | null;
   session_id: string | null;
   created_at: string;
@@ -48,7 +49,7 @@ export default function UserAnalyticsModal({
       setLoading(true);
       const { data } = await supabase
         .from("app_events" as never)
-        .select("id, type, path, label, platform, session_id, created_at")
+        .select("id, type, path, label, meta, platform, session_id, created_at")
         .eq("user_id", target.user_id)
         .order("created_at", { ascending: false })
         .limit(1000);
@@ -77,6 +78,46 @@ export default function UserAnalyticsModal({
     pageCounts[k] = (pageCounts[k] || 0) + 1;
   }
   const topPages = Object.entries(pageCounts).sort((a, b) => b[1] - a[1]).slice(0, 12);
+
+  // 🔎 Buscas do cliente (termo/categoria) — agregadas por frequência, mais recentes primeiro em empate.
+  const searchAgg = new Map<string, { query: string | null; category: string | null; count: number; last: string }>();
+  for (const e of events) {
+    if (e.type !== "action" || e.label !== "search") continue;
+    const q = (e.meta?.query ?? null) as string | null;
+    const cat = (e.meta?.category ?? null) as string | null;
+    if (!q && !cat) continue;
+    const key = `${(q || "").toLowerCase()}||${(cat || "").toLowerCase()}`;
+    const prev = searchAgg.get(key);
+    if (prev) {
+      prev.count += 1;
+      if (e.created_at > prev.last) prev.last = e.created_at;
+    } else {
+      searchAgg.set(key, { query: q, category: cat, count: 1, last: e.created_at });
+    }
+  }
+  const searches = Array.from(searchAgg.values())
+    .sort((a, b) => (b.count - a.count) || (b.last.localeCompare(a.last)))
+    .slice(0, 12);
+
+  // 👤 Perfis visitados — dedupe por profissional, com contagem, mais recentes primeiro.
+  const profileAgg = new Map<string, { name: string; category: string | null; count: number; last: string }>();
+  for (const e of events) {
+    if (e.type !== "action" || e.label !== "profile_view") continue;
+    const name = (e.meta?.professional_name ?? e.meta?.professional_id ?? null) as string | null;
+    if (!name) continue;
+    const cat = (e.meta?.category ?? null) as string | null;
+    const key = String(e.meta?.professional_id ?? name);
+    const prev = profileAgg.get(key);
+    if (prev) {
+      prev.count += 1;
+      if (e.created_at > prev.last) prev.last = e.created_at;
+    } else {
+      profileAgg.set(key, { name, category: cat, count: 1, last: e.created_at });
+    }
+  }
+  const profileViews = Array.from(profileAgg.values())
+    .sort((a, b) => b.last.localeCompare(a.last))
+    .slice(0, 12);
 
   const Stat = ({ icon, label, value, tint }: { icon: ReactNode; label: string; value: string; tint: string }) => (
     <div className="rounded-xl border border-border bg-card p-3">
@@ -147,6 +188,44 @@ export default function UserAnalyticsModal({
                 </div>
               </div>
             )}
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-2">🔎 Pesquisou por</p>
+              {searches.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhuma busca registrada.</p>
+              ) : (
+                <div className="space-y-1">
+                  {searches.map((s, i) => (
+                    <div key={`${s.query || ""}-${s.category || ""}-${i}`} className="flex items-center justify-between text-sm border-b border-border/60 py-1">
+                      <span className="text-foreground">
+                        {s.query || <span className="text-muted-foreground">(sem termo)</span>}
+                        {s.category && <span className="text-muted-foreground text-xs"> · {s.category}</span>}
+                      </span>
+                      {s.count > 1 && <span className="text-muted-foreground font-medium">{s.count}x</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-2">👤 Perfis que visitou</p>
+              {profileViews.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhum perfil visitado.</p>
+              ) : (
+                <div className="space-y-1">
+                  {profileViews.map((p, i) => (
+                    <div key={`${p.name}-${i}`} className="flex items-center justify-between text-sm border-b border-border/60 py-1">
+                      <span className="text-foreground">
+                        {p.name}
+                        {p.category && <span className="text-muted-foreground text-xs"> · {p.category}</span>}
+                      </span>
+                      {p.count > 1 && <span className="text-muted-foreground font-medium">{p.count}x</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-2">Histórico (mais recentes)</p>

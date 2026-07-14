@@ -64,7 +64,17 @@ const PAGE_NAMES: Record<string, string> = {
   "/profile": "Perfil", "/signup": "Cadastro", "/login": "Login", "/subscriptions": "Planos",
   "/notifications": "Notificações", "/community": "Comunidade", "/categories": "Categorias",
 };
-const pretty = (p: string | null) => (p ? PAGE_NAMES[p] || p : "—");
+const PRO_PATH_RE = /^\/(?:professional|pro)\/([^/?#]+)/;
+const CAT_PATH_RE = /^\/category\/([^/?#]+)/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Deixa um slug/valor de categoria legível quando a busca no banco falha. */
+function prettifyCategory(raw: string): string {
+  let t = raw;
+  try { t = decodeURIComponent(raw); } catch { /* mantém cru */ }
+  if (!t.includes(" ") && t.includes("-")) t = t.replace(/-/g, " ");
+  t = t.trim();
+  return t.replace(/\b\p{L}/gu, (ch) => ch.toUpperCase());
+}
 
 const PERIODS = [
   { k: "hoje", label: "Hoje", days: 1 },
@@ -107,6 +117,9 @@ export default function AdminAnalise({ embedded = false }: { embedded?: boolean 
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [providers, setProviders] = useState<{ provider: string; total: number; concluiu: number; abriu: number }[]>([]);
+  // Nomes legíveis resolvidos a partir dos paths (id/slug → nome), p/ páginas mais acessadas.
+  const [proNames, setProNames] = useState<Record<string, string>>({});
+  const [catNames, setCatNames] = useState<Record<string, string>>({});
 
   // ---- cadastros incompletos (lista por usuário) ----
   const [incompletes, setIncompletes] = useState<IncompleteRow[]>([]);
@@ -186,6 +199,92 @@ export default function AdminAnalise({ embedded = false }: { embedded?: boolean 
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Resolve nomes amigáveis (perfis/categorias) a partir dos paths dos eventos — nunca bloqueia render.
+  useEffect(() => {
+    let cancelled = false;
+    const proKeys = new Set<string>();
+    const catKeys = new Set<string>();
+    for (const e of events) {
+      const p = e.path || "";
+      const pm = p.match(PRO_PATH_RE);
+      if (pm) proKeys.add(pm[1]);
+      const cm = p.match(CAT_PATH_RE);
+      if (cm) catKeys.add(cm[1]);
+    }
+
+    // Profissionais: id/slug no path → nome (professionals.id|slug → profiles_public.full_name).
+    if (proKeys.size) {
+      (async () => {
+        try {
+          const keys = Array.from(proKeys);
+          const uuids = keys.filter((k) => UUID_RE.test(k));
+          const slugs = keys.filter((k) => !UUID_RE.test(k));
+          const rows: { id: string; slug: string | null; user_id: string }[] = [];
+          if (uuids.length) {
+            const { data: r } = await supabase.from("professionals").select("id, slug, user_id").in("id", uuids);
+            if (r) rows.push(...((r as unknown) as typeof rows));
+          }
+          if (slugs.length) {
+            const { data: r } = await supabase.from("professionals").select("id, slug, user_id").in("slug", slugs);
+            if (r) rows.push(...((r as unknown) as typeof rows));
+          }
+          const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))];
+          const nameByUser = new Map<string, string>();
+          if (userIds.length) {
+            const { data: profs } = await supabase.from("profiles_public" as never).select("user_id, full_name").in("user_id", userIds);
+            (((profs as unknown) as { user_id: string; full_name: string | null }[]) || []).forEach((pr) => {
+              if (pr.full_name) nameByUser.set(pr.user_id, pr.full_name);
+            });
+          }
+          const map: Record<string, string> = {};
+          for (const r of rows) {
+            const nm = nameByUser.get(r.user_id);
+            if (!nm) continue;
+            if (proKeys.has(r.id)) map[r.id] = nm;
+            if (r.slug && proKeys.has(r.slug)) map[r.slug] = nm;
+          }
+          if (!cancelled && Object.keys(map).length) setProNames(map);
+        } catch { /* mantém path cru se falhar */ }
+      })();
+    }
+
+    // Categorias: <x> no path → nome. Aceita nome URL-encoded e slug (categories.slug).
+    if (catKeys.size) {
+      (async () => {
+        try {
+          const keys = Array.from(catKeys);
+          const { data: cats } = await supabase.from("categories").select("name, slug");
+          const catRows = (((cats as unknown) as { name: string; slug: string }[]) || []);
+          const bySlug = new Map<string, string>();
+          const byNameLower = new Map<string, string>();
+          catRows.forEach((c) => {
+            if (c.slug) bySlug.set(c.slug, c.name);
+            if (c.name) byNameLower.set(c.name.toLowerCase(), c.name);
+          });
+          const map: Record<string, string> = {};
+          for (const k of keys) {
+            let decoded = k;
+            try { decoded = decodeURIComponent(k); } catch { /* mantém cru */ }
+            map[k] = bySlug.get(k) || bySlug.get(decoded) || byNameLower.get(decoded.toLowerCase()) || prettifyCategory(k);
+          }
+          if (!cancelled && Object.keys(map).length) setCatNames(map);
+        } catch { /* mantém path cru se falhar */ }
+      })();
+    }
+    return () => { cancelled = true; };
+  }, [events]);
+
+  // Rótulo legível do path — PAGE_NAMES + nomes resolvidos de perfis/categorias.
+  const prettyPath = (p: string | null): string => {
+    if (!p) return "—";
+    if (PAGE_NAMES[p]) return PAGE_NAMES[p];
+    const pm = p.match(PRO_PATH_RE);
+    if (pm && proNames[pm[1]]) return `Perfil: ${proNames[pm[1]]}`;
+    const cm = p.match(CAT_PATH_RE);
+    if (cm && catNames[cm[1]]) return `Categoria: ${catNames[cm[1]]}`;
+    return p;
+  };
 
   // ---- agregações ----
   const stats = useMemo(() => {
@@ -269,8 +368,8 @@ export default function AdminAnalise({ embedded = false }: { embedded?: boolean 
   const topPages = useMemo(() => {
     const m: Record<string, number> = {};
     for (const e of evFiltered) if (e.type === "page_view" && isUserPath(e.path)) { const k = e.path as string; m[k] = (m[k] || 0) + 1; }
-    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([path, qtd]) => ({ name: pretty(path), qtd }));
-  }, [evFiltered]);
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([path, qtd]) => ({ name: prettyPath(path), qtd }));
+  }, [evFiltered, proNames, catNames]);
 
   const perDay = useMemo(() => {
     const m: Record<string, number> = {};

@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -16,10 +17,11 @@ type SortDir = "desc" | "asc";
 // ─── Helpers compartilhados (novas abas) ───
 const RCOLORS = ["#ea580c", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ef4444", "#14b8a6", "#6b7280"];
 const R_PERIODS = [
+  { k: "hoje", label: "Hoje", days: 1 },
   { k: "7", label: "7 dias", days: 7 },
   { k: "30", label: "30 dias", days: 30 },
   { k: "90", label: "90 dias", days: 90 },
-  { k: "all", label: "Tudo", days: 0 },
+  { k: "all", label: "Total", days: 0 },
 ] as const;
 const RSpinner = () => <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" /></div>;
 const PeriodBar = ({ value, onChange }: { value: string; onChange: (k: string) => void }) => (
@@ -612,27 +614,44 @@ type ProSortKey =
   | "rating"
   | "reviews";
 
+type PAEvent = { target_user_id: string; event_kind: string; created_at: string };
+type ReqRow = { professional_id: string; created_at: string | null };
+type RevRow = { professional_id: string; rating: number | null; created_at: string | null };
+type ProReview = { rating: number | null; comment: string | null; created_at: string | null };
+
 const ProfessionalsTab = () => {
-  const [data, setData] = useState<ProRow[]>([]);
+  const [data, setData] = useState<ProRow[]>([]);            // base = contadores cumulativos (período "Total")
+  const [proIdByUserId, setProIdByUserId] = useState<Map<string, string>>(new Map());
+  const [events, setEvents] = useState<PAEvent[]>([]);       // eventos dos últimos 30 dias (name_search + profile_click)
+  const [reqs, setReqs] = useState<ReqRow[]>([]);            // todas as chamadas, com data
+  const [revs, setRevs] = useState<RevRow[]>([]);            // avaliações dos últimos 30 dias
   const [sortBy, setSortBy] = useState<ProSortKey>("profile_clicks");
+  const [period, setPeriod] = useState("30");
   const [loading, setLoading] = useState(true);
 
+  // Modal de detalhe (drill-down por profissional)
+  const [selected, setSelected] = useState<ProRow | null>(null);
+  const [detail, setDetail] = useState<{ category: string | null; avatar: string | null }>({ category: null, avatar: null });
+  const [detailReviews, setDetailReviews] = useState<ProReview[]>([]);
+
   useEffect(() => {
-    const fetch = async () => {
+    const fetchAll = async () => {
       const { data: pros } = await supabase
         .from("professionals")
         .select("user_id, total_services, rating, total_reviews")
         .eq("active", true);
       if (!pros) { setLoading(false); return; }
       const userIds = pros.map((p) => p.user_id);
+      const histSince = new Date(Date.now() - 366 * 86400000).toISOString(); // janela ampla: cobre todos os períodos oferecidos (até 90d); o filtro por período é client-side. Total usa contadores.
 
-      const [profilesRes, countersRes, reqsRes] = await Promise.all([
+      const [profilesRes, countersRes, reqsRes, proIdRes] = await Promise.all([
         supabase.from("profiles").select("user_id, full_name").in("user_id", userIds),
         (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
           .from("professional_analytics_counters")
           .select("user_id, profile_views, profile_clicks, call_clicks, name_searches")
           .in("user_id", userIds),
-        supabase.from("service_requests").select("professional_id"),
+        supabase.from("service_requests").select("professional_id, created_at"),
+        supabase.from("professionals").select("id, user_id").in("user_id", userIds),
       ]);
 
       const nameMap = new Map((profilesRes.data || []).map((p) => [p.user_id, p.full_name]));
@@ -645,28 +664,43 @@ const ProfessionalsTab = () => {
         name_searches: number | null;
       };
       const countersMap = new Map<string, CounterRow>();
-      for (const c of (countersRes.data as CounterRow[] | null) || []) {
-        countersMap.set(c.user_id, c);
-      }
+      for (const c of (countersRes.data as CounterRow[] | null) || []) countersMap.set(c.user_id, c);
 
-      // service_requests é contado pelo professional_id (PK na tabela professionals).
-      // Precisamos mapear user_id ↔ professional_id.
-      const { data: proIdRows } = await supabase
-        .from("professionals")
-        .select("id, user_id")
-        .in("user_id", userIds);
-      const proIdByUserId = new Map<string, string>();
-      for (const row of proIdRows || []) proIdByUserId.set(row.user_id, row.id);
+      // service_requests é contado pelo professional_id (PK de professionals) → mapeia user_id ↔ id.
+      const idMap = new Map<string, string>();
+      for (const row of (proIdRes.data || []) as { id: string; user_id: string }[]) idMap.set(row.user_id, row.id);
 
+      const reqRows = ((reqsRes.data || []) as ReqRow[]);
       const reqCountsByProId: Record<string, number> = {};
-      for (const r of (reqsRes.data || []) as { professional_id: string }[]) {
-        reqCountsByProId[r.professional_id] = (reqCountsByProId[r.professional_id] || 0) + 1;
-      }
+      for (const r of reqRows) reqCountsByProId[r.professional_id] = (reqCountsByProId[r.professional_id] || 0) + 1;
 
+      // Eventos por data (últimos 30 dias) — só os kinds que usamos aqui (pequenos). Resiliente.
+      let evRows: PAEvent[] = [];
+      try {
+        const { data: ev } = await (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
+          .from("professional_analytics_events")
+          .select("target_user_id, event_kind, created_at")
+          .in("event_kind", ["name_search", "profile_click"])
+          .gte("created_at", histSince)
+          .limit(100000);
+        evRows = ((ev as unknown) as PAEvent[]) || [];
+      } catch { evRows = []; }
+
+      // Avaliações dos últimos 30 dias (para nota/reviews por período). Resiliente.
+      let revRows: RevRow[] = [];
+      try {
+        const { data: rv } = await supabase.from("reviews").select("professional_id, rating, created_at").gte("created_at", histSince).limit(50000);
+        revRows = ((rv as unknown) as RevRow[]) || [];
+      } catch { revRows = []; }
+
+      setProIdByUserId(idMap);
+      setEvents(evRows);
+      setReqs(reqRows);
+      setRevs(revRows);
       setData(
         pros.map((p) => {
           const c = countersMap.get(p.user_id);
-          const proId = proIdByUserId.get(p.user_id);
+          const proId = idMap.get(p.user_id);
           return {
             user_id: p.user_id,
             name: nameMap.get(p.user_id) || "—",
@@ -683,10 +717,82 @@ const ProfessionalsTab = () => {
       );
       setLoading(false);
     };
-    fetch();
+    fetchAll().catch(() => setLoading(false));
   }, []);
 
-  const sorted = [...data].sort((a, b) => Number(b[sortBy] ?? 0) - Number(a[sortBy] ?? 0));
+  const days = R_PERIODS.find((p) => p.k === period)?.days ?? 0;
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+
+  // Linhas visíveis: no "Total" usa os contadores cumulativos (comportamento original, exato);
+  // em períodos (>0 dias) recalcula a partir dos logs por data.
+  const rows = useMemo<ProRow[]>(() => {
+    if (!days) return data;
+    const searches: Record<string, number> = {};
+    const visits: Record<string, number> = {};
+    for (const e of events) {
+      if (new Date(e.created_at).getTime() < cutoff) continue;
+      if (e.event_kind === "name_search") searches[e.target_user_id] = (searches[e.target_user_id] || 0) + 1;
+      else if (e.event_kind === "profile_click") visits[e.target_user_id] = (visits[e.target_user_id] || 0) + 1;
+    }
+    const reqByPro: Record<string, number> = {};
+    for (const r of reqs) if (r.created_at && new Date(r.created_at).getTime() >= cutoff) reqByPro[r.professional_id] = (reqByPro[r.professional_id] || 0) + 1;
+    const revCount: Record<string, number> = {};
+    const revSum: Record<string, number> = {};
+    for (const r of revs) if (r.created_at && new Date(r.created_at).getTime() >= cutoff) {
+      revCount[r.professional_id] = (revCount[r.professional_id] || 0) + 1;
+      revSum[r.professional_id] = (revSum[r.professional_id] || 0) + Number(r.rating ?? 0);
+    }
+    return data.map((r) => {
+      const proId = proIdByUserId.get(r.user_id);
+      const rc = proId ? (revCount[proId] || 0) : 0;
+      return {
+        ...r,
+        name_searches: searches[r.user_id] || 0,
+        profile_clicks: visits[r.user_id] || 0,
+        requests: proId ? (reqByPro[proId] || 0) : 0,
+        reviews: rc,
+        rating: rc && proId ? revSum[proId] / rc : 0,
+        // Atend. (services) mantém o total cumulativo — não há fonte limpa por período.
+      };
+    });
+  }, [days, cutoff, data, events, reqs, revs, proIdByUserId]);
+
+  const sorted = [...rows].sort((a, b) => Number(b[sortBy] ?? 0) - Number(a[sortBy] ?? 0));
+  const periodLabel = R_PERIODS.find((p) => p.k === period)?.label ?? "Total";
+
+  // Abre o modal e carrega detalhe (categoria, avatar, últimas avaliações). Nunca quebra.
+  const openDetail = async (row: ProRow) => {
+    setSelected(row);
+    setDetail({ category: null, avatar: null });
+    setDetailReviews([]);
+    const proId = proIdByUserId.get(row.user_id);
+    try {
+      const [profRes, proRes, revRes] = await Promise.all([
+        supabase.from("profiles").select("avatar_url").eq("user_id", row.user_id).maybeSingle(),
+        supabase.from("professionals").select("category_id").eq("user_id", row.user_id).maybeSingle(),
+        proId
+          ? supabase.from("reviews").select("rating, comment, created_at").eq("professional_id", proId).order("created_at", { ascending: false }).limit(5)
+          : Promise.resolve({ data: [] as ProReview[] }),
+      ]);
+      let category: string | null = null;
+      const catId = (proRes as { data?: { category_id?: string | null } }).data?.category_id;
+      if (catId) {
+        const { data: cat } = await supabase.from("categories").select("name").eq("id", catId).maybeSingle();
+        category = (cat as { name?: string } | null)?.name ?? null;
+      }
+      setDetail({ category, avatar: (profRes as { data?: { avatar_url?: string | null } }).data?.avatar_url ?? null });
+      setDetailReviews((((revRes as { data?: ProReview[] }).data) as ProReview[]) || []);
+    } catch { /* mantém o modal aberto com o que já temos */ }
+  };
+
+  // Mini-série "visitas por dia" no período (para o modal).
+  const detailPerDay = useMemo(() => {
+    if (!selected || !days) return [];
+    return seriesByDay(
+      events.filter((e) => e.target_user_id === selected.user_id && e.event_kind === "profile_click").map((e) => e.created_at),
+      cutoff,
+    );
+  }, [selected, days, events, cutoff]);
 
   if (loading) {
     return (
@@ -705,13 +811,25 @@ const ProfessionalsTab = () => {
     { key: "reviews", label: "Mais reviews" },
   ];
 
+  const fmtStars = (n: number) => "⭐".repeat(Math.max(0, Math.min(5, Math.round(n)))) || "—";
+  const fmtRevDate = (s: string | null) => (s ? new Date(s).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "");
+  const MiniCard = ({ label, value }: { label: string; value: number | string }) => (
+    <div className="rounded-lg border bg-muted/30 p-2.5">
+      <p className="text-[11px] text-muted-foreground leading-tight">{label}</p>
+      <p className="text-xl font-bold text-foreground mt-0.5">{value}</p>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        <strong>Pesquisados</strong> = buscas pelo nome do pro.{" "}
-        <strong>Visitas</strong> = quando alguém abre a página pública do perfil (<code className="text-[10px]">profile_clicks</code>; impressões de card no carrossel ficam em <code className="text-[10px]">profile_views</code> e não aparecem aqui).{" "}
-        <strong>Chamadas</strong> = pedidos de serviço criados (<code className="text-[10px]">service_requests</code>).
+        <strong>Pesquisas</strong> = buscas pelo nome do profissional.{" "}
+        <strong>Visitas</strong> = quando alguém abre a página do perfil.{" "}
+        <strong>Chamadas</strong> = pedidos de serviço criados.{" "}
+        No período <strong>Total</strong> os números são acumulados (desde sempre); em <strong>Hoje / 7 / 30 dias</strong> são calculados pelo registro de uso com data. Toque numa linha para ver o detalhe.
       </p>
+
+      <PeriodBar value={period} onChange={setPeriod} />
 
       <div className="flex flex-wrap gap-2">
         {sortOptions.map((opt) => (
@@ -746,14 +864,18 @@ const ProfessionalsTab = () => {
             </thead>
             <tbody>
               {sorted.slice(0, 30).map((p, i) => (
-                <tr key={p.user_id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <tr
+                  key={p.user_id}
+                  onClick={() => openDetail(p)}
+                  className="border-b last:border-0 hover:bg-muted/40 transition-colors cursor-pointer"
+                >
                   <td className="p-3 text-xs text-muted-foreground">{i + 1}</td>
                   <td className="p-3 font-medium text-foreground text-xs md:text-sm">{p.name}</td>
                   <td className="p-3 text-xs tabular-nums">{p.name_searches}</td>
                   <td className="p-3 text-xs tabular-nums">{p.profile_clicks}</td>
                   <td className="p-3 text-xs tabular-nums">{p.requests}</td>
                   <td className="p-3 text-xs tabular-nums">{p.services}</td>
-                  <td className="p-3 text-xs">⭐ {p.rating.toFixed(1)}</td>
+                  <td className="p-3 text-xs">{p.reviews > 0 ? `⭐ ${p.rating.toFixed(1)}` : "—"}</td>
                   <td className="p-3 text-xs tabular-nums">{p.reviews}</td>
                 </tr>
               ))}
@@ -762,6 +884,71 @@ const ProfessionalsTab = () => {
         </div>
         {data.length === 0 && <p className="text-center py-6 text-muted-foreground text-sm">Sem dados</p>}
       </div>
+
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) setSelected(null); }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          {selected && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-3">
+                  {detail.avatar
+                    ? <img src={detail.avatar} alt="" className="w-11 h-11 rounded-full object-cover" />
+                    : <div className="w-11 h-11 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold shrink-0">{(selected.name || "?").slice(0, 1).toUpperCase()}</div>}
+                  <div className="min-w-0 text-left">
+                    <p className="text-base font-bold text-foreground truncate">{selected.name}</p>
+                    <p className="text-xs font-normal text-muted-foreground">
+                      {detail.category || "Profissional"}
+                      {selected.reviews > 0 ? ` · ⭐ ${selected.rating.toFixed(1)}` : ""}
+                    </p>
+                  </div>
+                </DialogTitle>
+              </DialogHeader>
+
+              <p className="text-xs text-muted-foreground -mt-1">Números do período: <strong>{periodLabel}</strong>.</p>
+
+              <div className="grid grid-cols-2 gap-2">
+                <MiniCard label="Quantas vezes procuraram por ele" value={selected.name_searches} />
+                <MiniCard label="Quantas vezes abriram o perfil" value={selected.profile_clicks} />
+                <MiniCard label="Quantas chamadas recebeu" value={selected.requests} />
+                <MiniCard label="Atendimentos" value={selected.services} />
+                <MiniCard label="Nota média" value={selected.reviews > 0 ? selected.rating.toFixed(1) : "—"} />
+                <MiniCard label="Avaliações" value={selected.reviews} />
+              </div>
+
+              {days > 0 && detailPerDay.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-foreground mb-1">Visitas ao perfil por dia</p>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <BarChart data={detailPerDay}>
+                      <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="dia" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} width={24} /><Tooltip />
+                      <Bar dataKey="qtd" name="Visitas" fill={RCOLORS[0]} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <div>
+                <p className="text-xs font-semibold text-foreground mb-1">Últimas avaliações</p>
+                {detailReviews.length ? (
+                  <div className="space-y-2">
+                    {detailReviews.map((r, i) => (
+                      <div key={i} className="rounded-lg border p-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs">{fmtStars(r.rating || 0)}</span>
+                          <span className="text-[11px] text-muted-foreground">{fmtRevDate(r.created_at)}</span>
+                        </div>
+                        {r.comment
+                          ? <p className="text-xs text-foreground mt-1">{r.comment}</p>
+                          : <p className="text-xs text-muted-foreground mt-1 italic">Sem comentário.</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="text-xs text-muted-foreground">Nenhuma avaliação ainda.</p>}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

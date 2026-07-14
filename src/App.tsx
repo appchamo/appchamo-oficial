@@ -94,6 +94,7 @@ const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
 const ProfileAccount = lazy(() => import("./pages/Profile"));
 const ProfileSettingsPassword = lazy(() => import("./pages/ProfileSettingsPassword"));
 const ProfileSettingsAddress = lazy(() => import("./pages/ProfileSettingsAddress"));
+const ProfileSettingsPreferences = lazy(() => import("./pages/ProfileSettingsPreferences"));
 const ProfileSettingsSecurity = lazy(() => import("./pages/ProfileSettingsSecurity"));
 const ProfessionalReports = lazy(() => import("./pages/ProfessionalReports"));
 
@@ -641,6 +642,7 @@ const AppContent = () => {
         <Route path="/profile/settings/seguranca" element={<ProtectedRoute><ProfileSettingsSecurity /></ProtectedRoute>} />
         <Route path="/profile/settings/senha" element={<ProtectedRoute><ProfileSettingsPassword /></ProtectedRoute>} />
         <Route path="/profile/settings/endereco" element={<ProtectedRoute><ProfileSettingsAddress /></ProtectedRoute>} />
+        <Route path="/profile/settings/preferencias" element={<ProtectedRoute><ProfileSettingsPreferences /></ProtectedRoute>} />
         <Route path="/profile/relatorios" element={<ProtectedRoute><ProfessionalReports /></ProtectedRoute>} />
         <Route path="/checkout/business" element={<BusinessCheckout />} />
 

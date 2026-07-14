@@ -78,9 +78,13 @@ Deno.serve(async (req) => {
       );
       const { data: prof } = await supabase
         .from("profiles")
-        .select("phone, full_name")
+        .select("phone, full_name, whatsapp_notifications_enabled")
         .eq("user_id", body.user_id)
         .maybeSingle();
+      // Respeita opt-out do WhatsApp (só no fluxo por user_id; o "to" direto de teste ainda envia).
+      if ((prof as any)?.whatsapp_notifications_enabled === false) {
+        return new Response(JSON.stringify({ ok: true, skipped: "whatsapp_opt_out" }), { status: 200 });
+      }
       to = toMsisdn((prof as any)?.phone);
       // Se não passaram params, usa o primeiro nome do profissional como {{1}}
       if (params.length === 0 && (prof as any)?.full_name) {

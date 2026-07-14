@@ -98,6 +98,45 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
+    // 2b. Preferências de notificação: respeita opt-out de chat / comunidade / novidades.
+    //     Só gateia essas 3 categorias; avisos transacionais (chamada, pagamento, suporte,
+    //     vaga, selo, etc.) sempre passam.
+    try {
+      const t = String(record.type || "").toLowerCase()
+      const link = String(record.link || "")
+      let prefCol: string | null = null
+      if (t === "chat") {
+        prefCol = "chat_notifications_enabled"
+      } else if (t === "community" || (t === "info" && link.includes("comunidade"))) {
+        prefCol = "community_notifications_enabled"
+      } else {
+        let src = ""
+        try {
+          const m = typeof record.metadata === "string" ? JSON.parse(record.metadata) : record.metadata
+          src = String(m?.source || "")
+        } catch { /* ignore */ }
+        const MKT = new Set([
+          "daily_ai", "daily_ai_notification", "limit_reached_nudge", "upgrade_nudge",
+          "winback", "winback_reactivation", "category_intent", "category_intent_marketing",
+          "search_match", "incomplete_signup", "dica", "dica_chamo",
+        ])
+        if (MKT.has(src)) prefCol = "updates_notifications_enabled"
+      }
+      if (prefCol) {
+        const { data: pref } = await supabaseAdmin
+          .from("profiles")
+          .select(prefCol)
+          .eq("user_id", record.user_id)
+          .maybeSingle()
+        if ((pref as Record<string, unknown> | null)?.[prefCol] === false) {
+          console.log(`🔕 Push suprimido por preferência (${prefCol}) do usuário ${record.user_id}`)
+          return new Response(JSON.stringify({ ok: true, skipped: prefCol }), { status: 200 })
+        }
+      }
+    } catch (e) {
+      console.warn("[prefs] falha ao checar preferências (segue enviando):", (e as Error)?.message)
+    }
+
     // 3. Busca TODOS os dispositivos do usuário (push_token + device_name para iOS vs Android)
     const { data: devices, error: deviceError } = await supabaseAdmin
       .from('user_devices')

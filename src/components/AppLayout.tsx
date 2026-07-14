@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import Header from "./Header";
 import BottomNav from "./BottomNav";
 import { DesktopSidebar } from "./SideMenu";
@@ -17,6 +18,23 @@ const MemoizedBottomNav = memo(BottomNav);
 
 const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { isAdmin, user } = useAuth();
+
+  // Contas de admin (sócios com papel *_admin) não usam o app comum: qualquer
+  // tela do app manda direto pro painel /admin. Cobre o caso do celular abrir
+  // no /home. Não afeta: usuário do suporte (layout próprio) nem o preview da
+  // Home dentro do admin (iframe com ?preview=1).
+  useEffect(() => {
+    if (!isAdmin) return;
+    let isPreview = false;
+    try { isPreview = new URLSearchParams(window.location.search).get("preview") === "1"; } catch { /* */ }
+    if (isPreview) return;
+    const email = (user?.email || "").toLowerCase().trim();
+    if (email === "suporte@appchamo.com") return;
+    navigate("/admin", { replace: true });
+  }, [isAdmin, user, navigate]);
+
   const isHome = location.pathname === "/home";
   const isProProfile = /^\/pro\/[^/]+$/.test(location.pathname) || /^\/professional\/[^/]+$/.test(location.pathname);
   const isMainPullTab =

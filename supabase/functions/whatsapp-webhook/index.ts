@@ -19,8 +19,9 @@ const SYSTEM_PROMPT = `Você é o Assistente Chamô no WhatsApp. O Chamô é um 
 ## Estilo (WhatsApp)
 - Português do Brasil, caloroso, humano e CURTO (1 a 3 frases). Vá direto ao ponto.
 - NÃO cumprimente com "Oi/Olá/Bom dia" em toda mensagem. Só se for o primeiro contato. Se já estão conversando, responda direto, sem saudação repetida.
-- Não use travessão. No máximo 1 emoji, e nem sempre.
+- Não use travessão. No máximo 1 emoji no texto, e nem sempre.
 - Use o nome da pessoa com naturalidade, sem repetir a cada mensagem.
+- Você pode, opcionalmente, COMEÇAR a resposta com uma reação em emoji no formato [react:EMOJI] (ex.: [react:❤️], [react:👍], [react:😂]) quando fizer sentido (elogio, agradecimento, boa notícia). Use com moderação: a maioria das mensagens NÃO precisa de reação.
 
 ## Conhecimento do Chamô
 - COMO CONTRATAR (cliente): busca ou categorias -> abre o perfil do profissional -> faz a chamada/pedido -> conversa fica no chat de Mensagens do app.
@@ -42,18 +43,40 @@ function tsToIso(t: unknown): string {
   return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : new Date().toISOString();
 }
 
-async function sendText(to: string, bodyText: string): Promise<boolean> {
-  const token = (Deno.env.get("WHATSAPP_TOKEN") || "").trim();
-  const phoneId = (Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || "").trim();
+function waCfg() {
+  return {
+    token: (Deno.env.get("WHATSAPP_TOKEN") || "").trim(),
+    phoneId: (Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || "").trim(),
+  };
+}
+async function waPost(body: Record<string, unknown>): Promise<boolean> {
+  const { token, phoneId } = waCfg();
   if (!token || !phoneId) return false;
   try {
     const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: bodyText } }),
+      body: JSON.stringify({ messaging_product: "whatsapp", ...body }),
     });
     return r.ok;
   } catch (_e) { return false; }
+}
+async function sendText(to: string, bodyText: string): Promise<boolean> {
+  return waPost({ to, type: "text", text: { body: bodyText } });
+}
+/** Marca a mensagem recebida como lida (tique azul). */
+async function markRead(msgId: string): Promise<void> {
+  await waPost({ status: "read", message_id: msgId });
+}
+/** Reage com emoji na mensagem recebida (ou remove a reação com emoji vazio). */
+async function sendReaction(to: string, msgId: string, emoji: string): Promise<void> {
+  await waPost({ to, type: "reaction", reaction: { message_id: msgId, emoji } });
+}
+/** Separa uma reação opcional no formato [react:EMOJI] do início do texto da IA. */
+function splitReaction(reply: string): { emoji: string | null; text: string } {
+  const m = reply.match(/^\s*\[react:\s*(\S+?)\s*\]\s*/u);
+  if (m) return { emoji: m[1], text: reply.slice(m[0].length).trim() };
+  return { emoji: null, text: reply };
 }
 
 function roleLabel(userType: string | null | undefined): string {
@@ -125,6 +148,9 @@ async function process(payload: any) {
           .insert({ wa_message_id: msgId, from_phone: from, kind, incoming_text: text || null, status: "pending" });
         if (dupErr) continue;
 
+        // Marca como lida (tique azul) assim que chega.
+        try { await markRead(msgId); } catch (_e) { /* ignore */ }
+
         const n = norm(text);
         const wantsStop = STOP_WORDS.has(n);
         const wantsStart = START_WORDS.has(n);
@@ -145,7 +171,14 @@ async function process(payload: any) {
 
         // 2b) IA (só com texto útil)
         if (!text.trim()) {
-          await admin.from("wa_interactions").update({ status: "skipped", error: "sem texto" }).eq("wa_message_id", msgId);
+          // Áudio/voz (ainda sem transcrição): responde de forma amigável por texto.
+          if (kind === "audio" || kind === "voice") {
+            const reply = "Recebi seu áudio 🎧 Por enquanto consigo te ajudar melhor por texto. Me conta rapidinho por escrito o que você precisa? 💚";
+            const ok = await sendText(from, reply);
+            await admin.from("wa_interactions").update({ reply_text: reply, status: ok ? "sent" : "error" }).eq("wa_message_id", msgId);
+          } else {
+            await admin.from("wa_interactions").update({ status: "skipped", error: "sem texto" }).eq("wa_message_id", msgId);
+          }
           continue;
         }
 
@@ -185,13 +218,16 @@ async function process(payload: any) {
           ? `(A pessoa respondeu a uma pesquisa/botão com: "${text}")`
           : text;
 
-        const reply = await aiReply(system, history, userMsg);
-        if (!reply) {
+        const raw = await aiReply(system, history, userMsg);
+        if (!raw) {
           await admin.from("wa_interactions").update({ status: "error", error: "sem_resposta_ia" }).eq("wa_message_id", msgId);
           continue;
         }
-        const ok = await sendText(from, reply);
-        await admin.from("wa_interactions").update({ reply_text: reply, status: ok ? "sent" : "error" }).eq("wa_message_id", msgId);
+        const { emoji, text: replyText } = splitReaction(raw);
+        if (emoji) { try { await sendReaction(from, msgId, emoji); } catch (_e) { /* ignore */ } }
+        const finalText = replyText || raw;
+        const ok = await sendText(from, finalText);
+        await admin.from("wa_interactions").update({ reply_text: raw, status: ok ? "sent" : "error" }).eq("wa_message_id", msgId);
       }
     }
   }

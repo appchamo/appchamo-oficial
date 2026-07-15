@@ -75,6 +75,15 @@ function splitReaction(reply: string): { emoji: string | null; text: string } {
   if (m) return { emoji: m[1], text: reply.slice(m[0].length).trim() };
   return { emoji: null, text: reply };
 }
+/** Reação padrão (quando a IA não escolheu uma): joia = "entendido", coração p/ elogio, etc. */
+function pickReaction(incoming: string, kind: string): string {
+  const t = norm(incoming);
+  if (kind === "button" || kind === "interactive") return "👍";
+  if (/(obrigad|valeu|amei|adorei|top|excelente|ótim|otim|maravilh|parabéns|parabens|show|perfeit|gostei|top demais|sensacional|incrível|incrivel)/.test(t)) return "❤️";
+  if (/(problema|reclama|erro|péssim|pessim|horrível|horrivel|ruim|insatisfeit|cancelar|não funciona|nao funciona|não consigo|nao consigo|golpe|demora|atras)/.test(t)) return "🙏";
+  if (/(kkk|haha|rsrs|engraçad|engracad|risos)/.test(t)) return "😂";
+  return "👍";
+}
 
 // ── ÁUDIO ──
 async function downloadWaMedia(mediaId: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
@@ -303,7 +312,8 @@ async function process(payload: any) {
           continue;
         }
         const { emoji, text: replyText } = splitReaction(raw);
-        if (emoji) { try { await sendReaction(from, msgId, emoji); } catch (_e) { /* ignore */ } }
+        const reactEmoji = emoji || pickReaction(text, kind);
+        if (reactEmoji) { try { await sendReaction(from, msgId, reactEmoji); } catch (_e) { /* ignore */ } }
         const finalText = replyText || raw;
 
         let ok = false;

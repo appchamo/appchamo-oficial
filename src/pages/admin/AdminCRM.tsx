@@ -51,6 +51,8 @@ const waDayLabel = (s: string) => {
 
 interface WaMsg { id: number; to_phone: string | null; template: string | null; body: string | null; status: string | null; sent_at: string; read_at: string | null; delivered_at: string | null; user_id?: string | null; }
 interface WaInb { id: number; from_phone: string | null; type: string | null; body: string | null; received_at: string; }
+interface WaIx { id: number; from_phone: string | null; kind: string | null; incoming_text: string | null; reply_text: string | null; created_at: string; }
+const stripReactTag = (s: string) => s.replace(/^\s*\[react:[^\]]*\]\s*/u, "");
 type ChatMsg = { dir: "in" | "out"; text: string; time: string; status: string; template?: string | null; userId?: string | null };
 const onlyDigits = (s: string | null) => (s || "").replace(/\D/g, "");
 const fmtPhone = (d: string) => {
@@ -218,18 +220,21 @@ export default function AdminCRM() {
   // ----- aba WhatsApp -----
   const [waMsgs, setWaMsgs] = useState<WaMsg[]>([]);
   const [waInbound, setWaInbound] = useState<WaInb[]>([]);
+  const [waInter, setWaInter] = useState<WaIx[]>([]);
   const [waLoaded, setWaLoaded] = useState(false);
   const [waPhone, setWaPhone] = useState<string | null>(null);
   const [waSearch, setWaSearch] = useState("");
   useEffect(() => {
     if (tab !== "whatsapp" || waLoaded) return;
     (async () => {
-      const [{ data: m }, { data: inb }] = await Promise.all([
+      const [{ data: m }, { data: inb }, { data: ix }] = await Promise.all([
         supabase.from("wa_messages" as never).select("id, to_phone, template, body, status, sent_at, read_at, delivered_at, user_id").order("sent_at", { ascending: false }).limit(2000),
         supabase.from("wa_inbound" as never).select("id, from_phone, type, body, received_at").order("received_at", { ascending: false }).limit(2000),
+        supabase.from("wa_interactions" as never).select("id, from_phone, kind, incoming_text, reply_text, created_at").order("created_at", { ascending: false }).limit(2000),
       ]);
       setWaMsgs(((m as unknown) as WaMsg[]) || []);
       setWaInbound(((inb as unknown) as WaInb[]) || []);
+      setWaInter(((ix as unknown) as WaIx[]) || []);
       setWaLoaded(true);
     })();
   }, [tab, waLoaded]);
@@ -245,6 +250,13 @@ export default function AdminCRM() {
     };
     for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent"), template: m.template, userId: m.user_id ?? null });
     for (const i of waInbound) push(i.from_phone, { dir: "in", text: i.body || `(${i.type || "mensagem"})`, time: i.received_at, status: "in" });
+    // Conversa da IA (mensagens recebidas + respostas automáticas). Áudio marcado com 🎧.
+    for (const x of waInter) {
+      const isAudio = x.kind === "audio";
+      const tag = isAudio ? "🎧 " : "";
+      if (x.incoming_text) push(x.from_phone, { dir: "in", text: tag + x.incoming_text, time: x.created_at, status: "in" });
+      if (x.reply_text) push(x.from_phone, { dir: "out", text: tag + stripReactTag(x.reply_text), time: x.created_at, status: "sent" });
+    }
     const list = Array.from(map.entries()).map(([phone, msgs]) => {
       msgs.sort((a, b) => a.time.localeCompare(b.time));
       const last = msgs[msgs.length - 1];
@@ -253,7 +265,7 @@ export default function AdminCRM() {
     });
     list.sort((a, b) => b.last.time.localeCompare(a.last.time));
     return list;
-  }, [waMsgs, waInbound]);
+  }, [waMsgs, waInbound, waInter]);
 
   const waFilteredConvs = useMemo(() => {
     const t = onlyDigits(waSearch);

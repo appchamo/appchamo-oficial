@@ -2,14 +2,18 @@
 //  1) STATUS das mensagens (sent/delivered/read/failed) -> atualiza public.wa_messages.
 //  2) OPT-OUT/OPT-IN: PARAR/SAIR/STOP -> desliga; VOLTAR/ATIVAR/SIM -> religa.
 //  3) IA de atendimento (Sonnet): responde dúvidas/botões com histórico da conversa,
-//     sabendo se a pessoa é cliente ou profissional. Log + dedup em public.wa_interactions.
-// GET: verificação (hub.challenge) com WA_VERIFY_TOKEN.
-// Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, ANTHROPIC_API_KEY, WA_VERIFY_TOKEN (opcional).
+//     sabendo se a pessoa é cliente ou profissional. Marca como lida e reage com emoji.
+//  4) ÁUDIO: se a pessoa manda áudio, transcreve (ElevenLabs Scribe), responde e devolve
+//     em ÁUDIO (ElevenLabs TTS). Texto -> texto; áudio -> áudio.
+// Log + dedup em public.wa_interactions. GET: verificação (hub.challenge).
+// Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY,
+//          ELEVENLABS_VOICE_ID (opcional), WA_VERIFY_TOKEN (opcional).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const GRAPH_VERSION = "v21.0";
 const VERIFY_TOKEN = (Deno.env.get("WA_VERIFY_TOKEN") || "chamo-wa-2026").trim();
 const AI_MODEL = "claude-sonnet-4-6";
+const EL_VOICE = (Deno.env.get("ELEVENLABS_VOICE_ID") || "21m00Tcm4TlvDq8ikWAM").trim();
 
 const STOP_WORDS = new Set(["parar", "sair", "stop", "cancelar", "descadastrar", "pare"]);
 const START_WORDS = new Set(["voltar", "ativar", "sim", "start", "retornar"]);
@@ -21,7 +25,7 @@ const SYSTEM_PROMPT = `Você é o Assistente Chamô no WhatsApp. O Chamô é um 
 - NÃO cumprimente com "Oi/Olá/Bom dia" em toda mensagem. Só se for o primeiro contato. Se já estão conversando, responda direto, sem saudação repetida.
 - Não use travessão. No máximo 1 emoji no texto, e nem sempre.
 - Use o nome da pessoa com naturalidade, sem repetir a cada mensagem.
-- Você pode, opcionalmente, COMEÇAR a resposta com uma reação em emoji no formato [react:EMOJI] (ex.: [react:❤️], [react:👍], [react:😂]) quando fizer sentido (elogio, agradecimento, boa notícia). Use com moderação: a maioria das mensagens NÃO precisa de reação.
+- Você pode, opcionalmente, COMEÇAR a resposta com uma reação em emoji no formato [react:EMOJI] (ex.: [react:❤️], [react:👍], [react:😂]) quando fizer sentido. Use com moderação: a maioria das mensagens NÃO precisa de reação.
 
 ## Conhecimento do Chamô
 - COMO CONTRATAR (cliente): busca ou categorias -> abre o perfil do profissional -> faz a chamada/pedido -> conversa fica no chat de Mensagens do app.
@@ -30,10 +34,11 @@ const SYSTEM_PROMPT = `Você é o Assistente Chamô no WhatsApp. O Chamô é um 
 - No iOS os planos pagos usam compra dentro do app (Apple); no Android/web pode ter checkout. NUNCA invente preços, taxas, prazos ou datas.
 
 ## Regras
-- Nunca prometa reembolso, prazo, valor ou política que você não tem certeza. Diga que os valores/regras aparecem nas telas do app (Assinaturas, pagamento) e que o suporte confirma casos específicos.
+- Nunca prometa reembolso, prazo, valor ou política que você não tem certeza. Diga que os valores/regras aparecem nas telas do app e que o suporte confirma casos específicos.
 - Reclamação ou problema de pagamento: seja empático, peça desculpas e oriente a falar com o suporte dentro do app.
-- Se for spam, propaganda de terceiros ou ofensa: responda educado e breve, sem se estender.
-- Se a pessoa respondeu a uma pesquisa: "Recomendo muito" -> agradeça animado; "Poderia melhorar" -> agradeça e pergunte gentilmente o que dá pra melhorar.`;
+- Se for spam, propaganda de terceiros ou ofensa: responda educado e breve.
+- Se a pessoa respondeu a uma pesquisa: "Recomendo muito" -> agradeça animado; "Poderia melhorar" -> agradeça e pergunte o que dá pra melhorar.
+- Se a mensagem veio por ÁUDIO, sua resposta também vira áudio: então escreva um texto que soa bem falado (natural, sem markdown, sem emojis dentro do texto).`;
 
 function norm(s: string): string {
   return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
@@ -42,15 +47,11 @@ function tsToIso(t: unknown): string {
   const n = Number(t);
   return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : new Date().toISOString();
 }
+function waToken() { return (Deno.env.get("WHATSAPP_TOKEN") || "").trim(); }
+function waPhoneId() { return (Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || "").trim(); }
 
-function waCfg() {
-  return {
-    token: (Deno.env.get("WHATSAPP_TOKEN") || "").trim(),
-    phoneId: (Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || "").trim(),
-  };
-}
 async function waPost(body: Record<string, unknown>): Promise<boolean> {
-  const { token, phoneId } = waCfg();
+  const token = waToken(), phoneId = waPhoneId();
   if (!token || !phoneId) return false;
   try {
     const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`, {
@@ -64,19 +65,76 @@ async function waPost(body: Record<string, unknown>): Promise<boolean> {
 async function sendText(to: string, bodyText: string): Promise<boolean> {
   return waPost({ to, type: "text", text: { body: bodyText } });
 }
-/** Marca a mensagem recebida como lida (tique azul). */
-async function markRead(msgId: string): Promise<void> {
-  await waPost({ status: "read", message_id: msgId });
-}
-/** Reage com emoji na mensagem recebida (ou remove a reação com emoji vazio). */
+async function markRead(msgId: string): Promise<void> { await waPost({ status: "read", message_id: msgId }); }
 async function sendReaction(to: string, msgId: string, emoji: string): Promise<void> {
   await waPost({ to, type: "reaction", reaction: { message_id: msgId, emoji } });
 }
-/** Separa uma reação opcional no formato [react:EMOJI] do início do texto da IA. */
 function splitReaction(reply: string): { emoji: string | null; text: string } {
   const m = reply.match(/^\s*\[react:\s*(\S+?)\s*\]\s*/u);
   if (m) return { emoji: m[1], text: reply.slice(m[0].length).trim() };
   return { emoji: null, text: reply };
+}
+
+// ── ÁUDIO ──
+async function downloadWaMedia(mediaId: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  const token = waToken();
+  if (!token) return null;
+  try {
+    const meta = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const mj = await meta.json();
+    if (!mj?.url) return null;
+    const bin = await fetch(mj.url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!bin.ok) return null;
+    return { bytes: new Uint8Array(await bin.arrayBuffer()), mime: String(mj.mime_type || "audio/ogg") };
+  } catch (_e) { return null; }
+}
+async function transcribe(bytes: Uint8Array, mime: string): Promise<string | null> {
+  const key = (Deno.env.get("ELEVENLABS_API_KEY") || "").trim();
+  if (!key) return null;
+  try {
+    const fd = new FormData();
+    fd.append("model_id", "scribe_v1");
+    fd.append("file", new Blob([bytes], { type: mime || "audio/ogg" }), "audio.ogg");
+    const r = await fetch("https://api.elevenlabs.io/v1/speech-to-text", { method: "POST", headers: { "xi-api-key": key }, body: fd });
+    const j = await r.json();
+    const txt = String(j?.text || "").trim();
+    return txt || null;
+  } catch (_e) { return null; }
+}
+async function synthesize(text: string): Promise<Uint8Array | null> {
+  const key = (Deno.env.get("ELEVENLABS_API_KEY") || "").trim();
+  if (!key) return null;
+  try {
+    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${EL_VOICE}?output_format=mp3_44100_128`, {
+      method: "POST",
+      headers: { "xi-api-key": key, "content-type": "application/json" },
+      body: JSON.stringify({ text: text.slice(0, 900), model_id: "eleven_multilingual_v2" }),
+    });
+    if (!r.ok) return null;
+    return new Uint8Array(await r.arrayBuffer());
+  } catch (_e) { return null; }
+}
+async function uploadWaAudio(bytes: Uint8Array): Promise<string | null> {
+  const token = waToken(), phoneId = waPhoneId();
+  if (!token || !phoneId) return null;
+  try {
+    const fd = new FormData();
+    fd.append("messaging_product", "whatsapp");
+    fd.append("type", "audio/mpeg");
+    fd.append("file", new Blob([bytes], { type: "audio/mpeg" }), "resposta.mp3");
+    const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/media`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
+    });
+    const j = await r.json();
+    return j?.id ? String(j.id) : null;
+  } catch (_e) { return null; }
+}
+async function sendAudioReply(to: string, text: string): Promise<boolean> {
+  const audio = await synthesize(text);
+  if (!audio) return false;
+  const mediaId = await uploadWaAudio(audio);
+  if (!mediaId) return false;
+  return waPost({ to, type: "audio", audio: { id: mediaId } });
 }
 
 function roleLabel(userType: string | null | undefined): string {
@@ -104,28 +162,16 @@ async function aiReply(system: string, history: { role: string; content: string 
   } catch (_e) { return null; }
 }
 
-function extractText(m: any): { text: string; kind: string } {
-  if (m?.type === "text") return { text: String(m?.text?.body || ""), kind: "text" };
-  if (m?.type === "button") return { text: String(m?.button?.text || m?.button?.payload || ""), kind: "button" };
-  if (m?.type === "interactive") {
-    const i = m.interactive || {};
-    return { text: String(i?.button_reply?.title || i?.list_reply?.title || ""), kind: "interactive" };
-  }
-  return { text: "", kind: String(m?.type || "outro") };
-}
-
 async function process(payload: any) {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const entries = Array.isArray(payload?.entry) ? payload.entry : [];
   for (const entry of entries) {
-    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
-    for (const ch of changes) {
+    for (const ch of (Array.isArray(entry?.changes) ? entry.changes : [])) {
       const value = ch?.value || {};
 
       // 1) STATUS -> wa_messages
       for (const st of (Array.isArray(value.statuses) ? value.statuses : [])) {
-        const waId = String(st?.id || "");
-        const status = String(st?.status || "");
+        const waId = String(st?.id || ""); const status = String(st?.status || "");
         if (!waId || !status) continue;
         const iso = tsToIso(st?.timestamp);
         const patch: Record<string, unknown> = { status };
@@ -136,28 +182,50 @@ async function process(payload: any) {
         try { await admin.from("wa_messages").update(patch).eq("wa_id", waId); } catch (_e) { /* ignore */ }
       }
 
-      // 2) MENSAGENS recebidas
+      // 2) MENSAGENS
       for (const m of (Array.isArray(value.messages) ? value.messages : [])) {
         const from = String(m?.from || "").replace(/\D/g, "");
         const msgId = String(m?.id || "");
-        const { text, kind } = extractText(m);
+        const type = String(m?.type || "");
         if (!from || !msgId) continue;
+
+        const isAudio = (type === "audio" || type === "voice") && m?.audio?.id;
+        let text = "";
+        let kind = type;
+        if (type === "text") text = String(m?.text?.body || "");
+        else if (type === "button") { text = String(m?.button?.text || m?.button?.payload || ""); kind = "button"; }
+        else if (type === "interactive") { const i = m.interactive || {}; text = String(i?.button_reply?.title || i?.list_reply?.title || ""); kind = "interactive"; }
+        else if (isAudio) kind = "audio";
 
         // Dedup
         const { error: dupErr } = await admin.from("wa_interactions")
           .insert({ wa_message_id: msgId, from_phone: from, kind, incoming_text: text || null, status: "pending" });
         if (dupErr) continue;
 
-        // Marca como lida (tique azul) assim que chega.
         try { await markRead(msgId); } catch (_e) { /* ignore */ }
 
+        // Áudio -> transcreve
+        let respondWithAudio = false;
+        if (isAudio) {
+          respondWithAudio = true;
+          const media = await downloadWaMedia(String(m.audio.id));
+          const transcript = media ? await transcribe(media.bytes, media.mime) : null;
+          if (!transcript) {
+            const reply = "Recebi seu áudio 🎧 mas não consegui entender bem. Pode mandar de novo ou escrever?";
+            const ok = await sendText(from, reply);
+            await admin.from("wa_interactions").update({ reply_text: reply, status: ok ? "sent" : "error", error: "stt_falhou" }).eq("wa_message_id", msgId);
+            continue;
+          }
+          text = transcript;
+          await admin.from("wa_interactions").update({ incoming_text: transcript }).eq("wa_message_id", msgId);
+        }
+
         const n = norm(text);
-        const wantsStop = STOP_WORDS.has(n);
-        const wantsStart = START_WORDS.has(n);
         const last8 = from.slice(-8);
 
-        // 2a) Opt-out / opt-in
-        if (wantsStop || wantsStart) {
+        // Opt-out / opt-in (também por áudio transcrito)
+        if (STOP_WORDS.has(n) || START_WORDS.has(n)) {
+          const wantsStop = STOP_WORDS.has(n);
           const { data: rows } = await admin.from("profiles").select("user_id").ilike("phone", `%${last8}%`).limit(10);
           const ids = (rows || []).map((r: any) => r.user_id).filter(Boolean);
           if (ids.length) await admin.from("profiles").update({ whatsapp_notifications_enabled: !wantsStop }).in("user_id", ids);
@@ -169,41 +237,30 @@ async function process(payload: any) {
           continue;
         }
 
-        // 2b) IA (só com texto útil)
         if (!text.trim()) {
-          // Áudio/voz (ainda sem transcrição): responde de forma amigável por texto.
-          if (kind === "audio" || kind === "voice") {
-            const reply = "Recebi seu áudio 🎧 Por enquanto consigo te ajudar melhor por texto. Me conta rapidinho por escrito o que você precisa? 💚";
-            const ok = await sendText(from, reply);
-            await admin.from("wa_interactions").update({ reply_text: reply, status: ok ? "sent" : "error" }).eq("wa_message_id", msgId);
-          } else {
-            await admin.from("wa_interactions").update({ status: "skipped", error: "sem texto" }).eq("wa_message_id", msgId);
-          }
+          await admin.from("wa_interactions").update({ status: "skipped", error: "sem texto" }).eq("wa_message_id", msgId);
           continue;
         }
 
-        // Identidade: cliente ou profissional? (pelo telefone)
+        // Identidade
         let contextLine = "A pessoa ainda não foi identificada no cadastro do Chamô (número não encontrado).";
         try {
-          const { data: profs } = await admin.from("profiles")
-            .select("full_name, user_type").ilike("phone", `%${last8}%`).limit(10);
+          const { data: profs } = await admin.from("profiles").select("full_name, user_type").ilike("phone", `%${last8}%`).limit(10);
           if (profs && profs.length) {
-            const pro = profs.find((p: any) => (p.user_type || "").toLowerCase() === "professional" || (p.user_type || "").toLowerCase() === "company") || profs[0];
+            const pro = profs.find((p: any) => ["professional", "company"].includes((p.user_type || "").toLowerCase())) || profs[0];
             const nome = String((pro as any).full_name || "").split(" ")[0];
             const papel = roleLabel((pro as any).user_type);
             contextLine = `Você está falando com ${nome || "um usuário"}${papel ? `, que é ${papel} no Chamô` : ""}.`;
           }
         } catch (_e) { /* ignore */ }
 
-        // Histórico da conversa (turnos completos anteriores)
+        // Histórico
         const history: { role: string; content: string }[] = [];
         try {
           const { data: hist } = await admin.from("wa_interactions")
             .select("incoming_text, reply_text, created_at, wa_message_id")
-            .eq("from_phone", from)
-            .neq("wa_message_id", msgId)
-            .order("created_at", { ascending: true })
-            .limit(12);
+            .eq("from_phone", from).neq("wa_message_id", msgId)
+            .order("created_at", { ascending: true }).limit(12);
           for (const h of (hist || []) as any[]) {
             if (h.incoming_text && h.reply_text) {
               history.push({ role: "user", content: String(h.incoming_text) });
@@ -212,9 +269,10 @@ async function process(payload: any) {
           }
         } catch (_e) { /* ignore */ }
 
-        const primeiraVez = history.length === 0 ? " É o primeiro contato dela por aqui." : " Vocês já conversaram antes (veja o histórico).";
-        const system = `${SYSTEM_PROMPT}\n\n## Contexto desta conversa\n${contextLine}${primeiraVez}`;
-        const userMsg = kind === "button" || kind === "interactive"
+        const primeira = history.length === 0 ? " É o primeiro contato dela por aqui." : " Vocês já conversaram antes (veja o histórico).";
+        const canal = respondWithAudio ? " A pessoa mandou por ÁUDIO, então sua resposta será falada em áudio." : "";
+        const system = `${SYSTEM_PROMPT}\n\n## Contexto desta conversa\n${contextLine}${primeira}${canal}`;
+        const userMsg = (kind === "button" || kind === "interactive")
           ? `(A pessoa respondeu a uma pesquisa/botão com: "${text}")`
           : text;
 
@@ -226,7 +284,14 @@ async function process(payload: any) {
         const { emoji, text: replyText } = splitReaction(raw);
         if (emoji) { try { await sendReaction(from, msgId, emoji); } catch (_e) { /* ignore */ } }
         const finalText = replyText || raw;
-        const ok = await sendText(from, finalText);
+
+        let ok = false;
+        if (respondWithAudio) {
+          ok = await sendAudioReply(from, finalText);
+          if (!ok) ok = await sendText(from, finalText); // fallback: se o áudio falhar, manda texto
+        } else {
+          ok = await sendText(from, finalText);
+        }
         await admin.from("wa_interactions").update({ reply_text: raw, status: ok ? "sent" : "error" }).eq("wa_message_id", msgId);
       }
     }
@@ -246,10 +311,8 @@ Deno.serve(async (req) => {
 
   let payload: any = {};
   try { payload = await req.json(); } catch { /* ignore */ }
-
   const work = process(payload).catch((e) => console.error("[whatsapp-webhook] erro:", (e as Error)?.message));
   try { (globalThis as any).EdgeRuntime?.waitUntil?.(work); } catch { /* ignore */ }
   if (!(globalThis as any).EdgeRuntime?.waitUntil) { await work; }
-
   return new Response(JSON.stringify({ ok: true }), { status: 200 });
 });

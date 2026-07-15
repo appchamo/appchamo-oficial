@@ -101,22 +101,42 @@ async function transcribe(bytes: Uint8Array, mime: string): Promise<string | nul
     return txt || null;
   } catch (_e) { return null; }
 }
-async function synthesize(text: string): Promise<Uint8Array | null> {
-  const key = (Deno.env.get("ELEVENLABS_API_KEY") || "").trim();
-  if (!key) return null;
+async function firstAvailableVoice(key: string): Promise<string | null> {
   try {
-    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${EL_VOICE}?output_format=mp3_44100_128`, {
+    const r = await fetch("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": key } });
+    const j = await r.json();
+    const v = j?.voices?.[0]?.voice_id;
+    return v ? String(v) : null;
+  } catch { return null; }
+}
+async function ttsBytes(key: string, voice: string, text: string): Promise<{ bytes?: Uint8Array; error?: string }> {
+  try {
+    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`, {
       method: "POST",
       headers: { "xi-api-key": key, "content-type": "application/json" },
       body: JSON.stringify({ text: text.slice(0, 900), model_id: "eleven_multilingual_v2" }),
     });
-    if (!r.ok) { console.error("[tts] ElevenLabs falhou", r.status, (await r.text()).slice(0, 400)); return null; }
-    return new Uint8Array(await r.arrayBuffer());
-  } catch (e) { console.error("[tts] excecao", (e as Error)?.message); return null; }
+    if (!r.ok) return { error: `tts_${r.status}:${(await r.text()).slice(0, 200)}` };
+    return { bytes: new Uint8Array(await r.arrayBuffer()) };
+  } catch (e) { return { error: `tts_exc:${(e as Error)?.message}` }; }
 }
-async function uploadWaAudio(bytes: Uint8Array): Promise<string | null> {
+async function synthesize(text: string): Promise<{ bytes?: Uint8Array; error?: string }> {
+  const key = (Deno.env.get("ELEVENLABS_API_KEY") || "").trim();
+  if (!key) return { error: "sem_ELEVENLABS_API_KEY" };
+  let res = await ttsBytes(key, EL_VOICE, text);
+  if (res.bytes) return res;
+  // Voz padrão pode não existir na conta -> tenta a primeira voz disponível.
+  const v2 = await firstAvailableVoice(key);
+  if (v2 && v2 !== EL_VOICE) {
+    const res2 = await ttsBytes(key, v2, text);
+    if (res2.bytes) return res2;
+    return { error: `${res.error} | fallbackVoice ${v2}: ${res2.error}` };
+  }
+  return res;
+}
+async function uploadWaAudio(bytes: Uint8Array): Promise<{ id?: string; error?: string }> {
   const token = waToken(), phoneId = waPhoneId();
-  if (!token || !phoneId) return null;
+  if (!token || !phoneId) return { error: "wa_nao_configurado" };
   try {
     const fd = new FormData();
     fd.append("messaging_product", "whatsapp");
@@ -126,18 +146,17 @@ async function uploadWaAudio(bytes: Uint8Array): Promise<string | null> {
       method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
     });
     const j = await r.json();
-    if (!j?.id) console.error("[wa-upload] falhou", r.status, JSON.stringify(j).slice(0, 400));
-    return j?.id ? String(j.id) : null;
-  } catch (e) { console.error("[wa-upload] excecao", (e as Error)?.message); return null; }
+    if (!j?.id) return { error: `upload_${r.status}:${JSON.stringify(j).slice(0, 200)}` };
+    return { id: String(j.id) };
+  } catch (e) { return { error: `upload_exc:${(e as Error)?.message}` }; }
 }
-async function sendAudioReply(to: string, text: string): Promise<boolean> {
-  const audio = await synthesize(text);
-  if (!audio) { console.error("[audio] sem TTS (voz)"); return false; }
-  const mediaId = await uploadWaAudio(audio);
-  if (!mediaId) { console.error("[audio] sem mediaId (upload)"); return false; }
-  const ok = await waPost({ to, type: "audio", audio: { id: mediaId } });
-  if (!ok) console.error("[audio] envio do audio falhou");
-  return ok;
+async function sendAudioReply(to: string, text: string): Promise<{ ok: boolean; reason: string }> {
+  const s = await synthesize(text);
+  if (!s.bytes) return { ok: false, reason: s.error || "tts_nulo" };
+  const u = await uploadWaAudio(s.bytes);
+  if (!u.id) return { ok: false, reason: u.error || "upload_nulo" };
+  const ok = await waPost({ to, type: "audio", audio: { id: u.id } });
+  return { ok, reason: ok ? "" : "envio_audio_falhou" };
 }
 
 function roleLabel(userType: string | null | undefined): string {
@@ -289,13 +308,15 @@ async function process(payload: any) {
         const finalText = replyText || raw;
 
         let ok = false;
+        let audioErr: string | null = null;
         if (respondWithAudio) {
-          ok = await sendAudioReply(from, finalText);
-          if (!ok) ok = await sendText(from, finalText); // fallback: se o áudio falhar, manda texto
+          const res = await sendAudioReply(from, finalText);
+          ok = res.ok;
+          if (!ok) { audioErr = res.reason; ok = await sendText(from, finalText); } // fallback texto
         } else {
           ok = await sendText(from, finalText);
         }
-        await admin.from("wa_interactions").update({ reply_text: raw, status: ok ? "sent" : "error" }).eq("wa_message_id", msgId);
+        await admin.from("wa_interactions").update({ reply_text: raw, status: ok ? "sent" : "error", error: audioErr }).eq("wa_message_id", msgId);
       }
     }
   }

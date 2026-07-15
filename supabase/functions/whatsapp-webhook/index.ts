@@ -110,9 +110,9 @@ async function synthesize(text: string): Promise<Uint8Array | null> {
       headers: { "xi-api-key": key, "content-type": "application/json" },
       body: JSON.stringify({ text: text.slice(0, 900), model_id: "eleven_multilingual_v2" }),
     });
-    if (!r.ok) return null;
+    if (!r.ok) { console.error("[tts] ElevenLabs falhou", r.status, (await r.text()).slice(0, 400)); return null; }
     return new Uint8Array(await r.arrayBuffer());
-  } catch (_e) { return null; }
+  } catch (e) { console.error("[tts] excecao", (e as Error)?.message); return null; }
 }
 async function uploadWaAudio(bytes: Uint8Array): Promise<string | null> {
   const token = waToken(), phoneId = waPhoneId();
@@ -126,15 +126,18 @@ async function uploadWaAudio(bytes: Uint8Array): Promise<string | null> {
       method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
     });
     const j = await r.json();
+    if (!j?.id) console.error("[wa-upload] falhou", r.status, JSON.stringify(j).slice(0, 400));
     return j?.id ? String(j.id) : null;
-  } catch (_e) { return null; }
+  } catch (e) { console.error("[wa-upload] excecao", (e as Error)?.message); return null; }
 }
 async function sendAudioReply(to: string, text: string): Promise<boolean> {
   const audio = await synthesize(text);
-  if (!audio) return false;
+  if (!audio) { console.error("[audio] sem TTS (voz)"); return false; }
   const mediaId = await uploadWaAudio(audio);
-  if (!mediaId) return false;
-  return waPost({ to, type: "audio", audio: { id: mediaId } });
+  if (!mediaId) { console.error("[audio] sem mediaId (upload)"); return false; }
+  const ok = await waPost({ to, type: "audio", audio: { id: mediaId } });
+  if (!ok) console.error("[audio] envio do audio falhou");
+  return ok;
 }
 
 function roleLabel(userType: string | null | undefined): string {

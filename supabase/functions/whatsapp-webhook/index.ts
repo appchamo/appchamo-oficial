@@ -13,7 +13,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const GRAPH_VERSION = "v21.0";
 const VERIFY_TOKEN = (Deno.env.get("WA_VERIFY_TOKEN") || "chamo-wa-2026").trim();
 const AI_MODEL = "claude-sonnet-4-6";
-const EL_VOICE = (Deno.env.get("ELEVENLABS_VOICE_ID") || "21m00Tcm4TlvDq8ikWAM").trim();
+const EL_VOICE = (Deno.env.get("ELEVENLABS_VOICE_ID") || "GM2UA3fbsIaLHcswCDX9").trim();
+const EL_SETTINGS = { stability: 0.5, similarity_boost: 0.79, style: 0.15, use_speaker_boost: true, speed: 0.98 };
 
 const STOP_WORDS = new Set(["parar", "sair", "stop", "cancelar", "descadastrar", "pare"]);
 const START_WORDS = new Set(["voltar", "ativar", "sim", "start", "retornar"]);
@@ -109,39 +110,41 @@ async function firstAvailableVoice(key: string): Promise<string | null> {
     return v ? String(v) : null;
   } catch { return null; }
 }
-async function ttsBytes(key: string, voice: string, text: string): Promise<{ bytes?: Uint8Array; error?: string }> {
+async function ttsBytes(key: string, voice: string, text: string, format: string): Promise<{ bytes?: Uint8Array; error?: string }> {
   try {
-    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`, {
+    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=${format}`, {
       method: "POST",
       headers: { "xi-api-key": key, "content-type": "application/json" },
-      body: JSON.stringify({ text: text.slice(0, 900), model_id: "eleven_multilingual_v2" }),
+      body: JSON.stringify({ text: text.slice(0, 900), model_id: "eleven_multilingual_v2", voice_settings: EL_SETTINGS }),
     });
-    if (!r.ok) return { error: `tts_${r.status}:${(await r.text()).slice(0, 200)}` };
+    if (!r.ok) return { error: `tts_${format}_${r.status}:${(await r.text()).slice(0, 160)}` };
     return { bytes: new Uint8Array(await r.arrayBuffer()) };
   } catch (e) { return { error: `tts_exc:${(e as Error)?.message}` }; }
 }
-async function synthesize(text: string): Promise<{ bytes?: Uint8Array; error?: string }> {
+/** Gera a fala. Prioriza OGG/OPUS (vira NOTA DE VOZ no WhatsApp); se falhar, cai pra mp3 (arquivo). */
+async function synthesize(text: string): Promise<{ bytes?: Uint8Array; mime?: string; error?: string }> {
   const key = (Deno.env.get("ELEVENLABS_API_KEY") || "").trim();
   if (!key) return { error: "sem_ELEVENLABS_API_KEY" };
-  let res = await ttsBytes(key, EL_VOICE, text);
-  if (res.bytes) return res;
-  // Voz padrão pode não existir na conta -> tenta a primeira voz disponível.
+  const r = await ttsBytes(key, EL_VOICE, text, "opus_48000_64");
+  if (r.bytes) return { bytes: r.bytes, mime: "audio/ogg" };
   const v2 = await firstAvailableVoice(key);
   if (v2 && v2 !== EL_VOICE) {
-    const res2 = await ttsBytes(key, v2, text);
-    if (res2.bytes) return res2;
-    return { error: `${res.error} | fallbackVoice ${v2}: ${res2.error}` };
+    const r2 = await ttsBytes(key, v2, text, "opus_48000_64");
+    if (r2.bytes) return { bytes: r2.bytes, mime: "audio/ogg" };
   }
-  return res;
+  const mp3 = await ttsBytes(key, EL_VOICE, text, "mp3_44100_128");
+  if (mp3.bytes) return { bytes: mp3.bytes, mime: "audio/mpeg" };
+  return { error: r.error || mp3.error || "tts_falhou" };
 }
-async function uploadWaAudio(bytes: Uint8Array): Promise<{ id?: string; error?: string }> {
+async function uploadWaAudio(bytes: Uint8Array, mime: string): Promise<{ id?: string; error?: string }> {
   const token = waToken(), phoneId = waPhoneId();
   if (!token || !phoneId) return { error: "wa_nao_configurado" };
   try {
+    const ext = mime === "audio/ogg" ? "ogg" : "mp3";
     const fd = new FormData();
     fd.append("messaging_product", "whatsapp");
-    fd.append("type", "audio/mpeg");
-    fd.append("file", new Blob([bytes], { type: "audio/mpeg" }), "resposta.mp3");
+    fd.append("type", mime);
+    fd.append("file", new Blob([bytes], { type: mime }), `resposta.${ext}`);
     const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/media`, {
       method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
     });
@@ -152,8 +155,8 @@ async function uploadWaAudio(bytes: Uint8Array): Promise<{ id?: string; error?: 
 }
 async function sendAudioReply(to: string, text: string): Promise<{ ok: boolean; reason: string }> {
   const s = await synthesize(text);
-  if (!s.bytes) return { ok: false, reason: s.error || "tts_nulo" };
-  const u = await uploadWaAudio(s.bytes);
+  if (!s.bytes || !s.mime) return { ok: false, reason: s.error || "tts_nulo" };
+  const u = await uploadWaAudio(s.bytes, s.mime);
   if (!u.id) return { ok: false, reason: u.error || "upload_nulo" };
   const ok = await waPost({ to, type: "audio", audio: { id: u.id } });
   return { ok, reason: ok ? "" : "envio_audio_falhou" };

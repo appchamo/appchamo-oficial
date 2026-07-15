@@ -122,19 +122,14 @@ async function ttsBytes(key: string, voice: string, text: string, format: string
   } catch (e) { return { error: `tts_exc:${(e as Error)?.message}` }; }
 }
 /** Gera a fala. Prioriza OGG/OPUS (vira NOTA DE VOZ no WhatsApp); se falhar, cai pra mp3 (arquivo). */
-async function synthesize(text: string): Promise<{ bytes?: Uint8Array; mime?: string; error?: string }> {
+async function synthesize(text: string): Promise<{ bytes?: Uint8Array; mime?: string; note?: string; error?: string }> {
   const key = (Deno.env.get("ELEVENLABS_API_KEY") || "").trim();
   if (!key) return { error: "sem_ELEVENLABS_API_KEY" };
   const r = await ttsBytes(key, EL_VOICE, text, "opus_48000_64");
-  if (r.bytes) return { bytes: r.bytes, mime: "audio/ogg" };
-  const v2 = await firstAvailableVoice(key);
-  if (v2 && v2 !== EL_VOICE) {
-    const r2 = await ttsBytes(key, v2, text, "opus_48000_64");
-    if (r2.bytes) return { bytes: r2.bytes, mime: "audio/ogg" };
-  }
+  if (r.bytes) return { bytes: r.bytes, mime: "audio/ogg", note: `ogg:voz=${EL_VOICE}` };
   const mp3 = await ttsBytes(key, EL_VOICE, text, "mp3_44100_128");
-  if (mp3.bytes) return { bytes: mp3.bytes, mime: "audio/mpeg" };
-  return { error: r.error || mp3.error || "tts_falhou" };
+  if (mp3.bytes) return { bytes: mp3.bytes, mime: "audio/mpeg", note: `mp3:voz=${EL_VOICE} (opuserr=${r.error})` };
+  return { error: `opus:${r.error} | mp3:${mp3.error}` };
 }
 async function uploadWaAudio(bytes: Uint8Array, mime: string): Promise<{ id?: string; error?: string }> {
   const token = waToken(), phoneId = waPhoneId();
@@ -157,9 +152,10 @@ async function sendAudioReply(to: string, text: string): Promise<{ ok: boolean; 
   const s = await synthesize(text);
   if (!s.bytes || !s.mime) return { ok: false, reason: s.error || "tts_nulo" };
   const u = await uploadWaAudio(s.bytes, s.mime);
-  if (!u.id) return { ok: false, reason: u.error || "upload_nulo" };
-  const ok = await waPost({ to, type: "audio", audio: { id: u.id } });
-  return { ok, reason: ok ? "" : "envio_audio_falhou" };
+  if (!u.id) return { ok: false, reason: `${s.note} | ${u.error || "upload_nulo"}` };
+  const isVoice = s.mime === "audio/ogg";
+  const ok = await waPost({ to, type: "audio", audio: { id: u.id, ...(isVoice ? { voice: true } : {}) } });
+  return { ok, reason: `${s.note}${isVoice ? "|voice=true" : ""}${ok ? "" : " | envio_audio_falhou"}` };
 }
 
 function roleLabel(userType: string | null | undefined): string {
@@ -315,7 +311,8 @@ async function process(payload: any) {
         if (respondWithAudio) {
           const res = await sendAudioReply(from, finalText);
           ok = res.ok;
-          if (!ok) { audioErr = res.reason; ok = await sendText(from, finalText); } // fallback texto
+          audioErr = res.reason; // grava sempre (formato/voz usados) p/ diagnostico
+          if (!ok) { ok = await sendText(from, finalText); }
         } else {
           ok = await sendText(from, finalText);
         }

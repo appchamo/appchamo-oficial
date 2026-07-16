@@ -12,7 +12,9 @@ import {
   MapPin,
   Smartphone,
   Ticket,
+  ClipboardList,
 } from "lucide-react";
+import AdminOpenRequestsPanel from "@/components/admin/AdminOpenRequestsPanel";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -51,7 +53,7 @@ type SupportHit = {
 
 const CALLS_PAGE_SIZE = 500;
 
-type CallsTab = "calls" | "professional" | "client";
+type CallsTab = "calls" | "professional" | "client" | "pedidos";
 
 type ProfileAddr = {
   user_id: string;
@@ -679,6 +681,7 @@ const AdminProtocols = () => {
               { id: "calls", label: "Chamadas", icon: MessageSquare },
               { id: "professional", label: "Profissional", icon: Briefcase },
               { id: "client", label: "Cliente", icon: UserRound },
+              { id: "pedidos", label: "Pedidos", icon: ClipboardList },
             ] as { id: CallsTab; label: string; icon: typeof MessageSquare }[]
           ).map(({ id, label, icon: Icon }) => (
             <button
@@ -696,7 +699,7 @@ const AdminProtocols = () => {
               {label}
             </button>
           ))}
-          {!listLoading && (
+          {tab !== "pedidos" && !listLoading && (
             <span className="ml-auto text-xs text-muted-foreground">
               {displayedCalls.length}
               {q.trim().length >= 2 && allCalls.length !== displayedCalls.length ? ` de ${allCalls.length}` : ""}{" "}
@@ -706,7 +709,9 @@ const AdminProtocols = () => {
           )}
         </div>
 
-        <div className="bg-card border rounded-xl overflow-hidden">
+        {tab === "pedidos" && <AdminOpenRequestsPanel />}
+
+        <div className={cn("bg-card border rounded-xl overflow-hidden", tab === "pedidos" && "hidden")}>
           {listLoading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="w-8 h-8 text-primary animate-spin" />

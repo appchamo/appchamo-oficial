@@ -66,6 +66,10 @@ const TEMPLATES: Tpl[] = [
     body: "Oi {{1}}! Dica rápida do Chamô: perfis com foto real, serviços descritos e avaliações recebem até 3x mais chamadas. Dá uma revisada no seu perfil hoje. 🚀",
     example: ["Ana"],
     buttons: [{ type: "URL", text: "Revisar meu perfil", url: "https://appchamo.com/" }] },
+  { name: "pedido_novo_regiao", category: "MARKETING",
+    body: "Oi {{1}}! Um cliente em {{2}} está procurando {{3}} agora no Chamô. 👀 Abra o app e demonstre interesse antes que as vagas se preencham.",
+    example: ["Douglas", "Patrocínio", "Montador de móveis"],
+    buttons: [{ type: "URL", text: "Ver pedido", url: "https://appchamo.com/pro/pedidos-abertos" }] },
 ];
 
 Deno.serve(async (req) => {

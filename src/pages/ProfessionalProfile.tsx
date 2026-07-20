@@ -51,6 +51,9 @@ import { trackProfileView } from "@/lib/appAnalytics";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { cn } from "@/lib/utils";
 import ProfessionalSocialLinks from "@/components/ProfessionalSocialLinks";
+import { getDeviceLocation } from "@/lib/deviceLocation";
+import { reverseGeocode, forwardGeocodeBrazil } from "@/lib/geocode";
+import { fetchViaCep } from "@/lib/viacep";
 
 interface ProData {
   id: string;
@@ -104,13 +107,22 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile: authProfile, loading: authLoading } = useAuth();
+  const { user, profile: authProfile, loading: authLoading, refreshProfile } = useAuth();
   const [pro, setPro] = useState<ProData | null>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [callDialogOpen, setCallDialogOpen] = useState(false);
   const [profileGateOpen, setProfileGateOpen] = useState(false);
+  // Gate de localização na ação de CHAMAR: cliente precisa ter cidade/estado
+  // para achar/contatar um profissional perto. Modal inline (GPS ou CEP).
+  const [locationGateOpen, setLocationGateOpen] = useState(false);
+  const [locCep, setLocCep] = useState("");
+  const [locCity, setLocCity] = useState("");
+  const [locState, setLocState] = useState("");
+  const [locCepLoading, setLocCepLoading] = useState(false);
+  const [locGpsLoading, setLocGpsLoading] = useState(false);
+  const [locSaving, setLocSaving] = useState(false);
   const [agendaDialogOpen, setAgendaDialogOpen] = useState(false);
   const [avatarLightbox, setAvatarLightbox] = useState(false);
 
@@ -630,7 +642,123 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
       setProfileGateOpen(true);
       return;
     }
+    // Gate de localização: precisa de cidade/estado para achar um profissional perto.
+    if (!authProfile?.address_city || !authProfile?.address_state) {
+      setLocationGateOpen(true);
+      return;
+    }
     setCallDialogOpen(true);
+  };
+
+  // Grava localização no perfil e segue direto para a chamada.
+  const persistLocationAndCall = async (payload: Record<string, string | number | null>) => {
+    const u = user ?? (await supabase.auth.getUser()).data.user;
+    if (!u) { navigate("/login", { state: { from: location.pathname } }); return; }
+    const { error } = await supabase.from("profiles").update(payload).eq("user_id", u.id);
+    if (error) {
+      toast({ title: "Erro ao salvar localização", variant: "destructive" });
+      return;
+    }
+    await refreshProfile();
+    setLocationGateOpen(false);
+    setCallDialogOpen(true);
+  };
+
+  // Opção A: usar GPS do aparelho → reverse geocode → grava e chama.
+  const handleLocationGateGps = async () => {
+    if (locGpsLoading || locSaving) return;
+    setLocGpsLoading(true);
+    try {
+      const loc = await getDeviceLocation();
+      if (!loc.ok) {
+        const err = (loc as { error?: string }).error;
+        const msg =
+          err === "denied"
+            ? "Permissão de localização negada. Informe seu CEP abaixo."
+            : err === "timeout"
+              ? "Tempo esgotado ao obter localização. Tente de novo ou informe seu CEP."
+              : "Não foi possível obter sua localização. Informe seu CEP abaixo.";
+        toast({ title: "Localização indisponível", description: msg, variant: "destructive" });
+        return;
+      }
+      const okLoc = loc as { ok: true; lat: number; lng: number };
+      const geo = await reverseGeocode(okLoc.lat, okLoc.lng);
+      const city = (geo.city || "").trim();
+      const state = (geo.state || "").trim().toUpperCase().slice(0, 2);
+      if (!city || state.length !== 2) {
+        toast({ title: "Não identificamos sua cidade", description: "Informe seu CEP abaixo.", variant: "destructive" });
+        return;
+      }
+      setLocSaving(true);
+      await persistLocationAndCall({
+        address_city: city,
+        address_state: state,
+        latitude: okLoc.lat,
+        longitude: okLoc.lng,
+      });
+    } catch {
+      toast({ title: "Não foi possível obter sua localização", description: "Informe seu CEP abaixo.", variant: "destructive" });
+    } finally {
+      setLocGpsLoading(false);
+      setLocSaving(false);
+    }
+  };
+
+  // Preenche cidade/estado a partir do CEP (ViaCEP).
+  const handleLocationGateCepChange = (value: string) => {
+    const raw = value.replace(/\D/g, "").slice(0, 8);
+    setLocCep(raw.length === 8 ? `${raw.slice(0, 5)}-${raw.slice(5)}` : raw);
+    if (raw.length === 8) {
+      setLocCepLoading(true);
+      setLocCity("");
+      setLocState("");
+      fetchViaCep(raw)
+        .then((data) => {
+          if (data?.localidade) setLocCity(data.localidade);
+          if (data?.uf) setLocState(data.uf.toUpperCase());
+          if (!data?.localidade && !data?.uf) {
+            toast({ title: "CEP não encontrado", variant: "destructive" });
+          }
+        })
+        .catch(() => toast({ title: "Não foi possível buscar o CEP. Tente novamente.", variant: "destructive" }))
+        .finally(() => setLocCepLoading(false));
+    } else {
+      setLocCity("");
+      setLocState("");
+    }
+  };
+
+  // Opção B: salvar pelo CEP → forward geocode para coords → grava e chama.
+  const handleLocationGateSaveCep = async () => {
+    if (locSaving || locGpsLoading) return;
+    const city = locCity.trim();
+    const state = locState.trim().toUpperCase().slice(0, 2);
+    if (!city || !state) {
+      toast({ title: "Digite um CEP válido para buscar cidade e estado.", variant: "destructive" });
+      return;
+    }
+    setLocSaving(true);
+    const cepClean = locCep.replace(/\D/g, "");
+    const payload: Record<string, string | number | null> = {
+      address_zip: cepClean.length === 8 ? cepClean : null,
+      address_city: city || null,
+      address_state: state || null,
+    };
+    try {
+      const geo = await forwardGeocodeBrazil({
+        cep: cepClean.length === 8 ? cepClean : null,
+        city,
+        state,
+      });
+      if (geo) {
+        payload.latitude = geo.lat;
+        payload.longitude = geo.lng;
+      }
+    } catch {
+      void 0;
+    }
+    await persistLocationAndCall(payload);
+    setLocSaving(false);
   };
 
   if (loading) {
@@ -1355,6 +1483,70 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
                     Concluir cadastro
                   </Button>
                 </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={locationGateOpen} onOpenChange={setLocationGateOpen}>
+              <DialogContent className="sm:max-w-md rounded-2xl">
+                <DialogHeader>
+                  <DialogTitle>Onde você está?</DialogTitle>
+                  <DialogDescription>
+                    Pra achar um profissional perto de você, defina sua localização.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-1">
+                  {/* Opção A — GPS */}
+                  <Button
+                    type="button"
+                    onClick={handleLocationGateGps}
+                    disabled={locGpsLoading || locSaving}
+                    className="w-full rounded-xl min-h-[48px] gap-2"
+                  >
+                    {locGpsLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <MapPin className="w-4 h-4" />
+                    )}
+                    Usar minha localização (GPS)
+                  </Button>
+
+                  <div className="flex items-center gap-3">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-medium text-muted-foreground uppercase">ou</span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+
+                  {/* Opção B — CEP */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground block">Informe seu CEP</label>
+                    <div className="relative">
+                      <input
+                        value={locCep}
+                        onChange={(e) => handleLocationGateCepChange(e.target.value)}
+                        inputMode="numeric"
+                        placeholder="00000-000"
+                        className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                      {locCepLoading && (
+                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2" />
+                      )}
+                    </div>
+                    {(locCity || locState) && (
+                      <p className="text-xs text-muted-foreground">
+                        {[locCity, locState].filter(Boolean).join(", ")}
+                      </p>
+                    )}
+                    <Button
+                      type="button"
+                      onClick={handleLocationGateSaveCep}
+                      disabled={locSaving || locGpsLoading || !locCity || !locState}
+                      className="w-full rounded-xl min-h-[44px] gap-2"
+                    >
+                      {locSaving && !locGpsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Salvar e continuar
+                    </Button>
+                  </div>
+                </div>
               </DialogContent>
             </Dialog>
           </>

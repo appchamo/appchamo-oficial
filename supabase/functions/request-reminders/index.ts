@@ -43,10 +43,14 @@ Deno.serve(async (req) => {
     const threeHoursAgo = new Date(now - 3 * 60 * 60 * 1000).toISOString();
     const { data: requests, error: fetchErr } = await supabase
       .from("service_requests")
-      .select("id, client_id, professional_id, created_at, protocol")
+      .select("id, client_id, professional_id, created_at, protocol, description")
       .eq("status", "pending")
       .gte("created_at", threeHoursAgo)
       .order("created_at", { ascending: false });
+
+    // Janela da "escalação": chamada sem resposta entre 15 e 45 min vira PEDIDO ABERTO.
+    const wEsc_min = now - 45 * 60 * 1000;
+    const wEsc_max = now - 15 * 60 * 1000;
 
     if (fetchErr) return json({ error: fetchErr.message }, 500);
 
@@ -63,16 +67,64 @@ Deno.serve(async (req) => {
 
     let sent30min = 0;
     let sent2h = 0;
+    let escalated = 0;
 
     for (const req of requests || []) {
-      const r = req as { id: string; client_id: string; professional_id: string; created_at: string; protocol: string | null };
+      const r = req as { id: string; client_id: string; professional_id: string; created_at: string; protocol: string | null; description: string | null };
       const createdMs = new Date(r.created_at).getTime();
       const link = `/messages/${r.id}`;
       const protocol = r.protocol ? ` (${r.protocol})` : "";
 
-      const { data: proRow } = await supabase.from("professionals").select("user_id").eq("id", r.professional_id).maybeSingle();
+      const { data: proRow } = await supabase.from("professionals").select("user_id, category_id, profession_id").eq("id", r.professional_id).maybeSingle();
       const proUserId = (proRow as { user_id?: string } | null)?.user_id;
       if (!proUserId) continue;
+
+      // ── Escalação: sem resposta há 15-45 min → vira PEDIDO ABERTO (dispara região + WhatsApp) e avisa o cliente. ──
+      if (createdMs >= wEsc_min && createdMs <= wEsc_max && !sentSet.has(`${r.id}:escalated`)) {
+        try {
+          const pro = proRow as { category_id?: string | null; profession_id?: string | null } | null;
+          let categoryId = pro?.category_id ?? null;
+          if (!categoryId && pro?.profession_id) {
+            const { data: prof } = await supabase.from("professions").select("category_id").eq("id", pro.profession_id).maybeSingle();
+            categoryId = (prof as { category_id?: string | null } | null)?.category_id ?? null;
+          }
+          // Localização do cliente (perfil público, com fallback no privado).
+          const { data: cliPub } = await supabase.from("profiles").select("address_city, address_state").eq("user_id", r.client_id).maybeSingle();
+          let city = String((cliPub as any)?.address_city || "").trim();
+          let state = String((cliPub as any)?.address_state || "").trim();
+          if (!city || !state) {
+            const { data: cliPriv } = await supabase.from("profile_private").select("address_city, address_state").eq("user_id", r.client_id).maybeSingle();
+            city = city || String((cliPriv as any)?.address_city || "").trim();
+            state = state || String((cliPriv as any)?.address_state || "").trim();
+          }
+          if (categoryId && city && state) {
+            const desc = (r.description && r.description.trim().length >= 3)
+              ? r.description.trim()
+              : "Preciso de um profissional para este serviço.";
+            const { error: insErr } = await supabase.from("open_service_requests").insert({
+              client_id: r.client_id,
+              category_id: categoryId,
+              description: desc,
+              city,
+              state,
+              urgency: "today",
+              status: "open",
+              max_professional_interests: 5,
+            });
+            if (!insErr) {
+              await supabase.from("notifications").insert({
+                user_id: r.client_id,
+                title: "Chamamos vários profissionais pra você 👍",
+                message: "Ninguém respondeu na hora, então espalhamos seu pedido pros profissionais da sua região. Fica de olho que logo aparece alguém.",
+                type: "info",
+                link: "/client/pedidos-abertos",
+              });
+              await supabase.from("request_reminder_log").upsert({ request_id: r.id, reminder_type: "escalated" }, { onConflict: "request_id,reminder_type" });
+              escalated++;
+            }
+          }
+        } catch (_e) { /* não bloqueia os lembretes */ }
+      }
 
       if (createdMs >= w30min_min && createdMs <= w30min_max && !sentSet.has(`${r.id}:30min`)) {
         await supabase.from("notifications").insert({
@@ -99,7 +151,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ ok: true, reminders_30min: sent30min, reminders_2h: sent2h });
+    return json({ ok: true, reminders_30min: sent30min, reminders_2h: sent2h, escalated });
   } catch (err) {
     return json({ error: String(err) }, 500);
   }

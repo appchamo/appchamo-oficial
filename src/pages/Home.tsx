@@ -657,7 +657,8 @@ const Home = () => {
     jobs: null,
     search: (
       <div key={`search-${profile?.address_city}-${profile?.address_state}`} className="flex flex-col gap-3 w-full">
-        <HomeOpenRequestCta />
+        {/* Cliente/visitante recebem o CTA-herói no topo do cluster; aqui fica só para o PRO. */}
+        {isPro ? <HomeOpenRequestCta /> : null}
         <HomeSearchBar section={getSection("search")} />
       </div>
     ),
@@ -739,6 +740,9 @@ const Home = () => {
         >
           <TermsReacceptBanner />
           {user ? <DailyCheckin hideWhenDone /> : null}
+          {/* Ação principal e dominante para cliente/visitante: publicar um pedido aberto.
+              Fica ACIMA da saudação, benefícios e busca. O PRO mantém o CTA na seção de busca. */}
+          {!isPro ? <HomeOpenRequestCta /> : null}
           {user && isPro && proId ? (
             /* ── Carrossel: Carteira + Agenda (só monta quando proId está pronto) ── */
             <>
@@ -783,38 +787,8 @@ const Home = () => {
           ) : user ? (
             /* ── Welcome cliente ── */
             <motion.div className="flex flex-col gap-3" variants={pageEnter} initial="hidden" animate="show">
-              {profile?.user_type === "client" && !linkedSponsor && !clientSignupProTopDismissed ? (
-                <div className="relative -mt-0.5 overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-b from-primary/[0.09] via-primary/[0.03] to-transparent px-4 pt-3.5 pb-3 pr-10 shadow-sm ring-1 ring-primary/[0.06] dark:from-primary/[0.14] dark:via-primary/[0.06] dark:to-transparent">
-                  <button
-                    type="button"
-                    onClick={dismissClientSignupProTop}
-                    className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground active:scale-95"
-                    aria-label="Fechar convite para profissional"
-                  >
-                    <X className="h-4 w-4" strokeWidth={2.25} />
-                  </button>
-                  <div
-                    className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-primary/[0.12] blur-2xl dark:bg-primary/[0.2]"
-                    aria-hidden
-                  />
-                  <div className="relative flex flex-col gap-2.5">
-                    <div className="flex items-center justify-center gap-2 px-0.5">
-                      <Sparkles className="h-4 w-4 shrink-0 text-primary" strokeWidth={2} aria-hidden />
-                      <p className="text-center text-[13px] font-semibold leading-none tracking-tight text-foreground sm:text-sm whitespace-nowrap">
-                        Quer oferecer seu serviço?
-                      </p>
-                    </div>
-                    <Link
-                      to="/signup-pro"
-                      className="flex items-center justify-center gap-2 w-full rounded-full bg-primary py-3 pl-4 pr-3 text-sm font-bold text-primary-foreground shadow-md shadow-primary/20 transition-[transform,box-shadow] hover:shadow-lg hover:shadow-primary/25 active:scale-[0.98]"
-                    >
-                      <Briefcase className="h-4 w-4 shrink-0 opacity-95" strokeWidth={2.25} />
-                      <span className="flex-1 text-center">Tornar-se profissional</span>
-                      <ChevronRight className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
-                    </Link>
-                  </div>
-                </div>
-              ) : null}
+              {/* O convite "Tornar-se profissional" foi rebaixado: agora é um link discreto
+                  no fim da Home (ver showClientSignupProEndCta). O topo prioriza CONTRATAR. */}
               <div className="flex items-center gap-3">
                 {profile?.avatar_url ? (
                   <img src={profile.avatar_url} alt={userName} className="w-11 h-11 rounded-full object-cover border border-border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
@@ -1031,14 +1005,15 @@ const Home = () => {
           )}
 
           {showClientSignupProEndCta ? (
-            <div className="mt-2">
+            <div className="mt-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+              <span>É profissional?</span>
               <Link
                 to="/signup-pro"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-bold text-primary-foreground shadow-md shadow-primary/20 transition-[transform,box-shadow] hover:shadow-lg hover:shadow-primary/25 active:scale-[0.99]"
+                className="inline-flex items-center gap-1 font-semibold text-primary hover:underline underline-offset-2"
               >
-                <Briefcase className="h-4 w-4 shrink-0 opacity-95" strokeWidth={2.25} />
-                Tornar-se profissional
-                <ChevronRight className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+                <Briefcase className="h-3.5 w-3.5 shrink-0" strokeWidth={2.25} aria-hidden />
+                Ofereça seus serviços
+                <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
               </Link>
             </div>
           ) : null}

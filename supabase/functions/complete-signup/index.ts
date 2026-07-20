@@ -71,31 +71,37 @@ Deno.serve(async (req) => {
       );
     }
 
-    // CPF/CNPJ obrigatório para todos. Defesa contra clientes que chamem a função
-    // ignorando o passo de UI ou enviando payload manipulado.
+    // CPF/CNPJ obrigatório para profissional/empresa. Cliente pode se cadastrar
+    // SEM CPF (a coleta/verificação acontece no 1º pagamento). Defesa contra
+    // payload manipulado que pule o passo de UI.
     {
       const docDigits = String(basicData.document ?? "").replace(/\D/g, "");
       const docType = basicData.documentType === "cnpj" ? "cnpj" : "cpf";
+      const isClient = accountType === "client";
       if (!docDigits) {
-        return new Response(
-          JSON.stringify({ error: "CPF é obrigatório." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        if (!isClient) {
+          return new Response(
+            JSON.stringify({ error: "CPF é obrigatório." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        // Cliente sem CPF: segue o cadastro; documento não será gravado agora.
+      } else {
+        if (docType === "cpf" && !isValidCpf(docDigits)) {
+          return new Response(
+            JSON.stringify({ error: "CPF inválido." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        if (docType === "cnpj" && !isValidCnpj(docDigits)) {
+          return new Response(
+            JSON.stringify({ error: "CNPJ inválido." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        basicData.document = docDigits;
+        basicData.documentType = docType;
       }
-      if (docType === "cpf" && !isValidCpf(docDigits)) {
-        return new Response(
-          JSON.stringify({ error: "CPF inválido." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (docType === "cnpj" && !isValidCnpj(docDigits)) {
-        return new Response(
-          JSON.stringify({ error: "CNPJ inválido." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      basicData.document = docDigits;
-      basicData.documentType = docType;
     }
 
     // Validação do JWT (verify_jwt desligado no gateway por causa do ES256)

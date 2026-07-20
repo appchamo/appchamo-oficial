@@ -624,14 +624,10 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
     if (!u) { navigate("/login", { state: { from: location.pathname } }); return; }
     const nameFromMeta = (u.user_metadata?.full_name ?? u.user_metadata?.name ?? "") as string;
     const nameOk = (authProfile?.full_name?.trim() || nameFromMeta.trim()).length > 0;
-    const photoOk = !!(authProfile?.avatar_url && String(authProfile.avatar_url).trim());
-    if (!nameOk || !photoOk) {
+    // Cliente precisa apenas do NOME para chamar; foto e verificação de identidade
+    // deixaram de ser exigidas aqui (a verificação passou para a hora de pagar).
+    if (!nameOk) {
       setProfileGateOpen(true);
-      return;
-    }
-    // Verificação de identidade obrigatória antes de chamar.
-    if (authProfile && !authProfile.identity_verified) {
-      navigate("/verificar-identidade", { state: { from: location.pathname } });
       return;
     }
     setCallDialogOpen(true);
@@ -1007,35 +1003,15 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
                 ) : null}
                 {pro.availability_status !== "unavailable" ? (
                   <>
-                    {user && authProfile && !authProfile.identity_verified ? (
-                      <div className="space-y-2">
-                        <button
-                          type="button"
-                          disabled
-                          className="w-full min-h-[48px] py-3.5 rounded-xl bg-muted text-muted-foreground font-bold text-sm cursor-not-allowed flex items-center justify-center gap-2"
-                        >
-                          <Lock className="w-4 h-4" /> CHAMAR
-                        </button>
-                        <p className="text-[12px] text-muted-foreground text-center leading-snug px-1">
-                          Faça a verificação de identidade primeiro para chamar um profissional.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => navigate("/verificar-identidade", { state: { from: location.pathname } })}
-                          className="w-full min-h-[46px] py-3 rounded-xl border-2 border-primary/40 bg-primary/5 text-primary font-bold text-sm hover:bg-primary/10 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                        >
-                          <ShieldCheck className="w-4 h-4" /> Fazer verificação
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleCall}
-                        className="w-full min-h-[48px] py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
-                      >
-                        CHAMAR
-                      </button>
-                    )}
+                    {/* Botão CHAMAR sempre disponível: a verificação de identidade
+                        deixou de travar a chamada (agora é exigida só ao pagar). */}
+                    <button
+                      type="button"
+                      onClick={handleCall}
+                      className="w-full min-h-[48px] py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
+                    >
+                      CHAMAR
+                    </button>
                     {pro.agenda_enabled && (pro.user_type === "company" || planId === "business") && (
                       <Button
                         type="button"

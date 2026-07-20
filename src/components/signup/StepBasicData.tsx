@@ -435,12 +435,10 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       else if (password.length >= 6 && password !== confirmPassword) errs.confirmPassword = "As senhas não conferem.";
     }
 
-    // CPF/CNPJ: obrigatório para todos. Profissional pode usar CNPJ; cliente só CPF.
+    // CPF/CNPJ: obrigatório para profissional (pode usar CNPJ). Cliente: OPCIONAL —
+    // se digitar, validamos o formato; se deixar vazio, coletamos no 1º pagamento.
     if (!docClean) {
-      errs.document =
-        accountType === "professional"
-          ? "CPF ou CNPJ é obrigatório."
-          : "CPF é obrigatório.";
+      if (accountType === "professional") errs.document = "CPF ou CNPJ é obrigatório.";
     } else if (documentType === "cpf" && !validateCpf(docClean)) {
       errs.document = "CPF inválido. Confira os números digitados.";
     } else if (documentType === "cnpj" && !validateCnpj(docClean)) {
@@ -502,8 +500,10 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
           };
 
     // CPF/CNPJ: 1) duplicidade no nosso banco, 2) Asaas valida dígitos + duplicidade externa.
-    // Vale para todos os tipos de conta (cliente e profissional).
+    // Só roda quando há documento: profissional sempre; cliente apenas se digitou um CPF.
+    // Cliente sem CPF segue sem asaas_customer_id (criado no 1º pagamento).
     let asaasCustomerId: string | undefined;
+    if (docClean) {
     setValidating(true);
     try {
       const field = documentType === "cpf" ? "cpf" : "cnpj";
@@ -565,6 +565,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       asaasCustomerId = validation.asaas_customer_id;
     } finally {
       setValidating(false);
+    }
     }
 
     onNext({

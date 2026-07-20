@@ -91,7 +91,8 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
   const [categoryFieldError, setCategoryFieldError] = useState(false);
 
   const handleNext = () => {
-    if (!avatarUrl) {
+    // Foto obrigatória só para profissional; cliente pode concluir sem foto.
+    if (accountType === "professional" && !avatarUrl) {
       setAvatarError(true);
       toast({
         title: "Foto de perfil obrigatória",

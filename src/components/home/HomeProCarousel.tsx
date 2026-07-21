@@ -29,6 +29,7 @@ interface Props {
   profile: { avatar_url?: string | null } | null | undefined;
   userName: string;
   welcomeWord: string;
+  returning?: boolean;
   locationLabel: string;
   onLocationClick: () => void;
   walletBalance: number;
@@ -56,7 +57,7 @@ function statusLabel(s: string) {
 
 /* ══════════════════════════════════════════════════════════ */
 export default function HomeProCarousel({
-  profile, userName, welcomeWord, locationLabel,
+  profile, userName, welcomeWord, returning, locationLabel,
   onLocationClick, walletBalance, walletLoaded, professionalId,
 }: Props) {
   const navigate = useNavigate();
@@ -222,7 +223,7 @@ export default function HomeProCarousel({
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-white/75 text-[11px] lg:text-sm leading-none mb-0.5">{welcomeWord} de volta,</p>
+                  <p className="text-white/75 text-[11px] lg:text-sm leading-none mb-0.5">{welcomeWord}{returning ? " de volta" : ""},</p>
                   <p className="text-white font-bold text-base lg:text-xl leading-tight truncate">{userName} 👋</p>
                 </div>
               </div>

@@ -531,6 +531,9 @@ const Home = () => {
   const needsLocationSetup = !profile?.address_city || !profile?.address_state;
 
   const welcomeWord = profile?.gender === "female" ? "Bem-vinda" : profile?.gender === "male" ? "Bem-vindo" : "Bem-vindo(a)";
+  // "de volta" só para quem já é de casa (cadastro concluído há mais de 6h). Conta nova é saudada com "Bem-vindo(a)".
+  const isReturningUser = !!profile?.signup_completed_at && (Date.now() - new Date(profile.signup_completed_at).getTime() > 6 * 60 * 60 * 1000);
+  const backSuffix = isReturningUser ? " de volta" : "";
 
   // Novo cliente (Google/Apple sem cadastro): abre o modal de localização para definir cidade/CEP
   useEffect(() => {
@@ -750,6 +753,7 @@ const Home = () => {
                 profile={profile}
                 userName={userName}
                 welcomeWord={welcomeWord}
+                returning={isReturningUser}
                 locationLabel={locationLabel}
                 onLocationClick={handleOpenLocation}
                 walletBalance={walletBalance}
@@ -777,7 +781,7 @@ const Home = () => {
                     </div>
                   )}
                   <div>
-                    <p className="text-white/75 text-xs">{welcomeWord} de volta,</p>
+                    <p className="text-white/75 text-xs">{welcomeWord}{backSuffix},</p>
                     <p className="text-white font-bold text-lg">{userName} 👋</p>
                   </div>
                 </div>
@@ -800,7 +804,7 @@ const Home = () => {
                 <div className="flex-1 min-w-0">
                   {isClientUser ? (
                     <>
-                      <p className="text-xs font-medium text-muted-foreground leading-tight">{welcomeWord} de volta</p>
+                      <p className="text-xs font-medium text-muted-foreground leading-tight">{welcomeWord}{backSuffix}</p>
                       <p className="text-base font-bold text-foreground leading-tight mt-0.5">
                         <span className="text-primary">{userName}</span> 👋
                       </p>

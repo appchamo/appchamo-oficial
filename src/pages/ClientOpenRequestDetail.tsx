@@ -175,7 +175,7 @@ const ClientOpenRequestDetail = () => {
       professionalRowId,
       openRequestId: id,
       openRequestDescription: row.description,
-      markFilled: true,
+      markFilled: false, // não fecha o pedido: o cliente pode falar com vários e escolher
     });
     setChattingId(null);
     if (!r.ok) {
@@ -266,11 +266,17 @@ const ClientOpenRequestDetail = () => {
             onClick={() => setCloseOpen(true)}
           >
             <XCircle className="w-4 h-4 mr-2" />
-            Encerrar pedido sem contratar
+            Encerrar pedido
           </Button>
         )}
 
-        <h2 className="font-semibold text-foreground mb-3">Profissionais interessados</h2>
+        <h2 className="font-semibold text-foreground mb-1">Profissionais interessados</h2>
+        {isOpen && interests.length > 0 && (
+          <p className="text-xs text-muted-foreground mb-3">
+            Pode conversar com quantos quiser e escolher o melhor. Quando fechar com um, é só encerrar o pedido.
+          </p>
+        )}
+        {(!isOpen || interests.length === 0) && <div className="mb-3" />}
         {interests.length === 0 ? (
           <p className="text-sm text-muted-foreground py-6 text-center border border-dashed rounded-xl">
             {isOpen

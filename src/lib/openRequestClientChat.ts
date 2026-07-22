@@ -15,6 +15,21 @@ export async function startClientChatFromOpenRequest(params: {
   openRequestDescription: string;
   markFilled: boolean;
 }): Promise<StartOpenRequestChatResult> {
+  // Dedup: se já existe uma conversa ativa com este profissional, reaproveita (evita chat duplicado
+  // quando o cliente conversa com vários interessados e volta a clicar no mesmo).
+  const { data: existingReq } = await supabase
+    .from("service_requests")
+    .select("id, status")
+    .eq("client_id", params.clientUserId)
+    .eq("professional_id", params.professionalRowId)
+    .in("status", ["pending", "accepted"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if ((existingReq as { id?: string } | null)?.id) {
+    return { ok: true, serviceRequestId: (existingReq as { id: string }).id };
+  }
+
   const desc = `(Pedido aberto)\n\n${params.openRequestDescription.trim()}`;
   const { data: req, error: reqError } = await supabase
     .from("service_requests")

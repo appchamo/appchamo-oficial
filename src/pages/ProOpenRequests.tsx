@@ -161,11 +161,20 @@ const ProOpenRequests = () => {
     });
     setActionId(null);
     if (error) {
-      toast({
-        title: "Não foi possível manifestar interesse",
-        description: error.message.includes("Limite") ? "Este pedido já atingiu o máximo de interessados." : error.message,
-        variant: "destructive",
-      });
+      if (error.message.includes("Limite")) {
+        toast({
+          title: "Não foi possível manifestar interesse",
+          description: "Este pedido já atingiu o máximo de interessados.",
+          variant: "destructive",
+        });
+      } else {
+        // Correção 4: pedido virou 'filled'/'closed' (ou sumiu) — mensagem amigável e recarregar a lista.
+        toast({
+          title: "Esse pedido não está mais disponível.",
+          variant: "destructive",
+        });
+        void load();
+      }
       return;
     }
     toast({ title: "Interesse enviado!", description: "O cliente será notificado." });

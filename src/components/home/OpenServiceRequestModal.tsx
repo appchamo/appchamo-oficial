@@ -58,6 +58,7 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
   const [zip, setZip] = useState("");
   const [cepLoading, setCepLoading] = useState(false);
   const [locationOk, setLocationOk] = useState(false);
+  const [manualLocation, setManualLocation] = useState(false);
   const [neighborhood, setNeighborhood] = useState("");
   const [city, setCity] = useState("");
   const [stateUf, setStateUf] = useState("");
@@ -69,6 +70,7 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
     setDescription("");
     setZip("");
     setLocationOk(false);
+    setManualLocation(false);
     setNeighborhood("");
     setCity("");
     setStateUf("");
@@ -109,20 +111,22 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
     const digits = cepRaw.replace(/\D/g, "");
     if (digits.length !== 8) {
       setLocationOk(false);
+      setManualLocation(false);
       return;
     }
     setCepLoading(true);
     const v = await fetchViaCep(cepRaw);
     setCepLoading(false);
     if (!v?.localidade || !v?.uf) {
+      // ViaCEP caiu ou não achou o CEP: liberar preenchimento manual de cidade/UF.
       setLocationOk(false);
-      setCity("");
-      setStateUf("");
+      setManualLocation(true);
       if (!opts?.silent) {
-        toast({ title: "CEP não encontrado", description: "Confira os números e tente de novo.", variant: "destructive" });
+        toast({ title: "Não achamos seu CEP", description: "Informe cidade e estado manualmente.", variant: "destructive" });
       }
       return;
     }
+    setManualLocation(false);
     setCity(v.localidade.trim());
     setStateUf(v.uf.trim().toUpperCase().slice(0, 2));
     if (v.bairro?.trim()) {
@@ -146,6 +150,7 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
     if (digits.length === 8) void applyViaCep(digits, { silent: false });
     else if (digits.length > 0) {
       setLocationOk(false);
+      setManualLocation(false);
       setCity("");
       setStateUf("");
     }
@@ -177,10 +182,18 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
   const handleSubmit = async () => {
     if (!user) return;
     const cepDigits = zip.replace(/\D/g, "");
-    if (cepDigits.length !== 8 || !locationOk) {
+    if (cepDigits.length !== 8) {
       toast({
         title: "CEP inválido",
-        description: "Digite o CEP com 8 dígitos e aguarde a busca da cidade.",
+        description: "Digite o CEP com 8 dígitos.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!locationOk && !manualLocation) {
+      toast({
+        title: "Aguarde a busca do CEP",
+        description: "Estamos localizando a cidade do CEP informado.",
         variant: "destructive",
       });
       return;
@@ -188,11 +201,39 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
     const c = city.trim();
     const st = stateUf.trim().toUpperCase().slice(0, 2);
     if (!c || st.length !== 2) {
-      toast({ title: "Localização incompleta", description: "Busque o CEP novamente.", variant: "destructive" });
+      toast({
+        title: "Localização incompleta",
+        description: manualLocation ? "Preencha cidade e UF (2 letras)." : "Busque o CEP novamente.",
+        variant: "destructive",
+      });
       return;
     }
 
     setSubmitting(true);
+
+    // Correção 3: evitar pedido duplicado (mesma categoria, aberto, últimas 24h).
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: existingDup } = await supabase
+      .from("open_service_requests")
+      .select("id")
+      .eq("client_id", user.id)
+      .eq("category_id", categoryId)
+      .eq("status", "open")
+      .gte("created_at", since)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingDup) {
+      setSubmitting(false);
+      toast({
+        title: "Você já tem um pedido aberto nessa categoria",
+        description: "Acompanhe em Meus pedidos.",
+      });
+      onOpenChange(false);
+      navigate("/client/pedidos-abertos");
+      return;
+    }
+
     const { error } = await supabase.from("open_service_requests").insert({
       client_id: user.id,
       category_id: categoryId,
@@ -209,6 +250,23 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
     if (error) {
       toast({ title: "Não foi possível enviar", description: error.message || "Tente novamente.", variant: "destructive" });
       return;
+    }
+
+    // Correção 1: salvar a localização no perfil se ele ainda não tiver cidade/estado.
+    // Best-effort: erros aqui não devem impedir a publicação do pedido.
+    if (!profile?.address_city || !profile?.address_state) {
+      void supabase
+        .from("profiles")
+        .update({
+          address_city: c,
+          address_state: st,
+          address_zip: cepDigits.length === 8 ? cepDigits : null,
+        })
+        .eq("user_id", user.id)
+        .then(
+          () => {},
+          () => {},
+        );
     }
 
     try {
@@ -328,6 +386,9 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
                     onChange={(e) => {
                       setZip(maskCepInput(e.target.value));
                       setLocationOk(false);
+                      setManualLocation(false);
+                      setCity("");
+                      setStateUf("");
                     }}
                     onBlur={handleZipBlur}
                     placeholder="00000-000"
@@ -344,6 +405,36 @@ const OpenServiceRequestModal = ({ open, onOpenChange }: OpenServiceRequestModal
                     <div>
                       <p className="font-semibold text-sm text-foreground">{city}</p>
                       <p className="text-xs text-muted-foreground">UF {stateUf}</p>
+                    </div>
+                  </div>
+                ) : manualLocation ? (
+                  <div className="space-y-2 rounded-2xl border-2 border-amber-500/40 bg-amber-500/10 px-3 py-3">
+                    <p className="text-xs font-medium text-foreground">
+                      Não achamos seu CEP. Informe cidade e estado.
+                    </p>
+                    <div className="flex gap-2">
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-xs text-muted-foreground">Cidade</Label>
+                        <Input
+                          value={city}
+                          onChange={(e) => setCity(e.target.value)}
+                          placeholder="Sua cidade"
+                          maxLength={120}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="w-20 space-y-1">
+                        <Label className="text-xs text-muted-foreground">UF</Label>
+                        <Input
+                          value={stateUf}
+                          onChange={(e) =>
+                            setStateUf(e.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2))
+                          }
+                          placeholder="UF"
+                          maxLength={2}
+                          className="rounded-xl uppercase"
+                        />
+                      </div>
                     </div>
                   </div>
                 ) : (

@@ -126,6 +126,7 @@ Deno.serve(async (req) => {
                 urgency: "today",
                 status: "open",
                 max_professional_interests: 5,
+                source_service_request_id: r.id,
               });
               if (!insErr) {
                 await supabase.from("notifications").insert({

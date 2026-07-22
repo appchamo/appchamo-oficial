@@ -98,29 +98,46 @@ Deno.serve(async (req) => {
             state = state || String((cliPriv as any)?.address_state || "").trim();
           }
           if (categoryId && city && state) {
-            const desc = (r.description && r.description.trim().length >= 3)
-              ? r.description.trim()
-              : "Preciso de um profissional para este serviço.";
-            const { error: insErr } = await supabase.from("open_service_requests").insert({
-              client_id: r.client_id,
-              category_id: categoryId,
-              description: desc,
-              city,
-              state,
-              urgency: "today",
-              status: "open",
-              max_professional_interests: 5,
-            });
-            if (!insErr) {
-              await supabase.from("notifications").insert({
-                user_id: r.client_id,
-                title: "Chamamos vários profissionais pra você 👍",
-                message: "Ninguém respondeu na hora, então espalhamos seu pedido pros profissionais da sua região. Fica de olho que logo aparece alguém.",
-                type: "info",
-                link: "/client/pedidos-abertos",
-              });
+            // Dedup: se já existe um pedido aberto recente do mesmo cliente+categoria, não cria outro
+            // (evita 1 pedido por chamada quando o cliente ligou pra vários, e duplicação em re-run do cron).
+            const dedupSince = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+            const { data: existing } = await supabase
+              .from("open_service_requests")
+              .select("id")
+              .eq("client_id", r.client_id)
+              .eq("category_id", categoryId)
+              .eq("status", "open")
+              .gte("created_at", dedupSince)
+              .limit(1)
+              .maybeSingle();
+            if (existing) {
+              // Já há um pedido cobrindo; só marca como escalado pra não reprocessar.
               await supabase.from("request_reminder_log").upsert({ request_id: r.id, reminder_type: "escalated" }, { onConflict: "request_id,reminder_type" });
-              escalated++;
+            } else {
+              const desc = (r.description && r.description.trim().length >= 3)
+                ? r.description.trim()
+                : "Preciso de um profissional para este serviço.";
+              const { error: insErr } = await supabase.from("open_service_requests").insert({
+                client_id: r.client_id,
+                category_id: categoryId,
+                description: desc,
+                city,
+                state,
+                urgency: "today",
+                status: "open",
+                max_professional_interests: 5,
+              });
+              if (!insErr) {
+                await supabase.from("notifications").insert({
+                  user_id: r.client_id,
+                  title: "Chamamos vários profissionais pra você 👍",
+                  message: "Ninguém respondeu na hora, então espalhamos seu pedido pros profissionais da sua região. Fica de olho que logo aparece alguém.",
+                  type: "info",
+                  link: "/client/pedidos-abertos",
+                });
+                await supabase.from("request_reminder_log").upsert({ request_id: r.id, reminder_type: "escalated" }, { onConflict: "request_id,reminder_type" });
+                escalated++;
+              }
             }
           }
         } catch (_e) { /* não bloqueia os lembretes */ }

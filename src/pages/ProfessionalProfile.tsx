@@ -757,8 +757,11 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
     } catch {
       void 0;
     }
-    await persistLocationAndCall(payload);
-    setLocSaving(false);
+    try {
+      await persistLocationAndCall(payload);
+    } finally {
+      setLocSaving(false);
+    }
   };
 
   if (loading) {

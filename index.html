@@ -6,8 +6,8 @@
     <!-- Uma única CSP: img-src com data: permite recorte de imagem (foto perfil/atendente) -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' capacitor: https: 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: https: blob:; connect-src 'self' https://wfxeiuqxzrlnvlopcrwd.supabase.co wss://wfxeiuqxzrlnvlopcrwd.supabase.co https://*.supabase.co wss://*.supabase.co https://*.onesignal.com https://viacep.com.br;">
 
-    <title>Chamô</title>
-    <meta name="description" content="Chamô - Encontre profissionais qualificados" />
+    <title>Chamô — contrate profissionais de serviços na sua cidade</title>
+    <meta name="description" content="O Chamô é um aplicativo que conecta você a profissionais de serviços da sua cidade (eletricista, encanador, diarista, pintor, montador e mais). Busque, converse, contrate e pague com segurança, tudo pelo app, com profissionais verificados e avaliações reais." />
     <meta name="author" content="Chamô" />
     <meta name="theme-color" content="#f97316" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -18,11 +18,11 @@
     <link rel="apple-touch-icon" href="/icon-192.png" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Chamô" />
-    <meta property="og:description" content="Chamô - Encontre profissionais qualificados" />
+    <meta property="og:title" content="Chamô — contrate profissionais de serviços na sua cidade" />
+    <meta property="og:description" content="O Chamô conecta você a profissionais de serviços da sua cidade. Busque, converse, contrate e pague com segurança pelo app." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Chamô" />
-    <meta name="twitter:description" content="Chamô - Encontre profissionais qualificados" />
+    <meta name="twitter:title" content="Chamô — contrate profissionais de serviços na sua cidade" />
+    <meta name="twitter:description" content="O Chamô conecta você a profissionais de serviços da sua cidade. Busque, converse, contrate e pague com segurança pelo app." />
 
     <style>
       :root {
@@ -70,7 +70,22 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Conteúdo estático (visível antes do app carregar e para rastreadores sem JavaScript).
+           O React substitui isto ao montar. Descreve a finalidade do app para verificação e SEO. -->
+      <main style="max-width:640px;margin:0 auto;padding:48px 24px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a1a;line-height:1.6">
+        <h1 style="font-size:26px;margin:0 0 12px;color:#ea580c">Chamô — o profissional ideal, na palma da sua mão</h1>
+        <p style="margin:0 0 12px">O Chamô é um aplicativo que conecta você a profissionais de serviços da sua cidade: eletricistas, encanadores, diaristas, pintores, montadores, chaveiros e muito mais. Você descreve o que precisa, encontra profissionais verificados na sua região, conversa pelo chat e contrata com segurança.</p>
+        <p style="margin:0 0 12px">Também dá para pagar pelo próprio app, acompanhar suas solicitações e avaliar o serviço. Para profissionais, o Chamô é onde recebem novos clientes da região.</p>
+        <p style="margin:0 0 12px">O login com a conta Google é usado apenas para criar e acessar sua conta no Chamô, de forma rápida e segura.</p>
+        <p style="margin:0 0 16px">Disponível para iPhone (App Store) e Android (Google Play).</p>
+        <p style="margin:0;font-size:14px;color:#666">
+          <a href="https://appchamo.com/privacy" style="color:#ea580c">Política de Privacidade</a>
+          &nbsp;·&nbsp;
+          <a href="https://appchamo.com/terms-of-use" style="color:#ea580c">Termos de Uso</a>
+        </p>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

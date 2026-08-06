@@ -9,7 +9,7 @@ import OpenServiceRequestModal from "./OpenServiceRequestModal";
  * - Logado → abre o wizard em modal (3 etapas).
  * - Deslogado → leva ao login, pois o wizard exige conta na 1ª etapa.
  */
-const HomeOpenRequestCta = () => {
+const HomeOpenRequestCta = ({ isPro = false }: { isPro?: boolean }) => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -17,6 +17,11 @@ const HomeOpenRequestCta = () => {
   const handleClick = () => {
     if (!user) {
       navigate("/login");
+      return;
+    }
+    // Profissional: vai para a lista de serviços disponíveis na região.
+    if (isPro) {
+      navigate("/pro/pedidos-abertos");
       return;
     }
     setOpen(true);
@@ -38,10 +43,12 @@ const HomeOpenRequestCta = () => {
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="text-[17px] font-bold text-foreground tracking-tight leading-tight">
-            Precisa de um serviço?
+            {isPro ? "Serviços disponíveis" : "Precisa de um serviço?"}
           </span>
           <span className="mt-1 text-xs text-muted-foreground leading-snug sm:text-[13px]">
-            Descreve o que você precisa e os profissionais vêm até você.
+            {isPro
+              ? "Veja pedidos de clientes na sua região e demonstre interesse."
+              : "Descreve o que você precisa e os profissionais vêm até você."}
           </span>
         </span>
         <ChevronRight
@@ -49,7 +56,7 @@ const HomeOpenRequestCta = () => {
           aria-hidden
         />
       </button>
-      <OpenServiceRequestModal open={open} onOpenChange={setOpen} />
+      {!isPro && <OpenServiceRequestModal open={open} onOpenChange={setOpen} />}
     </>
   );
 };

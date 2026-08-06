@@ -69,7 +69,7 @@ function SideMenuNav({ onNavigate, footerPaddingClass }: NavProps) {
               { icon: Wallet, label: "Carteira", path: "/pro/financeiro", highlight: "primary" as const },
               { icon: Ticket, label: "Meus Cupons", path: "/coupons" },
               { icon: Megaphone, label: "Marketing", path: "/pro/marketing", highlight: "marketing" as const },
-              { icon: Handshake, label: "Pedidos na região", path: "/pro/pedidos-abertos" },
+              { icon: Handshake, label: "Serviços disponíveis", path: "/pro/pedidos-abertos" },
               ...(profile?.user_type === "company"
                 ? [
                     { icon: Briefcase, label: "Minhas Vagas", path: "/my-jobs" },

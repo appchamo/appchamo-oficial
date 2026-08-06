@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 type OpenRow = {
   id: string;
+  client_id: string;
   description: string;
   urgency: string;
   city: string;
@@ -20,6 +21,14 @@ type OpenRow = {
   category_id: string;
   max_professional_interests: number;
   categories: { name: string } | null;
+};
+
+type ClientInfo = { full_name: string; avatar_url: string | null };
+
+const clientAvatarUrl = (avatarUrl?: string | null): string | null => {
+  if (!avatarUrl) return null;
+  if (avatarUrl.startsWith("http")) return avatarUrl;
+  return `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/uploads/${avatarUrl}`;
 };
 
 const urgencyLabel = (u: string) => {
@@ -47,6 +56,7 @@ const ProOpenRequests = () => {
   const [rows, setRows] = useState<OpenRow[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [mine, setMine] = useState<Set<string>>(new Set());
+  const [clients, setClients] = useState<Record<string, ClientInfo>>({});
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
 
@@ -77,7 +87,7 @@ const ProOpenRequests = () => {
     const { data: raw, error: reqErr } = await supabase
       .from("open_service_requests")
       .select(
-        "id, description, urgency, city, state, neighborhood, created_at, category_id, max_professional_interests, categories(name)",
+        "id, client_id, description, urgency, city, state, neighborhood, created_at, category_id, max_professional_interests, categories(name)",
       )
       .order("created_at", { ascending: false });
 
@@ -102,6 +112,22 @@ const ProOpenRequests = () => {
     });
 
     setRows(filtered);
+
+    // Info dos clientes (foto + nome) para mostrar em cada pedido.
+    const clientIds = [...new Set(filtered.map((r) => r.client_id).filter(Boolean))];
+    if (clientIds.length > 0) {
+      const { data: cprofs } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, avatar_url")
+        .in("user_id", clientIds);
+      const cmap: Record<string, ClientInfo> = {};
+      for (const p of (cprofs as { user_id: string; full_name: string | null; avatar_url: string | null }[]) || []) {
+        cmap[p.user_id] = { full_name: p.full_name || "Cliente", avatar_url: p.avatar_url };
+      }
+      setClients(cmap);
+    } else {
+      setClients({});
+    }
 
     const ids = filtered.map((r) => r.id);
     if (ids.length === 0) {
@@ -138,75 +164,33 @@ const ProOpenRequests = () => {
     return () => window.removeEventListener("chamo-open-requests-changed", h);
   }, [load]);
 
-  const notifyClientInterest = async (openRequestId: string) => {
-    const { data: r } = await supabase.from("open_service_requests").select("client_id").eq("id", openRequestId).maybeSingle();
-    const clientId = (r as { client_id?: string } | null)?.client_id;
-    if (!clientId) return;
-    const proName = profile?.full_name?.trim() || "Um profissional";
-    await supabase.from("notifications").insert({
-      user_id: clientId,
-      title: "Interesse no seu pedido",
-      message: `${proName} quer saber mais sobre sua solicitação.`,
-      type: "open_request_interest",
-      link: `/client/pedidos-abertos/${openRequestId}`,
-    } as never);
-  };
-
-  const expressInterest = async (openRequestId: string) => {
+  /**
+   * "Tenho interesse": abre uma conversa (chamada com status ACEITA) com o cliente,
+   * envia a mensagem automática do profissional e notifica o cliente (push/email/wpp).
+   * Tudo via edge function, pois criar a service_request exige service role (RLS).
+   */
+  const handleInterest = async (openRequestId: string) => {
     if (!proRow) return;
     setActionId(openRequestId);
-    const { error } = await supabase.from("open_service_request_interests").insert({
-      open_request_id: openRequestId,
-      professional_id: proRow.id,
+    const { data, error } = await supabase.functions.invoke("pro-express-interest", {
+      body: { openRequestId },
     });
     setActionId(null);
-    if (error) {
-      if (error.message.includes("Limite")) {
-        toast({
-          title: "Não foi possível manifestar interesse",
-          description: "Este pedido já atingiu o máximo de interessados.",
-          variant: "destructive",
-        });
-      } else {
-        // Correção 4: pedido virou 'filled'/'closed' (ou sumiu) — mensagem amigável e recarregar a lista.
-        toast({
-          title: "Esse pedido não está mais disponível.",
-          variant: "destructive",
-        });
-        void load();
-      }
+    const res = (data ?? {}) as { serviceRequestId?: string; error?: string };
+    if (error || res.error || !res.serviceRequestId) {
+      toast({
+        title: "Não foi possível abrir a conversa",
+        description: res.error || error?.message || "Tente novamente em instantes.",
+        variant: "destructive",
+      });
       return;
     }
-    toast({ title: "Interesse enviado!", description: "O cliente será notificado." });
-    await notifyClientInterest(openRequestId);
     try {
       window.dispatchEvent(new CustomEvent("chamo-open-requests-changed"));
     } catch {
       /* ignore */
     }
-    void load();
-  };
-
-  const withdrawInterest = async (openRequestId: string) => {
-    if (!proRow) return;
-    setActionId(openRequestId);
-    const { error } = await supabase
-      .from("open_service_request_interests")
-      .delete()
-      .eq("open_request_id", openRequestId)
-      .eq("professional_id", proRow.id);
-    setActionId(null);
-    if (error) {
-      toast({ title: "Erro ao desistir", description: error.message, variant: "destructive" });
-      return;
-    }
-    toast({ title: "Interesse retirado" });
-    try {
-      window.dispatchEvent(new CustomEvent("chamo-open-requests-changed"));
-    } catch {
-      /* ignore */
-    }
-    void load();
+    navigate(`/messages/${res.serviceRequestId}`);
   };
 
   const eligibilityMessage = useMemo(() => {
@@ -231,7 +215,7 @@ const ProOpenRequests = () => {
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
               <Handshake className="w-6 h-6 text-primary shrink-0" />
-              Pedidos na região
+              Serviços disponíveis
             </h1>
             <p className="text-sm text-muted-foreground">
               Pedidos na sua cidade e UF
@@ -267,23 +251,44 @@ const ProOpenRequests = () => {
         ) : (
           <ul className="flex flex-col gap-4">
             {rows.map((r) => {
-              const c = counts[r.id] ?? 0;
-              const max = r.max_professional_interests;
-              const full = c >= max;
               const hasMine = mine.has(r.id);
               const busy = actionId === r.id;
+              const client = clients[r.client_id];
+              const clientAvatar = clientAvatarUrl(client?.avatar_url);
               return (
                 <li key={r.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                  {/* Cliente do pedido */}
+                  {client && (
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <div className="w-9 h-9 rounded-full bg-muted overflow-hidden flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">
+                        {clientAvatar ? (
+                          <img
+                            src={clientAvatar}
+                            alt={client.full_name}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : (
+                          client.full_name.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      <span className="text-sm font-semibold text-foreground truncate">{client.full_name}</span>
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <Badge variant="outline">{urgencyLabel(r.urgency)}</Badge>
                     {r.categories?.name && (
                       <span className="text-xs font-medium text-muted-foreground">{r.categories.name}</span>
                     )}
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      {c}/{max} interessados
+                    <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      DISPONÍVEL
                     </span>
                   </div>
-                  <p className="text-sm text-foreground leading-snug whitespace-pre-wrap">{r.description}</p>
+                  <p className="text-sm text-foreground leading-snug whitespace-pre-wrap">
+                    <span className="font-bold">SERVIÇO: </span>{r.description}
+                  </p>
                   <p className="text-xs text-muted-foreground mt-2">
                     {[r.neighborhood, r.city, r.state].filter(Boolean).join(" · ")}
                     {" · "}
@@ -294,54 +299,21 @@ const ProOpenRequests = () => {
                       minute: "2-digit",
                     })}
                   </p>
-                  <div className="mt-4 flex flex-col sm:flex-row gap-2">
-                    {hasMine ? (
-                      <>
-                        <Badge className="w-fit bg-emerald-600 hover:bg-emerald-600">Você manifestou interesse</Badge>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="font-semibold"
-                          disabled={!!actionId}
-                          onClick={() => void withdrawInterest(r.id)}
-                        >
-                          {busy ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <>
-                              <Undo2 className="w-4 h-4 mr-1.5" />
-                              Desistir
-                            </>
-                          )}
-                        </Button>
-                      </>
-                    ) : full ? (
-                      <span className="text-sm text-muted-foreground">Limite de interessados atingido.</span>
-                    ) : (
-                      <Button
-                        type="button"
-                        className={cn("font-bold", "w-full sm:w-auto")}
-                        disabled={!!actionId}
-                        onClick={() => void expressInterest(r.id)}
-                      >
-                        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Tenho interesse"}
-                      </Button>
-                    )}
+                  <div className="mt-4">
+                    <Button
+                      type="button"
+                      className="font-bold w-full"
+                      disabled={!!actionId}
+                      onClick={() => void handleInterest(r.id)}
+                    >
+                      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : hasMine ? "Abrir conversa" : "Oferecer meus serviços"}
+                    </Button>
                   </div>
                 </li>
               );
             })}
           </ul>
         )}
-
-        <p className="text-xs text-muted-foreground mt-6 text-center">
-          Cidade e UF do pedido precisam coincidir com as do seu{" "}
-          <Link to="/profile/settings/endereco" className="text-primary font-medium underline-offset-2 hover:underline">
-            endereço no perfil
-          </Link>
-          .
-        </p>
       </div>
     </AppLayout>
   );

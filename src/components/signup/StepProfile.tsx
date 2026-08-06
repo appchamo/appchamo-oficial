@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, startTransition } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { UserRound, ChevronDown, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -71,20 +71,21 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
     setProfessionPopoverOpen(false);
   }, [categoryId]);
 
-  const filteredProfessions = useMemo(
-    () => professions.filter((p) => p.category_id === categoryId),
-    [professions, categoryId],
-  );
-
+  // Busca em TODAS as profissões — a categoria é derivada da profissão escolhida.
   const professionListVisible = useMemo(() => {
     const q = professionQuery.trim().toLowerCase();
-    if (!q) return filteredProfessions.slice(0, 48);
-    return filteredProfessions.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 80);
-  }, [filteredProfessions, professionQuery]);
+    if (!q) return professions.slice(0, 60);
+    return professions.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 80);
+  }, [professions, professionQuery]);
 
-  const selectedProfessionLabel = useMemo(
-    () => filteredProfessions.find((p) => p.id === professionId)?.name ?? "",
-    [filteredProfessions, professionId],
+  const selectedProfession = useMemo(
+    () => professions.find((p) => p.id === professionId) ?? null,
+    [professions, professionId],
+  );
+  const selectedProfessionLabel = selectedProfession?.name ?? "";
+  const selectedCategoryName = useMemo(
+    () => categories.find((c) => c.id === (selectedProfession?.category_id ?? categoryId))?.name ?? "",
+    [categories, selectedProfession, categoryId],
   );
 
   const [avatarError, setAvatarError] = useState(false);
@@ -105,9 +106,9 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
       return;
     }
     setAvatarError(false);
-    if (accountType === "professional" && !categoryId) {
+    if (accountType === "professional" && !professionId) {
       setCategoryFieldError(true);
-      toast({ title: "Selecione sua categoria / área.", variant: "destructive" });
+      toast({ title: "Selecione sua profissão.", variant: "destructive" });
       requestAnimationFrame(() => {
         document.getElementById("signup-field-profile-category")?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
@@ -117,7 +118,8 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
     const servicesFiltered = accountType === "professional" ? services.filter(s => s.trim()) : undefined;
     onNext({
       avatarUrl,
-      categoryId: accountType === "professional" ? categoryId : undefined,
+      // Categoria derivada da profissão escolhida.
+      categoryId: accountType === "professional" ? (selectedProfession?.category_id || categoryId) : undefined,
       professionId: accountType === "professional" && professionId ? professionId : undefined,
       experience: accountType === "professional" ? experience.trim() || undefined : undefined,
       services: servicesFiltered?.length ? servicesFiltered : undefined,
@@ -139,21 +141,24 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
         <div className="bg-card border rounded-2xl p-5 shadow-card space-y-4">
           {/* Avatar */}
           <div id="signup-field-profile-avatar" className="flex flex-col items-center gap-3">
-            <div
-              className={cn(
-                "relative w-28 h-28 shrink-0 rounded-full overflow-hidden border-2 transition-colors",
-                avatarError && "border-destructive ring-2 ring-destructive/30",
-                !avatarError && avatarUrl && "border-primary/25 ring-2 ring-primary/10",
-                !avatarError && !avatarUrl && "border-border bg-gradient-to-b from-muted/80 to-muted/40",
-              )}
-            >
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
-              ) : (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <UserRound className="h-12 w-12 text-muted-foreground/45" strokeWidth={1.25} />
-                </div>
-              )}
+            <div className="relative w-28 h-28 shrink-0">
+              {/* Círculo com overflow só na imagem (o badge fica FORA, por cima) */}
+              <div
+                className={cn(
+                  "relative w-28 h-28 rounded-full overflow-hidden border-2 transition-colors",
+                  avatarError && "border-destructive ring-2 ring-destructive/30",
+                  !avatarError && avatarUrl && "border-primary/25 ring-2 ring-primary/10",
+                  !avatarError && !avatarUrl && "border-border bg-gradient-to-b from-muted/80 to-muted/40",
+                )}
+              >
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <UserRound className="h-12 w-12 text-muted-foreground/45" strokeWidth={1.25} />
+                  </div>
+                )}
+              </div>
               <ImageCropUpload
                 onUpload={(url) => {
                   setAvatarUrl(url);
@@ -171,9 +176,9 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
                   <button
                     type="button"
                     className={cn(
-                      "absolute z-10 flex items-center justify-center rounded-full touch-manipulation outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      "absolute z-20 flex items-center justify-center rounded-full touch-manipulation outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                       avatarUrl
-                        ? "bottom-0 right-0 mb-0.5 mr-0.5 h-10 w-10 bg-primary text-primary-foreground shadow-md border-2 border-background"
+                        ? "-bottom-1 -right-1 h-10 w-10 bg-primary text-primary-foreground shadow-md border-2 border-background"
                         : "inset-0 bg-transparent",
                     )}
                     aria-label={avatarUrl ? "Alterar foto de perfil" : "Adicionar foto de perfil"}
@@ -197,89 +202,70 @@ const StepProfile = ({ accountType, onNext, onBack, onExitToLogin, initialAvatar
           {accountType === "professional" && (
             <>
               <div id="signup-field-profile-category">
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Categoria / Área *</label>
-                <div className="relative">
-                  <select
-                    value={categoryId}
-                    onChange={(e) => {
-                      setCategoryFieldError(false);
-                      const v = e.target.value;
-                      startTransition(() => {
-                        setCategoryId(v);
-                        setProfessionId("");
-                      });
-                    }}
-                    className={cn(
-                      "w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-foreground outline-none focus:ring-2 focus:ring-primary/30 appearance-none transition-colors",
-                      categoryFieldError && "border-destructive border-2 ring-2 ring-destructive/25",
-                    )}
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Profissão *</label>
+                <Popover open={professionPopoverOpen} onOpenChange={setProfessionPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-left outline-none focus:ring-2 focus:ring-primary/30 flex items-center justify-between gap-2 touch-manipulation transition-colors",
+                        categoryFieldError && "border-destructive border-2 ring-2 ring-destructive/25",
+                      )}
+                    >
+                      <span className={selectedProfessionLabel ? "text-foreground truncate" : "text-muted-foreground truncate"}>
+                        {selectedProfessionLabel || "Selecione ou busque sua profissão"}
+                      </span>
+                      <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="start"
+                    className="w-[min(calc(100vw-2rem),22rem)] p-2"
+                    onOpenAutoFocus={(e) => e.preventDefault()}
                   >
-                    <option value="">Selecione sua área</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                </div>
+                    <input
+                      type="search"
+                      autoComplete="off"
+                      value={professionQuery}
+                      onChange={(e) => setProfessionQuery(e.target.value)}
+                      placeholder="Digite para buscar sua profissão…"
+                      className="w-full border rounded-lg px-2 py-2 text-sm bg-background mb-2 outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                    <div className="max-h-56 overflow-y-auto overscroll-contain -mx-0.5">
+                      {professionListVisible.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setCategoryFieldError(false);
+                            setProfessionId(p.id);
+                            setCategoryId(p.category_id); // categoria selecionada automaticamente pela profissão
+                            setProfessionPopoverOpen(false);
+                            setProfessionQuery("");
+                          }}
+                          className={cn(
+                            "w-full text-left px-2 py-2.5 text-sm rounded-lg hover:bg-muted transition-colors",
+                            professionId === p.id && "bg-muted font-medium",
+                          )}
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                      {professionListVisible.length === 0 ? (
+                        <p className="text-xs text-muted-foreground px-2 py-2">Nenhuma profissão encontrada.</p>
+                      ) : null}
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 {categoryFieldError ? (
-                  <p className="text-xs text-destructive font-medium mt-1.5">Selecione sua categoria ou área de atuação.</p>
+                  <p className="text-xs text-destructive font-medium mt-1.5">Selecione sua profissão.</p>
+                ) : null}
+                {selectedCategoryName ? (
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    Categoria: <span className="font-medium text-foreground">{selectedCategoryName}</span>
+                  </p>
                 ) : null}
               </div>
-
-              {categoryId && filteredProfessions.length > 0 && (
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Profissão</label>
-                  <Popover open={professionPopoverOpen} onOpenChange={setProfessionPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <button
-                        type="button"
-                        className="w-full border rounded-xl px-3 py-2.5 text-sm bg-transparent text-left outline-none focus:ring-2 focus:ring-primary/30 flex items-center justify-between gap-2 touch-manipulation"
-                      >
-                        <span className={selectedProfessionLabel ? "text-foreground truncate" : "text-muted-foreground truncate"}>
-                          {selectedProfessionLabel || "Toque para buscar ou escolher"}
-                        </span>
-                        <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      align="start"
-                      className="w-[min(calc(100vw-2rem),22rem)] p-2"
-                      onOpenAutoFocus={(e) => e.preventDefault()}
-                    >
-                      <input
-                        type="search"
-                        autoComplete="off"
-                        value={professionQuery}
-                        onChange={(e) => setProfessionQuery(e.target.value)}
-                        placeholder="Digite para filtrar…"
-                        className="w-full border rounded-lg px-2 py-2 text-sm bg-background mb-2 outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                      <div className="max-h-56 overflow-y-auto overscroll-contain -mx-0.5">
-                        {professionListVisible.map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setProfessionId(p.id);
-                              setProfessionPopoverOpen(false);
-                              setProfessionQuery("");
-                            }}
-                            className={cn(
-                              "w-full text-left px-2 py-2.5 text-sm rounded-lg hover:bg-muted transition-colors",
-                              professionId === p.id && "bg-muted font-medium",
-                            )}
-                          >
-                            {p.name}
-                          </button>
-                        ))}
-                        {professionListVisible.length === 0 ? (
-                          <p className="text-xs text-muted-foreground px-2 py-2">Nenhuma profissão encontrada.</p>
-                        ) : null}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              )}
 
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Experiência</label>

@@ -5,7 +5,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const GRAPH_VERSION = "v21.0";
-const TEMPLATE = "pedido_novo_regiao";
+// Template novo (nome completo, sem categoria). Enquanto a Meta não aprova, cai no antigo.
+const TEMPLATE_NEW = "cliente_procurando_servico";
+const TEMPLATE_OLD = "pedido_novo_regiao";
 
 function toMsisdn(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -70,42 +72,56 @@ Deno.serve(async (req) => {
 
     const targets = ((profs as any[]) || [])
       .filter((p) => p.whatsapp_notifications_enabled !== false)
-      .map((p) => ({ user_id: p.user_id as string, name: String(p.full_name || "").split(" ")[0] || "profissional", to: toMsisdn(p.phone) }))
+      .map((p) => ({ user_id: p.user_id as string, name: String(p.full_name || "").trim() || "profissional", to: toMsisdn(p.phone) }))
       .filter((t) => Boolean(t.to));
+
+    // Envia um template e retorna a resposta crua da Graph API.
+    const sendTemplate = async (to: string, tplName: string, params: string[]) => {
+      const payload = {
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: tplName,
+          language: { code: "pt_BR" },
+          components: [{ type: "body", parameters: params.map((x) => ({ type: "text", text: x })) }],
+        },
+      };
+      const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      return { ok: r.ok, json: await r.json().catch(() => ({})) };
+    };
 
     const work = (async () => {
       const logRows: Record<string, unknown>[] = [];
+      const firstName = (full: string) => full.split(" ")[0] || "profissional";
       for (const t of targets) {
-        const params = [t.name, city, categoryName];
-        const payload = {
-          messaging_product: "whatsapp",
-          to: t.to,
-          type: "template",
-          template: {
-            name: TEMPLATE,
-            language: { code: "pt_BR" },
-            components: [{ type: "body", parameters: params.map((x) => ({ type: "text", text: x })) }],
-          },
-        };
+        let usedTemplate = TEMPLATE_NEW;
+        let usedBody = `Oi ${t.name}! Um cliente tá procurando o seu serviço, abra o aplicativo Chamô e confira!`;
         try {
-          const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          const j = await r.json().catch(() => ({}));
-          const waId = (j as any)?.messages?.[0]?.id ?? null;
+          // 1ª tentativa: template novo (nome completo, sem categoria).
+          let res = await sendTemplate(t.to, TEMPLATE_NEW, [t.name]);
+          // Fallback: se o novo ainda não foi aprovado pela Meta, usa o antigo aprovado.
+          if (!res.ok) {
+            usedTemplate = TEMPLATE_OLD;
+            usedBody = `Oi ${firstName(t.name)}! Um cliente em ${city} está procurando ${categoryName} agora no Chamô.`;
+            res = await sendTemplate(t.to, TEMPLATE_OLD, [firstName(t.name), city, categoryName]);
+          }
+          const waId = (res.json as any)?.messages?.[0]?.id ?? null;
           logRows.push({
             wa_id: waId,
             to_phone: t.to,
             user_id: t.user_id,
-            template: TEMPLATE,
-            body: `Oi ${t.name}! Um cliente em ${city} está procurando ${categoryName} agora no Chamô.`,
-            status: r.ok ? "sent" : "error",
-            payload: j,
+            template: usedTemplate,
+            body: usedBody,
+            status: res.ok ? "sent" : "error",
+            payload: res.json,
           });
         } catch (e) {
-          logRows.push({ wa_id: null, to_phone: t.to, user_id: t.user_id, template: TEMPLATE, body: null, status: "error", payload: { error: String(e) } });
+          logRows.push({ wa_id: null, to_phone: t.to, user_id: t.user_id, template: usedTemplate, body: null, status: "error", payload: { error: String(e) } });
         }
       }
       if (logRows.length) { try { await admin.from("wa_messages").insert(logRows); } catch (_e) { /* log não-crítico */ } }

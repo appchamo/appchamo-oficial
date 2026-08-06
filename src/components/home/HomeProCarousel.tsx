@@ -35,6 +35,10 @@ interface Props {
   walletBalance: number;
   walletLoaded: boolean;
   professionalId: string;
+  /** Ex.: "Plano Grátis". */
+  planLabel?: string;
+  /** Ex.: "0/3 chamadas" ou "Chamadas ilimitadas". */
+  callsLabel?: string;
 }
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -59,6 +63,7 @@ function statusLabel(s: string) {
 export default function HomeProCarousel({
   profile, userName, welcomeWord, returning, locationLabel,
   onLocationClick, walletBalance, walletLoaded, professionalId,
+  planLabel, callsLabel,
 }: Props) {
   const navigate = useNavigate();
   const [slide, setSlide] = useState(0);
@@ -227,6 +232,21 @@ export default function HomeProCarousel({
                   <p className="text-white font-bold text-base lg:text-xl leading-tight truncate">{userName} 👋</p>
                 </div>
               </div>
+              {planLabel ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); navigate("/subscriptions"); }}
+                  className="flex flex-col items-end gap-0.5 shrink-0 active:scale-[0.98] transition-transform"
+                  aria-label="Ver plano e assinatura"
+                >
+                  <span className="inline-flex items-center rounded-full bg-white/20 backdrop-blur-sm border border-white/40 px-2.5 py-1 text-[11px] lg:text-xs font-bold text-white whitespace-nowrap">
+                    {planLabel}
+                  </span>
+                  {callsLabel ? (
+                    <span className="text-[10px] lg:text-[11px] text-white/85 font-medium whitespace-nowrap">{callsLabel}</span>
+                  ) : null}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

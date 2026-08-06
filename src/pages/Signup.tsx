@@ -12,13 +12,14 @@ import {
   type PendingEmailSignupV1,
 } from "@/lib/pendingEmailSignup";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
-import { forwardGeocodeBrazil } from "@/lib/geocode";
+import { forwardGeocodeBrazil, reverseGeocode } from "@/lib/geocode";
 import { fetchRegionGate, checkRegion } from "@/lib/regionGate";
 import { getDeviceLocation } from "@/lib/deviceLocation";
 import { getOrCreateDeviceId } from "@/lib/deviceId";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ticket, MailCheck, Mail, Home } from "lucide-react";
 import StepBasicData, { type BasicData } from "@/components/signup/StepBasicData";
+import StepLocationPermission from "@/components/signup/StepLocationPermission";
 import StepDocuments from "@/components/signup/StepDocuments";
 import StepProfile from "@/components/signup/StepProfile";
 import { DocumentsNoticeModal } from "@/components/signup/DocumentsNoticeModal";
@@ -213,6 +214,12 @@ const Signup = () => {
   const [showVerifyEmailModal, setShowVerifyEmailModal] = useState(false);
   const [resending, setResending] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+  /** Cliente finaliza o cadastro já na etapa "Dados pessoais" (sem etapa de perfil). */
+  const [pendingClientFinalize, setPendingClientFinalize] = useState(false);
+  /** Cliente: já passou pela tela de permissão de localização (estilo iFood). */
+  const [locationResolved, setLocationResolved] = useState(false);
+  /** Cliente sem GPS: mostra o campo CEP (obrigatório) no cadastro. */
+  const [clientNeedsCep, setClientNeedsCep] = useState(false);
   const didAdvanceFromOAuth = useRef(false);
   /** GPS real capturado na trava de região (cadastro). Persiste no perfil ao finalizar. */
   const regionGpsRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -760,8 +767,10 @@ const Signup = () => {
           }
         }
         setBasicData(payload);
+        // Cliente finaliza aqui mesmo (sem etapa de perfil) → doSignup → Home.
+        // O effect de finalização dispara quando basicData estiver setado.
         if (accountType === "professional") setStep("document-notice");
-        else setStep("profile");
+        else setPendingClientFinalize(true);
       } catch {
         toast({ title: "Erro de verificação", variant: "destructive" });
       } finally {
@@ -852,6 +861,15 @@ const Signup = () => {
       if (regionGpsRef.current) {
         basicPayload.latitude = regionGpsRef.current.lat;
         basicPayload.longitude = regionGpsRef.current.lng;
+        // Cliente que permitiu GPS: converte coordenada → cidade/UF, pois a Home,
+        // o Perfil e o match por região dependem de address_city/address_state.
+        if (accountType !== "professional" && !String(basicPayload.addressCity || "").trim()) {
+          try {
+            const rev = await reverseGeocode(regionGpsRef.current.lat, regionGpsRef.current.lng);
+            if (rev?.city) basicPayload.addressCity = rev.city;
+            if (rev?.state) basicPayload.addressState = rev.state;
+          } catch { /* segue sem cidade se o reverse-geocode falhar */ }
+        }
       } else if (accountType === "professional" && basicData.addressCity?.trim() && basicData.addressState?.trim()) {
         try {
           const geo = await forwardGeocodeBrazil({
@@ -976,6 +994,17 @@ const Signup = () => {
     }
   };
 
+  // Cliente: finaliza o cadastro assim que os dados básicos estão prontos
+  // (sem passar pela etapa de perfil). Usa nome/foto vindos do Google.
+  useEffect(() => {
+    if (!pendingClientFinalize || !basicData) return;
+    setPendingClientFinalize(false);
+    const meta = (session?.user?.user_metadata || {}) as Record<string, unknown>;
+    const avatarUrl = String((meta.avatar_url as string) || (meta.picture as string) || "").trim();
+    void doSignup(avatarUrl ? { avatarUrl } : {}, "free");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingClientFinalize, basicData]);
+
   const handleResendEmail = async () => {
     if (!basicData?.email) return;
     setResending(true);
@@ -1093,7 +1122,23 @@ const Signup = () => {
         </div>
       )}
 
-      {!loading && step === "basic" && (
+      {/* Cliente: tela de permissão de localização (estilo iFood) antes do formulário. */}
+      {!loading && step === "basic" && accountType !== "professional" && !locationResolved && (
+        <StepLocationPermission
+          onDone={(granted, coords) => {
+            if (granted && coords) {
+              regionGpsRef.current = { lat: coords.lat, lng: coords.lng };
+              setClientNeedsCep(false);
+            } else {
+              // Negou/pulou: o cadastro vai pedir o CEP (obrigatório).
+              setClientNeedsCep(true);
+            }
+            setLocationResolved(true);
+          }}
+          onExitToLogin={forceExitToLogin}
+        />
+      )}
+      {!loading && step === "basic" && (accountType === "professional" || locationResolved) && (
         <StepBasicData
           key={`basic-${accountType}-${createdUserId ?? "new"}`}
           accountType={accountType}
@@ -1102,6 +1147,7 @@ const Signup = () => {
           onExitToLogin={forceExitToLogin}
           initialData={basicData || undefined}
           initialReferralCode={signupReferralParam || undefined}
+          requireCep={accountType !== "professional" && clientNeedsCep}
         />
       )}
       {!loading && step === "document-notice" && (

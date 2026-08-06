@@ -59,15 +59,33 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment", val
     const startCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: facing },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
+          video: isSelfie
+            ? {
+                // Selfie / reconhecimento facial: câmera em RETRATO e travada em 1x.
+                // Antes o vídeo vinha em paisagem (1920x1080) e, exibido num container
+                // retrato com object-cover, cortava as laterais parecendo um "zoom 5x".
+                facingMode: { ideal: facing },
+                width: { ideal: 1080 },
+                height: { ideal: 1440 },
+                aspectRatio: { ideal: 3 / 4 },
+              }
+            : {
+                facingMode: { ideal: facing },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+              },
           audio: false,
         });
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;
+        // Trava o zoom óptico/digital em 1x (mínimo) quando o aparelho expõe zoom.
+        try {
+          const track = stream.getVideoTracks()[0];
+          const caps = (track?.getCapabilities?.() ?? {}) as { zoom?: { min?: number } };
+          if (track && caps.zoom && typeof caps.zoom.min === "number") {
+            await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] } as MediaTrackConstraints);
+          }
+        } catch { /* zoom não suportado neste aparelho — ok */ }
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
@@ -81,6 +99,21 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment", val
     startCamera();
     return () => { cancelled = true; stopCamera(); };
   }, [stopCamera]);
+
+  // Bloqueia o zoom por pinça (dois dedos) enquanto a câmera está aberta —
+  // no iOS o gesto de pinça pode dar zoom mesmo com user-scalable=no.
+  useEffect(() => {
+    const prevent = (e: Event) => e.preventDefault();
+    const onTouchMove = (e: TouchEvent) => { if (e.touches.length > 1) e.preventDefault(); };
+    document.addEventListener("gesturestart", prevent, { passive: false });
+    document.addEventListener("gesturechange", prevent, { passive: false });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      document.removeEventListener("gesturestart", prevent);
+      document.removeEventListener("gesturechange", prevent);
+      document.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
 
   const handleClose = useCallback(() => {
     stopCamera();
@@ -254,7 +287,7 @@ const DocumentCamera = ({ label, onCapture, onClose, facing = "environment", val
       </div>
 
       {/* Camera + overlay */}
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden" style={{ touchAction: "none" }}>
         {/* Video stream */}
         <video
           ref={videoRef}

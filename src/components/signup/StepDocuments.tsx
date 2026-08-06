@@ -20,6 +20,8 @@ interface UploadedDoc {
   preview: string;
   label: string;
   isPdf?: boolean;
+  /** true = capturado pela câmera; false = enviado da galeria/PDF. */
+  fromCamera?: boolean;
 }
 
 interface Props {
@@ -152,7 +154,7 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
     setDocs((prev) => {
       const old = prev.find((d) => d.label === currentSlot);
       if (old?.preview.startsWith("blob:")) URL.revokeObjectURL(old.preview);
-      return [...prev.filter((d) => d.label !== currentSlot), { file, preview, label: currentSlot, isPdf: false }];
+      return [...prev.filter((d) => d.label !== currentSlot), { file, preview, label: currentSlot, isPdf: false, fromCamera: true }];
     });
     setCameraOpen(false);
   };
@@ -181,10 +183,10 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
       const old = prev.find((d) => d.label === slot);
       if (old?.preview.startsWith("blob:")) URL.revokeObjectURL(old.preview);
       if (isPdf) {
-        return [...prev.filter((d) => d.label !== slot), { file, preview: "", label: slot, isPdf: true }];
+        return [...prev.filter((d) => d.label !== slot), { file, preview: "", label: slot, isPdf: true, fromCamera: false }];
       }
       const preview = URL.createObjectURL(file);
-      return [...prev.filter((d) => d.label !== slot), { file, preview, label: slot, isPdf: false }];
+      return [...prev.filter((d) => d.label !== slot), { file, preview, label: slot, isPdf: false, fromCamera: false }];
     });
   };
 
@@ -221,11 +223,13 @@ const StepDocuments = ({ documentType, onNext, onBack, onExitToLogin }: Props) =
     // Checagem de qualidade (IA) da selfie + documento — não bloqueia o cadastro.
     const selfieDoc = docs.find((d) => d.label === SELFIE_LABEL && !d.isPdf);
     const frontDoc = docs.find((d) => d.label === idFrontLabel && !d.isPdf);
-    if (selfieDoc) {
+    // Só roda a análise de qualidade (IA) quando o DOCUMENTO foi tirado pela CÂMERA.
+    // Upload de imagem/PDF não é analisado — não gera alerta no admin.
+    if (selfieDoc && frontDoc?.fromCamera) {
       (async () => {
         try {
           const selfie = await fileToDataUrl(selfieDoc.file);
-          const document = frontDoc ? await fileToDataUrl(frontDoc.file) : undefined;
+          const document = await fileToDataUrl(frontDoc.file);
           await supabase.functions.invoke("analyze-selfie-quality", { body: { selfie, document, doc_type: docType } });
         } catch { /* análise é best-effort */ }
       })();

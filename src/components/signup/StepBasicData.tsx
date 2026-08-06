@@ -45,6 +45,7 @@ export type BasicFieldKey =
   | "document"
   | "password"
   | "confirmPassword"
+  | "addressZip"
   | "addressCity"
   | "addressState"
   | "addressNumber"
@@ -59,6 +60,7 @@ const BASIC_FIELD_SCROLL_ORDER: BasicFieldKey[] = [
   "document",
   "password",
   "confirmPassword",
+  "addressZip",
   "addressCity",
   "addressState",
   "addressNumber",
@@ -83,6 +85,8 @@ interface Props {
   initialData?: Partial<BasicData>; // ✅ ADICIONADO: Para receber dados do Google
   /** Preenchido pela URL ?ref= ao cadastrar como profissional */
   initialReferralCode?: string;
+  /** Cliente sem permissão de GPS: mostra o campo CEP (obrigatório) + Cidade/Estado. */
+  requireCep?: boolean;
 }
 
 import { formatCpf, formatCnpj, formatPhone, validateCpf, validateCnpj } from "@/lib/formatters";
@@ -120,7 +124,7 @@ const InputRow = ({
 
 const NATIVE_FORM_DEFER_MS = 200;
 
-const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, initialData, initialReferralCode }: Props) => {
+const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, initialData, initialReferralCode, requireCep = false }: Props) => {
   /** iOS WebView: pequeno defer após SIGNED_IN para não competir com o primeiro paint (600ms deixava a tela “morta” por muito tempo). */
   const [nativeFormReady, setNativeFormReady] = useState(() => !Capacitor.isNativePlatform());
   useEffect(() => {
@@ -412,8 +416,16 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
     const docClean = document.replace(/\D/g, "");
 
     if (!name.trim()) errs.name = "Campo obrigatório.";
+    // Exige nome completo: pelo menos 2 palavras (nome + sobrenome).
+    // Exceção: empresa (profissional com CNPJ) pode ter razão social de 1 palavra.
+    else if (
+      !(accountType === "professional" && documentType === "cnpj") &&
+      name.trim().split(/\s+/).filter(Boolean).length < 2
+    )
+      errs.name = "Digite seu nome completo (nome e sobrenome).";
     if (!email.trim()) errs.email = "Campo obrigatório.";
-    if (!phone.replace(/\D/g, "")) errs.phone = "Campo obrigatório.";
+    // Telefone só é obrigatório para profissional (cliente não informa no cadastro).
+    if (accountType === "professional" && !phone.replace(/\D/g, "")) errs.phone = "Campo obrigatório.";
 
     const birthDigits = birthDateBr.replace(/\D/g, "");
     if (!birthDigits.length) errs.birthDate = "Campo obrigatório.";
@@ -449,6 +461,14 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
       if (!addressCity?.trim()) errs.addressCity = "Informe a cidade.";
       if (!addressState?.trim()) errs.addressState = "Informe o estado (UF).";
       if (!addressNumber?.trim()) errs.addressNumber = "Informe o número do endereço.";
+    }
+
+    // Cliente sem GPS: CEP obrigatório + Cidade/Estado (auto pelo CEP ou digitados).
+    if (requireCep) {
+      const cepDigits = addressZip.replace(/\D/g, "");
+      if (cepDigits.length !== 8) errs.addressZip = "Informe um CEP válido (8 dígitos).";
+      if (!addressCity.trim()) errs.addressCity = "Informe a cidade.";
+      if (!addressState.trim()) errs.addressState = "Informe o estado (UF).";
     }
 
     if (!termsAccepted) errs.terms = "Leia e aceite os termos para continuar.";
@@ -489,13 +509,13 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             addressCountry,
           }
         : {
-            addressZip: "",
+            addressZip: requireCep ? addressZip.replace(/\D/g, "") : "",
             addressStreet: "",
             addressNumber: "",
             addressComplement: "",
             addressNeighborhood: "",
-            addressCity: "",
-            addressState: "",
+            addressCity: requireCep ? addressCity.trim() : "",
+            addressState: requireCep ? addressState.trim().toUpperCase() : "",
             addressCountry: "Brasil",
           };
 
@@ -601,7 +621,11 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
         <div className="text-center mb-4">
           <h1 className="text-2xl font-extrabold text-gradient mb-1">Chamô</h1>
           <p className="text-sm text-muted-foreground">
-            Etapa 1 de {accountType === "professional" ? "3" : "2"} · <strong>Dados pessoais</strong>
+            {accountType === "professional" ? (
+              <>Etapa 1 de 3 · <strong>Dados pessoais</strong></>
+            ) : (
+              <strong>Dados pessoais</strong>
+            )}
           </p>
           <button type="button" onClick={onBack} className="text-xs text-primary mt-1 hover:underline">← Alterar tipo de conta</button>
         </div>
@@ -623,57 +647,63 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             />
           </InputRow>
 
-          <div>
-            <InputRow icon={UserCircle} label="Nome de exibição (opcional)" fieldId="signup-field-displayName">
+          {accountType === "professional" && (
+            <div>
+              <InputRow icon={UserCircle} label="Nome de exibição (opcional)" fieldId="signup-field-displayName">
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder={name.trim() || "Nome fantasia, empresa…"}
+                  autoCapitalize="words"
+                  autoCorrect="off"
+                  autoComplete="nickname"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                />
+              </InputRow>
+              <p className="text-[10px] text-muted-foreground mt-1 px-0.5">
+                Nome que aparece no app. Pode ser nome fantasia ou nome da empresa. Se deixar em branco, usamos o nome completo.
+              </p>
+            </div>
+          )}
+
+          {(accountType === "professional" || !isSocialSignup) && (
+            <InputRow icon={Mail} label="E-mail *" fieldId="signup-field-email" error={fieldErrors.email}>
               <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder={name.trim() || "Nome fantasia, empresa…"}
-                autoCapitalize="words"
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  clearFieldError("email");
+                  setEmail(e.target.value);
+                }}
+                placeholder="seu@email.com"
+                disabled={isSocialSignup}
+                inputMode="email"
+                autoCapitalize="none"
                 autoCorrect="off"
-                autoComplete="nickname"
+                spellCheck={false}
+                autoComplete="email"
+                className={`flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground ${isSocialSignup ? "opacity-60 cursor-not-allowed" : ""}`}
+              />
+            </InputRow>
+          )}
+
+          {accountType === "professional" && (
+            <InputRow icon={Phone} label="Telefone *" fieldId="signup-field-phone" error={fieldErrors.phone}>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => {
+                  clearFieldError("phone");
+                  setPhone(formatPhone(e.target.value));
+                }}
+                placeholder="(00) 00000-0000"
+                inputMode="tel"
+                autoComplete="tel"
                 className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
               />
             </InputRow>
-            <p className="text-[10px] text-muted-foreground mt-1 px-0.5">
-              Nome que aparece no app. Pode ser nome fantasia ou nome da empresa. Se deixar em branco, usamos o nome completo.
-            </p>
-          </div>
-
-          <InputRow icon={Mail} label="E-mail *" fieldId="signup-field-email" error={fieldErrors.email}>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => {
-                clearFieldError("email");
-                setEmail(e.target.value);
-              }}
-              placeholder="seu@email.com"
-              disabled={isSocialSignup}
-              inputMode="email"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              autoComplete="email"
-              className={`flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground ${isSocialSignup ? "opacity-60 cursor-not-allowed" : ""}`}
-            />
-          </InputRow>
-
-          <InputRow icon={Phone} label="Telefone *" fieldId="signup-field-phone" error={fieldErrors.phone}>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => {
-                clearFieldError("phone");
-                setPhone(formatPhone(e.target.value));
-              }}
-              placeholder="(00) 00000-0000"
-              inputMode="tel"
-              autoComplete="tel"
-              className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-            />
-          </InputRow>
+          )}
 
           <InputRow icon={Calendar} label="Data de nascimento *" fieldId="signup-field-birthDate" error={fieldErrors.birthDate}>
             <input
@@ -691,7 +721,65 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
           </InputRow>
           {underageHint}
 
-          {/* Documento */}
+          {/* CEP + Cidade/Estado — cliente que não permitiu a localização por GPS. */}
+          {requireCep && (
+            <div className="space-y-3 border-t pt-3 mt-1">
+              <InputRow icon={MapPin} label="CEP *" fieldId="signup-field-addressZip" error={fieldErrors.addressZip}>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={addressZip}
+                  onChange={(e) => handleCepChange(e.target.value)}
+                  placeholder="00000-000"
+                  maxLength={9}
+                  autoComplete="postal-code"
+                  className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                />
+              </InputRow>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <InputRow icon={MapPin} label="Cidade *" fieldId="signup-field-addressCity" error={fieldErrors.addressCity}>
+                    <input
+                      type="text"
+                      value={addressCity}
+                      onChange={(e) => {
+                        clearFieldError("addressCity");
+                        setAddressCity(e.target.value);
+                      }}
+                      placeholder="Sua cidade"
+                      autoComplete="address-level2"
+                      className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
+                    />
+                  </InputRow>
+                </div>
+                <div>
+                  <InputRow icon={MapPin} label="UF *" fieldId="signup-field-addressState" error={fieldErrors.addressState}>
+                    <input
+                      type="text"
+                      value={addressState}
+                      onChange={(e) => {
+                        clearFieldError("addressState");
+                        setAddressState(e.target.value.toUpperCase());
+                      }}
+                      placeholder="UF"
+                      maxLength={2}
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      autoComplete="address-level1"
+                      className="flex-1 bg-transparent text-sm outline-none uppercase text-foreground placeholder:text-muted-foreground"
+                    />
+                  </InputRow>
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground px-0.5">
+                Preenchemos Cidade e Estado pelo CEP. Se não encontrar, é só digitar.
+              </p>
+            </div>
+          )}
+
+          {/* Documento — só profissional (cliente informa o CPF no 1º pagamento) */}
+          {accountType === "professional" && (
           <div id="signup-field-document">
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
               {accountType === "professional"
@@ -767,6 +855,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
               <p className="text-xs text-destructive font-medium mt-1.5 px-0.5">{fieldErrors.document}</p>
             ) : null}
           </div>
+          )}
 
           {/* ✅ CAMPOS DE SENHA ESCONDIDOS SE FOR SOCIAL */}
           {!isSocialSignup && (
@@ -953,6 +1042,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
             </div>
           )}
 
+          {accountType === "professional" && (
           <div id="signup-field-referral" className="border-t pt-3 mt-2 space-y-2">
             <label className="text-xs font-medium text-muted-foreground block">Código de convite (opcional)</label>
             <div className="flex items-stretch gap-2">
@@ -998,6 +1088,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
               <p className="text-xs text-destructive font-medium px-0.5">{fieldErrors.referral}</p>
             ) : null}
           </div>
+          )}
 
           {/* Termos: resumo curto + checkbox; links abrem o texto completo. */}
           <div id="signup-field-terms">
@@ -1017,7 +1108,7 @@ const StepBasicDataComponent = ({ accountType, onNext, onBack, onExitToLogin, in
 
           <button type="submit" disabled={validating || !termsAccepted}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-            {validating ? "Validando..." : "Próximo →"}
+            {validating ? "Validando..." : accountType === "professional" ? "Próximo →" : "Finalizar"}
           </button>
         </form>
 

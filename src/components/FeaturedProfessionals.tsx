@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { isSponsorClientAccount } from "@/lib/sponsorVisibility";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAuth } from "@/hooks/useAuth";
+import { useSubscription } from "@/hooks/useSubscription";
 
 const AUTO_ADVANCE_MS = 6000;
 /** Espaço entre cards no carrossel (alinhar ao gap-3 ≈ 0.75rem). */
@@ -83,6 +84,10 @@ interface Pro {
   created_at: string | null;
   /** Selos públicos (ordenados: destaque primeiro) */
   seals?: { icon_variant: string }[];
+  /** Card fixo do próprio profissional (preview de como ele aparece na lista). */
+  isSelf?: boolean;
+  /** Profissional grátis: card em preto e branco + botão "Fazer upgrade". */
+  locked?: boolean;
 }
 
 /** Remove espaços invisíveis / ZW* que quebram ordem “alfabética” na UI. */
@@ -212,64 +217,94 @@ function FeaturedProCard({ pro }: { pro: Pro }) {
     pro.address_city || pro.address_state
       ? [pro.address_city, pro.address_state].filter(Boolean).join(", ")
       : null;
+  const locked = !!pro.locked;
+
+  // Conteúdo do card (foto, nome, avaliação, cidade) — reutilizado nas duas variantes.
+  const body = (
+    <>
+      {/* Foto + selos ao lado (melhor selo maior); texto abaixo da foto */}
+      <div className="flex gap-4 lg:gap-5 items-start w-full min-w-0">
+        <div className="relative shrink-0 self-start">
+          <div className="relative w-16 h-16 lg:w-[72px] lg:h-[72px] rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
+            <span className="select-none">{initials}</span>
+            {avatarSrc && (
+              <img
+                src={avatarSrc}
+                alt={pro.full_name}
+                className="absolute inset-0 w-full h-full object-cover rounded-full"
+                loading="lazy"
+                decoding="async"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            )}
+          </div>
+          {pro.verified && (
+            <div className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-card shadow-sm">
+              <BadgeCheck className="w-3 h-3 text-white" />
+            </div>
+          )}
+        </div>
+        {pro.seals && pro.seals.length > 0 ? (
+          <FeaturedSealStrip seals={pro.seals} />
+        ) : (
+          <div className="flex-1 min-w-0" />
+        )}
+      </div>
+
+      <div className="min-w-0 -mt-0.5">
+        <p className="font-bold text-foreground text-sm lg:text-base truncate leading-tight">{pro.full_name}</p>
+        <p className="text-sm lg:text-[15px] font-semibold text-primary truncate mt-0.5">{pro.profession_name}</p>
+        {pro.verified && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 mt-0.5">
+            <BadgeCheck className="w-3 h-3 shrink-0" /> Verificado
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1">
+        <Star className="w-3.5 h-3.5 fill-primary text-primary flex-shrink-0" />
+        <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
+        <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
+      </div>
+
+      {cityLine && (
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <MapPin className="w-3 h-3 text-primary flex-shrink-0" />
+          <span className="truncate">{cityLine}</span>
+        </div>
+      )}
+    </>
+  );
+
+  // Profissional grátis (próprio card fixado): preto e branco + "Fazer upgrade".
+  if (locked) {
+    return (
+      <div ref={impressionRef} className="w-full min-w-0 min-h-0 flex">
+        <div className="bg-card rounded-xl lg:rounded-2xl border shadow-card p-4 lg:p-5 flex flex-col gap-2.5 lg:gap-3 w-full min-w-0 overflow-hidden">
+          <div className="grayscale opacity-95 flex flex-col gap-2.5 lg:gap-3">
+            {body}
+          </div>
+          <div className="mt-auto pt-1">
+            <Link
+              to="/subscriptions"
+              className="block w-full text-center text-sm font-semibold py-2.5 rounded-lg bg-primary text-white active:scale-[0.98] transition-transform"
+            >
+              Fazer upgrade
+            </Link>
+            <p className="text-[11px] text-muted-foreground text-center mt-1.5">Faça upgrade para aparecer aqui.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={impressionRef} className="w-full min-w-0 min-h-0 flex">
       <Link
         to={`/professional/${pro.id}`}
         className="bg-card rounded-xl lg:rounded-2xl border shadow-card p-4 lg:p-5 flex flex-col gap-2.5 lg:gap-3 w-full min-w-0 overflow-hidden active:scale-[0.97] transition-transform"
       >
-        {/* Foto + selos ao lado (melhor selo maior); texto abaixo da foto */}
-        <div className="flex gap-4 lg:gap-5 items-start w-full min-w-0">
-          <div className="relative shrink-0 self-start">
-            <div className="relative w-16 h-16 lg:w-[72px] lg:h-[72px] rounded-full bg-muted flex items-center justify-center text-base font-bold text-muted-foreground overflow-hidden ring-2 ring-border/40">
-              <span className="select-none">{initials}</span>
-              {avatarSrc && (
-                <img
-                  src={avatarSrc}
-                  alt={pro.full_name}
-                  className="absolute inset-0 w-full h-full object-cover rounded-full"
-                  loading="lazy"
-                  decoding="async"
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                />
-              )}
-            </div>
-            {pro.verified && (
-              <div className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center ring-2 ring-card shadow-sm">
-                <BadgeCheck className="w-3 h-3 text-white" />
-              </div>
-            )}
-          </div>
-          {pro.seals && pro.seals.length > 0 ? (
-            <FeaturedSealStrip seals={pro.seals} />
-          ) : (
-            <div className="flex-1 min-w-0" />
-          )}
-        </div>
-
-        <div className="min-w-0 -mt-0.5">
-          <p className="font-bold text-foreground text-sm lg:text-base truncate leading-tight">{pro.full_name}</p>
-          <p className="text-sm lg:text-[15px] font-semibold text-primary truncate mt-0.5">{pro.profession_name}</p>
-          {pro.verified && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 mt-0.5">
-              <BadgeCheck className="w-3 h-3 shrink-0" /> Verificado
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1">
-          <Star className="w-3.5 h-3.5 fill-primary text-primary flex-shrink-0" />
-          <span className="text-sm font-semibold text-foreground">{Number(pro.rating).toFixed(1)}</span>
-          <span className="text-xs text-muted-foreground">· {pro.total_services} serv.</span>
-        </div>
-
-        {cityLine && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="w-3 h-3 text-primary flex-shrink-0" />
-            <span className="truncate">{cityLine}</span>
-          </div>
-        )}
-
+        {body}
         <div className="mt-auto pt-1">
           <div className="w-full text-center text-sm font-semibold py-2.5 rounded-lg bg-primary text-white">
             Contratar
@@ -293,6 +328,49 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
   const { user, profile } = useAuth();
   const featuredSelfUserId =
     profile?.user_type === "professional" || profile?.user_type === "company" ? user?.id : undefined;
+
+  // Plano do próprio profissional: VIP/Business = aparece normal; grátis = P&B + "Fazer upgrade".
+  const { isFreePlan: selfFreePlan, plan: selfPlan } = useSubscription();
+  const selfIsVip = !!selfPlan && !selfFreePlan;
+  /** Card do próprio profissional, fixado no início da lista de destaques. */
+  const [selfPro, setSelfPro] = useState<Pro | null>(null);
+
+  useEffect(() => {
+    if (!featuredSelfUserId) { setSelfPro(null); return; }
+    let cancelled = false;
+    void (async () => {
+      const { data: proRow } = await supabase
+        .from("professionals")
+        .select("id, rating, total_services, verified, avg_response_seconds, user_id, profession_id, professions(name), created_at")
+        .eq("user_id", featuredSelfUserId)
+        .maybeSingle();
+      if (cancelled || !proRow) { if (!cancelled) setSelfPro(null); return; }
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url, address_city, address_state")
+        .eq("user_id", featuredSelfUserId)
+        .maybeSingle();
+      if (cancelled) return;
+      const pr = proRow as Record<string, unknown>;
+      const pf = (prof || {}) as Record<string, unknown>;
+      setSelfPro({
+        id: String(pr.id),
+        rating: Number(pr.rating ?? 0),
+        total_services: Number(pr.total_services ?? 0),
+        verified: !!pr.verified,
+        avg_response_seconds: (pr.avg_response_seconds as number | null) ?? null,
+        user_id: featuredSelfUserId,
+        profession_name: ((pr.professions as { name?: string } | null)?.name) ?? "",
+        full_name: String(pf.full_name ?? ""),
+        avatar_url: (pf.avatar_url as string | null) ?? null,
+        address_city: (pf.address_city as string | null) ?? null,
+        address_state: (pf.address_state as string | null) ?? null,
+        created_at: (pr.created_at as string | null) ?? null,
+        seals: [],
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [featuredSelfUserId]);
 
   // Init from localStorage immediately — avoids waiting for DB before first render
   const cachedLoc = useMemo(() => getHomeLocationCache(), []);
@@ -704,6 +782,18 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
 
   const displayKey = useMemo(() => displayPicked.map((p) => p.id).join("|"), [displayPicked]);
 
+  /**
+   * Lista exibida no carrossel com o PRÓPRIO profissional fixado no início.
+   * - VIP/Business: já entra no pool e é fixado (applySelfFirstInFeatured) — aparece normal.
+   * - Grátis: não entra no pool de destaques → injetamos aqui em P&B com "Fazer upgrade".
+   */
+  const displayPros = useMemo(() => {
+    if (!selfPro || !featuredSelfUserId) return professionals;
+    const already = professionals.some((p) => p.user_id === featuredSelfUserId);
+    if (already) return professionals;
+    return [{ ...selfPro, isSelf: true, locked: !selfIsVip }, ...professionals];
+  }, [selfPro, professionals, featuredSelfUserId, selfIsVip]);
+
   useEffect(() => {
     setActiveIndex(0);
     const el = scrollRef.current;
@@ -912,8 +1002,8 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         onTouchStart={() => setIsPaused(true)}
         onTouchEnd={() => setIsPaused(false)}
       >
-        {professionals.map((pro) => (
-          <div key={pro.id} data-featured-card className={featuredCardWidthClass}>
+        {displayPros.map((pro) => (
+          <div key={pro.isSelf ? `self-${pro.id}` : pro.id} data-featured-card className={featuredCardWidthClass}>
             <FeaturedProCard pro={pro} />
           </div>
         ))}
@@ -936,24 +1026,24 @@ const FeaturedProfessionals = ({ section }: FeaturedProfessionalsProps) => {
         </div>
       </div>
 
-      {professionals.length + 1 > 1 && (
+      {displayPros.length + 1 > 1 && (
         <div className="flex justify-center gap-1.5 mt-2 flex-wrap">
-          {professionals.map((pro, i) => (
+          {displayPros.map((pro, i) => (
             <button
-              key={pro.id}
+              key={pro.isSelf ? `self-${pro.id}` : pro.id}
               type="button"
               onClick={() => scrollToCardIndex(i)}
               className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
                 i === activeIndex ? "bg-primary" : "bg-muted-foreground/30"
               }`}
-              aria-label={`Profissional ${i + 1} de ${professionals.length}`}
+              aria-label={`Profissional ${i + 1} de ${displayPros.length}`}
             />
           ))}
           <button
             type="button"
-            onClick={() => scrollToCardIndex(professionals.length)}
+            onClick={() => scrollToCardIndex(displayPros.length)}
             className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
-              activeIndex === professionals.length ? "bg-primary" : "bg-muted-foreground/30"
+              activeIndex === displayPros.length ? "bg-primary" : "bg-muted-foreground/30"
             }`}
             aria-label="Ver todos os profissionais"
           />

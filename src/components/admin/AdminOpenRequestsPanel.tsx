@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, Search, Send, Users, MapPin, Clock, Tag, User } from "lucide-react";
+import { Loader2, Search, Send, Users, MapPin, Clock, Tag, User, CheckCircle2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 
 // ---- tipos ----
 interface ReqRow {
@@ -45,6 +46,31 @@ export default function AdminOpenRequestsPanel() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sel, setSel] = useState<ReqRow | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Encerra o pedido (status -> closed). Sai automaticamente da lista dos profissionais (RLS exige 'open').
+  const handleClose = async (id: string) => {
+    setActionBusy(true);
+    const { error } = await supabase.from("open_service_requests" as never).update({ status: "closed" } as never).eq("id", id);
+    setActionBusy(false);
+    if (error) { toast({ title: "Não foi possível encerrar", description: error.message, variant: "destructive" }); return; }
+    setReqs((prev) => prev.map((r) => (r.id === id ? { ...r, status: "closed" } : r)));
+    setSel((prev) => (prev ? { ...prev, status: "closed" } : prev));
+    toast({ title: "Pedido encerrado." });
+  };
+
+  // Exclui o pedido de vez (recipients/interests caem em cascata).
+  const handleDelete = async (id: string) => {
+    setActionBusy(true);
+    const { error } = await supabase.from("open_service_requests" as never).delete().eq("id", id);
+    setActionBusy(false);
+    if (error) { toast({ title: "Não foi possível excluir", description: error.message, variant: "destructive" }); return; }
+    setReqs((prev) => prev.filter((r) => r.id !== id));
+    setConfirmDelete(false);
+    setSel(null);
+    toast({ title: "Pedido excluído." });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -211,7 +237,7 @@ export default function AdminOpenRequestsPanel() {
         )}
       </div>
 
-      <Dialog open={!!sel} onOpenChange={(o) => !o && setSel(null)}>
+      <Dialog open={!!sel} onOpenChange={(o) => { if (!o) { setSel(null); setConfirmDelete(false); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           {sel && (() => {
             const recs = recByReq.get(sel.id) || [];
@@ -257,6 +283,49 @@ export default function AdminOpenRequestsPanel() {
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Ações do admin: encerrar / excluir */}
+                  <div className="flex items-center gap-2 pt-3 border-t">
+                    {sel.status !== "closed" && (
+                      <button
+                        type="button"
+                        onClick={() => handleClose(sel.id)}
+                        disabled={actionBusy}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold hover:bg-muted/60 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Encerrar pedido
+                      </button>
+                    )}
+                    {!confirmDelete ? (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(true)}
+                        disabled={actionBusy}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-destructive/30 text-destructive px-3 py-2 text-sm font-semibold hover:bg-destructive/5 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-4 h-4" /> Excluir
+                      </button>
+                    ) : (
+                      <div className="flex-1 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDelete(false)}
+                          disabled={actionBusy}
+                          className="flex-1 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted/60 disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(sel.id)}
+                          disabled={actionBusy}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-destructive text-destructive-foreground px-3 py-2 text-sm font-semibold hover:bg-destructive/90 disabled:opacity-50"
+                        >
+                          {actionBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar exclusão"}
+                        </button>
                       </div>
                     )}
                   </div>

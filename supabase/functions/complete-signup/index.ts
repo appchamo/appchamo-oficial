@@ -36,6 +36,59 @@ function isValidCnpj(d: string): boolean {
   return true;
 }
 
+function stateToUF(raw: string): string {
+  const s = (raw || "").trim();
+  if (s.length === 2) return s.toUpperCase();
+  const map: Record<string, string> = {
+    "minas gerais": "MG", "são paulo": "SP", "rio de janeiro": "RJ", "bahia": "BA",
+    "paraná": "PR", "parana": "PR", "rio grande do sul": "RS", "pernambuco": "PE",
+    "ceará": "CE", "ceara": "CE", "santa catarina": "SC", "goiás": "GO", "goias": "GO",
+    "maranhão": "MA", "maranhao": "MA", "paraíba": "PB", "paraiba": "PB", "amazonas": "AM",
+    "espírito santo": "ES", "espirito santo": "ES", "rio grande do norte": "RN", "alagoas": "AL",
+    "piauí": "PI", "piaui": "PI", "distrito federal": "DF", "mato grosso": "MT",
+    "mato grosso do sul": "MS", "sergipe": "SE", "tocantins": "TO", "rondônia": "RO",
+    "rondonia": "RO", "acre": "AC", "amapá": "AP", "amapa": "AP", "roraima": "RR",
+  };
+  const key = s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return map[key] || s.slice(0, 2).toUpperCase();
+}
+
+/**
+ * Reverse-geocode no servidor (Deno). Ao contrário do navegador/webview, aqui
+ * dá para enviar User-Agent — requisito do Nominatim. Cai para BigDataCloud.
+ */
+async function reverseGeocode(lat: number, lng: number): Promise<{ city: string; state: string }> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`;
+    const res = await fetch(url, {
+      headers: { "Accept-Language": "pt-BR", "User-Agent": "ChamoApp/1.0 (contato@appchamo.com)" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const addr = data?.address || {};
+      const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || "";
+      const stateRaw =
+        (addr["ISO3166-2-lvl4"] && String(addr["ISO3166-2-lvl4"]).split("-")[1]) || addr.state || "";
+      if (city) return { city, state: stateToUF(stateRaw) };
+    }
+  } catch (_) { /* tenta o fallback */ }
+  try {
+    const res = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=pt`,
+      { signal: AbortSignal.timeout(4000) },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const city = data?.city || data?.locality || "";
+      const code = String(data?.principalSubdivisionCode || "");
+      const state = code.includes("-") ? code.split("-")[1].toUpperCase() : stateToUF(data?.principalSubdivision || "");
+      if (city) return { city, state };
+    }
+  } catch (_) { /* sem cidade */ }
+  return { city: "", state: "" };
+}
+
 Deno.serve(async (req) => {
   // ✅ 1. Resposta para o Preflight do navegador (CORS)
   if (req.method === "OPTIONS") {
@@ -208,6 +261,21 @@ Deno.serve(async (req) => {
     ) {
       profileUpdates.latitude = lat;
       profileUpdates.longitude = lng;
+    }
+
+    // Cliente que permitiu GPS mas não temos cidade: converte coordenada → Cidade/UF
+    // aqui no servidor (o app/webview não consegue por causa do User-Agent do Nominatim).
+    // A Home, o Perfil e o match por região dependem de address_city/address_state.
+    if (
+      (!profileUpdates.address_city || !String(profileUpdates.address_city).trim()) &&
+      typeof profileUpdates.latitude === "number" &&
+      typeof profileUpdates.longitude === "number"
+    ) {
+      const geo = await reverseGeocode(profileUpdates.latitude as number, profileUpdates.longitude as number);
+      if (geo.city) {
+        profileUpdates.address_city = geo.city;
+        if (geo.state) profileUpdates.address_state = geo.state;
+      }
     }
 
     // Bloqueia CPF/CNPJ duplicado APENAS no cadastro de conta.

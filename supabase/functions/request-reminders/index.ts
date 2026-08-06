@@ -51,6 +51,9 @@ Deno.serve(async (req) => {
     // Janela da "escalação": chamada sem resposta entre 15 e 45 min vira PEDIDO ABERTO.
     const wEsc_min = now - 45 * 60 * 1000;
     const wEsc_max = now - 15 * 60 * 1000;
+    // Escalonamento automático DESLIGADO (a pedido do Rafael): chamada sem resposta NÃO abre
+    // mais um pedido aberto sozinho. Os lembretes ao profissional continuam funcionando.
+    const ESCALATION_ENABLED = false;
 
     if (fetchErr) return json({ error: fetchErr.message }, 500);
 
@@ -80,7 +83,7 @@ Deno.serve(async (req) => {
       if (!proUserId) continue;
 
       // ── Escalação: sem resposta há 15-45 min → vira PEDIDO ABERTO (dispara região + WhatsApp) e avisa o cliente. ──
-      if (createdMs >= wEsc_min && createdMs <= wEsc_max && !sentSet.has(`${r.id}:escalated`)) {
+      if (ESCALATION_ENABLED && createdMs >= wEsc_min && createdMs <= wEsc_max && !sentSet.has(`${r.id}:escalated`)) {
         try {
           const pro = proRow as { category_id?: string | null; profession_id?: string | null } | null;
           let categoryId = pro?.category_id ?? null;

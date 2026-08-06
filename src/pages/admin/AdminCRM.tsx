@@ -11,6 +11,22 @@ const initials = (name: string | null) => (name || "").split(" ").filter(Boolean
 const typeLabel = (t: string | null | undefined) => t === "professional" ? "Profissional" : t === "company" || t === "enterprise" ? "Empresa" : t === "client" ? "Cliente" : "—";
 // Botões dos templates (visual, igual WhatsApp)
 const TEMPLATE_BUTTONS: Record<string, string[]> = { nova_chamada: ["Abrir no Chamô"], alerta_admin: [] };
+// Texto legível quando a mensagem é só template (sem body salvo) — evita mostrar "[cupom_cliente]".
+const TEMPLATE_LABELS: Record<string, string> = {
+  cupom_cliente: "🎁 Cupom de desconto enviado ao cliente (WhatsApp).",
+  nova_chamada: "📞 Aviso de nova chamada (WhatsApp).",
+  pedido_novo_regiao: "👀 Aviso: cliente procurando na região (WhatsApp).",
+  chamada_sem_resposta: "⏰ Lembrete de chamada sem resposta (WhatsApp).",
+  cliente_avaliou: "⭐ Aviso de nova avaliação (WhatsApp).",
+  limite_plano_pro: "🚀 Aviso de limite do plano grátis (WhatsApp).",
+  documentos_pendentes: "📄 Aviso de documentos pendentes (WhatsApp).",
+  dica_profissional: "💡 Dica para o profissional (WhatsApp).",
+  reativacao_cliente: "😉 Reativação de cliente (WhatsApp).",
+  avaliacao_pos_servico: "⭐ Pedido de avaliação pós-serviço (WhatsApp).",
+  nps_pesquisa: "💚 Pesquisa NPS (WhatsApp).",
+  chamada_enviada: "📨 Chamada enviada (WhatsApp).",
+  lembrete_agendamento: "📅 Lembrete de agendamento (WhatsApp).",
+};
 interface EventRow { id: number; type: string; path: string | null; label: string | null; platform: string | null; session_id: string | null; created_at: string; }
 
 const PAGE_NAMES: Record<string, string> = {
@@ -248,7 +264,7 @@ export default function AdminCRM() {
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(msg);
     };
-    for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent"), template: m.template, userId: m.user_id ?? null });
+    for (const m of waMsgs) push(m.to_phone, { dir: "out", text: m.body || TEMPLATE_LABELS[m.template || ""] || `[${m.template || "modelo"}]`, time: m.sent_at, status: m.read_at ? "read" : m.delivered_at ? "delivered" : (m.status || "sent"), template: m.template, userId: m.user_id ?? null });
     for (const i of waInbound) push(i.from_phone, { dir: "in", text: i.body || `(${i.type || "mensagem"})`, time: i.received_at, status: "in" });
     // Conversa da IA (mensagens recebidas + respostas automáticas). Áudio marcado com 🎧.
     for (const x of waInter) {

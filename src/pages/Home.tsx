@@ -27,7 +27,6 @@ import CouponProfessionals from "@/components/home/CouponProfessionals";
 import HomeProCarousel from "@/components/home/HomeProCarousel";
 import ProSellMoreChecklist from "@/components/home/ProSellMoreChecklist";
 import TermsReacceptBanner from "@/components/home/TermsReacceptBanner";
-import ProFeaturedUpsellBanner from "@/components/home/ProFeaturedUpsellBanner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
 import { usePush } from "@/hooks/usePush"; // ✅ IMPORTAÇÃO DO HOOK DE PUSH
 import { toast } from "@/hooks/use-toast";
@@ -176,7 +175,12 @@ const Home = () => {
       cancelled = true;
     };
   }, [user?.id, linkedSponsor?.id, linkedSponsor?.name, linkedSponsor?.logo_url, refreshProfile]);
-  const { isFreePlan, callsRemaining, loading: subLoading, plan } = useSubscription();
+  const { isFreePlan, callsRemaining, callsUsed, loading: subLoading, plan } = useSubscription();
+  // Rótulos do plano exibidos no header do PRO (free → "Grátis").
+  const planLabel = `Plano ${isFreePlan ? "Grátis" : (plan?.name || "Grátis")}`;
+  const callsLabel = plan
+    ? (plan.max_calls === -1 ? "Chamadas ilimitadas" : `${callsUsed}/${plan.max_calls} chamadas`)
+    : "";
   const isBusiness = plan?.id === "business";
   // Preview do admin (Layout da Home): ?as=pro | ?as=client força a visão.
   const previewAs = (() => {
@@ -630,7 +634,8 @@ const Home = () => {
     const effectiveName = dbName || metaName;
 
     const missingName  = !effectiveName;
-    const missingPhone = !(profile.phone || "").trim();
+    // Cliente não informa telefone no cadastro (fluxo enxuto) — não cobrar aqui.
+    const missingPhone = profile.user_type !== "client" && !(profile.phone || "").trim();
     const missingDoc   = profile.user_type === "company" && !(profile.cpf || "").trim() && !(profile.cnpj || "").trim();
     const needs = missingName || missingPhone || missingDoc;
     setNeedsProfileCompletion(needs);
@@ -661,7 +666,7 @@ const Home = () => {
     search: (
       <div key={`search-${profile?.address_city}-${profile?.address_state}`} className="flex flex-col gap-3 w-full">
         {/* Cliente/visitante recebem o CTA-herói no topo do cluster; aqui fica só para o PRO. */}
-        {isPro ? <HomeOpenRequestCta /> : null}
+        {isPro ? <HomeOpenRequestCta isPro /> : null}
         <HomeSearchBar section={getSection("search")} />
       </div>
     ),
@@ -759,9 +764,10 @@ const Home = () => {
                 walletBalance={walletBalance}
                 walletLoaded={walletLoaded}
                 professionalId={proId}
+                planLabel={planLabel}
+                callsLabel={callsLabel}
               />
               <ProSellMoreChecklist professionalId={proId} userId={user.id} />
-              <BenefitsPanel key="benefits-pro" section={getSection("benefits")} />
             </>
           ) : user && isPro ? (
             /* ── Placeholder enquanto proId carrega ── */
@@ -956,7 +962,6 @@ const Home = () => {
                   </div>
                 )}
                 {block}
-                {section.id === "featured" && <ProFeaturedUpsellBanner />}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
                 {section.id === "sponsors" && linkedSponsor && !homeFeedComunidade ? (
                   <div className="mt-3 flex flex-col gap-3">

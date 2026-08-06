@@ -63,7 +63,7 @@ const ProfessionalDashboard = () => {
   ];
 
   const actions = [
-    { icon: Handshake, label: "Pedidos na região", description: "Clientes buscando serviço na sua UF", path: "/pro/pedidos-abertos" },
+    { icon: Handshake, label: "Serviços disponíveis", description: "Clientes buscando serviço na sua UF", path: "/pro/pedidos-abertos" },
     { icon: Pencil, label: "Editar perfil", description: "Atualize suas informações", path: "/profile" },
     { icon: Wallet, label: "Carteira", description: "Saldo a receber e recebido", path: "/pro/financeiro" },
     { icon: DollarSign, label: "Extrato", description: "Relatório de faturamento", path: "/pro/financeiro?tab=transactions" },

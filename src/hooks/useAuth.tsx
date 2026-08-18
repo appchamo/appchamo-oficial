@@ -40,6 +40,9 @@ interface Profile {
   accepted_terms_version: string | null;
   /** Preenchido ao finalizar cadastro no app (complete-signup). */
   signup_completed_at?: string | null;
+  /** WhatsApp confirmado por codigo OTP. */
+  phone_verified?: boolean | null;
+  created_at?: string | null;
   job_posting_enabled?: boolean;
   /** male | female | prefer_not_say – usado para "Bem-vindo(a)" na Home */
   gender?: string | null;
@@ -122,7 +125,7 @@ async function fetchProfileWithStatus(userId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email, phone, cpf, cnpj, display_name, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_zip, address_neighborhood, address_city, address_state, invite_code, accepted_terms_version, signup_completed_at, identity_verified")
+    .select("id, user_id, full_name, email, phone, cpf, cnpj, display_name, avatar_url, user_type, is_blocked, job_posting_enabled, gender, address_zip, address_neighborhood, address_city, address_state, invite_code, accepted_terms_version, signup_completed_at, identity_verified, phone_verified, created_at")
     .eq("user_id", userId)
     .maybeSingle();
 

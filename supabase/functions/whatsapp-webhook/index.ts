@@ -177,18 +177,21 @@ function roleLabel(userType: string | null | undefined): string {
   return "";
 }
 
-async function aiReply(system: string, history: { role: string; content: string }[], userMsg: string): Promise<string | null> {
-  const key = (Deno.env.get("ANTHROPIC_API_KEY") || "").trim();
-  if (!key) return null;
-  const messages = [...history, { role: "user", content: userMsg.slice(0, 2000) }];
+// Delega a geração da resposta ao wa-agent (IA com ferramentas: busca profissionais e
+// envia card com botão "Contratar no app"). Mantém o mesmo retorno (texto final).
+async function aiReply(system: string, history: { role: string; content: string }[], userMsg: string, from: string): Promise<string | null> {
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/wa-agent`, {
       method: "POST",
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: AI_MODEL, max_tokens: 400, system, messages }),
+      headers: {
+        "content-type": "application/json",
+        "x-hook-secret": (Deno.env.get("EMAIL_HOOK_SECRET") || "").trim(),
+        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""}`,
+      },
+      body: JSON.stringify({ from, system, history, userMsg: userMsg.slice(0, 2000) }),
     });
-    const j = await r.json();
-    const txt = (j?.content?.[0]?.text || "").trim();
+    const j = await r.json().catch(() => ({}));
+    const txt = String(j?.reply || "").trim();
     return txt || null;
   } catch (_e) { return null; }
 }
@@ -307,7 +310,7 @@ async function process(payload: any) {
           ? `(A pessoa respondeu a uma pesquisa/botão com: "${text}")`
           : text;
 
-        const raw = await aiReply(system, history, userMsg);
+        const raw = await aiReply(system, history, userMsg, from);
         if (!raw) {
           await admin.from("wa_interactions").update({ status: "error", error: "sem_resposta_ia" }).eq("wa_message_id", msgId);
           continue;

@@ -330,9 +330,14 @@ serve(async (req) => {
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
     const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY");
-    const MUNICIPAL_SERVICE_ID = Deno.env.get("ASAAS_NF_MUNICIPAL_SERVICE_ID")?.trim();
+    // Serviço municipal correto para Patrocínio-MG: 577397 = "100801 - Agenciamento de
+    // publicidade...", confirmado por nota AUTORIZADA no Asaas. O 562067 (intermediação de
+    // plataforma) era REJEITADO pela prefeitura (SM0002). Aceita override por env, mas ignora
+    // o valor antigo/errado (562067).
+    const ENV_MSID = Deno.env.get("ASAAS_NF_MUNICIPAL_SERVICE_ID")?.trim();
+    const MUNICIPAL_SERVICE_ID = (ENV_MSID && ENV_MSID !== "562067") ? ENV_MSID : "577397";
     const MUNICIPAL_SERVICE_NAME = Deno.env.get("ASAAS_NF_MUNICIPAL_SERVICE_NAME")?.trim() ||
-      "Intermediação de negócios / plataforma digital";
+      "100801 - Agenciamento de publicidade e propaganda, inclusive o agenciamento de veiculação por quaisquer meios";
 
     if (!ASAAS_API_KEY) {
       return new Response(JSON.stringify({ error: "ASAAS_API_KEY não configurada" }), {

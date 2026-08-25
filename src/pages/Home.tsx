@@ -748,9 +748,8 @@ const Home = () => {
         >
           <TermsReacceptBanner />
           {user ? <DailyCheckin hideWhenDone /> : null}
-          {/* Ação principal e dominante para cliente/visitante: publicar um pedido aberto.
-              Fica ACIMA da saudação, benefícios e busca. O PRO mantém o CTA na seção de busca. */}
-          {!isPro ? <HomeOpenRequestCta /> : null}
+          {/* CTA "Solicite um profissional" movido para logo abaixo de Patrocinadores
+              (ver a seção "sponsors" no loop de seções mais abaixo), conforme layout aprovado. */}
           {user && isPro && proId ? (
             /* ── Carrossel: Carteira + Agenda (só monta quando proId está pronto) ── */
             <>
@@ -963,6 +962,12 @@ const Home = () => {
                 )}
                 {block}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
+                {/* CTA principal do cliente: logo abaixo de Patrocinadores (layout aprovado). */}
+                {section.id === "sponsors" && !isPro ? (
+                  <div className="mt-3">
+                    <HomeOpenRequestCta />
+                  </div>
+                ) : null}
                 {section.id === "sponsors" && linkedSponsor && !homeFeedComunidade ? (
                   <div className="mt-3 flex flex-col gap-3">
                     <button

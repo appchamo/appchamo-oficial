@@ -1,0 +1,351 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { Check, Loader2, ShieldCheck, Star, Crown, LogOut } from "lucide-react";
+
+interface PlanRow {
+  id: string;
+  name: string;
+  price_monthly: number;
+  max_calls: number;
+  has_verified_badge: boolean;
+  has_featured: boolean;
+  has_product_catalog: boolean;
+  has_job_postings: boolean;
+  has_in_app_support: boolean;
+  has_vip_event: boolean;
+  sort_order?: number;
+}
+
+const brl = (n: number) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n || 0);
+
+const onlyDigits = (s: string) => s.replace(/\D/g, "");
+
+const formatCard = (v: string) =>
+  onlyDigits(v).slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
+
+const formatExpiry = (v: string) => {
+  const d = onlyDigits(v).slice(0, 4);
+  return d.length >= 3 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+};
+
+const featuresOf = (p: PlanRow): string[] => {
+  const f: string[] = [];
+  f.push(p.max_calls === -1 ? "Pedidos ilimitados" : `${p.max_calls} pedidos/mês`);
+  if (p.has_verified_badge) f.push("Selo verificado");
+  if (p.has_featured) f.push("Destaque nas buscas");
+  if (p.has_product_catalog) f.push("Catálogo de produtos");
+  if (p.has_job_postings) f.push("Publicar vagas");
+  if (p.has_in_app_support) f.push("Suporte no app");
+  if (p.has_vip_event) f.push("Eventos VIP");
+  return f;
+};
+
+export default function PlanPaywall() {
+  const navigate = useNavigate();
+  const { user, profile } = useAuth();
+  const { toast } = useToast();
+
+  const [plans, setPlans] = useState<PlanRow[]>([]);
+  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  // "returning" = já teve plano pago (agora suspenso/vencido): regulariza sem novo mês grátis.
+  const [returning, setReturning] = useState(false);
+  const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", cpf: "", cep: "", addressNumber: "" });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.from("plans").select("*").order("sort_order");
+        const list = ((data as PlanRow[]) || []).filter((p) => p.id === "pro" || p.id === "vip");
+        if (!cancelled) {
+          setPlans(list);
+          setSelected(list.find((p) => p.id === "pro")?.id || list[0]?.id || null);
+        }
+      } finally {
+        if (!cancelled) setLoadingPlans(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Pré-preenche CEP e número do endereço do perfil
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("address_zip, address_number, full_name, cpf")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (data) {
+        setCard((c) => ({
+          ...c,
+          cep: c.cep || onlyDigits(String((data as any).address_zip || "")),
+          addressNumber: c.addressNumber || String((data as any).address_number || ""),
+          name: c.name || String((data as any).full_name || ""),
+          cpf: c.cpf || onlyDigits(String((data as any).cpf || "")),
+        }));
+      }
+      // Detecta plano pago existente (suspenso/vencido) → modo regularizar (sem novo mês grátis)
+      const { data: sub } = await supabase
+        .from("subscriptions")
+        .select("plan_id, status")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const planId = String((sub as any)?.plan_id || "");
+      const status = String((sub as any)?.status || "").toLowerCase();
+      if (planId && planId !== "free" && status !== "active") {
+        setReturning(true);
+        setSelected((cur) => cur || planId);
+      }
+    })();
+  }, [user]);
+
+  const selectedPlan = useMemo(() => plans.find((p) => p.id === selected) || null, [plans, selected]);
+
+  const handleSubscribe = async () => {
+    if (!user || !selectedPlan) return;
+    if (!card.number || !card.name || !card.expiry || !card.cvv) {
+      toast({ title: "Preencha os dados do cartão", variant: "destructive" });
+      return;
+    }
+    if (onlyDigits(card.number).length < 16) {
+      toast({ title: "Número do cartão inválido", variant: "destructive" });
+      return;
+    }
+    if (onlyDigits(card.cpf).length < 11) {
+      toast({ title: "CPF do titular obrigatório", variant: "destructive" });
+      return;
+    }
+    if (onlyDigits(card.cep).length !== 8 || !card.addressNumber.trim()) {
+      toast({ title: "Informe CEP (8 dígitos) e número do endereço", variant: "destructive" });
+      return;
+    }
+    setProcessing(true);
+    try {
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+        session = refreshed;
+      }
+      if (!session) throw new Error("Sessão expirada. Faça login novamente.");
+
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("email, phone, cpf, cnpj")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      const expiryParts = card.expiry.split("/");
+      const res = await supabase.functions.invoke("create_subscription", {
+        body: {
+          userId: user.id,
+          planId: selectedPlan.id,
+          value: Number(selectedPlan.price_monthly) || 0,
+          firstMonthFree: !returning,
+          holderName: card.name,
+          number: onlyDigits(card.number),
+          expiryMonth: expiryParts[0],
+          expiryYear: `20${expiryParts[1] || ""}`,
+          ccv: card.cvv,
+          email: (prof as any)?.email || session.user.email || "",
+          cpfCnpj: onlyDigits(card.cpf) || onlyDigits(String((prof as any)?.cpf || "")),
+          postalCode: onlyDigits(card.cep),
+          addressNumber: card.addressNumber.trim(),
+          phone: (prof as any)?.phone || "",
+        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      const apiErr = (res.data as any)?.error;
+      if (res.error || apiErr) {
+        const msg = typeof apiErr === "string" ? apiErr : apiErr ? JSON.stringify(apiErr) : res.error?.message;
+        throw new Error(msg || "Não foi possível processar o cartão.");
+      }
+
+      toast({
+        title: "Plano ativado! 🚀",
+        description: returning ? "Pagamento confirmado. Seu plano voltou a funcionar." : "1º mês grátis. A cobrança começa daqui 30 dias.",
+      });
+      // Reload completo: remonta o app pra reler a assinatura ativa e liberar o guard.
+      window.location.assign("/home");
+    } catch (err: any) {
+      toast({ title: err?.message || "Erro ao processar assinatura", variant: "destructive" });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    navigate("/login", { replace: true });
+  };
+
+  return (
+    <div className="min-h-screen bg-secondary">
+      <div className="mx-auto w-full max-w-md px-4 py-6">
+        <div className="mb-5 text-center">
+          <h1 className="text-2xl font-bold text-foreground">
+            {returning ? "Regularize seu plano" : "Escolha seu plano"}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {returning ? (
+              <>
+                Seu pagamento não foi confirmado e o plano está suspenso.
+                <br />
+                Atualize o cartão para reativar agora.
+              </>
+            ) : (
+              <>
+                Pra atender clientes no Chamô você precisa de um plano ativo.
+                <br />
+                <span className="font-semibold text-primary">1º mês grátis</span> — a cobrança só começa em 30 dias.
+              </>
+            )}
+          </p>
+        </div>
+
+        {loadingPlans ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3">
+              {plans.map((p) => {
+                const isSel = selected === p.id;
+                const Icon = p.id === "vip" ? Crown : Star;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setSelected(p.id)}
+                    className={`w-full rounded-2xl border p-4 text-left transition ${
+                      isSel ? "border-primary bg-primary/5 ring-2 ring-primary" : "border-border bg-card"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Icon className={`h-5 w-5 ${isSel ? "text-primary" : "text-muted-foreground"}`} />
+                        <span className="text-base font-bold text-foreground">{p.name}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-extrabold text-foreground">{brl(p.price_monthly)}</div>
+                        <div className="text-[11px] text-muted-foreground">/mês</div>
+                      </div>
+                    </div>
+                    <ul className="mt-2 grid grid-cols-1 gap-1">
+                      {featuresOf(p).map((f) => (
+                        <li key={f} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Check className="h-3.5 w-3.5 text-primary" /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-border bg-card p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ShieldCheck className="h-4 w-4 text-primary" /> Dados do cartão
+              </div>
+              <div className="space-y-3">
+                <input
+                  inputMode="numeric"
+                  placeholder="Número do cartão"
+                  value={card.number}
+                  onChange={(e) => setCard({ ...card, number: formatCard(e.target.value) })}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                />
+                <input
+                  placeholder="Nome impresso no cartão"
+                  value={card.name}
+                  onChange={(e) => setCard({ ...card, name: e.target.value })}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    inputMode="numeric"
+                    placeholder="Validade MM/AA"
+                    value={card.expiry}
+                    onChange={(e) => setCard({ ...card, expiry: formatExpiry(e.target.value) })}
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    inputMode="numeric"
+                    placeholder="CVV"
+                    value={card.cvv}
+                    onChange={(e) => setCard({ ...card, cvv: onlyDigits(e.target.value).slice(0, 4) })}
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                <input
+                  inputMode="numeric"
+                  placeholder="CPF do titular"
+                  value={card.cpf}
+                  onChange={(e) => setCard({ ...card, cpf: onlyDigits(e.target.value).slice(0, 11) })}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    inputMode="numeric"
+                    placeholder="CEP"
+                    value={card.cep}
+                    onChange={(e) => setCard({ ...card, cep: onlyDigits(e.target.value).slice(0, 8) })}
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    inputMode="numeric"
+                    placeholder="Nº endereço"
+                    value={card.addressNumber}
+                    onChange={(e) => setCard({ ...card, addressNumber: e.target.value })}
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={processing || !selectedPlan}
+              onClick={handleSubscribe}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3.5 text-base font-bold text-primary-foreground shadow-md active:scale-[0.99] disabled:opacity-60"
+            >
+              {processing ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+              {processing
+                ? "Processando..."
+                : returning
+                ? selectedPlan
+                  ? `Pagar e reativar — ${brl(selectedPlan.price_monthly)}`
+                  : "Pagar e reativar"
+                : selectedPlan
+                ? `Ativar ${selectedPlan.name} — 1º mês grátis`
+                : "Ativar plano"}
+            </button>
+
+            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+              {returning
+                ? `Cobrança de ${selectedPlan ? brl(selectedPlan.price_monthly) : ""} agora. Depois, mensal. Cancele quando quiser no app.`
+                : `Sem cobrança nos primeiros 30 dias. Depois ${selectedPlan ? brl(selectedPlan.price_monthly) : ""}/mês. Cancele quando quiser no app.`}
+            </p>
+
+            <button
+              type="button"
+              onClick={logout}
+              className="mx-auto mt-5 flex items-center gap-1.5 text-xs text-muted-foreground underline"
+            >
+              <LogOut className="h-3.5 w-3.5" /> Sair da conta
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

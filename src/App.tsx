@@ -16,6 +16,7 @@ import AuthSessionGate from "@/components/AuthSessionGate";
 import { RefreshProvider } from "@/contexts/RefreshContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import PhoneVerificationGuard from "@/components/auth/PhoneVerificationGuard";
+import ProPlanGuard from "@/components/auth/ProPlanGuard";
 import SupportDeskRoute from "@/components/auth/SupportDeskRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import DeepLinkRouter from "@/components/DeepLinkRouter";
@@ -65,6 +66,7 @@ const ProfessionalFinancial = lazy(() => import("./pages/ProfessionalFinancial")
 const ProMarketing = lazy(() => import("./pages/ProMarketing"));
 const ProfessionalProfile = lazy(() => import("./pages/ProfessionalProfile"));
 const VerifyWhatsapp = lazy(() => import("./pages/VerifyWhatsapp"));
+const PlanPaywall = lazy(() => import("./pages/PlanPaywall"));
 const ProAgenda = lazy(() => import("./pages/ProAgenda"));
 const ProAgendaCalendar = lazy(() => import("./pages/ProAgendaCalendar"));
 const Community = lazy(() => import("./pages/Community"));
@@ -572,6 +574,7 @@ const AppContent = () => {
       {session ? <RoletaGate /> : null}
       {session ? <RegionGate /> : null}
       {session ? <PhoneVerificationGuard /> : null}
+      {session ? <ProPlanGuard /> : null}
       <Suspense fallback={<PageFallback />}>
         <MainTabPersistentLayers />
         <RoutesOverlayShell>
@@ -604,6 +607,7 @@ const AppContent = () => {
         <Route path="/parceiros" element={<ProtectedRoute><Partners /></ProtectedRoute>} />
         <Route path="/verificar-identidade" element={<ProtectedRoute><VerificarIdentidade /></ProtectedRoute>} />
         <Route path="/verificar-whatsapp" element={<ProtectedRoute><VerifyWhatsapp /></ProtectedRoute>} />
+        <Route path="/assinar" element={<ProtectedRoute><PlanPaywall /></ProtectedRoute>} />
         <Route path="/profile" element={<TabRoutePlaceholder />} />
         <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
         <Route path="/rewards" element={<TabRoutePlaceholder />} />

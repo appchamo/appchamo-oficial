@@ -444,7 +444,7 @@ serve(async (req) => {
     }
 
     // ===============================
-    // PAGAMENTO VENCIDO → inicia carência de 7 dias
+    // PAGAMENTO VENCIDO → suspende e inicia recobrança diária
     // ===============================
     if (event === "PAYMENT_OVERDUE") {
       const payment = body.payment;
@@ -479,9 +479,12 @@ serve(async (req) => {
             { onConflict: "source,external_id", ignoreDuplicates: false }
           );
 
+          // Suspende o plano enquanto estiver vencido (o app bloqueia via ProPlanGuard).
+          // Volta a "active" automaticamente quando o pagamento for confirmado.
           await supabase
             .from("subscriptions")
             .update({
+              status: "suspended",
               last_payment_status: "refused",
               last_payment_at: new Date().toISOString(),
             })
@@ -497,8 +500,8 @@ serve(async (req) => {
 
           if (!existing) {
             const now = new Date();
-            // Próxima tentativa: dia 2 (26h depois)
-            const nextAttempt = new Date(now.getTime() + 26 * 60 * 60 * 1000);
+            // Próxima tentativa: daqui 24h (recobrança diária)
+            const nextAttempt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
             await supabase.from("subscription_grace_periods").insert({
               user_id: userId,
@@ -514,10 +517,10 @@ serve(async (req) => {
             // Notifica o usuário sobre a falha
             await supabase.from("notifications").insert({
               user_id: userId,
-              title: "⚠️ Falha na renovação do plano",
-              message: "Não conseguimos cobrar a renovação do seu plano. Verifique seu cartão. Você tem 7 dias antes do cancelamento.",
+              title: "⚠️ Plano suspenso — pagamento não confirmado",
+              message: "Não conseguimos cobrar seu plano. Ele ficou suspenso e vamos tentar cobrar novamente todo dia. Atualize o cartão no app para reativar na hora.",
               type: "warning",
-              link: "/subscriptions",
+              link: "/assinar",
             });
 
             // Notifica admin
@@ -529,8 +532,8 @@ serve(async (req) => {
             const userName = (userProfile as any)?.full_name ?? "Profissional";
             await notifyAdmin(
               supabase,
-              "⚠️ Falha de Renovação",
-              `Falha ao renovar plano de ${userName}. Carência de 7 dias iniciada.`,
+              "⚠️ Plano Suspenso (pagamento vencido)",
+              `Falha ao cobrar o plano de ${userName}. Plano suspenso; recobrança diária até pagar ou cancelar.`,
               "warning",
               "/admin/users"
             );

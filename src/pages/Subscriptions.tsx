@@ -670,10 +670,12 @@ const Subscriptions = () => {
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId);
 
+  // O plano grátis não é mais oferecido: nunca aparece como card selecionável.
+  // (Quem já está no grátis — base antiga — continua funcionando; só não veem o card.)
   const plansVisiveis =
     profile?.user_type === "professional" && !cadastroInternoLiberado
       ? plans.filter((p) => p.id === "free")
-      : plans;
+      : plans.filter((p) => p.id !== "free");
 
   if (profile?.user_type === "sponsor" || subLinkedSponsor) {
     return <Navigate to="/home" replace />;

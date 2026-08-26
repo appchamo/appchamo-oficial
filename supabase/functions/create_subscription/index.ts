@@ -47,6 +47,7 @@ serve(async (req) => {
       userId,
       planId,
       phone,
+      firstMonthFree,
     } = body;
 
     // ===============================
@@ -202,8 +203,30 @@ serve(async (req) => {
     // ===============================
     // 2️⃣ Criar assinatura — cobrança imediata para todos os planos
     // ===============================
-    // Aprovação manual removida: todos os planos são cobrados e ativados na hora.
-    const nextDueDate = new Date().toISOString().split("T")[0];
+    // Evita assinatura duplicada no Asaas: se já existe uma assinatura anterior
+    // registrada para este usuário, cancela ela no Asaas antes de criar a nova.
+    try {
+      const { data: prevSub } = await supabase
+        .from("subscriptions")
+        .select("asaas_subscription_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const prevAsaasId = (prevSub as any)?.asaas_subscription_id;
+      if (prevAsaasId) {
+        await fetch(`${ASAAS_BASE_URL}/subscriptions/${prevAsaasId}`, {
+          method: "DELETE",
+          headers: { access_token: ASAAS_API_KEY },
+        });
+      }
+    } catch (delErr) {
+      console.error("create_subscription: falha ao cancelar assinatura anterior:", delErr);
+    }
+
+    // 1º mês grátis (cadastro): cadastra o cartão agora, mas a 1ª cobrança fica para daqui 30 dias.
+    // Upgrades/assinaturas normais (sem firstMonthFree) cobram hoje, como antes.
+    const _due = new Date();
+    if (firstMonthFree) _due.setDate(_due.getDate() + 30);
+    const nextDueDate = _due.toISOString().split("T")[0];
 
     console.log("CUSTOMER ID ENVIADO:", customerId);
     
@@ -260,7 +283,8 @@ serve(async (req) => {
         {
           user_id: userId,
           plan_id: planId,
-          status: "pending", // Asaas confirma via webhook → vira "active"
+          // 1º mês grátis: já ativa (trial). Pago normal: "pending" até o webhook confirmar.
+          status: firstMonthFree ? "active" : "pending",
           source: "asaas_card",
           billing_period: "monthly",
           cancel_at_period_end: false,
@@ -268,7 +292,7 @@ serve(async (req) => {
           asaas_subscription_id: subscriptionData.id,
           asaas_customer_id: customerId,
           started_at: new Date().toISOString(),
-          last_payment_status: "pending",
+          last_payment_status: firstMonthFree ? "trial" : "pending",
           last_payment_at: new Date().toISOString(),
         },
         { onConflict: "user_id" }

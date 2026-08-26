@@ -21,16 +21,9 @@ const ASAAS_BASE_URL = ASAAS_ENV === "production"
   : "https://api-sandbox.asaas.com/v3";
 const ASAAS_API_KEY = Deno.env.get("ASAAS_API_KEY")!;
 
-// Horas após started_at para cada tentativa (attempt_count 1…5)
-// attempt_count já começa em 1 (criado no webhook como primeira falha)
-const RETRY_SCHEDULE: Record<number, number | null> = {
-  1: 26,   // Dia 2
-  2: 50,   // Dia 3, primeira
-  3: 58,   // Dia 3, segunda (8h depois)
-  4: 74,   // Dia 4
-  5: 146,  // Dia 7 — última; se falhar → cancela
-};
-const MAX_ATTEMPTS = 5;
+// Recobrança diária, indefinidamente, até o pagamento passar OU o usuário cancelar manual.
+// Nunca cancela sozinho por tempo. Enquanto vencido, o plano fica "suspended" e o app bloqueia.
+const RETRY_INTERVAL_HOURS = 24;
 
 async function getAdminId(supabase: any): Promise<string | null> {
   const { data } = await supabase
@@ -81,9 +74,7 @@ serve(async (req) => {
     const results: any[] = [];
 
     for (const grace of (graces || [])) {
-      const isFinalAttempt = grace.attempt_count >= MAX_ATTEMPTS;
-      const dayLabel = isFinalAttempt ? "Dia 7 (final)" : `Dia ${Math.ceil(grace.attempt_count + 1)}`;
-      console.log(`[renewal-retry] Processando carência ${grace.id} | usuário: ${grace.user_id} | tentativa: ${grace.attempt_count} | ${dayLabel}`);
+      console.log(`[renewal-retry] Processando carência ${grace.id} | usuário: ${grace.user_id} | tentativa: ${grace.attempt_count}`);
 
       // Tenta cobrar via Asaas (retry no pagamento vencido)
       let success = false;
@@ -146,81 +137,34 @@ serve(async (req) => {
       }
 
       if (success) {
-        // ✅ Pagamento realizado com sucesso → resolve a carência
+        // ✅ Pagamento realizado com sucesso → resolve a carência e reativa o plano
         await supabase
           .from("subscription_grace_periods")
           .update({ status: "resolved", resolved_at: now.toISOString(), last_attempt_at: now.toISOString() })
           .eq("id", grace.id);
 
-        // Reativa a assinatura no banco
+        // Reativa a assinatura no banco (volta a funcionar imediatamente)
         await supabase
           .from("subscriptions")
-          .update({ status: "ACTIVE" })
+          .update({ status: "active", last_payment_status: "paid" })
           .eq("asaas_subscription_id", grace.asaas_subscription_id);
 
         await notifyUser(
           supabase, grace.user_id,
-          "✅ Plano Renovado com Sucesso",
-          "Sua renovação foi processada com sucesso! Continue aproveitando todos os benefícios.",
+          "✅ Plano Reativado",
+          "Conseguimos cobrar seu cartão! Seu plano voltou a funcionar normalmente.",
           "success"
         );
-        await notifyAdmin(supabase, "✅ Renovação Recuperada",
-          `Plano do usuário foi renovado com sucesso após tentativa de recobrança.`,
+        await notifyAdmin(supabase, "✅ Cobrança Recuperada",
+          `Plano do usuário voltou a funcionar após recobrança bem-sucedida.`,
           "subscription", "/admin/users"
         );
         results.push({ grace_id: grace.id, outcome: "success" });
 
-      } else if (isFinalAttempt) {
-        // ❌ Última tentativa falhou → cancela assinatura
-        console.log(`[renewal-retry] ❌ Tentativa final falhou para ${grace.user_id}. Cancelando assinatura.`);
-
-        await supabase
-          .from("subscription_grace_periods")
-          .update({ status: "cancelled", resolved_at: now.toISOString(), last_attempt_at: now.toISOString() })
-          .eq("id", grace.id);
-
-        // Cancela no Asaas
-        await fetch(`${ASAAS_BASE_URL}/subscriptions/${grace.asaas_subscription_id}`, {
-          method: "DELETE",
-          headers: { "access_token": ASAAS_API_KEY },
-        });
-
-        // Reverte para plano Free no banco
-        await supabase
-          .from("subscriptions")
-          .update({ status: "CANCELLED", plan_id: "free" })
-          .eq("asaas_subscription_id", grace.asaas_subscription_id);
-
-        // Reverte user_type para client
-        await supabase
-          .from("profiles")
-          .update({ user_type: "client" })
-          .eq("user_id", grace.user_id);
-
-        await notifyUser(
-          supabase, grace.user_id,
-          "❌ Plano Cancelado",
-          "Não conseguimos renovar seu plano após várias tentativas. Seu acesso foi revertido para o plano gratuito. Assine novamente a qualquer momento.",
-          "warning"
-        );
-        await notifyAdmin(supabase, "❌ Assinatura Cancelada",
-          `Plano cancelado após 7 dias sem pagamento. Usuário revertido para Free.`,
-          "warning", "/admin/users"
-        );
-        results.push({ grace_id: grace.id, outcome: "cancelled" });
-
       } else {
-        // ❌ Tentativa falhou mas ainda há dias → agenda próxima
+        // ❌ Falhou → NÃO cancela. Mantém suspenso e reagenda para daqui 24h (todo dia).
         const nextAttemptCount = grace.attempt_count + 1;
-        const hoursFromStart = RETRY_SCHEDULE[nextAttemptCount];
-
-        let nextAttemptAt: Date;
-        if (hoursFromStart != null) {
-          nextAttemptAt = new Date(new Date(grace.started_at).getTime() + hoursFromStart * 60 * 60 * 1000);
-        } else {
-          // Fallback: 24h a partir de agora
-          nextAttemptAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-        }
+        const nextAttemptAt = new Date(now.getTime() + RETRY_INTERVAL_HOURS * 60 * 60 * 1000);
 
         await supabase
           .from("subscription_grace_periods")
@@ -231,16 +175,13 @@ serve(async (req) => {
           })
           .eq("id", grace.id);
 
-        // Notifica usuário sobre a falha desta tentativa
-        const daysLeft = 7 - Math.floor((now.getTime() - new Date(grace.started_at).getTime()) / (24 * 60 * 60 * 1000));
-        await notifyUser(
-          supabase, grace.user_id,
-          "⚠️ Tentativa de renovação falhou",
-          `Não conseguimos cobrar a renovação do seu plano. Tentaremos novamente em breve. ${daysLeft > 0 ? `Você tem ${daysLeft} dia(s) antes do cancelamento.` : "Última tentativa amanhã."}`,
-          "warning"
-        );
+        // Garante que o plano segue marcado como suspenso enquanto vencido
+        await supabase
+          .from("subscriptions")
+          .update({ status: "suspended", last_payment_status: "refused" })
+          .eq("asaas_subscription_id", grace.asaas_subscription_id);
 
-        console.log(`[renewal-retry] Próxima tentativa agendada para ${nextAttemptAt.toISOString()} | motivo: ${asaasError}`);
+        console.log(`[renewal-retry] Falha (tentativa ${nextAttemptCount}). Nova tentativa: ${nextAttemptAt.toISOString()} | motivo: ${asaasError}`);
         results.push({ grace_id: grace.id, outcome: "retry_scheduled", next: nextAttemptAt.toISOString() });
       }
     }

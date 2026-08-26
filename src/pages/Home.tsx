@@ -941,6 +941,15 @@ const Home = () => {
             );
           })}
 
+          {/* Feed contínuo: abaixo dos Destaques a home emenda na Comunidade e vai
+              carregando mais posts conforme rola (scroll infinito). */}
+          {user ? (
+            <div className="mt-4">
+              <h2 className="text-lg font-bold text-foreground mb-2">Comunidade</h2>
+              <CommunityFeed variant="embedded" />
+            </div>
+          ) : null}
+
           <HomeBanners position="bottom" />
 
           {/* Mostra para cliente ou quando perfil ainda não carregou (igual Android no iPhone) */}

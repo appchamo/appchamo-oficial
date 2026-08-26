@@ -329,6 +329,18 @@ const Header = () => {
                 >
                   Comunidade
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={false}
+                  onClick={() => navigate("/jobs")}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full text-xs font-bold transition-all max-w-[110px] truncate lg:max-w-none lg:px-5 lg:py-2 lg:text-sm",
+                    "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Vagas
+                </button>
               </div>
             ) : user ? (
               <span className="text-lg font-bold text-primary">Chamô</span>

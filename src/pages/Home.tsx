@@ -783,40 +783,8 @@ const Home = () => {
                   )}
                 </div>
               </div>
-              {isClientUser ? (
-                <div className={`w-full ${sectionMinHeights.benefits}`}>
-                  <BenefitsPanel key="benefits-client-top" section={getSection("benefits")} />
-                </div>
-              ) : null}
-              {needsLocationSetup ? (
-                <button
-                  type="button"
-                  onClick={handleOpenLocation}
-                  className="w-full flex items-start gap-3 bg-amber-50 dark:bg-amber-950/35 border-2 border-amber-400 dark:border-amber-600 rounded-xl p-4 text-left shadow-sm active:scale-[0.99] transition-transform"
-                >
-                  <MapPin className="w-6 h-6 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-amber-950 dark:text-amber-50">Definir localização</p>
-                    <p className="text-xs text-amber-900/90 dark:text-amber-100/85 mt-1 leading-snug">
-                      Toque para informar cidade e CEP e ver profissionais e patrocinadores da sua região.
-                    </p>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-amber-700 dark:text-amber-400 shrink-0 self-center" />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleOpenLocation}
-                  className="w-full flex items-center gap-3 rounded-xl border-2 border-primary/40 bg-primary/5 px-4 py-3.5 text-left hover:bg-primary/10 active:scale-[0.99] transition-colors shadow-sm"
-                >
-                  <MapPin className="w-5 h-5 text-primary shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-foreground truncate">{locationLabel}</p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">Toque para alterar cidade ou CEP</p>
-                  </div>
-                  <span className="text-xs font-bold text-primary shrink-0">Alterar</span>
-                </button>
-              )}
+              {/* "Seus Benefícios" e a barra de localização foram removidos do topo
+                  do cliente (layout do print). Definir localização segue pelo RegionGate. */}
             </motion.div>
           ) : null}
 

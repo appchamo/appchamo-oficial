@@ -944,8 +944,8 @@ const Home = () => {
           {/* Feed contínuo: abaixo dos Destaques a home emenda na Comunidade e vai
               carregando mais posts conforme rola (scroll infinito). */}
           {user ? (
-            <div className="mt-4">
-              <h2 className="text-lg font-bold text-foreground mb-2">Comunidade</h2>
+            <div className="mt-6 pt-5 border-t border-border/70">
+              <h2 className="text-lg font-bold text-foreground mb-3">Comunidade</h2>
               <CommunityFeed variant="embedded" />
             </div>
           ) : null}

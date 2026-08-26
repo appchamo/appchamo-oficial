@@ -19,6 +19,34 @@ const BottomNav = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [badges, setBadges] = useState<{ chat: number; notifications: number }>({ chat: 0, notifications: 0 });
+  const [hasNewVagas, setHasNewVagas] = useState(false);
+
+  // "Vaga nova": destaca o botão Vagas (laranja) quando há vaga criada depois da última vez
+  // que o usuário abriu a aba de vagas. Reseta ao abrir a aba (localStorage).
+  const VAGAS_LAST_SEEN_KEY = "chamo_vagas_last_seen";
+  const checkNewVagas = useCallback(async () => {
+    try {
+      const lastSeen = localStorage.getItem(VAGAS_LAST_SEEN_KEY)
+        || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabase
+        .from("job_postings")
+        .select("id", { count: "exact", head: true })
+        .eq("active", true)
+        .gt("created_at", lastSeen);
+      setHasNewVagas((count || 0) > 0);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    const onVagas = location.pathname === "/home"
+      && new URLSearchParams(location.search).get("feed") === "vagas";
+    if (onVagas) {
+      localStorage.setItem(VAGAS_LAST_SEEN_KEY, new Date().toISOString());
+      setHasNewVagas(false);
+    } else {
+      void checkNewVagas();
+    }
+  }, [location.pathname, location.search, checkNewVagas]);
 
   // 🛡️ TRAVA DE DEBOUNCE: Impede que o Realtime crie loops de requisição
   const isFetchingRef = useRef(false);
@@ -170,6 +198,8 @@ const BottomNav = () => {
                 ? location.pathname === "/home" && currentFeed !== "vagas" && currentFeed !== "comunidade"
                 : location.pathname === tab.path || location.pathname.startsWith(tab.path + "/");
           const badgeCount = tab.badgeKey ? badges[tab.badgeKey] : 0;
+          const isVagasNew = tab.path === "/home?feed=vagas" && hasNewVagas && !isActive;
+          const highlight = isActive || isVagasNew;
           const handleTabClick = (e: React.MouseEvent) => {
             const onHomeComunidade =
               tab.path === MAIN_APP_TAB_PATHS[0] &&
@@ -191,18 +221,24 @@ const BottomNav = () => {
               to={tab.path}
               onClick={handleTabClick}
               className={`flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl transition-colors relative ${
-                isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                highlight ? "text-primary" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               <div className="relative">
-                <tab.icon className={`w-5 h-5 ${isActive ? "stroke-[2.5]" : ""}`} />
+                <tab.icon className={`w-5 h-5 ${highlight ? "stroke-[2.5]" : ""}`} />
+                {isVagasNew && (
+                  <span className="absolute -top-1 -right-2 flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-70" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background" />
+                  </span>
+                )}
                 {badgeCount > 0 && (
                   <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center px-1 shadow-sm">
                     {badgeCount > 99 ? "99+" : badgeCount}
                   </span>
                 )}
               </div>
-              <span className={`text-[10px] font-medium ${isActive ? "font-semibold" : ""}`}>
+              <span className={`text-[10px] font-medium ${highlight ? "font-semibold" : ""}`}>
                 {tab.label}
               </span>
             </Link>

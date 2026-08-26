@@ -497,12 +497,17 @@ const BecomeProfessional = () => {
 
       await refreshProfile();
 
+      // Profissional (pro/vip) precisa contratar um plano pra usar o app: vai direto
+      // pro paywall. Empresa (CNPJ) segue o fluxo próprio dela.
+      const isCompany = docType === "cnpj";
       toast({
-        title: "Solicitação enviada!",
-        description: "Seu perfil profissional está em análise. Você continua no plano Free até contratar um plano pago.",
+        title: "Cadastro enviado!",
+        description: isCompany
+          ? "Seu perfil está em análise. Você receberá uma notificação quando for aprovado."
+          : "Falta só escolher seu plano pra ativar seu perfil — o 1º mês é grátis.",
       });
 
-      navigate("/home");
+      navigate(isCompany ? "/home" : "/assinar", { replace: true });
     } catch (err: any) {
       console.error("[BecomeProfessional] submit:", err);
 

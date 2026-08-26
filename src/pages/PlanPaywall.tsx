@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useIAP } from "@/hooks/useIAP";
 import { getProductIdForPlan } from "@/lib/iap-config";
-import { Check, Loader2, ShieldCheck, Star, Crown, LogOut, Apple, RotateCcw } from "lucide-react";
+import { Check, Loader2, ShieldCheck, Star, Crown, LogOut, Apple, RotateCcw, Building2, Sparkles } from "lucide-react";
 
 interface PlanRow {
   id: string;
@@ -47,6 +47,17 @@ const featuresOf = (p: PlanRow): string[] => {
   return f;
 };
 
+// Planos oferecidos no paywall + qual tem 1º mês grátis (Pro e VIP).
+const PLAN_ORDER: Record<string, number> = { pro: 0, vip: 1, business: 2 };
+const TRIAL_PLAN_IDS = new Set(["pro", "vip"]);
+const RECOMMENDED_ID = "pro";
+const planMeta = (id: string) =>
+  id === "vip"
+    ? { Icon: Crown, accent: "text-amber-500" }
+    : id === "business"
+    ? { Icon: Building2, accent: "text-violet-600" }
+    : { Icon: Star, accent: "text-primary" };
+
 export default function PlanPaywall() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -70,7 +81,9 @@ export default function PlanPaywall() {
     (async () => {
       try {
         const { data } = await supabase.from("plans").select("*").order("sort_order");
-        const list = ((data as PlanRow[]) || []).filter((p) => p.id === "pro" || p.id === "vip");
+        const list = ((data as PlanRow[]) || [])
+          .filter((p) => p.id === "pro" || p.id === "vip" || p.id === "business")
+          .sort((a, b) => (PLAN_ORDER[a.id] ?? 9) - (PLAN_ORDER[b.id] ?? 9));
         if (!cancelled) {
           setPlans(list);
           setSelected(list.find((p) => p.id === "pro")?.id || list[0]?.id || null);
@@ -121,6 +134,7 @@ export default function PlanPaywall() {
   }, [user]);
 
   const selectedPlan = useMemo(() => plans.find((p) => p.id === selected) || null, [plans, selected]);
+  const selectedHasTrial = selectedPlan ? TRIAL_PLAN_IDS.has(selectedPlan.id) : false;
 
   // Preço a exibir: no iOS usa o preço da App Store (exigência Apple); senão o do banco.
   const priceLabel = (p: PlanRow): string => {
@@ -137,7 +151,7 @@ export default function PlanPaywall() {
     if (!user || !selectedPlan) return;
     setProcessing(true);
     try {
-      const result = await iap.purchase(selectedPlan.id as "pro" | "vip", "monthly");
+      const result = await iap.purchase(selectedPlan.id as "pro" | "vip" | "business", "monthly");
       if (!result) {
         // Cancelou o diálogo da Apple OU já é assinante → tenta restaurar
         setProcessing(false);
@@ -276,7 +290,7 @@ export default function PlanPaywall() {
           userId: user.id,
           planId: selectedPlan.id,
           value: Number(selectedPlan.price_monthly) || 0,
-          firstMonthFree: !returning,
+          firstMonthFree: !returning && selectedHasTrial,
           holderName: card.name,
           number: onlyDigits(card.number),
           expiryMonth: expiryParts[0],
@@ -317,25 +331,24 @@ export default function PlanPaywall() {
   return (
     <div className="min-h-screen bg-secondary">
       <div className="mx-auto w-full max-w-md px-4 py-6">
-        <div className="mb-5 text-center">
-          <h1 className="text-2xl font-bold text-foreground">
+        <div className="mb-6 text-center">
+          <h1 className="text-[26px] font-extrabold tracking-tight text-foreground">
             {returning && !useStoreIAP ? "Regularize seu plano" : "Escolha seu plano"}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {returning && !useStoreIAP ? (
-              <>
-                Seu pagamento não foi confirmado e o plano está suspenso.
-                <br />
-                Atualize o cartão para reativar agora.
-              </>
-            ) : (
-              <>
-                Pra atender clientes no Chamô você precisa de um plano ativo.
-                <br />
-                <span className="font-semibold text-primary">1º mês grátis</span> — depois é mensal.
-              </>
-            )}
-          </p>
+          {returning && !useStoreIAP ? (
+            <p className="mx-auto mt-2 max-w-[19rem] text-sm leading-snug text-muted-foreground [text-wrap:pretty]">
+              Seu pagamento não foi confirmado e o plano está suspenso. Atualize o cartão para reativar agora.
+            </p>
+          ) : (
+            <>
+              <p className="mx-auto mt-2 max-w-[19rem] text-sm leading-snug text-muted-foreground [text-wrap:pretty]">
+                Pra atender clientes no Chamô, você precisa de um plano ativo.
+              </p>
+              <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+                <Sparkles className="h-3.5 w-3.5" /> 1º mês grátis no Pro e no VIP
+              </span>
+            </>
+          )}
         </div>
 
         {loadingPlans ? (
@@ -347,30 +360,63 @@ export default function PlanPaywall() {
             <div className="space-y-3">
               {plans.map((p) => {
                 const isSel = selected === p.id;
-                const Icon = p.id === "vip" ? Crown : Star;
+                const { Icon, accent } = planMeta(p.id);
+                const hasTrial = TRIAL_PLAN_IDS.has(p.id);
+                const isRecommended = p.id === RECOMMENDED_ID;
                 return (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => setSelected(p.id)}
-                    className={`w-full rounded-2xl border p-4 text-left transition ${
-                      isSel ? "border-primary bg-primary/5 ring-2 ring-primary" : "border-border bg-card"
+                    aria-pressed={isSel}
+                    className={`relative w-full rounded-2xl border p-4 pt-5 text-left transition-all ${
+                      isSel
+                        ? "border-primary bg-primary/[0.04] ring-2 ring-primary shadow-sm"
+                        : "border-border bg-card hover:border-primary/40"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Icon className={`h-5 w-5 ${isSel ? "text-primary" : "text-muted-foreground"}`} />
-                        <span className="text-base font-bold text-foreground">{p.name}</span>
+                    {isRecommended && (
+                      <span className="absolute -top-2.5 left-4 rounded-full bg-primary px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground shadow">
+                        Mais escolhido
+                      </span>
+                    )}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                            isSel ? "bg-primary/10" : "bg-muted"
+                          }`}
+                        >
+                          <Icon className={`h-5 w-5 ${accent}`} />
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-base font-bold text-foreground">{p.name}</span>
+                            {/* radio visual */}
+                            <span
+                              className={`ml-0.5 flex h-4 w-4 items-center justify-center rounded-full border ${
+                                isSel ? "border-primary bg-primary" : "border-muted-foreground/40"
+                              }`}
+                            >
+                              {isSel && <Check className="h-2.5 w-2.5 text-primary-foreground" strokeWidth={3} />}
+                            </span>
+                          </div>
+                          {hasTrial && (
+                            <span className="mt-0.5 inline-block rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">
+                              1º mês grátis
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-lg font-extrabold text-foreground">{priceLabel(p)}</div>
-                        <div className="text-[11px] text-muted-foreground">/mês</div>
+                        <div className="text-lg font-extrabold leading-none text-foreground">{priceLabel(p)}</div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">/mês</div>
                       </div>
                     </div>
-                    <ul className="mt-2 grid grid-cols-1 gap-1">
+                    <ul className="mt-3 grid grid-cols-1 gap-1.5">
                       {featuresOf(p).map((f) => (
-                        <li key={f} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Check className="h-3.5 w-3.5 text-primary" /> {f}
+                        <li key={f} className="flex items-center gap-1.5 text-xs text-foreground/80">
+                          <Check className="h-3.5 w-3.5 flex-shrink-0 text-primary" /> {f}
                         </li>
                       ))}
                     </ul>
@@ -389,7 +435,13 @@ export default function PlanPaywall() {
                   className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3.5 text-base font-bold text-primary-foreground shadow-md active:scale-[0.99] disabled:opacity-60"
                 >
                   {processing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Apple className="h-5 w-5" />}
-                  {processing ? "Processando..." : selectedPlan ? `Assinar ${selectedPlan.name} — 1º mês grátis` : "Assinar"}
+                  {processing
+                    ? "Processando..."
+                    : selectedPlan
+                    ? selectedHasTrial
+                      ? `Assinar ${selectedPlan.name} — 1º mês grátis`
+                      : `Assinar ${selectedPlan.name}`
+                    : "Assinar"}
                 </button>
                 <p className="mt-2 text-center text-[11px] text-muted-foreground">
                   Assinatura, teste grátis e renovação gerenciados pela App Store. Cancele em Ajustes → Assinaturas.
@@ -480,14 +532,18 @@ export default function PlanPaywall() {
                       ? `Pagar e reativar — ${brl(selectedPlan.price_monthly)}`
                       : "Pagar e reativar"
                     : selectedPlan
-                    ? `Ativar ${selectedPlan.name} — 1º mês grátis`
+                    ? selectedHasTrial
+                      ? `Ativar ${selectedPlan.name} — 1º mês grátis`
+                      : `Ativar ${selectedPlan.name}`
                     : "Ativar plano"}
                 </button>
 
                 <p className="mt-2 text-center text-[11px] text-muted-foreground">
                   {returning
                     ? `Cobrança de ${selectedPlan ? brl(selectedPlan.price_monthly) : ""} agora. Depois, mensal. Cancele quando quiser no app.`
-                    : `Sem cobrança nos primeiros 30 dias. Depois ${selectedPlan ? brl(selectedPlan.price_monthly) : ""}/mês. Cancele quando quiser no app.`}
+                    : selectedHasTrial
+                    ? `Sem cobrança nos primeiros 30 dias. Depois ${selectedPlan ? brl(selectedPlan.price_monthly) : ""}/mês. Cancele quando quiser no app.`
+                    : `Cobrança de ${selectedPlan ? brl(selectedPlan.price_monthly) : ""}/mês. Cancele quando quiser no app.`}
                 </p>
               </>
             )}

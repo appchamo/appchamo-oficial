@@ -376,7 +376,7 @@ const Header = () => {
             {/* Profissional: selo no lugar do Planos — texto distinto para cadastro vs assinatura */}
             {user && isPro && !hidePlanos && pendingReplacesPlanos && pendingSlotKind && (
               <div
-                className="flex items-center justify-center gap-1.5 min-w-[6.75rem] max-w-[9.5rem] px-2 py-1.5 rounded-xl border border-amber-500/35 bg-amber-500/10 text-amber-800 flex-shrink-0"
+                className="flex items-center gap-1 px-2 py-1.5 rounded-full border border-amber-500/35 bg-amber-500/10 text-amber-800 flex-shrink-0"
                 role="status"
                 aria-live="polite"
                 title={
@@ -386,11 +386,9 @@ const Header = () => {
                 }
               >
                 <Clock className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 animate-pulse" />
-                <span className="flex flex-col items-center justify-center leading-[1.15] min-w-0 text-center">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-amber-800/90">
-                    {pendingSlotKind === "profile" ? "Perfil" : "Assinatura"}
-                  </span>
-                  <span className="text-[11px] font-bold">em análise</span>
+                {/* Compacto (1 linha) pra não espremer as abas Início/Comunidade/Vagas no topo */}
+                <span className="text-[11px] font-bold whitespace-nowrap">
+                  {pendingSlotKind === "profile" ? "Em análise" : "Processando"}
                 </span>
               </div>
             )}

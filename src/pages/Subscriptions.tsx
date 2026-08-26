@@ -549,11 +549,13 @@ const Subscriptions = () => {
           setProcessing(false);
           return;
         }
-        if (!result.receipt?.trim()) {
+        // StoreKit 2 às vezes não devolve o "receipt" legado — usamos a transação
+        // assinada (jwsRepresentation). Só falha se não vier nenhum comprovante.
+        if (!result.receipt?.trim() && !result.jwsRepresentation?.trim() && !result.transactionId?.trim()) {
           toast({
             title: "Sincronizando com a App Store",
             description:
-              "Não foi possível ler o recibo agora. Feche o app por completo, abra de novo e toque em «Restaurar compras» na tela de planos.",
+              "Não foi possível ler o comprovante agora. Feche o app por completo, abra de novo e toque em «Restaurar compras» na tela de planos.",
             variant: "destructive",
           });
           setProcessing(false);
@@ -573,6 +575,7 @@ const Subscriptions = () => {
           transactionId: result.transactionId,
           productIdentifier: result.productIdentifier,
           receipt: result.receipt ?? undefined,
+          jwsRepresentation: result.jwsRepresentation ?? undefined,
           platform: result.platform,
         },
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -633,6 +636,7 @@ const Subscriptions = () => {
             transactionId: best.transactionId,
             productIdentifier: best.productIdentifier,
             receipt: best.receipt ?? undefined,
+            jwsRepresentation: (best as any).jwsRepresentation ?? undefined,
             platform: best.platform,
           },
           headers: { Authorization: `Bearer ${session.access_token}` },

@@ -151,8 +151,10 @@ export default function PlanPaywall() {
         if (result.subscriptionState === "expired" || result.subscriptionState === "revoked") {
           throw new Error("Esta assinatura está expirada ou revogada na App Store.");
         }
-        if (!result.receipt?.trim()) {
-          throw new Error("Não foi possível ler o recibo. Feche o app, abra de novo e toque em «Restaurar compras».");
+        // StoreKit 2 às vezes não devolve o "receipt" legado — nesse caso usamos
+        // a transação assinada (jwsRepresentation). Só falha se não vier nenhum dos dois.
+        if (!result.receipt?.trim() && !result.jwsRepresentation?.trim() && !result.transactionId?.trim()) {
+          throw new Error("Não foi possível ler o comprovante. Feche o app, abra de novo e toque em «Restaurar compras».");
         }
       }
       let { data: { session } } = await supabase.auth.getSession();
@@ -169,6 +171,7 @@ export default function PlanPaywall() {
           transactionId: result.transactionId,
           productIdentifier: result.productIdentifier,
           receipt: result.receipt ?? undefined,
+          jwsRepresentation: result.jwsRepresentation ?? undefined,
           platform: result.platform,
         },
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -214,6 +217,7 @@ export default function PlanPaywall() {
           transactionId: best.transactionId,
           productIdentifier: best.productIdentifier,
           receipt: best.receipt ?? undefined,
+          jwsRepresentation: (best as any).jwsRepresentation ?? undefined,
           platform: best.platform,
         },
         headers: { Authorization: `Bearer ${session.access_token}` },

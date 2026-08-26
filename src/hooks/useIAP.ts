@@ -162,6 +162,7 @@ export function useIAP() {
             planId: parsed?.planId ?? "",
             billingPeriod: parsed?.billingPeriod ?? "monthly",
             receipt: p.receipt,
+            jwsRepresentation: (p as { jwsRepresentation?: string }).jwsRepresentation,
             verificationData: p.verificationData,
             purchaseToken: p.purchaseToken,
             platform,

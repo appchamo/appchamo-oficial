@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as x509 from "npm:@peculiar/x509@1.12.3";
+import { compactVerify, importX509 } from "npm:jose@5.9.6";
+
+// @peculiar/x509 usa o WebCrypto do Deno.
+x509.cryptoProvider.set(crypto as Crypto);
 
 const ALLOWED_PLANS = ["pro", "vip", "business"];
 const APPLE_VERIFY_PRODUCTION = "https://buy.itunes.apple.com/verifyReceipt";
@@ -144,6 +149,99 @@ async function verifyAppleReceipt(
   };
 }
 
+// ─── Verificação do jwsRepresentation (StoreKit 2) ───────────────────────────
+// A transação assinada do StoreKit 2 é um JWS no mesmo formato do ASN V2.
+// Verificamos cadeia x5c → Apple Root CA G3 + assinatura ECDSA.
+let appleRootCert: x509.X509Certificate | null = null;
+let appleRootError: string | null = null;
+
+function ensureAppleRoot(): boolean {
+  if (appleRootCert) return true;
+  if (appleRootError) return false;
+  const rootCertB64 = Deno.env.get("APPLE_ROOT_CA_G3_B64");
+  if (!rootCertB64) {
+    appleRootError = "APPLE_ROOT_CA_G3_B64 ausente — verificação de jwsRepresentation desativada.";
+    console.warn("validate_iap_subscription:", appleRootError);
+    return false;
+  }
+  try {
+    const rootDer = Uint8Array.from(atob(rootCertB64), (c) => c.charCodeAt(0));
+    appleRootCert = new x509.X509Certificate(rootDer);
+    return true;
+  } catch (e) {
+    appleRootError = `Falha ao parsear Apple Root CA G3: ${(e as Error).message}`;
+    console.error("validate_iap_subscription:", appleRootError);
+    return false;
+  }
+}
+
+function b64urlJsonLocal<T>(b64url: string): T {
+  const padded = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  const b64 = padded + "=".repeat((4 - (padded.length % 4)) % 4);
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+}
+
+interface StoreKitTx {
+  transactionId?: string;
+  originalTransactionId?: string;
+  productId?: string;
+  expiresDate?: number;
+  bundleId?: string;
+  environment?: "Sandbox" | "Production";
+}
+
+async function verifyJwsTransaction(jws: string): Promise<StoreKitTx | null> {
+  if (!ensureAppleRoot() || !appleRootCert) return null;
+  const parts = jws.split(".");
+  if (parts.length !== 3) return null;
+
+  let header: { alg?: string; x5c?: string[] };
+  try {
+    header = b64urlJsonLocal(parts[0]);
+  } catch {
+    return null;
+  }
+  if (!header.x5c || header.x5c.length < 1) return null;
+
+  let certs: x509.X509Certificate[];
+  try {
+    certs = header.x5c.map(
+      (c) => new x509.X509Certificate(Uint8Array.from(atob(c), (ch) => ch.charCodeAt(0))),
+    );
+  } catch (e) {
+    console.error("validate_iap_subscription: x5c inválido:", e);
+    return null;
+  }
+
+  // Cada cert assinado pelo próximo
+  for (let i = 0; i < certs.length - 1; i++) {
+    const valid = await certs[i].verify({ publicKey: certs[i + 1].publicKey, signatureOnly: true });
+    if (!valid) {
+      console.error("validate_iap_subscription: cadeia x5c inválida no índice", i);
+      return null;
+    }
+  }
+  // Termina na Apple Root CA G3
+  const lastCert = certs[certs.length - 1];
+  if (lastCert.thumbprint !== appleRootCert.thumbprint) {
+    const valid = await lastCert.verify({ publicKey: appleRootCert.publicKey, signatureOnly: true });
+    if (!valid) {
+      console.error("validate_iap_subscription: cadeia x5c não termina em Apple Root CA G3");
+      return null;
+    }
+  }
+  // Assinatura JWS com a chave do leaf
+  try {
+    const leafKey = await importX509(certs[0].toString("pem"), header.alg ?? "ES256");
+    const result = await compactVerify(jws, leafKey);
+    return JSON.parse(new TextDecoder().decode(result.payload)) as StoreKitTx;
+  } catch (e) {
+    console.error("validate_iap_subscription: assinatura JWS inválida:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: cors() });
@@ -157,6 +255,7 @@ serve(async (req) => {
       transactionId,
       productIdentifier,
       receipt,
+      jwsRepresentation,
       platform,
     } = body;
 
@@ -213,25 +312,50 @@ serve(async (req) => {
     let appleEnvironment: "Sandbox" | "Production" | undefined;
 
     if (platform === "ios") {
-      if (
-        !receipt ||
-        typeof receipt !== "string" ||
-        receipt.trim().length < 20
-      ) {
+      const hasReceipt =
+        receipt && typeof receipt === "string" && receipt.trim().length >= 20;
+      const hasJws =
+        jwsRepresentation &&
+        typeof jwsRepresentation === "string" &&
+        jwsRepresentation.split(".").length === 3;
+
+      if (hasReceipt) {
+        // Caminho 1: recibo legado (verifyReceipt)
+        const v = await verifyAppleReceipt(receipt.trim(), productIdentifier);
+        if (!v.ok) {
+          return json({ error: v.userMessage || "Recibo inválido." }, 400);
+        }
+        appleOriginalTxId = v.originalTransactionId;
+        appleEnvironment = v.environment;
+      } else if (hasJws) {
+        // Caminho 2: transação assinada do StoreKit 2 (jwsRepresentation).
+        // O StoreKit já verificou no dispositivo; validamos a assinatura da Apple no servidor.
+        const tx = await verifyJwsTransaction(jwsRepresentation);
+        if (!tx) {
+          return json(
+            {
+              error:
+                "Não foi possível validar a compra com a Apple. Tente «Restaurar compras».",
+            },
+            400
+          );
+        }
+        // Confere que é um produto do grupo Chamô e bate com o produto comprado
+        const prod = String(tx.productId || "");
+        if (!ALL_CHAMO_PRODUCT_IDS.includes(prod)) {
+          return json({ error: "Produto da compra não reconhecido." }, 400);
+        }
+        appleOriginalTxId = tx.originalTransactionId ?? tx.transactionId;
+        appleEnvironment = tx.environment ?? "Production";
+      } else {
         return json(
           {
             error:
-              "Recibo da App Store ausente. Feche o app completamente, abra de novo e tente assinar outra vez, ou use «Restaurar compras».",
+              "Comprovante da App Store ausente. Feche o app completamente, abra de novo e tente assinar outra vez, ou use «Restaurar compras».",
           },
           400
         );
       }
-      const v = await verifyAppleReceipt(receipt.trim(), productIdentifier);
-      if (!v.ok) {
-        return json({ error: v.userMessage || "Recibo inválido." }, 400);
-      }
-      appleOriginalTxId = v.originalTransactionId;
-      appleEnvironment = v.environment;
     }
 
     // Determina o billing_period a partir do productIdentifier

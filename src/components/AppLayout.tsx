@@ -7,6 +7,7 @@ import { DesktopSidebar } from "./SideMenu";
 import PullToRefresh from "./PullToRefresh";
 import { MenuProvider } from "@/contexts/MenuContext";
 import DiagPanel from "@/components/DiagPanel";
+import AppPopups from "./AppPopups";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -92,6 +93,7 @@ const AppLayout = ({ children, showHeader = true }: AppLayoutProps) => {
           <DiagPanel />
         </div>
       </div>
+      <AppPopups />
     </MenuProvider>
   );
 };

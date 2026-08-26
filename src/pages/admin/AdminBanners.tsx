@@ -29,6 +29,7 @@ const positionLabels: Record<string, string> = {
   below_featured: "Abaixo dos destaques",
   below_categories: "Abaixo das categorias",
   bottom: "Final da página",
+  popup: "Popup (abre ao entrar no app)",
 };
 
 const AdminBanners = () => {

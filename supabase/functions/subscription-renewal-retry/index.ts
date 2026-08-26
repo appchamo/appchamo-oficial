@@ -148,6 +148,11 @@ serve(async (req) => {
           .from("subscriptions")
           .update({ status: "active", last_payment_status: "paid" })
           .eq("asaas_subscription_id", grace.asaas_subscription_id);
+        // Volta a aparecer pros clientes
+        await supabase
+          .from("professionals")
+          .update({ availability_status: "available" })
+          .eq("user_id", grace.user_id);
 
         await notifyUser(
           supabase, grace.user_id,
@@ -180,6 +185,11 @@ serve(async (req) => {
           .from("subscriptions")
           .update({ status: "suspended", last_payment_status: "refused" })
           .eq("asaas_subscription_id", grace.asaas_subscription_id);
+        // Some da busca dos clientes enquanto vencido
+        await supabase
+          .from("professionals")
+          .update({ availability_status: "unavailable" })
+          .eq("user_id", grace.user_id);
 
         console.log(`[renewal-retry] Falha (tentativa ${nextAttemptCount}). Nova tentativa: ${nextAttemptAt.toISOString()} | motivo: ${asaasError}`);
         results.push({ grace_id: grace.id, outcome: "retry_scheduled", next: nextAttemptAt.toISOString() });

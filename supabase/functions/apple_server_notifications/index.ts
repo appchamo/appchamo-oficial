@@ -473,20 +473,31 @@ serve(async (req) => {
       .eq("id", sub.id);
     if (updErr) console.error("[Apple ASSN] update sub error:", updErr);
 
-    // Se cancelou, garante user_type = client
+    // Assinatura encerrada na Apple: NÃO volta pra cliente. Continua profissional,
+    // mas fica invisível pros clientes (some da busca) até reassinar.
     if (newStatus === "cancelled") {
       await supabase
-        .from("profiles")
-        .update({ user_type: "client" })
+        .from("professionals")
+        .update({ availability_status: "unavailable" })
         .eq("user_id", userId);
 
       await supabase.from("notifications").insert({
         user_id: userId,
-        title: "❌ Plano cancelado",
-        message: reason ?? "Sua assinatura foi cancelada pela Apple.",
+        title: "❌ Plano encerrado",
+        message: reason ?? "Sua assinatura foi encerrada. Você parou de aparecer para os clientes — reative para voltar.",
         type: "warning",
-        link: "/subscriptions",
+        link: "/assinar",
       });
+    }
+
+    // Assinou/renovou: garante profissional + volta a aparecer pros clientes.
+    if (newStatus === "active") {
+      const proType = planId === "business" ? "company" : "professional";
+      await supabase.from("profiles").update({ user_type: proType }).eq("user_id", userId);
+      await supabase
+        .from("professionals")
+        .update({ availability_status: "available" })
+        .eq("user_id", userId);
     }
 
     if (lastPaymentStatus === "refused" && newStatus !== "cancelled") {

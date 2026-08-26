@@ -325,6 +325,8 @@ serve(async (req) => {
     // Atualiza user_type: business → company; pro/vip → professional
     const newUserType = planId === "business" ? "company" : "professional";
     await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);
+    // Volta a aparecer pros clientes (caso estivesse indisponível por lapso anterior)
+    await supabase.from("professionals").update({ availability_status: "available" }).eq("user_id", userId);
 
     // Notifica o profissional que o plano está ativo
     await supabase.from("notifications").insert({

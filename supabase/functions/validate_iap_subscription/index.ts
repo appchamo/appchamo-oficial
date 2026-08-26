@@ -467,9 +467,10 @@ serve(async (req) => {
       console.error("validate_iap_subscription referral commission:", refErr);
     }
 
-    // Atualiza user_type de acordo com o plano
+    // Atualiza user_type de acordo com o plano e volta a aparecer pros clientes
     const newUserType = planId === "business" ? "company" : "professional";
     await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);
+    await supabase.from("professionals").update({ availability_status: "available" }).eq("user_id", userId);
 
     // Notifica o usuário
     await supabase.from("notifications").insert({

@@ -393,6 +393,8 @@ serve(async (req) => {
 
             const newUserType = subData.plan_id === "business" ? "company" : "professional";
             await supabase.from("profiles").update({ user_type: newUserType }).eq("user_id", userId);
+            // Volta a aparecer pros clientes
+            await supabase.from("professionals").update({ availability_status: "available" }).eq("user_id", userId);
 
             await supabase.from("notifications").insert({
               user_id: userId,
@@ -488,6 +490,12 @@ serve(async (req) => {
               last_payment_status: "refused",
               last_payment_at: new Date().toISOString(),
             })
+            .eq("user_id", userId);
+
+          // Continua profissional, mas some da busca dos clientes enquanto vencido.
+          await supabase
+            .from("professionals")
+            .update({ availability_status: "unavailable" })
             .eq("user_id", userId);
 
           // Verifica se já existe carência ativa para esta assinatura

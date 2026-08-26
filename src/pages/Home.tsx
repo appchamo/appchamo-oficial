@@ -25,6 +25,8 @@ import HomeAlertCarousel from "@/components/home/HomeAlertCarousel";
 import QuickProfessionalsList from "@/components/home/QuickProfessionalsList";
 import CouponProfessionals from "@/components/home/CouponProfessionals";
 import HomeProCarousel from "@/components/home/HomeProCarousel";
+import HomeSolicitarHero from "@/components/home/HomeSolicitarHero";
+import HomeBalanceCard from "@/components/home/HomeBalanceCard";
 import ProSellMoreChecklist from "@/components/home/ProSellMoreChecklist";
 import TermsReacceptBanner from "@/components/home/TermsReacceptBanner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"; 
@@ -662,7 +664,7 @@ const Home = () => {
         pinnedSponsorId={linkedSponsor?.id ?? null}
       />
     ),
-    jobs: <HomeJobsBanner key="jobs" jobCount={jobCount} section={getSection("jobs")} />,
+    jobs: null,
     search: (
       <div key={`search-${profile?.address_city}-${profile?.address_state}`} className="flex flex-col gap-3 w-full">
         {/* Cliente/visitante recebem o CTA-herói no topo do cluster; aqui fica só para o PRO. */}
@@ -750,49 +752,9 @@ const Home = () => {
           {user ? <DailyCheckin hideWhenDone /> : null}
           {/* CTA "Solicite um profissional" movido para logo abaixo de Patrocinadores
               (ver a seção "sponsors" no loop de seções mais abaixo), conforme layout aprovado. */}
-          {user && isPro && proId ? (
-            /* ── Carrossel: Carteira + Agenda (só monta quando proId está pronto) ── */
-            <>
-              <HomeProCarousel
-                profile={profile}
-                userName={userName}
-                welcomeWord={welcomeWord}
-                returning={isReturningUser}
-                locationLabel={locationLabel}
-                onLocationClick={handleOpenLocation}
-                walletBalance={walletBalance}
-                walletLoaded={walletLoaded}
-                professionalId={proId}
-                planLabel={planLabel}
-                callsLabel={callsLabel}
-              />
-              <ProSellMoreChecklist professionalId={proId} userId={user.id} />
-            </>
-          ) : user && isPro ? (
-            /* ── Placeholder enquanto proId carrega ── */
-            <div
-              className="relative overflow-hidden rounded-2xl shadow-lg"
-              style={{ background: "linear-gradient(135deg, #f97316 0%, #ea580c 60%, #c2410c 100%)" }}
-            >
-              <div className="absolute -top-8 -right-8 w-36 h-36 bg-white/10 rounded-full" />
-              <div className="absolute -bottom-6 -left-6 w-28 h-28 bg-white/5 rounded-full" />
-              <div className="relative p-5">
-                <div className="flex items-center gap-3 mb-4">
-                  {profile?.avatar_url ? (
-                    <img src={profile.avatar_url} alt={userName} className="w-12 h-12 rounded-full object-cover border-2 border-white/40 shrink-0" />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center shrink-0">
-                      <span className="text-white font-bold text-xl">{userName.charAt(0).toUpperCase()}</span>
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-white/75 text-xs">{welcomeWord}{backSuffix},</p>
-                    <p className="text-white font-bold text-lg">{userName} 👋</p>
-                  </div>
-                </div>
-                <div className="bg-white/15 rounded-xl p-3.5 h-14 animate-pulse" />
-              </div>
-            </div>
+          {user && isPro ? (
+            /* ── Profissional: seção de saldo (leva para a Carteira) ── */
+            <HomeBalanceCard walletBalance={walletBalance} walletLoaded={walletLoaded} />
           ) : user ? (
             /* ── Welcome cliente ── */
             <motion.div className="flex flex-col gap-3" variants={pageEnter} initial="hidden" animate="show">
@@ -962,10 +924,10 @@ const Home = () => {
                 )}
                 {block}
                 {section.id === "sponsors" && <HomeBanners position="carousel" />}
-                {/* CTA principal do cliente: logo abaixo de Patrocinadores (layout aprovado). */}
-                {section.id === "sponsors" && !isPro ? (
+                {/* CTA grande "Solicite um profissional" logo abaixo de Patrocinadores. */}
+                {section.id === "sponsors" ? (
                   <div className="mt-3">
-                    <HomeOpenRequestCta />
+                    <HomeSolicitarHero />
                   </div>
                 ) : null}
                 {section.id === "sponsors" && linkedSponsor && !homeFeedComunidade ? (
@@ -1003,17 +965,6 @@ const Home = () => {
           })}
 
           <HomeBanners position="bottom" />
-
-          {/* Botão de vagas no rodapé (profissional): leva para a lista de vagas. */}
-          {isPro ? (
-            <Link
-              to="/jobs"
-              className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-semibold text-sm transition-colors"
-            >
-              <Briefcase className="w-5 h-5" />
-              Ver vagas de emprego
-            </Link>
-          ) : null}
 
           {/* Mostra para cliente ou quando perfil ainda não carregou (igual Android no iPhone) */}
           {profile?.user_type !== "professional" &&

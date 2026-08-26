@@ -5,9 +5,13 @@ import { supabase } from "@/integrations/supabase/client";
 
 /**
  * Trava de plano pago (obrigatoria para profissionais novos).
- * Profissional criado a partir do lancamento (CUTOFF) sem plano pago ativo
- * cai no paywall (/assinar) e nao usa o app ate assinar.
- * Base antiga (inclusive quem esta no plano gratis) NAO e forcada (grandfather).
+ * Regra:
+ *  - Todo mundo que VIRA profissional a partir do lancamento (CUTOFF) sem plano
+ *    pago ativo cai no paywall (/assinar) e nao usa o app ate assinar. Isso inclui
+ *    cliente antigo que vira profissional agora (conta antiga, mas pro novo).
+ *  - Grandfather: quem JA ERA profissional antes do CUTOFF (mesmo no gratis) NAO e forcado.
+ *  - Plano pago vencido/suspenso -> cai no paywall em qualquer data (para regularizar).
+ * O "vira profissional" e medido pela data em que a linha em `professionals` foi criada.
  */
 const CUTOFF = new Date("2026-08-26T00:00:00Z").getTime();
 
@@ -33,28 +37,30 @@ const ProPlanGuard = () => {
     if (loading || !profile || isAdmin) return;
     if (profile.user_type !== "professional") return; // so profissional (empresa usa outro fluxo)
 
-    const isNew = profile.created_at ? new Date(profile.created_at).getTime() >= CUTOFF : false;
-
     if (checkedForRef.current === profile.user_id) return;
     checkedForRef.current = profile.user_id;
 
     (async () => {
-      const { data: sub } = await supabase
-        .from("subscriptions")
-        .select("plan_id, status")
-        .eq("user_id", profile.user_id)
-        .maybeSingle();
+      const [{ data: sub }, { data: pro }] = await Promise.all([
+        supabase.from("subscriptions").select("plan_id, status").eq("user_id", profile.user_id).maybeSingle(),
+        supabase.from("professionals").select("created_at").eq("user_id", profile.user_id).maybeSingle(),
+      ]);
       const status = String((sub as any)?.status || "").toLowerCase();
       const planId = String((sub as any)?.plan_id || "");
       const isPaidPlan = planId !== "" && planId !== "free";
       const isActive = status === "active";
+      const hasActivePaid = isPaidPlan && isActive;
 
-      // Bloqueia se:
-      //  - tem plano pago mas nao esta ativo (vencido/suspenso) -> qualquer data
-      //  - profissional novo (pos-cutoff) sem plano pago ativo -> grandfather nos antigos gratis
+      // "Virou profissional antes do lancamento" = grandfather (nao forca).
+      const proCreated = (pro as any)?.created_at ? new Date((pro as any).created_at).getTime() : null;
+      const becameProBeforeCutoff = proCreated !== null && proCreated < CUTOFF;
+
+      // Bloqueia (manda pro paywall) se NAO tem plano pago ativo E:
+      //  - o plano pago esta vencido/suspenso (regularizar) -> qualquer data, ou
+      //  - virou profissional a partir do lancamento (pro novo, inclui cliente antigo que virou pro).
       const suspendedPaid = isPaidPlan && !isActive;
-      const newWithoutPaid = isNew && !(isPaidPlan && isActive);
-      setBlocked(suspendedPaid || newWithoutPaid);
+      const gate = !hasActivePaid && (suspendedPaid || !becameProBeforeCutoff);
+      setBlocked(gate);
     })();
   }, [loading, profile, isAdmin]);
 

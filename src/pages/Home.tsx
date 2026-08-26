@@ -662,7 +662,7 @@ const Home = () => {
         pinnedSponsorId={linkedSponsor?.id ?? null}
       />
     ),
-    jobs: null,
+    jobs: <HomeJobsBanner key="jobs" jobCount={jobCount} section={getSection("jobs")} />,
     search: (
       <div key={`search-${profile?.address_city}-${profile?.address_state}`} className="flex flex-col gap-3 w-full">
         {/* Cliente/visitante recebem o CTA-herói no topo do cluster; aqui fica só para o PRO. */}
@@ -1003,6 +1003,17 @@ const Home = () => {
           })}
 
           <HomeBanners position="bottom" />
+
+          {/* Botão de vagas no rodapé (profissional): leva para a lista de vagas. */}
+          {isPro ? (
+            <Link
+              to="/jobs"
+              className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-semibold text-sm transition-colors"
+            >
+              <Briefcase className="w-5 h-5" />
+              Ver vagas de emprego
+            </Link>
+          ) : null}
 
           {/* Mostra para cliente ou quando perfil ainda não carregou (igual Android no iPhone) */}
           {profile?.user_type !== "professional" &&

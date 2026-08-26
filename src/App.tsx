@@ -126,6 +126,8 @@ const SupportDesk = lazy(() => import("./pages/SupportDesk"));
 const SupportDeskNotifications = lazy(() => import("./pages/SupportDeskNotifications"));
 const AdminTutorials = lazy(() => import("./pages/admin/AdminTutorials"));
 const AdminProfiles = lazy(() => import("./pages/admin/AdminProfiles"));
+const AdminVagas = lazy(() => import("./pages/admin/AdminVagas"));
+const AdminComunidade = lazy(() => import("./pages/admin/AdminComunidade"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -683,6 +685,8 @@ const AppContent = () => {
         <Route path="/admin/layout" element={<ProtectedRoute><AdminLayoutPage /></ProtectedRoute>} />
         <Route path="/admin/tutorials" element={<ProtectedRoute><AdminTutorials /></ProtectedRoute>} />
         <Route path="/admin/profiles" element={<ProtectedRoute><AdminProfiles /></ProtectedRoute>} />
+        <Route path="/admin/vagas" element={<ProtectedRoute><AdminVagas /></ProtectedRoute>} />
+        <Route path="/admin/comunidade" element={<ProtectedRoute><AdminComunidade /></ProtectedRoute>} />
 
         <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
         </Routes>

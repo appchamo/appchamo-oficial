@@ -9,7 +9,7 @@ import { MAIN_APP_TAB_PATHS } from "@/lib/mainAppTabs";
 
 const tabs = [
   { icon: Home, label: "Início", path: MAIN_APP_TAB_PATHS[0] },
-  { icon: Briefcase, label: "Vagas", path: "/jobs" },
+  { icon: Briefcase, label: "Vagas", path: "/home?feed=vagas" },
   { icon: MessageSquare, label: "Chat", path: MAIN_APP_TAB_PATHS[2], badgeKey: "chat" as const },
   { icon: Store, label: "Parceiros", path: "/parceiros" },
   { icon: User, label: "Perfil", path: MAIN_APP_TAB_PATHS[4] },
@@ -162,7 +162,13 @@ const BottomNav = () => {
     >
       <div className="flex items-center justify-around max-w-screen-lg mx-auto h-16 w-full">
         {tabs.map((tab) => {
-          const isActive = location.pathname === tab.path || location.pathname.startsWith(tab.path + "/");
+          const currentFeed = location.pathname === "/home" ? new URLSearchParams(location.search).get("feed") : null;
+          const isActive =
+            tab.path === "/home?feed=vagas"
+              ? currentFeed === "vagas"
+              : tab.path === MAIN_APP_TAB_PATHS[0]
+                ? location.pathname === "/home" && currentFeed !== "vagas" && currentFeed !== "comunidade"
+                : location.pathname === tab.path || location.pathname.startsWith(tab.path + "/");
           const badgeCount = tab.badgeKey ? badges[tab.badgeKey] : 0;
           const handleTabClick = (e: React.MouseEvent) => {
             const onHomeComunidade =

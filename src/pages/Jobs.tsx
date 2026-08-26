@@ -47,7 +47,7 @@ type JobRowFlat = {
 const JOB_SELECT_FLAT =
   "id, title, description, location, salary_range, created_at, professional_id, sponsor_id";
 
-const Jobs = () => {
+const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
   useAuth();
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -238,8 +238,7 @@ const Jobs = () => {
     setLoadingMyApps(false);
   };
 
-  return (
-    <AppLayout>
+  const content = (
       <main className="max-w-screen-lg mx-auto px-4 py-5">
         {canPost ? (
           <div className="flex items-stretch gap-2 mb-5">
@@ -412,8 +411,8 @@ const Jobs = () => {
           </DialogContent>
         </Dialog>
       </main>
-    </AppLayout>
   );
+  return embedded ? content : <AppLayout>{content}</AppLayout>;
 };
 
 export default Jobs;

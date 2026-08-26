@@ -40,6 +40,7 @@ import { countActiveJobPostings } from "@/lib/jobRegionFilter";
 import { Capacitor } from "@capacitor/core";
 import { isOverlayStackRoute } from "@/lib/mainAppTabs";
 import CommunityFeed from "@/components/community/CommunityFeed";
+import Jobs from "@/pages/Jobs";
 import { useLinkedSponsor } from "@/hooks/useLinkedSponsor";
 import SponsorPatrocinadorPanel from "@/components/sponsor/SponsorPatrocinadorPanel";
 import SponsorLaunchNovidadeModal from "@/components/sponsor/SponsorLaunchNovidadeModal";
@@ -132,6 +133,7 @@ const Home = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const homeFeedComunidade = searchParams.get("feed") === "comunidade";
+  const homeFeedVagas = searchParams.get("feed") === "vagas";
   const { profile, user, refreshProfile, loading: authLoading } = useAuth();
   const { sponsor: linkedSponsor } = useLinkedSponsor(user?.id);
 
@@ -724,6 +726,13 @@ const Home = () => {
     <AppLayout>
       {!contentReady ? (
         <HomeSkeleton />
+      ) : user && homeFeedVagas ? (
+        <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto lg:px-4 xl:px-6 2xl:px-8 lg:py-3">
+          <div className="px-4 pt-3 lg:px-0 lg:pt-0">
+            <TermsReacceptBanner />
+          </div>
+          <Jobs embedded />
+        </div>
       ) : user && homeFeedComunidade ? (
         <div className="w-full max-w-screen-lg lg:max-w-[1480px] xl:max-w-[1600px] mx-auto lg:px-4 xl:px-6 2xl:px-8 lg:py-3">
           <div className="px-4 pt-3 lg:px-0 lg:pt-0">

@@ -31,6 +31,7 @@ const Header = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const isHomePath = location.pathname === "/home";
   const homeFeedComunidade = searchParams.get("feed") === "comunidade";
+  const homeFeedVagas = searchParams.get("feed") === "vagas";
   
   const [proStatus, setProStatus] = useState<string | null>(null);
   const [planName, setPlanName] = useState<string | null>(null);
@@ -304,11 +305,11 @@ const Header = () => {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={!homeFeedComunidade}
+                  aria-selected={!homeFeedComunidade && !homeFeedVagas}
                   onClick={() => setSearchParams({}, { replace: true })}
                   className={cn(
                     "px-3 py-1.5 rounded-full text-xs font-bold transition-all lg:px-5 lg:py-2 lg:text-sm",
-                    !homeFeedComunidade
+                    !homeFeedComunidade && !homeFeedVagas
                       ? "bg-card text-primary shadow-sm ring-1 ring-black/5"
                       : "text-muted-foreground hover:text-foreground",
                   )}
@@ -332,11 +333,13 @@ const Header = () => {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={false}
-                  onClick={() => navigate("/jobs")}
+                  aria-selected={homeFeedVagas}
+                  onClick={() => setSearchParams({ feed: "vagas" }, { replace: true })}
                   className={cn(
                     "px-3 py-1.5 rounded-full text-xs font-bold transition-all max-w-[110px] truncate lg:max-w-none lg:px-5 lg:py-2 lg:text-sm",
-                    "text-muted-foreground hover:text-foreground",
+                    homeFeedVagas
+                      ? "bg-card text-primary shadow-sm ring-1 ring-black/5"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   Vagas

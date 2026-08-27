@@ -558,14 +558,11 @@ serve(async (req) => {
     // SUBSCRIPTION UPDATED
     // ===============================
     if (event === "SUBSCRIPTION_UPDATED") {
+      // NÃO sobrescrevemos o status aqui: o Asaas manda o status "cru" (ACTIVE/INACTIVE/EXPIRED),
+      // que conflita com o nosso vocabulário interno (active/pending/suspended/cancelled) e poderia
+      // desfazer um "suspended". Os eventos PAYMENT_* são a fonte autoritativa do status.
       const subscription = body.subscription;
-
-      await supabase
-        .from("subscriptions")
-        .update({ status: subscription.status })
-        .eq("asaas_subscription_id", subscription.id);
-
-      console.log("Subscription updated via event:", subscription.id);
+      console.log("Subscription updated via event (status ignorado):", subscription?.id, subscription?.status);
     }
 
     return new Response("OK", { status: 200 });

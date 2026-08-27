@@ -23,6 +23,14 @@ const ALL_CHAMO_PRODUCT_IDS = [
   "com.chamo.app.business.annual",
 ];
 
+// Deriva o plano a partir do productId verificado da Apple (nao confia no client).
+function planFromProductId(productId: string): "pro" | "vip" | "business" | null {
+  if (productId.startsWith("com.chamo.app.pro.")) return "pro";
+  if (productId.startsWith("com.chamo.app.vip.")) return "vip";
+  if (productId.startsWith("com.chamo.app.business.")) return "business";
+  return null;
+}
+
 const cors = () => ({
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -251,13 +259,14 @@ serve(async (req) => {
     const body = await req.json();
     const {
       userId,
-      planId,
       transactionId,
       productIdentifier,
       receipt,
       jwsRepresentation,
       platform,
     } = body;
+    // planId eh derivado do produto verificado da Apple (iOS). O do body eh so ponto de partida.
+    let planId = body.planId;
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -327,6 +336,9 @@ serve(async (req) => {
         }
         appleOriginalTxId = v.originalTransactionId;
         appleEnvironment = v.environment;
+        // Deriva o plano do produto ativo verificado (nao confia no planId do client)
+        const verifiedPlan = planFromProductId(v.activeProductId ?? productIdentifier ?? "");
+        if (verifiedPlan) planId = verifiedPlan;
       } else if (hasJws) {
         // Caminho 2: transação assinada do StoreKit 2 (jwsRepresentation).
         // O StoreKit já verificou no dispositivo; validamos a assinatura da Apple no servidor.
@@ -347,6 +359,9 @@ serve(async (req) => {
         }
         appleOriginalTxId = tx.originalTransactionId ?? tx.transactionId;
         appleEnvironment = tx.environment ?? "Production";
+        // Deriva o plano do produto verificado (nao confia no planId do client)
+        const verifiedPlan = planFromProductId(prod);
+        if (verifiedPlan) planId = verifiedPlan;
       } else {
         return json(
           {

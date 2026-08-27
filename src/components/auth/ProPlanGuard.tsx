@@ -38,29 +38,36 @@ const ProPlanGuard = () => {
     if (profile.user_type !== "professional") return; // so profissional (empresa usa outro fluxo)
 
     if (checkedForRef.current === profile.user_id) return;
-    checkedForRef.current = profile.user_id;
 
     (async () => {
-      const [{ data: sub }, { data: pro }] = await Promise.all([
-        supabase.from("subscriptions").select("plan_id, status").eq("user_id", profile.user_id).maybeSingle(),
-        supabase.from("professionals").select("created_at").eq("user_id", profile.user_id).maybeSingle(),
-      ]);
-      const status = String((sub as any)?.status || "").toLowerCase();
-      const planId = String((sub as any)?.plan_id || "");
-      const isPaidPlan = planId !== "" && planId !== "free";
-      const isActive = status === "active";
-      const hasActivePaid = isPaidPlan && isActive;
+      try {
+        const [{ data: sub, error: subErr }, { data: pro, error: proErr }] = await Promise.all([
+          supabase.from("subscriptions").select("plan_id, status").eq("user_id", profile.user_id).maybeSingle(),
+          supabase.from("professionals").select("created_at").eq("user_id", profile.user_id).maybeSingle(),
+        ]);
+        // Falha de rede: não marca como checado pra reavaliar depois (evita pro "escapar" do paywall).
+        if (subErr || proErr) return;
 
-      // "Virou profissional antes do lancamento" = grandfather (nao forca).
-      const proCreated = (pro as any)?.created_at ? new Date((pro as any).created_at).getTime() : null;
-      const becameProBeforeCutoff = proCreated !== null && proCreated < CUTOFF;
+        const status = String((sub as any)?.status || "").toLowerCase();
+        const planId = String((sub as any)?.plan_id || "");
+        const isPaidPlan = planId !== "" && planId !== "free";
+        const isActive = status === "active";
+        const hasActivePaid = isPaidPlan && isActive;
 
-      // Bloqueia (manda pro paywall) se NAO tem plano pago ativo E:
-      //  - o plano pago esta vencido/suspenso (regularizar) -> qualquer data, ou
-      //  - virou profissional a partir do lancamento (pro novo, inclui cliente antigo que virou pro).
-      const suspendedPaid = isPaidPlan && !isActive;
-      const gate = !hasActivePaid && (suspendedPaid || !becameProBeforeCutoff);
-      setBlocked(gate);
+        // "Virou profissional antes do lancamento" = grandfather (nao forca).
+        const proCreated = (pro as any)?.created_at ? new Date((pro as any).created_at).getTime() : null;
+        const becameProBeforeCutoff = proCreated !== null && proCreated < CUTOFF;
+
+        // Bloqueia (manda pro paywall) se NAO tem plano pago ativo E:
+        //  - o plano pago esta vencido/suspenso (regularizar) -> qualquer data, ou
+        //  - virou profissional a partir do lancamento (pro novo, inclui cliente antigo que virou pro).
+        const suspendedPaid = isPaidPlan && !isActive;
+        const gate = !hasActivePaid && (suspendedPaid || !becameProBeforeCutoff);
+        checkedForRef.current = profile.user_id;
+        setBlocked(gate);
+      } catch {
+        // erro inesperado: não marca checado (reavalia depois)
+      }
     })();
   }, [loading, profile, isAdmin]);
 

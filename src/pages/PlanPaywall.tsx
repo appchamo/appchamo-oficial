@@ -194,7 +194,7 @@ export default function PlanPaywall() {
         throw new Error((res.data as any)?.error || "Erro ao ativar a assinatura.");
       }
 
-      await supabase.from("profiles").update({ user_type: "professional" }).eq("user_id", user.id);
+      await supabase.from("profiles").update({ user_type: selectedPlan.id === "business" ? "company" : "professional" }).eq("user_id", user.id);
       toast({ title: "Plano ativado! 🚀", description: "Sua assinatura foi confirmada pela App Store." });
       window.location.assign("/home");
     } catch (err: any) {
@@ -237,7 +237,7 @@ export default function PlanPaywall() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (!res.error && !(res.data as any)?.error) {
-        await supabase.from("profiles").update({ user_type: "professional" }).eq("user_id", user.id);
+        await supabase.from("profiles").update({ user_type: best.planId === "business" ? "company" : "professional" }).eq("user_id", user.id);
         toast({ title: "Compras restauradas!", description: `Plano ${best.planId} ativado.` });
         window.location.assign("/home");
       } else {

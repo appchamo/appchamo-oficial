@@ -104,7 +104,69 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const body = await req.json();
-    const { userId, accountType: accountTypeRaw, profileData, basicData, docFiles, planId } = body;
+    let { accountType: accountTypeRaw, profileData, basicData, docFiles, planId } = body;
+    const { userId } = body;
+
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: "Missing required fields" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validação do JWT (verify_jwt desligado no gateway por causa do ES256) — feita ANTES
+    // de qualquer coisa, pois o pickup do servidor depende de o token bater com o userId.
+    const authHeader = req.headers.get("Authorization");
+    const token = authHeader?.replace(/^Bearer\s+/i, "")?.trim();
+    if (!token) {
+      return new Response(
+        JSON.stringify({ error: "Token ausente." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    try {
+      const JWKS = jose.createRemoteJWKSet(
+        new URL(supabaseUrl + "/auth/v1/.well-known/jwks.json")
+      );
+      const issuer = supabaseUrl + "/auth/v1";
+      const { payload } = await jose.jwtVerify(token, JWKS, { issuer });
+      const sub = payload.sub as string | undefined;
+      if (!sub || sub !== userId) {
+        return new Response(
+          JSON.stringify({ error: "Token inválido para este usuário." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } catch (_e) {
+      return new Response(
+        JSON.stringify({ error: "Token inválido ou expirado." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Pickup do servidor: se o navegador não enviou os dados (cadastro por e-mail
+    // concluído em OUTRO aparelho, ou o app reiniciado apagou o sessionStorage),
+    // busca o payload guardado de forma durável em `pending_signups`.
+    if (!basicData) {
+      const { data: pend } = await supabase
+        .from("pending_signups")
+        .select("payload")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const p = (pend as { payload?: Record<string, unknown> } | null)?.payload as any;
+      if (!p) {
+        // Nada pra completar (usuário já concluído ou sem pendência). No-op seguro.
+        return new Response(
+          JSON.stringify({ skipped: true, reason: "sem_pendencia" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      accountTypeRaw = p.accountType ?? accountTypeRaw;
+      profileData = p.profileData ?? profileData;
+      basicData = p.basicData ?? basicData;
+      docFiles = p.docFiles ?? docFiles;
+      planId = p.planId ?? planId;
+    }
 
     /** Se o app perder o estado (ex.: remount WebView) pode enviar client com payload de profissional. */
     const hasProDocs = Array.isArray(docFiles) && docFiles.length > 0;
@@ -117,7 +179,7 @@ Deno.serve(async (req) => {
       accountType = "professional";
     }
 
-    if (!userId || !accountType || !basicData) {
+    if (!accountType || !basicData) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -155,35 +217,6 @@ Deno.serve(async (req) => {
         basicData.document = docDigits;
         basicData.documentType = docType;
       }
-    }
-
-    // Validação do JWT (verify_jwt desligado no gateway por causa do ES256)
-    const authHeader = req.headers.get("Authorization");
-    const token = authHeader?.replace(/^Bearer\s+/i, "")?.trim();
-    if (!token) {
-      return new Response(
-        JSON.stringify({ error: "Token ausente." }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    try {
-      const JWKS = jose.createRemoteJWKSet(
-        new URL(supabaseUrl + "/auth/v1/.well-known/jwks.json")
-      );
-      const issuer = supabaseUrl + "/auth/v1";
-      const { payload } = await jose.jwtVerify(token, JWKS, { issuer });
-      const sub = payload.sub as string | undefined;
-      if (!sub || sub !== userId) {
-        return new Response(
-          JSON.stringify({ error: "Token inválido para este usuário." }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-    } catch (_e) {
-      return new Response(
-        JSON.stringify({ error: "Token inválido ou expirado." }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
     }
 
     // Verificação do usuário no Auth
@@ -434,6 +467,11 @@ Deno.serve(async (req) => {
         link: "/admin/pros",
       });
     }
+
+    // Cadastro concluído: remove a pendência durável (se existia).
+    try {
+      await supabase.from("pending_signups").delete().eq("user_id", userId);
+    } catch (_e) { /* best-effort */ }
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

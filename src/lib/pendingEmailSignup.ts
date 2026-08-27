@@ -33,19 +33,100 @@ export function peekPendingEmailSignup(userId: string): PendingEmailSignupV1 | n
 }
 
 /**
- * Após login, o JWT pode demorar um instante; várias tentativas evitam ficar com perfil "cliente" até dar F5.
+ * Guarda o cadastro pendente DE FORMA DURÁVEL no servidor (tabela pending_signups),
+ * pra concluir depois da confirmação do e-mail em QUALQUER aparelho — mesmo que o
+ * navegador que iniciou seja fechado ou o e-mail seja aberto em outro device.
+ * Best-effort: se falhar, o fluxo local (sessionStorage) ainda cobre o caso normal.
+ */
+export async function stashPendingSignupToServer(userId: string, payload: PendingEmailSignupV1): Promise<void> {
+  try {
+    await supabase.functions.invoke("stash-pending-signup", { body: { userId, payload } });
+  } catch (e) {
+    console.warn("[pendingEmailSignup] stash:", e);
+  }
+}
+
+type FlushOutcome = "done" | "retry" | "nothing";
+
+/**
+ * Tenta concluir o cadastro. Usa o payload local (sessionStorage) quando existe;
+ * senão manda só o userId e o servidor usa o payload guardado em pending_signups.
+ */
+async function attemptFlush(session: Session | null): Promise<FlushOutcome> {
+  if (!session?.user?.id) return "nothing";
+  const uid = session.user.id;
+
+  const token = await getAccessTokenForEdgeFunctions();
+  if (!token) return "retry";
+
+  const local = peekPendingEmailSignup(uid);
+  const body = local
+    ? {
+        userId: local.userId,
+        accountType: local.accountType,
+        profileData: local.profileData,
+        basicData: local.basicData,
+        docFiles: local.docFiles,
+        planId: local.planId,
+      }
+    : { userId: uid }; // pickup do servidor
+
+  const { data: result, error: fnError } = await supabase.functions.invoke("complete-signup", {
+    body,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (fnError) {
+    console.error("[pendingEmailSignup] complete-signup:", fnError);
+    return "retry";
+  }
+  const res = result as { error?: string; skipped?: boolean } | null;
+  if (res && typeof res === "object" && res.error) {
+    console.error("[pendingEmailSignup] complete-signup:", res.error);
+    return "retry";
+  }
+  // Servidor não tinha nada pendente (já concluído ou nunca guardado): nada a fazer.
+  if (res && typeof res === "object" && res.skipped) return "nothing";
+
+  // Sucesso: limpa o rascunho local e aplica indicação (só temos o código no payload local).
+  if (local) {
+    try {
+      sessionStorage.removeItem(PENDING_EMAIL_SIGNUP_KEY);
+    } catch {
+      void 0;
+    }
+    const refCode = local.referralCode?.trim() ?? "";
+    if (refCode.length >= 6) {
+      const { error: refErr } = await supabase.rpc("apply_referral_code", { p_raw_code: refCode });
+      if (refErr) console.warn("[pendingEmailSignup] apply_referral_code:", refErr);
+    }
+  }
+  return "done";
+}
+
+/**
+ * Após login, o JWT pode demorar um instante; várias tentativas evitam ficar com perfil
+ * "cliente"/"pending" até dar F5. Cobre tanto o payload local quanto o pickup do servidor.
  */
 export async function flushPendingEmailSignupWithRetries(session: Session | null, maxAttempts = 8): Promise<void> {
   if (!session?.user?.id) return;
   const uid = session.user.id;
-  if (!peekPendingEmailSignup(uid)) return;
+
+  // Sem payload local: só vale a pena tentar o pickup do servidor se o perfil ainda
+  // estiver "pending_signup" (evita chamada extra em todo login normal).
+  if (!peekPendingEmailSignup(uid)) {
+    try {
+      const { data: prof } = await supabase.from("profiles").select("user_type").eq("user_id", uid).maybeSingle();
+      if (String((prof as { user_type?: string } | null)?.user_type || "") !== "pending_signup") return;
+    } catch {
+      /* se a consulta falhar, tenta mesmo assim */
+    }
+  }
 
   let sess: Session | null = session;
   for (let i = 0; i < maxAttempts; i++) {
-    if (!peekPendingEmailSignup(uid)) return;
-
-    const ok = await flushPendingEmailSignup(sess);
-    if (ok) return;
+    const outcome = await attemptFlush(sess);
+    if (outcome === "done" || outcome === "nothing") return;
 
     await supabase.auth.refreshSession().catch(() => {});
     const {
@@ -56,50 +137,7 @@ export async function flushPendingEmailSignupWithRetries(session: Session | null
   }
 }
 
-/**
- * Após o utilizador confirmar o e-mail e obter sessão, envia o payload guardado em sessionStorage
- * para complete-signup (o fluxo sem sessão imediata após signUp não consegue chamar a Edge Function antes).
- */
+/** Compat: retorna true se concluiu o cadastro. */
 export async function flushPendingEmailSignup(session: Session | null): Promise<boolean> {
-  if (!session?.user?.id) return false;
-
-  const pending = peekPendingEmailSignup(session.user.id);
-  if (!pending) return false;
-
-  const token = await getAccessTokenForEdgeFunctions();
-  if (!token) return false;
-
-  const { data: result, error: fnError } = await supabase.functions.invoke("complete-signup", {
-    body: {
-      userId: pending.userId,
-      accountType: pending.accountType,
-      profileData: pending.profileData,
-      basicData: pending.basicData,
-      docFiles: pending.docFiles,
-      planId: pending.planId,
-    },
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (fnError || (result && typeof result === "object" && "error" in result && (result as { error?: string }).error)) {
-    console.error("[pendingEmailSignup] complete-signup:", fnError || result);
-    return false;
-  }
-
-  try {
-    sessionStorage.removeItem(PENDING_EMAIL_SIGNUP_KEY);
-  } catch {
-    void 0;
-  }
-
-  const refCode = pending.referralCode?.trim() ?? "";
-  if (refCode.length >= 6) {
-    const { data: refData, error: refErr } = await supabase.rpc("apply_referral_code", { p_raw_code: refCode });
-    if (refErr) console.warn("[pendingEmailSignup] apply_referral_code:", refErr);
-    else if (refData && typeof refData === "object" && "ok" in refData && (refData as { ok?: boolean }).ok === false) {
-      console.warn("[pendingEmailSignup] referral:", (refData as { error?: string }).error);
-    }
-  }
-
-  return true;
+  return (await attemptFlush(session)) === "done";
 }

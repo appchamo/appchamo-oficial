@@ -9,6 +9,7 @@ import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
 import { getAuthEmailRedirectUrl } from "@/lib/authEmailRedirect";
 import {
   PENDING_EMAIL_SIGNUP_KEY,
+  stashPendingSignupToServer,
   type PendingEmailSignupV1,
 } from "@/lib/pendingEmailSignup";
 import { getAccessTokenForEdgeFunctions } from "@/lib/getAccessTokenForEdgeFunctions";
@@ -900,16 +901,14 @@ const Signup = () => {
           planId,
           referralCode: basicData.referralCode?.trim() || null,
         };
+        // Guarda DURÁVEL no servidor: conclui o cadastro após confirmar o e-mail
+        // em QUALQUER aparelho (abrir o e-mail no PC, app reiniciado, etc.).
+        await stashPendingSignupToServer(userId, pending);
+        // Guarda também localmente (caminho rápido). Se falhar (cota), o servidor cobre.
         try {
           sessionStorage.setItem(PENDING_EMAIL_SIGNUP_KEY, JSON.stringify(pending));
         } catch {
-          toast({
-            title: "Não foi possível guardar o cadastro",
-            description: "Ative armazenamento para este site ou tente noutro browser.",
-            variant: "destructive",
-          });
-          setLoading(false);
-          return;
+          /* sem storage local: o pickup do servidor conclui o cadastro no login */
         }
         setLoading(false);
         localStorage.removeItem("signup_in_progress");

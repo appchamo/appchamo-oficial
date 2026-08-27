@@ -63,10 +63,18 @@ const AdminProfessions = () => {
       return;
     }
     if (isNew) {
-      await supabase.from("professions" as any).insert(form as any);
+      const { error } = await supabase.from("professions" as any).insert(form as any);
+      if (error) {
+        toast({ title: "Erro ao criar profissão", description: error.message, variant: "destructive" });
+        return;
+      }
       toast({ title: "Profissão criada!" });
     } else if (editItem) {
-      await supabase.from("professions" as any).update(form as any).eq("id", editItem.id);
+      const { error } = await supabase.from("professions" as any).update(form as any).eq("id", editItem.id);
+      if (error) {
+        toast({ title: "Erro ao atualizar profissão", description: error.message, variant: "destructive" });
+        return;
+      }
       toast({ title: "Profissão atualizada!" });
     }
     setEditItem(null);
@@ -74,7 +82,12 @@ const AdminProfessions = () => {
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from("professions" as any).delete().eq("id", id);
+    if (!window.confirm("Remover esta profissão?")) return;
+    const { error } = await supabase.from("professions" as any).delete().eq("id", id);
+    if (error) {
+      toast({ title: "Erro ao remover profissão", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({ title: "Profissão removida" });
     fetchData();
   };
@@ -87,7 +100,7 @@ const AdminProfessions = () => {
     <AdminLayout title="Profissões">
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <p className="text-sm text-muted-foreground">{professions.length} profissões</p>
+          <p className="text-sm text-muted-foreground">{(filterCat ? filtered : professions).length} profissões</p>
           <div className="relative">
             <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}
               className="border rounded-xl px-3 py-2 text-xs bg-background outline-none focus:ring-2 focus:ring-primary/30 appearance-none pr-7">

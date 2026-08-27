@@ -113,7 +113,7 @@ const AdminProfiles = () => {
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
     return (
-      u.full_name.toLowerCase().includes(q) ||
+      u.full_name?.toLowerCase().includes(q) ||
       u.email.toLowerCase().includes(q) ||
       (u.category_name || "").toLowerCase().includes(q) ||
       (u.profession_name || "").toLowerCase().includes(q)
@@ -159,7 +159,8 @@ const AdminProfiles = () => {
 
   const handleDeleteReview = async () => {
     if (!deleteReviewId || !selectedUser?.professional_id) return;
-    await supabase.from("reviews").delete().eq("id", deleteReviewId);
+    const { error: delErr } = await supabase.from("reviews").delete().eq("id", deleteReviewId);
+    if (delErr) { toast({ title: "Erro ao remover comentário", description: translateError(delErr.message), variant: "destructive" }); return; }
 
     // Log action
     const { data: { session } } = await supabase.auth.getSession();

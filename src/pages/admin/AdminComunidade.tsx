@@ -29,11 +29,16 @@ const AdminComunidade = () => {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("community_posts" as any)
       .select("id, author_id, body, image_url, video_url, created_at, audience")
       .order("created_at", { ascending: false })
       .limit(500);
+    if (error) {
+      toast({ title: "Erro ao carregar posts", description: error.message, variant: "destructive" });
+      setLoading(false);
+      return;
+    }
     const list = ((data as unknown) as PostRow[]) || [];
     setPosts(list);
     const ids = [...new Set(list.map((p) => p.author_id).filter(Boolean))];

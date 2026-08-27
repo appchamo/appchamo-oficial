@@ -123,6 +123,10 @@ export default function AdminOpenRequestsPanel() {
         setInterests(itRows);
         setClientNames(cNames);
         setProInfo(pInfo);
+      } catch (e) {
+        if (!cancelled) {
+          toast({ title: "Erro ao carregar pedidos", description: (e as Error)?.message, variant: "destructive" });
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

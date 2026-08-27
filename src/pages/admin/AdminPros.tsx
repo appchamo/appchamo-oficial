@@ -94,6 +94,7 @@ const availabilityBadge: Record<string, { label: string; cls: string }> = {
 // Componente auxiliar para buscar dados da assinatura (CNPJ e Endereço)
 const SubscriptionDoc = ({ userId }: { userId: string }) => {
   const [subDoc, setSubDoc] = useState<{url: string, address: string} | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const fetchSub = async () => {
@@ -103,11 +104,13 @@ const SubscriptionDoc = ({ userId }: { userId: string }) => {
         .eq("user_id", userId)
         .maybeSingle();
       if (data) setSubDoc({ url: data.business_proof_url, address: data.business_address });
+      setLoaded(true);
     };
     fetchSub();
   }, [userId]);
 
-  if (!subDoc?.url) return <p className="text-[10px] text-muted-foreground italic">Carregando dados empresariais...</p>;
+  if (!loaded) return <p className="text-[10px] text-muted-foreground italic">Carregando dados empresariais...</p>;
+  if (!subDoc?.url) return <p className="text-[10px] text-muted-foreground italic">Nenhum documento empresarial enviado</p>;
 
   return (
     <div className="space-y-2">
@@ -312,17 +315,19 @@ const AdminPros = () => {
     if (!detailPro) return;
 
     // 1. Aprovar e ativar o profissional
-    await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", detailPro.id);
+    const { error: updErr } = await supabase.from("professionals").update({ profile_status: "approved", active: true }).eq("id", detailPro.id);
+    if (updErr) { toast({ title: "Erro ao aprovar profissional", description: translateError(updErr.message), variant: "destructive" }); return; }
     await logAction("approve_professional", "professional", detailPro.id);
 
     // 2. Notificar o profissional
-    await supabase.from("notifications").insert({
+    const { error: notifErr } = await supabase.from("notifications").insert({
       user_id: detailPro.user_id,
       title: "Cadastro aprovado! 🎉",
       message: "Seu cadastro profissional foi aprovado. Agora você pode receber chamadas de clientes.",
       type: "approval",
       link: "/pro",
     });
+    if (notifErr) { toast({ title: "Erro ao aprovar profissional", description: translateError(notifErr.message), variant: "destructive" }); return; }
     toast({ title: "Profissional aprovado!" });
     setDetailPro(null);
     fetchPros();
@@ -334,16 +339,19 @@ const AdminPros = () => {
       toast({ title: "Informe o motivo da reprovação", variant: "destructive" });
       return;
     }
-    await supabase.from("professionals").update({ profile_status: "rejected", active: false }).eq("id", rejectOpenPro.id);
-    await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", rejectOpenPro.user_id);
+    const { error: proErr } = await supabase.from("professionals").update({ profile_status: "rejected", active: false }).eq("id", rejectOpenPro.id);
+    if (proErr) { toast({ title: "Erro ao reprovar cadastro", description: translateError(proErr.message), variant: "destructive" }); return; }
+    const { error: profErr } = await supabase.from("profiles").update({ user_type: "client" }).eq("user_id", rejectOpenPro.user_id);
+    if (profErr) { toast({ title: "Erro ao reprovar cadastro", description: translateError(profErr.message), variant: "destructive" }); return; }
     await logAction("reject_professional", "professional", rejectOpenPro.id, { reason: rejectOpenReason });
-    await supabase.from("notifications").insert({
+    const { error: notifErr } = await supabase.from("notifications").insert({
       user_id: rejectOpenPro.user_id,
       title: "Cadastro não aprovado",
       message: rejectOpenReason,
       type: "rejection",
       link: "/notifications",
     });
+    if (notifErr) { toast({ title: "Erro ao reprovar cadastro", description: translateError(notifErr.message), variant: "destructive" }); return; }
     toast({ title: "Profissional reprovado" });
     setRejectOpen(false);
     setRejectOpenPro(null);
@@ -1125,7 +1133,7 @@ const AdminPros = () => {
                     </div>
 
                     {/* Documentos do Plano Business (Cartão CNPJ) */}
-                    {detailPro.plan_id === 'business' && detailPro.subscription_status !== 'ACTIVE' && (
+                    {detailPro.plan_id === 'business' && (detailPro.subscription_status || '').toUpperCase() !== 'ACTIVE' && (
                       <div className="bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 rounded-xl p-3">
                         <p className="text-[10px] font-bold text-violet-600 uppercase mb-2 flex items-center gap-1">
                           <Building2 className="w-3 h-3" /> Verificação Business

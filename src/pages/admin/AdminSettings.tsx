@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { translateError } from "@/lib/errorMessages";
@@ -30,6 +30,9 @@ import {
 
 const AdminSettings = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
+  // Chaves cujo valor no banco é objeto/array (JSON) — ex.: home_tutorials.
+  // NUNCA regravar essas aqui (esta tela só edita strings); senão vira string e corrompe o dado.
+  const jsonKeysRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [statsRows, setStatsRows] = useState<any[]>([]);
@@ -86,10 +89,17 @@ const AdminSettings = () => {
       ]);
       if (settingsData) {
         const map: Record<string, string> = {};
+        const jsonKeys = new Set<string>();
         for (const s of settingsData) {
+          if (s.value !== null && typeof s.value === "object") {
+            // valor JSON (objeto/array) — mantém no mapa como texto só pra referência,
+            // mas marca pra NUNCA regravar no save (evita corromper home_tutorials etc.)
+            jsonKeys.add(s.key);
+          }
           const val = typeof s.value === "string" ? s.value : JSON.stringify(s.value).replace(/^"|"$/g, "");
           map[s.key] = val;
         }
+        jsonKeysRef.current = jsonKeys;
         setSettings(map);
       }
       if (statsData) setStatsRows(statsData);
@@ -232,16 +242,20 @@ const AdminSettings = () => {
 
   const handleSave = async () => {
     setSaving(true);
-    // Save platform_settings
-    for (const [key, value] of Object.entries(settings)) {
-      await supabase.from("platform_settings").upsert(
-        { key, value: value as any },
-        { onConflict: "key" }
-      );
+    // Save platform_settings (pula chaves JSON pra não corromper home_tutorials etc.)
+    const entries = Object.entries(settings).filter(([key]) => !jsonKeysRef.current.has(key));
+    const payload = entries.map(([key, value]) => ({ key, value: value as any }));
+    const { error: settingsErr } = await supabase
+      .from("platform_settings")
+      .upsert(payload, { onConflict: "key" });
+    if (settingsErr) {
+      toast({ title: "Erro ao salvar configurações", description: settingsErr.message, variant: "destructive" });
+      setSaving(false);
+      return;
     }
     // Save platform_stats
     for (const row of statsRows) {
-      await supabase.from("platform_stats").update({
+      const { error: statErr } = await supabase.from("platform_stats").update({
         icon_name: row.icon_name,
         label: row.label,
         value_mode: row.value_mode,
@@ -249,6 +263,11 @@ const AdminSettings = () => {
         sort_order: row.sort_order,
         active: row.active,
       }).eq("id", row.id);
+      if (statErr) {
+        toast({ title: "Erro ao salvar estatísticas", description: statErr.message, variant: "destructive" });
+        setSaving(false);
+        return;
+      }
     }
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {

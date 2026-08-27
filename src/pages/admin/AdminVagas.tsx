@@ -10,7 +10,6 @@ interface JobRow {
   professional_id: string | null; sponsor_id: string | null;
 }
 
-// deno-lint-ignore no-explicit-any
 const AdminVagas = () => {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [owners, setOwners] = useState<Record<string, string>>({});
@@ -22,40 +21,45 @@ const AdminVagas = () => {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("job_postings")
-      .select("id, title, description, active, created_at, city, state, salary_range, professional_id, sponsor_id")
-      .order("created_at", { ascending: false })
-      .limit(1000);
-    const list = (data || []) as JobRow[];
-    setJobs(list);
+    try {
+      const { data } = await supabase
+        .from("job_postings")
+        .select("id, title, description, active, created_at, city, state, salary_range, professional_id, sponsor_id")
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      const list = (data || []) as JobRow[];
+      setJobs(list);
 
-    const proIds = [...new Set(list.map((j) => j.professional_id).filter(Boolean))] as string[];
-    const spIds = [...new Set(list.map((j) => j.sponsor_id).filter(Boolean))] as string[];
-    const [{ data: pros }, { data: sps }] = await Promise.all([
-      proIds.length ? supabase.from("professionals").select("id, user_id").in("id", proIds) : Promise.resolve({ data: [] as any[] }),
-      spIds.length ? supabase.from("sponsors").select("id, user_id").in("id", spIds) : Promise.resolve({ data: [] as any[] }),
-    ]);
-    const proMap = new Map((pros || []).map((p: any) => [p.id, p.user_id]));
-    const spMap = new Map((sps || []).map((s: any) => [s.id, s.user_id]));
-    const userIds = [...new Set([...(pros || []).map((p: any) => p.user_id), ...(sps || []).map((s: any) => s.user_id)])];
-    const { data: profs } = userIds.length ? await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds) : { data: [] as any[] };
-    const nameByUser = new Map((profs || []).map((p: any) => [p.user_id, (p.full_name || "").trim() || "—"]));
-    const ownMap: Record<string, string> = {};
-    for (const j of list) {
-      const uid = j.professional_id ? proMap.get(j.professional_id) : j.sponsor_id ? spMap.get(j.sponsor_id) : null;
-      ownMap[j.id] = uid ? (nameByUser.get(uid) || "—") : "—";
-    }
-    setOwners(ownMap);
+      const proIds = [...new Set(list.map((j) => j.professional_id).filter(Boolean))] as string[];
+      const spIds = [...new Set(list.map((j) => j.sponsor_id).filter(Boolean))] as string[];
+      const [{ data: pros }, { data: sps }] = await Promise.all([
+        proIds.length ? supabase.from("professionals").select("id, user_id").in("id", proIds) : Promise.resolve({ data: [] as any[] }),
+        spIds.length ? supabase.from("sponsors").select("id, user_id").in("id", spIds) : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const proMap = new Map((pros || []).map((p: any) => [p.id, p.user_id]));
+      const spMap = new Map((sps || []).map((s: any) => [s.id, s.user_id]));
+      const userIds = [...new Set([...(pros || []).map((p: any) => p.user_id), ...(sps || []).map((s: any) => s.user_id)])];
+      const { data: profs } = userIds.length ? await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds) : { data: [] as any[] };
+      const nameByUser = new Map((profs || []).map((p: any) => [p.user_id, (p.full_name || "").trim() || "—"]));
+      const ownMap: Record<string, string> = {};
+      for (const j of list) {
+        const uid = j.professional_id ? proMap.get(j.professional_id) : j.sponsor_id ? spMap.get(j.sponsor_id) : null;
+        ownMap[j.id] = uid ? (nameByUser.get(uid) || "—") : "—";
+      }
+      setOwners(ownMap);
 
-    const ids = list.map((j) => j.id);
-    if (ids.length) {
-      const { data: apps } = await supabase.from("job_applications").select("job_id").in("job_id", ids);
-      const c: Record<string, number> = {};
-      for (const a of (apps || []) as any[]) c[a.job_id] = (c[a.job_id] || 0) + 1;
-      setCounts(c);
+      const ids = list.map((j) => j.id);
+      if (ids.length) {
+        const { data: apps } = await supabase.from("job_applications").select("job_id").in("job_id", ids);
+        const c: Record<string, number> = {};
+        for (const a of (apps || []) as any[]) c[a.job_id] = (c[a.job_id] || 0) + 1;
+        setCounts(c);
+      }
+    } catch (e) {
+      toast({ title: "Erro ao carregar vagas", description: (e as Error)?.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
   useEffect(() => { void load(); }, []);
 

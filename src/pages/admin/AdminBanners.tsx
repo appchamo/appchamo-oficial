@@ -56,7 +56,12 @@ const AdminBanners = () => {
   const [linkedBannerId, setLinkedBannerId] = useState<string>("");
 
   const fetchData = async () => {
-    const { data } = await supabase.from("banners" as any).select("*").order("sort_order");
+    const { data, error } = await supabase.from("banners" as any).select("*").order("sort_order");
+    if (error) {
+      toast({ title: "Erro ao carregar banners", description: error.message, variant: "destructive" });
+      setLoading(false);
+      return;
+    }
     setBanners((data as any[]) || []);
     setLoading(false);
   };
@@ -119,6 +124,7 @@ const AdminBanners = () => {
     }
 
     let finalCarouselGroup = form.carousel_group;
+    let finalPosition = form.position;
 
     // Modo carrossel: descobrir/criar o grupo
     if (carouselMode && linkedBannerId) {
@@ -131,23 +137,35 @@ const AdminBanners = () => {
           // Criar novo grupo usando o id do banner linkado como chave
           finalCarouselGroup = linkedBanner.id;
           // Atualizar o banner linkado com o grupo
-          await supabase
+          const { error: linkError } = await supabase
             .from("banners" as any)
             .update({ carousel_group: finalCarouselGroup } as any)
             .eq("id", linkedBanner.id);
+          if (linkError) {
+            toast({ title: "Erro ao agrupar carrossel", description: linkError.message, variant: "destructive" });
+            return;
+          }
         }
-        // Herdar posição do banner linkado
-        form.position = linkedBanner.position;
+        // Herdar posição do banner linkado (sem mutar o form)
+        finalPosition = linkedBanner.position;
       }
     }
 
-    const payload = { ...form, carousel_group: finalCarouselGroup };
+    const payload = { ...form, carousel_group: finalCarouselGroup, position: finalPosition };
 
     if (isNew) {
-      await supabase.from("banners" as any).insert(payload as any);
+      const { error } = await supabase.from("banners" as any).insert(payload as any);
+      if (error) {
+        toast({ title: "Erro ao criar banner", description: error.message, variant: "destructive" });
+        return;
+      }
       toast({ title: "Banner criado!" });
     } else if (editItem && editItem.id) {
-      await supabase.from("banners" as any).update(payload as any).eq("id", editItem.id);
+      const { error } = await supabase.from("banners" as any).update(payload as any).eq("id", editItem.id);
+      if (error) {
+        toast({ title: "Erro ao atualizar banner", description: error.message, variant: "destructive" });
+        return;
+      }
       toast({ title: "Banner atualizado!" });
     }
 
@@ -156,7 +174,11 @@ const AdminBanners = () => {
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from("banners" as any).delete().eq("id", id);
+    const { error } = await supabase.from("banners" as any).delete().eq("id", id);
+    if (error) {
+      toast({ title: "Erro ao remover banner", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({ title: "Banner removido" });
     fetchData();
   };

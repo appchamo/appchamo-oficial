@@ -75,10 +75,18 @@ const AdminCategories = () => {
       return;
     }
     if (isNew) {
-      await supabase.from("categories").insert(form);
+      const { error } = await supabase.from("categories").insert(form);
+      if (error) {
+        toast({ title: "Erro ao criar categoria", description: error.message, variant: "destructive" });
+        return;
+      }
       toast({ title: "Categoria criada!" });
     } else if (editCat) {
-      await supabase.from("categories").update(form).eq("id", editCat.id);
+      const { error } = await supabase.from("categories").update(form).eq("id", editCat.id);
+      if (error) {
+        toast({ title: "Erro ao atualizar categoria", description: error.message, variant: "destructive" });
+        return;
+      }
       toast({ title: "Categoria atualizada!" });
     }
     setEditCat(null);
@@ -86,7 +94,12 @@ const AdminCategories = () => {
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from("categories").delete().eq("id", id);
+    if (!window.confirm("Remover esta categoria? As profissões vinculadas podem impedir a remoção.")) return;
+    const { error } = await supabase.from("categories").delete().eq("id", id);
+    if (error) {
+      toast({ title: "Não foi possível remover", description: "A categoria pode ter profissões vinculadas.", variant: "destructive" });
+      return;
+    }
     toast({ title: "Categoria removida" });
     fetch();
   };

@@ -375,7 +375,7 @@ const AdminUsers = () => {
 
   const fetchUsers = async () => {
     const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
-    if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); return; }
+    if (error) { toast({ title: "Erro", description: translateError(error.message), variant: "destructive" }); setLoading(false); return; }
     setUsers(data || []);
     setLoading(false);
   };
@@ -511,11 +511,12 @@ const AdminUsers = () => {
     if (newType === "professional" || newType === "company") {
       const { data: existingPro } = await supabase.from("professionals").select("id").eq("user_id", user.user_id).maybeSingle();
       if (!existingPro) {
-        await supabase.from("professionals").insert({
+        const { error: insErr } = await supabase.from("professionals").insert({
           user_id: user.user_id,
           profile_status: "approved",
           active: true,
         });
+        if (insErr) { toast({ title: "Erro ao alterar tipo", description: translateError(insErr.message), variant: "destructive" }); return; }
       }
     }
 
@@ -568,7 +569,7 @@ const AdminUsers = () => {
 
   const handleChangePlan = async () => {
     if (!planUser) return;
-    const { data: sub } = await supabase.from("subscriptions").select("id").eq("user_id", planUser.user_id).maybeSingle();
+    const { data: sub } = await supabase.from("subscriptions").select("id").eq("user_id", planUser.user_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
     // cancel_at_period_end=false evita que o cron expire_cancelled_subscriptions reverta o plano pra free.
     if (sub) {
       const { error: updErr } = await supabase.from("subscriptions")
@@ -602,11 +603,12 @@ const AdminUsers = () => {
     if (newValue) {
       const { data: existingPro } = await supabase.from("professionals").select("id").eq("user_id", user.user_id).maybeSingle();
       if (!existingPro) {
-        await supabase.from("professionals").insert({
+        const { error: insErr } = await supabase.from("professionals").insert({
           user_id: user.user_id,
           profile_status: "approved",
           active: true,
         });
+        if (insErr) { toast({ title: "Erro ao atualizar", description: translateError(insErr.message), variant: "destructive" }); return; }
       }
     }
     await logAction(newValue ? "enable_job_posting" : "disable_job_posting", "user", user.user_id);

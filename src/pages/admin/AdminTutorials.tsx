@@ -31,7 +31,7 @@ const AdminTutorials = () => {
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase.from("platform_settings").select("value").eq("key", "home_tutorials").single();
+      const { data } = await supabase.from("platform_settings").select("value").eq("key", "home_tutorials").maybeSingle();
       if (data?.value && typeof data.value === "object" && !Array.isArray(data.value)) {
         const val = data.value as any;
         setTitle(val.title || "Dúvidas sobre como usar o app?");

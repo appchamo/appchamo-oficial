@@ -535,17 +535,34 @@ const FinancialConfig = () => {
       ...Array.from({ length: 11 }, (_, i) => `installment_fee_${i + 2}x`)];
     for (const key of feeKeys) {
       if (settings[key] !== undefined) {
-        await supabase.from("platform_settings").upsert({ key, value: settings[key] as any }, { onConflict: "key" });
+        const { error } = await supabase.from("platform_settings").upsert({ key, value: settings[key] as any }, { onConflict: "key" });
+        if (error) {
+          toast({ title: "Erro ao salvar configurações", description: error.message, variant: "destructive" });
+          setSaving(false);
+          return;
+        }
       }
     }
 
     // Salva configurações de parcelas (modo e pacotes)
-    await supabase.from("platform_settings").upsert({ key: "installment_mode", value: installmentMode as any }, { onConflict: "key" });
-    await supabase.from("platform_settings").upsert({ key: "installment_packages", value: installmentPackages as any }, { onConflict: "key" });
+    {
+      const { error } = await supabase.from("platform_settings").upsert({ key: "installment_mode", value: installmentMode as any }, { onConflict: "key" });
+      if (error) { toast({ title: "Erro ao salvar configurações", description: error.message, variant: "destructive" }); setSaving(false); return; }
+    }
+    {
+      const { error } = await supabase.from("platform_settings").upsert({ key: "installment_packages", value: installmentPackages as any }, { onConflict: "key" });
+      if (error) { toast({ title: "Erro ao salvar configurações", description: error.message, variant: "destructive" }); setSaving(false); return; }
+    }
 
     // Salva configurações de antecipação detalhada
-    await supabase.from("platform_settings").upsert({ key: "anticipation_mode", value: anticipationMode as any }, { onConflict: "key" });
-    await supabase.from("platform_settings").upsert({ key: "anticipation_monthly_rate", value: anticipationMonthlyRate as any }, { onConflict: "key" });
+    {
+      const { error } = await supabase.from("platform_settings").upsert({ key: "anticipation_mode", value: anticipationMode as any }, { onConflict: "key" });
+      if (error) { toast({ title: "Erro ao salvar configurações", description: error.message, variant: "destructive" }); setSaving(false); return; }
+    }
+    {
+      const { error } = await supabase.from("platform_settings").upsert({ key: "anticipation_monthly_rate", value: anticipationMonthlyRate as any }, { onConflict: "key" });
+      if (error) { toast({ title: "Erro ao salvar configurações", description: error.message, variant: "destructive" }); setSaving(false); return; }
+    }
 
     // Salva Preço e Benefícios dos Planos
     for (const planId of ['free', 'pro', 'vip', 'business']) {
@@ -576,7 +593,12 @@ const FinancialConfig = () => {
         }
 
         if (Object.keys(updateData).length > 0) {
-           await supabase.from("plans").update(updateData).eq("id", planId);
+           const { error } = await supabase.from("plans").update(updateData).eq("id", planId);
+           if (error) {
+             toast({ title: "Erro ao salvar planos", description: error.message, variant: "destructive" });
+             setSaving(false);
+             return;
+           }
         }
     }
 
@@ -604,7 +626,7 @@ const FinancialConfig = () => {
                </div>
                <div>
                  <label className="text-[10px] text-muted-foreground font-medium mb-1 block">Semestral total (R$)</label>
-                 <input type="text" placeholder="Ex: 199,00" value={planPricesAnnual[id] !== undefined ? planPricesSemester[id] || "" : ""} onChange={(e) => setPlanPriceSemester(id, e.target.value)} className={inputCls} />
+                 <input type="text" placeholder="Ex: 199,00" value={planPricesSemester[id] || ""} onChange={(e) => setPlanPriceSemester(id, e.target.value)} className={inputCls} />
                  {planPricesSemester[id] && !isNaN(parseFloat(String(planPricesSemester[id]).replace(',', '.'))) && (
                    <p className="text-[9px] text-emerald-600 mt-0.5">= R$ {(parseFloat(String(planPricesSemester[id]).replace(',', '.')) / 6).toFixed(2).replace('.', ',')}/mês</p>
                  )}

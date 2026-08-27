@@ -434,12 +434,20 @@ const AdminCoupons = () => {
     if (!drawRaffleId) return;
     setDrawing(true);
     try {
-      const { data: coupons } = await supabase
-        .from("coupons")
-        .select("id, user_id")
-        .eq("used", false)
-        .eq("coupon_type", "raffle");
-      let pool = (coupons as { id: string; user_id: string }[] | null) || [];
+      // Pagina TODAS as linhas (o Supabase corta em ~1000) para o pool ficar completo.
+      let pool: { id: string; user_id: string }[] = [];
+      const pageSize = 1000;
+      for (let from = 0; ; from += pageSize) {
+        const { data: page } = await supabase
+          .from("coupons")
+          .select("id, user_id")
+          .eq("used", false)
+          .eq("coupon_type", "raffle")
+          .range(from, from + pageSize - 1);
+        const rows = (page as { id: string; user_id: string }[] | null) || [];
+        pool = pool.concat(rows);
+        if (rows.length < pageSize) break;
+      }
 
       if (pool.length === 0) {
         toast({ title: "Nenhum cupom disponível para sorteio", variant: "destructive" });
@@ -736,7 +744,17 @@ const AdminCoupons = () => {
         for (let i = 0; i < notifPayload.length; i += CHUNK) {
           const slice = notifPayload.slice(i, i + CHUNK);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await supabase.from("notifications").insert(slice as any);
+          const { error: nErr } = await supabase.from("notifications").insert(slice as any);
+          if (nErr) {
+            toast({
+              title: "Erro ao enviar notificações em massa",
+              description: nErr.message,
+              variant: "destructive",
+            });
+            setAddingCoupon(false);
+            setBroadcastConfirmOpen(false);
+            return;
+          }
         }
 
         toast({
@@ -2575,6 +2593,8 @@ const AdminCoupons = () => {
               <strong className="text-foreground">Tipo:</strong>{" "}
               {distributeType === "raffle"
                 ? "Cupom de sorteio"
+                : distributeForm.discount_kind === "amount"
+                ? `Cupom de R$ ${distributeForm.discount_amount} de desconto`
                 : `Cupom de ${distributeForm.discount_percent}% de desconto`}
               {distributeType === "discount" && (
                 <>

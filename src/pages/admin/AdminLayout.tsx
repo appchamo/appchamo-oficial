@@ -52,7 +52,7 @@ const AdminLayoutPage = () => {
   const layoutKey = (a: "client" | "pro") => (a === "pro" ? "home_layout_pro" : "home_layout");
 
   const loadSectionsFor = async (a: "client" | "pro") => {
-    const res = await supabase.from("platform_settings").select("value").eq("key", layoutKey(a)).single();
+    const res = await supabase.from("platform_settings").select("value").eq("key", layoutKey(a)).maybeSingle();
     if (res.data?.value && Array.isArray(res.data.value)) {
       const saved = res.data.value as unknown as SectionConfig[];
       const savedMap = new Map(saved.map(s => [s.id, s]));
@@ -106,10 +106,10 @@ const AdminLayoutPage = () => {
   useEffect(() => {
     const load = async () => {
       const [layoutRes, footerRes, tutorialsRes, themeRes] = await Promise.all([
-        supabase.from("platform_settings").select("value").eq("key", "home_layout").single(),
-        supabase.from("platform_settings").select("value").eq("key", "home_footer_text").single(),
-        supabase.from("platform_settings").select("value").eq("key", "home_tutorials").single(),
-        supabase.from("platform_settings").select("value").eq("key", "home_theme").single(),
+        supabase.from("platform_settings").select("value").eq("key", "home_layout").maybeSingle(),
+        supabase.from("platform_settings").select("value").eq("key", "home_footer_text").maybeSingle(),
+        supabase.from("platform_settings").select("value").eq("key", "home_tutorials").maybeSingle(),
+        supabase.from("platform_settings").select("value").eq("key", "home_theme").maybeSingle(),
       ]);
       const theme = themeRes.data?.value as { accent?: string } | null;
       if (theme?.accent) setAccent(theme.accent);

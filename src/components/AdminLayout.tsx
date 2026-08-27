@@ -13,29 +13,32 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 
-const navItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
-  { icon: Users, label: "Usuários", path: "/admin/users" },
-  { icon: Contact, label: "CRM", path: "/admin/crm" },
-  { icon: BadgeCheck, label: "Profissionais", path: "/admin/pros" },
-  { icon: Megaphone, label: "Patrocinadores", path: "/admin/sponsors" },
-  { icon: CreditCard, label: "Financeiro", path: "/admin/transactions" },
-  { icon: Wallet, label: "Carteira / Repasses", path: "/admin/wallet" },
-  { icon: BarChart3, label: "Relatórios", path: "/admin/reports" },
-  { icon: Ticket, label: "Cupons & Sorteios", path: "/admin/coupons" },
+// `roles` = quem, além de super_admin, pode ver o item. Omitido = só super_admin.
+// O super_admin sempre vê tudo. O núcleo do time tem super_admin, então isso só
+// restringe contas de escopo único (ex.: suporte@).
+const navItems: { icon: any; label: string; path: string; roles?: string[] }[] = [
+  { icon: LayoutDashboard, label: "Dashboard", path: "/admin", roles: ["finance_admin", "support_admin", "sponsor_admin", "moderator"] },
+  { icon: Users, label: "Usuários", path: "/admin/users", roles: ["support_admin"] },
+  { icon: Contact, label: "CRM", path: "/admin/crm", roles: ["support_admin"] },
+  { icon: BadgeCheck, label: "Profissionais", path: "/admin/pros", roles: ["support_admin"] },
+  { icon: Megaphone, label: "Patrocinadores", path: "/admin/sponsors", roles: ["sponsor_admin"] },
+  { icon: CreditCard, label: "Financeiro", path: "/admin/transactions", roles: ["finance_admin"] },
+  { icon: Wallet, label: "Carteira / Repasses", path: "/admin/wallet", roles: ["finance_admin"] },
+  { icon: BarChart3, label: "Relatórios", path: "/admin/reports", roles: ["finance_admin"] },
+  { icon: Ticket, label: "Cupons & Sorteios", path: "/admin/coupons", roles: ["finance_admin"] },
   { icon: Grid3X3, label: "Categorias", path: "/admin/categories" },
   { icon: Briefcase, label: "Profissões", path: "/admin/professions" },
-  { icon: Image, label: "Banners", path: "/admin/banners" },
-  { icon: Hash, label: "Chamadas", path: "/admin/protocols" },
-  { icon: Inbox, label: "Pedidos", path: "/admin/pedidos" },
-  { icon: MessagesSquare, label: "Comunidade", path: "/admin/comunidade" },
-  { icon: ClipboardList, label: "Vagas", path: "/admin/vagas" },
-  { icon: HelpCircle, label: "Suporte", path: "/admin/support" },
+  { icon: Image, label: "Banners", path: "/admin/banners", roles: ["moderator"] },
+  { icon: Hash, label: "Chamadas", path: "/admin/protocols", roles: ["support_admin"] },
+  { icon: Inbox, label: "Pedidos", path: "/admin/pedidos", roles: ["support_admin", "moderator"] },
+  { icon: MessagesSquare, label: "Comunidade", path: "/admin/comunidade", roles: ["moderator"] },
+  { icon: ClipboardList, label: "Vagas", path: "/admin/vagas", roles: ["moderator"] },
+  { icon: HelpCircle, label: "Suporte", path: "/admin/support", roles: ["support_admin"] },
   { icon: Bell, label: "Notificações", path: "/admin/notifications" },
-  { icon: Instagram, label: "Instagram (IA)", path: "/admin/instagram" },
+  { icon: Instagram, label: "Instagram (IA)", path: "/admin/instagram", roles: ["moderator"] },
   { icon: LayoutList, label: "Layout Home", path: "/admin/layout" },
   { icon: BookOpen, label: "Tutoriais", path: "/admin/tutorials" },
-  { icon: UserSearch, label: "Ver Perfis", path: "/admin/profiles" },
+  { icon: UserSearch, label: "Ver Perfis", path: "/admin/profiles", roles: ["support_admin"] },
   { icon: Settings, label: "Configurações", path: "/admin/settings" },
   { icon: FileText, label: "Logs", path: "/admin/logs" },
 ];
@@ -51,6 +54,13 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
   const { adminUser, loading } = useAdminAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Filtra o menu pela(s) role(s) do admin. super_admin vê tudo.
+  const userRoles = adminUser?.roles ?? [];
+  const isSuper = userRoles.includes("super_admin");
+  const visibleNavItems = navItems.filter(
+    (item) => isSuper || !item.roles || item.roles.some((r) => userRoles.includes(r)),
+  );
 
   useEffect(() => {
     if (!adminUser?.id) return;
@@ -164,7 +174,7 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
           <Link to="/admin" className="text-xl font-extrabold text-gradient">Chamô Admin</Link>
         </div>
         <nav className="flex-1 p-3 flex flex-col gap-0.5 overflow-y-auto">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
               <Link
@@ -233,7 +243,7 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
 
         {/* Abas: no desktop (md+) faixa horizontal; no tablet/phone menu via Sheet */}
         <nav className="hidden md:flex overflow-x-auto border-b border-border bg-muted/30 gap-1 px-2 py-2.5 scrollbar-hide min-h-[44px] items-center shrink-0">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
               <Link
@@ -261,7 +271,7 @@ const AdminLayout = ({ children, title }: AdminLayoutProps) => {
               <SheetTitle>Páginas do admin</SheetTitle>
             </SheetHeader>
             <nav className="flex flex-col gap-0.5 pt-4">
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
                   <Link

@@ -181,11 +181,15 @@ const AdminSponsors = () => {
 
   const handleSavePrices = async () => {
     setSavingPrices(true);
-    await supabase.from("platform_settings").upsert({ key: "sponsor_pack_14_price", value: pack14Price as any }, { onConflict: "key" });
-    await supabase.from("platform_settings").upsert({ key: "sponsor_pack_28_price", value: pack28Price as any }, { onConflict: "key" });
-    await supabase.from("platform_settings").upsert({ key: "sponsor_contact_whatsapp", value: contactWhatsapp as any }, { onConflict: "key" });
-    toast({ title: "Preços dos pacotes salvos!" });
+    const results = await Promise.all([
+      supabase.from("platform_settings").upsert({ key: "sponsor_pack_14_price", value: pack14Price as any }, { onConflict: "key" }),
+      supabase.from("platform_settings").upsert({ key: "sponsor_pack_28_price", value: pack28Price as any }, { onConflict: "key" }),
+      supabase.from("platform_settings").upsert({ key: "sponsor_contact_whatsapp", value: contactWhatsapp as any }, { onConflict: "key" }),
+    ]);
     setSavingPrices(false);
+    const err = results.find((r) => r.error)?.error;
+    if (err) { toast({ title: "Erro ao salvar preços", description: translateError(err.message), variant: "destructive" }); return; }
+    toast({ title: "Preços dos pacotes salvos!" });
   };
 
   useEffect(() => { fetchSponsors(); fetchPackPrices(); }, []);
@@ -330,6 +334,7 @@ const AdminSponsors = () => {
       body: { action: "create_sponsor_user", email: email.trim(), password, sponsorId: s.id },
     });
     if (error || !data?.success) { toast({ title: "Erro", description: error?.message || data?.error, variant: "destructive" }); return; }
+    await logAction("reset_sponsor_access", "sponsor", s.id, { email: email.trim() });
     toast({ title: "Acesso redefinido!", description: email });
     fetchSponsors();
   };

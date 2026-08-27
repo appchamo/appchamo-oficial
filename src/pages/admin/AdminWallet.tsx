@@ -209,7 +209,7 @@ const TransferTimingModal = ({
             </button>
           )}
           <button
-            onClick={() => onConfirm(true)}
+            onClick={() => onConfirm(!ready)}
             disabled={transferring}
             className="flex-1 bg-primary text-white rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-primary/90 transition-colors"
           >
@@ -466,7 +466,7 @@ const AdminWallet = () => {
 
   useEffect(() => { load(); }, []);
 
-  const doTransfer = async (entry: WalletEntry) => {
+  const doTransfer = async (entry: WalletEntry, force = false) => {
     const pendingIds = entry.transactions.filter(t => t.status === "pending").map(t => t.id);
     const platformFeeForNf = entry.transactions
       .filter(t => pendingIds.includes(t.id))
@@ -476,7 +476,7 @@ const AdminWallet = () => {
     setModalEntry(null);
     try {
       const { data, error } = await supabase.functions.invoke("process_transfer", {
-        body: { professional_id: entry.professional_id, wallet_transaction_ids: pendingIds },
+        body: { professional_id: entry.professional_id, wallet_transaction_ids: pendingIds, force },
       });
       if (error) throw new Error(error.message || "Erro ao repassar");
       if (data?.error) throw new Error(data.error);
@@ -598,7 +598,7 @@ const AdminWallet = () => {
       {modalEntry && (
         <TransferTimingModal
           entry={modalEntry}
-          onConfirm={() => doTransfer(modalEntry)}
+          onConfirm={(force) => doTransfer(modalEntry, force)}
           onCancel={() => setModalEntry(null)}
           transferring={transferring === modalEntry.professional_id}
         />

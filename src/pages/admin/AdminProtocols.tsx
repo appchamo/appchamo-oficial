@@ -465,7 +465,7 @@ const AdminProtocols = () => {
               deviceLabel: pickPrimaryDeviceLabel(devices),
               coupon: best
                 ? {
-                    code: "—",
+                    name: null,
                     short: formatClientCouponShort(best),
                     detail: formatClientCouponDetail(best),
                   }

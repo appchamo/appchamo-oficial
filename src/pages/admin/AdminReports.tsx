@@ -469,8 +469,17 @@ const ViewsTab = () => {
 
       if (pros && profiles) {
         const profMap = new Map(profiles?.map(p => [p.user_id, p.full_name]) || []);
-        // Count service requests per professional
-        const { data: reqs } = await supabase.from("service_requests").select("professional_id");
+        // Count service requests per professional (pagina todas as linhas; Supabase corta em ~1000)
+        const reqs: { professional_id: string }[] = [];
+        for (let from = 0; ; from += FETCH_PAGE) {
+          const { data: page } = await supabase
+            .from("service_requests")
+            .select("professional_id")
+            .range(from, from + FETCH_PAGE - 1);
+          const rows = (page as { professional_id: string }[] | null) || [];
+          reqs.push(...rows);
+          if (rows.length < FETCH_PAGE) break;
+        }
         const proCounts: Record<string, number> = {};
         const proNameMap: Record<string, string> = {};
         for (const p of pros) {
@@ -650,7 +659,20 @@ const ProfessionalsTab = () => {
           .from("professional_analytics_counters")
           .select("user_id, profile_views, profile_clicks, call_clicks, name_searches")
           .in("user_id", userIds),
-        supabase.from("service_requests").select("professional_id, created_at"),
+        (async () => {
+          // pagina todas as linhas (Supabase corta em ~1000) mantendo o shape { data }
+          const rows: ReqRow[] = [];
+          for (let from = 0; ; from += FETCH_PAGE) {
+            const { data: page } = await supabase
+              .from("service_requests")
+              .select("professional_id, created_at")
+              .range(from, from + FETCH_PAGE - 1);
+            const chunk = (page as ReqRow[] | null) || [];
+            rows.push(...chunk);
+            if (chunk.length < FETCH_PAGE) break;
+          }
+          return { data: rows };
+        })(),
         supabase.from("professionals").select("id, user_id").in("user_id", userIds),
       ]);
 
@@ -1185,19 +1207,21 @@ function planBadgeForUser(subsByUser: Map<string, SubLite[]>, userId: string): s
   const list = subsByUser.get(userId) || [];
   if (!list.length) return "Free (sem assinatura)";
   const rank = (s: SubLite) => {
+    const st = String(s.status).toLowerCase();
     const paid = s.plan_id !== "free";
-    if (s.status === "ACTIVE" && paid) return 5;
-    if (s.status === "ACTIVE") return 4;
-    if (s.status === "PENDING" && paid) return 3;
-    if (s.status === "PENDING") return 2;
+    if (st === "active" && paid) return 5;
+    if (st === "active") return 4;
+    if (st === "pending" && paid) return 3;
+    if (st === "pending") return 2;
     return 1;
   };
   const sub = [...list].sort((a, b) => rank(b) - rank(a))[0];
   const names: Record<string, string> = { free: "Free", pro: "Pro", vip: "VIP", business: "Business" };
   const pn = names[sub.plan_id] || sub.plan_id;
   const paid = sub.plan_id !== "free";
-  if (sub.status === "ACTIVE") return paid ? `Assinante · ${pn}` : "Free";
-  if (sub.status === "PENDING") return paid ? `Pendente · ${pn}` : "Pendente (free)";
+  const st = String(sub.status).toLowerCase();
+  if (st === "active") return paid ? `Assinante · ${pn}` : "Free";
+  if (st === "pending") return paid ? `Pendente · ${pn}` : "Pendente (free)";
   return `${pn} · ${sub.status}`;
 }
 

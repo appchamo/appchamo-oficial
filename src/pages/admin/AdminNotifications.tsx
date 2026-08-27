@@ -32,6 +32,17 @@ import { NOTIFICATION_MENU_DESTINATIONS } from "@/lib/appNotificationDestination
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
+// Sanitiza termo de busca usado dentro de .or(...ilike...): tira vírgula/parênteses
+// (que quebram a sintaxe do PostgREST) e escapa curingas % _ \.
+function safeSearchTerm(s: string): string {
+  return s
+    .replace(/[(),]/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_")
+    .trim();
+}
+
 type TargetType =
   | "all"
   | "clients"
@@ -341,10 +352,11 @@ const AdminNotifications = () => {
     setUserSearch(query);
     if (query.length < 2) { setUserResults([]); return; }
     setSearching(true);
+    const term = safeSearchTerm(query);
     const { data } = await supabase
       .from("profiles")
       .select("user_id, full_name, email")
-      .or(`full_name.ilike.%${query}%,email.ilike.%${query}%`)
+      .or(`full_name.ilike.%${term}%,email.ilike.%${term}%`)
       .limit(10);
     setUserResults(data || []);
     setSearching(false);
@@ -382,7 +394,7 @@ const AdminNotifications = () => {
           .order("full_name", { ascending: true, nullsFirst: false })
           .limit(50);
 
-        const trimmed = query.trim();
+        const trimmed = safeSearchTerm(query);
         if (trimmed.length >= 2) {
           q = q.or(`full_name.ilike.%${trimmed}%,email.ilike.%${trimmed}%`);
         }
@@ -598,10 +610,11 @@ const AdminNotifications = () => {
     }
     setAuditSearching(true);
     auditSearchTimer.current = window.setTimeout(async () => {
+      const term = safeSearchTerm(value);
       const { data } = await supabase
         .from("profiles")
         .select("user_id, full_name, email")
-        .or(`full_name.ilike.%${value}%,email.ilike.%${value}%`)
+        .or(`full_name.ilike.%${term}%,email.ilike.%${term}%`)
         .limit(10);
       setAuditResults(data || []);
       setAuditSearching(false);
@@ -695,6 +708,23 @@ const AdminNotifications = () => {
     try {
       let userIds: string[] = [];
 
+      // Pagina TODAS as linhas (o Supabase corta em ~1000 por request); sem isso
+      // o broadcast pra "Todos" atingia só os 1000 primeiros silenciosamente.
+      const pageAllUserIds = async (
+        build: (from: number, to: number) => PromiseLike<{ data: { user_id: string | null }[] | null; error: { message: string } | null }>,
+      ): Promise<string[]> => {
+        const out: string[] = [];
+        const size = 1000;
+        for (let from = 0; ; from += size) {
+          const { data, error } = await build(from, from + size - 1);
+          if (error) throw new Error(error.message);
+          const rows = data || [];
+          for (const r of rows) if (r.user_id) out.push(r.user_id);
+          if (rows.length < size) break;
+        }
+        return out;
+      };
+
       if (target === "individual" && selectedUser) {
         userIds = [selectedUser.user_id];
       } else if (target === "selected") {
@@ -703,8 +733,8 @@ const AdminNotifications = () => {
         const ids = await fetchPendingProUserIds();
         userIds = [...ids];
       } else if (target === "all") {
-        const { data } = await supabase.from("profiles").select("user_id");
-        const ids = new Set((data || []).map((p) => p.user_id).filter(Boolean) as string[]);
+        const all = await pageAllUserIds((f, t) => supabase.from("profiles").select("user_id").range(f, t));
+        const ids = new Set(all);
         const { data: adminProf } = await supabase
           .from("profiles")
           .select("user_id")
@@ -718,18 +748,16 @@ const AdminNotifications = () => {
         }
         userIds = [...ids];
       } else if (target === "clients") {
-        const { data } = await supabase.from("profiles").select("user_id").eq("user_type", "client");
-        userIds = (data || []).map(p => p.user_id);
+        userIds = await pageAllUserIds((f, t) => supabase.from("profiles").select("user_id").eq("user_type", "client").range(f, t));
       } else if (target === "professionals") {
-        const { data } = await supabase.from("profiles").select("user_id").eq("user_type", "professional");
-        userIds = (data || []).map(p => p.user_id);
+        userIds = await pageAllUserIds((f, t) => supabase.from("profiles").select("user_id").eq("user_type", "professional").range(f, t));
       } else if (target === "companies") {
-        const { data } = await supabase.from("profiles").select("user_id").eq("user_type", "company");
-        userIds = (data || []).map(p => p.user_id);
+        userIds = await pageAllUserIds((f, t) => supabase.from("profiles").select("user_id").eq("user_type", "company").range(f, t));
       } else if (target === "category") {
-        const { data: pros } = await supabase.from("professionals").select("user_id").eq("category_id", categoryId);
-        userIds = (pros || []).map(p => p.user_id);
+        userIds = await pageAllUserIds((f, t) => supabase.from("professionals").select("user_id").eq("category_id", categoryId).range(f, t));
       }
+      // Remove duplicados/nulos.
+      userIds = [...new Set(userIds.filter(Boolean))];
 
       if (userIds.length === 0) {
         toast({ title: "Nenhum usuário encontrado para o filtro selecionado", variant: "destructive" });
@@ -778,8 +806,11 @@ const AdminNotifications = () => {
 
       // 2) Insere as notificações em lotes, amarradas ao batch.
       const batchSize = 100;
+      let inserted = 0;
+      let failed = 0;
       for (let i = 0; i < userIds.length; i += batchSize) {
-        const batch = userIds.slice(i, i + batchSize).map((uid) => ({
+        const chunk = userIds.slice(i, i + batchSize);
+        const batch = chunk.map((uid) => ({
           user_id: uid,
           title: title.trim(),
           message: message.trim(),
@@ -787,11 +818,25 @@ const AdminNotifications = () => {
           ...(link ? { link } : {}),
           ...(batchId ? { batch_id: batchId } : {}),
         }));
-        await supabase.from("notifications").insert(batch as never);
+        const { error: insErr } = await supabase.from("notifications").insert(batch as never);
+        if (insErr) {
+          failed += chunk.length;
+          console.warn("Falha ao inserir lote de notificações:", insErr.message);
+        } else {
+          inserted += chunk.length;
+        }
       }
 
-      setSentCount(userIds.length);
-      toast({ title: `Notificação enviada para ${userIds.length} usuário(s)!` });
+      setSentCount(inserted);
+      if (inserted === 0) {
+        toast({ title: "Não foi possível enviar", description: "Nenhuma notificação foi gravada. Verifique as permissões.", variant: "destructive" });
+        setSending(false);
+        return;
+      }
+      toast({
+        title: `Notificação enviada para ${inserted} usuário(s)!`,
+        ...(failed > 0 ? { description: `${failed} não puderam ser enviadas.`, variant: "destructive" as const } : {}),
+      });
       setTitle("");
       setMessage("");
       setDestinationPath("");

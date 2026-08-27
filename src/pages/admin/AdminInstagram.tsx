@@ -1,6 +1,7 @@
 import AdminLayout from "@/components/AdminLayout";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 import { RefreshCw, MessageCircle, MessageSquare, AtSign, Heart, Megaphone } from "lucide-react";
 
 type IgRow = {
@@ -54,11 +55,16 @@ const AdminInstagram = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("ig_interactions")
       .select("id, kind, from_username, from_id, incoming_text, reply_text, action, status, error, created_at")
       .order("created_at", { ascending: false })
       .limit(300);
+    if (error) {
+      toast({ title: "Erro ao carregar interações", description: error.message, variant: "destructive" });
+      setLoading(false);
+      return;
+    }
     setRows((data as IgRow[]) || []);
     setLoading(false);
   }, []);

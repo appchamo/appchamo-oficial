@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
   LayoutDashboard, Users, BadgeCheck, Megaphone, 
-  CreditCard, Wallet, Ticket, Settings, FileText, LogOut, Grid3X3, Briefcase, Image, Hash, HelpCircle, Bell, LayoutList, BarChart3, BookOpen, UserSearch, Menu, PieChart, Contact, Instagram, MessagesSquare, ClipboardList
+  CreditCard, Wallet, Ticket, Settings, FileText, LogOut, Grid3X3, Briefcase, Image, Hash, HelpCircle, Bell, LayoutList, BarChart3, BookOpen, UserSearch, Menu, PieChart, Contact, Instagram, MessagesSquare, ClipboardList, Inbox
 } from "lucide-react";
 import {
   Sheet,
@@ -27,6 +27,7 @@ const navItems = [
   { icon: Briefcase, label: "Profissões", path: "/admin/professions" },
   { icon: Image, label: "Banners", path: "/admin/banners" },
   { icon: Hash, label: "Chamadas", path: "/admin/protocols" },
+  { icon: Inbox, label: "Pedidos", path: "/admin/pedidos" },
   { icon: MessagesSquare, label: "Comunidade", path: "/admin/comunidade" },
   { icon: ClipboardList, label: "Vagas", path: "/admin/vagas" },
   { icon: HelpCircle, label: "Suporte", path: "/admin/support" },

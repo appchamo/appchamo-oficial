@@ -26,11 +26,12 @@ interface Interest { open_request_id: string; professional_id: string; }
 interface ProInfo { name: string; slug: string | null; }
 
 // ---- rótulos ----
-const STATUS_LABEL: Record<string, string> = { open: "Aberto", filled: "Atendido", closed: "Encerrado" };
+const STATUS_LABEL: Record<string, string> = { open: "Aberto", filled: "Atendido", closed: "Encerrado", expired: "Expirado" };
 const STATUS_CLS: Record<string, string> = {
   open: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
   filled: "bg-blue-500/10 text-blue-600 border-blue-500/20",
   closed: "bg-muted text-muted-foreground border-border",
+  expired: "bg-amber-500/10 text-amber-600 border-amber-500/20",
 };
 const URGENCY_LABEL: Record<string, string> = { now: "Agora", today: "Hoje", flexible: "Flexível" };
 const fmtDateTime = (s: string) => new Date(s).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -182,7 +183,7 @@ export default function AdminOpenRequestsPanel() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por cliente, categoria, cidade ou descrição" className="flex-1 bg-transparent text-sm outline-none" />
         </div>
         <div className="flex items-center gap-1.5">
-          {([["all", "Todos"], ["open", "Abertos"], ["filled", "Atendidos"], ["closed", "Encerrados"]] as [string, string][]).map(([id, label]) => (
+          {([["all", "Todos"], ["open", "Abertos"], ["filled", "Atendidos"], ["closed", "Encerrados"], ["expired", "Expirados"]] as [string, string][]).map(([id, label]) => (
             <button key={id} type="button" onClick={() => setStatusFilter(id)}
               className={cn("rounded-lg px-3 py-1.5 text-xs font-semibold border transition-colors",
                 statusFilter === id ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border hover:text-foreground hover:bg-muted/60")}>

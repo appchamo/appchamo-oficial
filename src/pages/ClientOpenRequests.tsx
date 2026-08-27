@@ -30,6 +30,7 @@ const statusLabel = (s: string) => {
   if (s === "open") return "Aberto";
   if (s === "closed") return "Encerrado";
   if (s === "filled") return "Atendido";
+  if (s === "expired") return "Expirado";
   return s;
 };
 

@@ -51,11 +51,24 @@ Deno.serve(async (req) => {
     // Janela da "escalação": chamada sem resposta entre 15 e 45 min vira PEDIDO ABERTO.
     const wEsc_min = now - 45 * 60 * 1000;
     const wEsc_max = now - 15 * 60 * 1000;
-    // Escalonamento automático DESLIGADO (a pedido do Rafael): chamada sem resposta NÃO abre
-    // mais um pedido aberto sozinho. Os lembretes ao profissional continuam funcionando.
-    const ESCALATION_ENABLED = false;
+    // Escalonamento automático LIGADO: chamada sem resposta entre 15-45 min abre um pedido
+    // aberto pros profissionais da região, e notifica o cliente (app + email + WhatsApp).
+    const ESCALATION_ENABLED = true;
 
     if (fetchErr) return json({ error: fetchErr.message }, 500);
+
+    // Expira pedidos abertos parados há mais de 72h (também limpa antigos "atendidos mas ativos").
+    let expiredOpen = 0;
+    try {
+      const cutoff72 = new Date(now - 72 * 60 * 60 * 1000).toISOString();
+      const { data: exp } = await supabase
+        .from("open_service_requests")
+        .update({ status: "expired" })
+        .eq("status", "open")
+        .lt("created_at", cutoff72)
+        .select("id");
+      expiredOpen = (exp || []).length;
+    } catch (_e) { /* não bloqueia os lembretes */ }
 
     const requestIds = (requests || []).map((r: any) => r.id);
     const { data: sentLog } = requestIds.length > 0
@@ -132,13 +145,27 @@ Deno.serve(async (req) => {
                 source_service_request_id: r.id,
               });
               if (!insErr) {
+                // Nome do profissional que o cliente chamou (mensagem personalizada).
+                const { data: proProf } = await supabase.from("profiles").select("full_name, display_name").eq("user_id", proUserId).maybeSingle();
+                const calledProName = String((proProf as any)?.display_name || (proProf as any)?.full_name || "").trim() || "o profissional que você chamou";
+
                 await supabase.from("notifications").insert({
                   user_id: r.client_id,
-                  title: "Chamamos vários profissionais pra você 👍",
-                  message: "Ninguém respondeu na hora, então espalhamos seu pedido pros profissionais da sua região. Fica de olho que logo aparece alguém.",
+                  title: "Chamamos outros profissionais pra você 👍",
+                  message: `Como você não teve resposta de ${calledProName}, abrimos um pedido pros profissionais dessa mesma área te chamarem. Fica de olho! Se já resolveu, é só apagar o pedido.`,
                   type: "info",
                   link: "/client/pedidos-abertos",
                 });
+
+                // Email + WhatsApp pro cliente (best-effort; não bloqueia o cron).
+                try {
+                  await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/notify-open-request-client`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "x-hook-secret": hookSecret },
+                    body: JSON.stringify({ clientUserId: r.client_id, calledProName }),
+                  });
+                } catch (_e) { /* não bloqueia */ }
+
                 await supabase.from("request_reminder_log").upsert({ request_id: r.id, reminder_type: "escalated" }, { onConflict: "request_id,reminder_type" });
                 escalated++;
               }
@@ -172,7 +199,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ ok: true, reminders_30min: sent30min, reminders_2h: sent2h, escalated });
+    return json({ ok: true, reminders_30min: sent30min, reminders_2h: sent2h, escalated, expiredOpen });
   } catch (err) {
     return json({ error: String(err) }, 500);
   }

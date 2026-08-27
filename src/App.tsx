@@ -121,6 +121,7 @@ const AdminCategories = lazy(() => import("./pages/admin/AdminCategories"));
 const AdminProfessions = lazy(() => import("./pages/admin/AdminProfessions"));
 const AdminBanners = lazy(() => import("./pages/admin/AdminBanners"));
 const AdminProtocols = lazy(() => import("./pages/admin/AdminProtocols"));
+const AdminPedidos = lazy(() => import("./pages/admin/AdminPedidos"));
 const AdminSupport = lazy(() => import("./pages/admin/AdminSupport"));
 const AdminNotifications = lazy(() => import("./pages/admin/AdminNotifications"));
 const AdminLayoutPage = lazy(() => import("./pages/admin/AdminLayout"));
@@ -683,6 +684,7 @@ const AppContent = () => {
         <Route path="/admin/professions" element={<ProtectedRoute><AdminProfessions /></ProtectedRoute>} />
         <Route path="/admin/banners" element={<ProtectedRoute><AdminBanners /></ProtectedRoute>} />
         <Route path="/admin/protocols" element={<ProtectedRoute><AdminProtocols /></ProtectedRoute>} />
+        <Route path="/admin/pedidos" element={<ProtectedRoute><AdminPedidos /></ProtectedRoute>} />
         <Route path="/admin/enterprise" element={<Navigate to="/admin/protocols" replace />} />
         <Route path="/admin/support" element={<ProtectedRoute><AdminSupport /></ProtectedRoute>} />
         <Route path="/admin/notifications" element={<ProtectedRoute><AdminNotifications /></ProtectedRoute>} />

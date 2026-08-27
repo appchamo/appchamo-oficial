@@ -8,6 +8,7 @@ import {
   BadgeCheck,
   Star,
   XCircle,
+  Trash2,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -65,6 +66,7 @@ const statusLabel = (s: string) => {
   if (s === "open") return "Aberto";
   if (s === "closed") return "Encerrado";
   if (s === "filled") return "Atendido";
+  if (s === "expired") return "Expirado";
   return s;
 };
 
@@ -79,6 +81,8 @@ const ClientOpenRequestDetail = () => {
   const [loading, setLoading] = useState(true);
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [chattingId, setChattingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -165,6 +169,29 @@ const ClientOpenRequestDetail = () => {
       /* ignore */
     }
     void load();
+  };
+
+  const handleDeleteRequest = async () => {
+    if (!user?.id || !id) return;
+    setDeleting(true);
+    const { error } = await supabase
+      .from("open_service_requests")
+      .delete()
+      .eq("id", id)
+      .eq("client_id", user.id);
+    setDeleting(false);
+    setDeleteOpen(false);
+    if (error) {
+      toast({ title: "Não foi possível apagar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Pedido apagado" });
+    try {
+      window.dispatchEvent(new CustomEvent("chamo-open-requests-changed"));
+    } catch {
+      /* ignore */
+    }
+    navigate("/client/pedidos-abertos", { replace: true });
   };
 
   const handleChat = async (professionalRowId: string) => {
@@ -258,17 +285,28 @@ const ClientOpenRequestDetail = () => {
           </p>
         </div>
 
-        {isOpen && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-6">
+          {isOpen && (
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1 border-border text-foreground hover:bg-muted"
+              onClick={() => setCloseOpen(true)}
+            >
+              <XCircle className="w-4 h-4 mr-2" />
+              Encerrar pedido
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
-            className="w-full mb-6 border-destructive/40 text-destructive hover:bg-destructive/10"
-            onClick={() => setCloseOpen(true)}
+            className="flex-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+            onClick={() => setDeleteOpen(true)}
           >
-            <XCircle className="w-4 h-4 mr-2" />
-            Encerrar pedido
+            <Trash2 className="w-4 h-4 mr-2" />
+            Apagar pedido
           </Button>
-        )}
+        </div>
 
         <h2 className="font-semibold text-foreground mb-1">Profissionais interessados</h2>
         {isOpen && interests.length > 0 && (
@@ -367,6 +405,28 @@ const ClientOpenRequestDetail = () => {
                 onClick={() => void handleCloseRequest()}
               >
                 {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Encerrar pedido"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent className="rounded-2xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Apagar este pedido?</AlertDialogTitle>
+              <AlertDialogDescription>
+                O pedido será removido de vez e sairá da lista dos profissionais. Essa ação não pode ser desfeita.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleting}
+                onClick={() => void handleDeleteRequest()}
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Apagar pedido"}
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>

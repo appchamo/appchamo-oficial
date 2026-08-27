@@ -16,7 +16,7 @@ function maskPhone(v: string): string {
 
 const VerifyWhatsapp = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   const [phase, setPhase] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -33,6 +33,18 @@ const VerifyWhatsapp = () => {
     const t = setInterval(() => setResendIn((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(t);
   }, [resendIn]);
+
+  // Auto-cura: se o número já foi confirmado (no banco), não fica preso aqui.
+  // Recarrega o perfil uma vez ao abrir (caso o estado local esteja desatualizado)
+  // e sai da tela assim que phone_verified virar true.
+  useEffect(() => {
+    void refreshProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (profile?.phone_verified) navigate("/home", { replace: true });
+  }, [profile?.phone_verified, navigate]);
 
   const sendCode = async () => {
     if (!phoneOk || loading) return;
@@ -61,6 +73,13 @@ const VerifyWhatsapp = () => {
       setError(res.error || "Código incorreto. Confira e tente de novo.");
       setCode("");
       return;
+    }
+    // Recarrega o perfil ANTES de sair: senão o PhoneVerificationGuard ainda vê
+    // phone_verified=false (estado antigo) e joga o usuário de volta pra cá em loop.
+    try {
+      await refreshProfile();
+    } catch {
+      /* mesmo se falhar o refresh, segue — o guard reavalia no próximo load */
     }
     toast({ title: "WhatsApp confirmado! ✅" });
     navigate("/home", { replace: true });

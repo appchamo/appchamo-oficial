@@ -705,21 +705,28 @@ const Signup = () => {
           const cfg = await fetchRegionGate();
           if (cfg.enabled && cfg.blockSignup) {
             const loc = await getDeviceLocation();
-            if (!loc.ok) {
-              toast({
-                title: "Ative a localização",
-                description: loc.error === "denied"
-                  ? `Para concluir o cadastro, ative a permissão de localização. O Chamô está disponível apenas em ${cfg.allowedCities.join(", ")}.`
-                  : "Não foi possível obter sua localização. Ative o GPS e tente novamente.",
-                variant: "destructive",
-              });
-              return;
-            }
-            regionGpsRef.current = { lat: loc.lat, lng: loc.lng };
-            const check = checkRegion(cfg, { city: data.addressCity, lat: loc.lat, lng: loc.lng });
-            if (!check.allowed) {
-              toast({ title: "Fora da área de atendimento", description: check.reason, variant: "destructive" });
-              return;
+            if (loc.ok) {
+              // Tem GPS: valida pela posição real.
+              regionGpsRef.current = { lat: loc.lat, lng: loc.lng };
+              const check = checkRegion(cfg, { city: data.addressCity, lat: loc.lat, lng: loc.lng });
+              if (!check.allowed) {
+                toast({ title: "Fora da área de atendimento", description: check.reason, variant: "destructive" });
+                return;
+              }
+            } else {
+              // GPS negado/indisponível: NÃO trava. Tenta validar pela cidade do CEP.
+              const byCity = checkRegion(cfg, { city: data.addressCity });
+              if (!byCity.allowed) {
+                toast({
+                  title: data.addressCity ? "Fora da área de atendimento" : "Localização ou CEP necessário",
+                  description: data.addressCity
+                    ? byCity.reason
+                    : `Para concluir o cadastro, ative a localização OU informe seu CEP. O Chamô está disponível apenas em ${cfg.allowedCities.join(", ")}.`,
+                  variant: "destructive",
+                });
+                return;
+              }
+              // Cidade válida pelo CEP: segue sem exigir GPS.
             }
           }
         } catch { /* nunca bloqueia por erro de config */ }
@@ -980,7 +987,10 @@ const Signup = () => {
       localStorage.removeItem("signup_in_progress");
       clearSignupDrafts();
 
-      if (signedUpWithEmail) {
+      // Só mostra "verifique o e-mail" se realmente NÃO houver sessão (confirmação de
+      // e-mail ligada). Se chegou aqui com sessão, a conta já está ativa e concluída —
+      // mostrar o modal de verificação confundiria o usuário.
+      if (signedUpWithEmail && !signupSession) {
         setShowVerifyEmailModal(true);
       } else {
         setCouponPopup(true);

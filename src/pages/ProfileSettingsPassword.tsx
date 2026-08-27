@@ -8,18 +8,23 @@ import { useAuth } from "@/hooks/useAuth";
 import { useState } from "react";
 
 const ProfileSettingsPassword = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Quem entrou só por Google/Apple não tem senha (identity "email"): pode DEFINIR uma.
+  const hasPassword = !!(user as { identities?: Array<{ provider?: string }> } | null)?.identities?.some(
+    (i) => i.provider === "email",
+  );
 
   const handleSave = async () => {
     if (!profile?.email) {
       toast({ title: "Sessão inválida", variant: "destructive" });
       return;
     }
-    if (!currentPassword) {
+    if (hasPassword && !currentPassword) {
       toast({ title: "Digite sua senha atual.", variant: "destructive" });
       return;
     }
@@ -32,14 +37,17 @@ const ProfileSettingsPassword = () => {
       return;
     }
     setSaving(true);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: profile.email,
-      password: currentPassword,
-    });
-    if (signInError) {
-      toast({ title: "Senha atual incorreta.", variant: "destructive" });
-      setSaving(false);
-      return;
+    // Só valida a senha atual para quem já tem senha (fluxo por e-mail/senha).
+    if (hasPassword) {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: profile.email,
+        password: currentPassword,
+      });
+      if (signInError) {
+        toast({ title: "Senha atual incorreta.", variant: "destructive" });
+        setSaving(false);
+        return;
+      }
     }
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     setSaving(false);
@@ -47,7 +55,7 @@ const ProfileSettingsPassword = () => {
       toast({ title: "Erro ao alterar senha", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Senha alterada com sucesso!" });
+    toast({ title: hasPassword ? "Senha alterada com sucesso!" : "Senha definida! Agora você também pode entrar por e-mail." });
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
@@ -63,17 +71,23 @@ const ProfileSettingsPassword = () => {
           <ArrowLeft className="w-4 h-4" /> Configurações
         </Link>
 
-        <h1 className="text-xl font-bold text-foreground mb-1">Alterar senha</h1>
-        <p className="text-sm text-muted-foreground mb-6">Use uma senha forte que você não usa em outros sites.</p>
+        <h1 className="text-xl font-bold text-foreground mb-1">{hasPassword ? "Alterar senha" : "Definir senha"}</h1>
+        <p className="text-sm text-muted-foreground mb-6">
+          {hasPassword
+            ? "Use uma senha forte que você não usa em outros sites."
+            : "Você entrou com Google/Apple. Defina uma senha para também poder entrar por e-mail."}
+        </p>
 
         <div className="rounded-2xl border border-border/70 bg-card p-4 space-y-4 max-w-md">
-          <PasswordInput
-            label="Senha atual"
-            value={currentPassword}
-            onChange={setCurrentPassword}
-            placeholder="••••••••"
-            autoComplete="current-password"
-          />
+          {hasPassword && (
+            <PasswordInput
+              label="Senha atual"
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              placeholder="••••••••"
+              autoComplete="current-password"
+            />
+          )}
           <PasswordInput
             label="Nova senha"
             value={newPassword}
@@ -91,10 +105,10 @@ const ProfileSettingsPassword = () => {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || newPassword.length < 6 || !currentPassword}
+            disabled={saving || newPassword.length < 6 || (hasPassword && !currentPassword)}
             className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
-            {saving ? "Salvando..." : "Salvar nova senha"}
+            {saving ? "Salvando..." : hasPassword ? "Salvar nova senha" : "Definir senha"}
           </button>
         </div>
       </main>

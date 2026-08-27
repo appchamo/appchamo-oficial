@@ -46,7 +46,7 @@ const readOAuthErrorFromUrl = (): { error: string; description: string } | null 
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
   const error = params.get("error");
-  const description = params.get("error_description") || params.get("error_description") || "";
+  const description = params.get("error_description") || "";
   if (error) {
     try {
       return { error, description: description ? decodeURIComponent(description) : "" };

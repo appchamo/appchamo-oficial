@@ -31,7 +31,7 @@ import {
 
 const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qr-login`;
 
-type Stage = "idle" | "scanning" | "processing" | "success" | "error";
+type Stage = "idle" | "scanning" | "confirm" | "processing" | "success" | "error";
 
 const isNative = Capacitor.isNativePlatform();
 // Só usa MLKit no Android; iOS usa câmera web (WebView tem suporte nativo)
@@ -44,6 +44,8 @@ export default function QrScannerApp() {
   const { user } = useAuth();
   const [stage, setStage] = useState<Stage>("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  // Token do QR detectado, aguardando confirmação do usuário antes de autorizar a web.
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -90,7 +92,7 @@ export default function QrScannerApp() {
 
   useEffect(() => () => { stopCamera(); }, [stopCamera]);
 
-  // ── Processamento do token detectado ───────────────────────────────────────
+  // ── Token detectado → NÃO autoriza direto. Pede confirmação (evita phishing) ──
   const handleTokenFound = useCallback(async (token: string) => {
     if (handledRef.current) return;
     handledRef.current = true;
@@ -103,8 +105,18 @@ export default function QrScannerApp() {
       return;
     }
 
-    setStage("processing");
+    // Login via web: só autoriza depois que o usuário confirmar que foi ELE quem
+    // abriu o appchamo.com no computador (defesa contra alguém te induzir a escanear
+    // o QR dele e sequestrar sua sessão).
+    setPendingToken(token.trim());
+    setStage("confirm");
+  }, [navigate, stopCamera]);
 
+  // ── Autoriza de fato a sessão na web (após confirmação) ─────────────────────
+  const authorizeWeb = useCallback(async () => {
+    const token = pendingToken;
+    if (!token) return;
+    setStage("processing");
     try {
       if (!user) throw new Error("Você precisa estar logado no app.");
       const { data: { session } } = await supabase.auth.getSession();
@@ -121,7 +133,7 @@ export default function QrScannerApp() {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          token: token.trim(),
+          token,
           access_token: session.access_token,
           refresh_token: session.refresh_token,
         }),
@@ -141,8 +153,16 @@ export default function QrScannerApp() {
     } catch (e: any) {
       setStage("error");
       setErrorMsg(e.message || "Erro ao processar o QR Code.");
+    } finally {
+      setPendingToken(null);
     }
-  }, [user, navigate, stopCamera]);
+  }, [pendingToken, user, navigate]);
+
+  const cancelConfirm = useCallback(() => {
+    setPendingToken(null);
+    setStage("idle");
+    handledRef.current = false;
+  }, []);
 
   // ── Scanner NATIVO (Android / iOS) via MLKit ───────────────────────────────
   const startNativeScanner = useCallback(async () => {
@@ -372,6 +392,37 @@ export default function QrScannerApp() {
               <button
                 onClick={handleClose}
                 className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 text-white font-semibold text-sm active:scale-95 transition-transform"
+              >
+                <X className="w-4 h-4" /> Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── CONFIRM (antes de autorizar a sessão na web) ── */}
+        {stage === "confirm" && (
+          <div className="flex flex-col items-center gap-5 py-10">
+            <div className="w-24 h-24 rounded-3xl bg-primary/10 flex items-center justify-center">
+              <QrCode className="w-12 h-12 text-primary" />
+            </div>
+            <h2 className="font-bold text-foreground text-xl text-center">Autorizar login na web?</h2>
+            <div className="w-full max-w-xs rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+              <p className="text-xs text-amber-800 leading-relaxed">
+                <strong>Só continue se foi você</strong> que abriu o <strong>appchamo.com</strong> no
+                computador. Ao autorizar, aquele navegador vai entrar na <strong>sua conta</strong>.
+                Nunca escaneie um QR que outra pessoa te enviou.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 w-full max-w-xs">
+              <button
+                onClick={authorizeWeb}
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm active:scale-95 transition-transform"
+              >
+                <CheckCircle2 className="w-4 h-4" /> Sim, autorizar
+              </button>
+              <button
+                onClick={cancelConfirm}
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border text-foreground font-medium text-sm active:scale-95 transition-transform"
               >
                 <X className="w-4 h-4" /> Cancelar
               </button>

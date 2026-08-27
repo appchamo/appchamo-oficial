@@ -846,13 +846,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (_) {}
       await supabase.auth.signOut();
       await hardClearNativeAuthSession();
+    } catch (error) {
+      console.warn("[signOut] erro ao encerrar sessão:", error);
+    } finally {
+      // Limpa o estado SEMPRE (mesmo se o signOut lançar) pra UI não ficar "logada".
       setUser(null);
       setSession(null);
       setProfile(null);
       setRoles([]);
       setTimeout(() => setIsSignOutInProgress(false), 1000);
-    } catch (error) {
-      setIsSignOutInProgress(false);
     }
   };
 

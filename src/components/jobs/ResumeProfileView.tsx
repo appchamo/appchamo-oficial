@@ -194,10 +194,12 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
 
         {/* Ações */}
         <div className="flex gap-2 my-4">
-          <button type="button" disabled={isOwner} onClick={() => setChamarOpen(true)}
-            className="flex-1 py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 disabled:opacity-40">
-            CHAMAR
-          </button>
+          {!isOwner && (
+            <button type="button" onClick={() => setChamarOpen(true)}
+              className="flex-1 py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30">
+              CHAMAR
+            </button>
+          )}
           {!isOwner && (
             <button type="button" onClick={handleFollow} disabled={followBusy}
               className={`px-4 rounded-xl border-2 font-semibold text-xs flex flex-col items-center justify-center gap-0.5 transition-colors ${following ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground hover:bg-muted"}`}>
@@ -206,18 +208,28 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
             </button>
           )}
           <button type="button" onClick={handleShare}
-            className="px-4 rounded-xl border-2 border-border text-foreground font-semibold text-xs flex flex-col items-center justify-center gap-0.5 hover:bg-muted transition-colors">
+            className={`${isOwner ? "flex-1" : "px-4"} py-3.5 rounded-xl border-2 border-border text-foreground font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-muted transition-colors`}>
             <Share2 className="w-4 h-4" /> Compartilhar
           </button>
         </div>
 
         {/* Objetivo */}
-        <SectionRow title={editing ? "" : `Objetivo: ${candidate?.objetivo || draft.objetivo || "—"}`} owner={isOwner} onEdit={() => setEditing(true)} inline>
-          {editing && (
-            <input value={draft.objetivo ?? ""} onChange={(e) => set("objetivo", e.target.value)} placeholder="Objetivo (ex.: Comercial)"
+        {editing ? (
+          <div className="my-3">
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Objetivo</label>
+            <input value={draft.objetivo ?? ""} onChange={(e) => set("objetivo", e.target.value)} placeholder="Ex.: Comercial"
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30" />
-          )}
-        </SectionRow>
+          </div>
+        ) : (candidate?.objetivo || draft.objetivo) ? (
+          <div className="flex items-center gap-2 my-3">
+            <h2 className="text-lg font-bold text-foreground">Objetivo: {candidate?.objetivo || draft.objetivo}</h2>
+            {isOwner && <button type="button" onClick={() => setEditing(true)} className="p-1 rounded-lg hover:bg-muted"><Pencil className="w-4 h-4 text-muted-foreground" /></button>}
+          </div>
+        ) : isOwner ? (
+          <button type="button" onClick={() => setEditing(true)} className="my-3 inline-flex items-center gap-1.5 text-sm text-primary font-medium">
+            <Pencil className="w-4 h-4" /> Adicionar objetivo, experiência e mais
+          </button>
+        ) : null}
 
         {/* Experiência */}
         {(editing || candidate?.experiencia || draft.experiencia) && (

@@ -6,6 +6,7 @@ import { fetchActiveJobPostings } from "@/lib/jobRegionFilter";
 import { isMissingSponsorIdColumnError, jobPostingsSelectLegacyCompatible } from "@/lib/jobPostingsSelectCompat";
 import { useAuth } from "@/hooks/useAuth";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import CandidatesList from "@/components/jobs/CandidatesList";
 import { fetchFavoriteIds, toggleFavorite } from "@/lib/jobSeeker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 

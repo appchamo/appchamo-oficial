@@ -562,7 +562,11 @@ const MessageThread = () => {
       if (expectedGen !== loadGenerationRef.current) return;
       if (req && user) {
         setRequestStatus(req.status);
-        setRequestKind((req as { request_kind?: string | null }).request_kind === "following" ? "following" : "service");
+        {
+          const rk = (req as { request_kind?: string | null }).request_kind;
+          // 'direct' (conversa direta usuário↔usuário) se comporta como DM: sem fluxo de serviço.
+          setRequestKind(rk === "following" || rk === "direct" ? "following" : "service");
+        }
         setRequestProtocol((req as any).protocol || null);
         const isClient = req.client_id === user.id;
 

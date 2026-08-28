@@ -202,7 +202,7 @@ export async function startDirectChat(
   if (!threadId) {
     const { data: req, error } = await supabase
       .from("service_requests" as never)
-      .insert({ client_id: fromUserId, peer_user_id: toUserId, request_kind: "direct", description: firstMessage.trim() || "Olá!" } as never)
+      .insert({ client_id: fromUserId, peer_user_id: toUserId, request_kind: "direct", status: "accepted", description: firstMessage.trim() || "Olá!" } as never)
       .select("id")
       .single();
     if (error || !req) return { threadId: null, error: error?.message ?? "Não foi possível abrir a conversa." };

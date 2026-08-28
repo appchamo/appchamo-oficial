@@ -304,14 +304,14 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
 
       {/* Modal CHAMAR */}
       {chamarOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6" onClick={() => setChamarOpen(false)}>
-          <div className="w-full max-w-md rounded-2xl bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 px-4 py-6" onClick={() => setChamarOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl bg-card p-5 shadow-xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-base font-bold text-foreground">Chamar {name.split(" ")[0]}</h3>
               <button onClick={() => setChamarOpen(false)} className="p-1.5 rounded-lg hover:bg-muted"><X className="w-5 h-5" /></button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">Escreva sua proposta. A pessoa será notificada (app e push).</p>
-            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4}
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3}
               placeholder="Ex.: Olá! Tenho uma oportunidade que pode te interessar. Podemos conversar?"
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none mb-3" />
             <button type="button" onClick={handleSend} disabled={sending}

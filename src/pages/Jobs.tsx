@@ -5,7 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchActiveJobPostings } from "@/lib/jobRegionFilter";
 import { isMissingSponsorIdColumnError, jobPostingsSelectLegacyCompatible } from "@/lib/jobPostingsSelectCompat";
 import { useAuth } from "@/hooks/useAuth";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import CandidatesList from "@/components/jobs/CandidatesList";
+import MyResumeEditor from "@/components/jobs/MyResumeEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -47,8 +49,16 @@ type JobRowFlat = {
 const JOB_SELECT_FLAT =
   "id, title, description, location, salary_range, created_at, professional_id, sponsor_id";
 
+type VagasTab = "disponiveis" | "curriculos" | "meu-perfil";
+
 const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
   useAuth();
+  const routerLocation = useLocation();
+  const initialTab: VagasTab = (() => {
+    const v = new URLSearchParams(routerLocation.search).get("vtab");
+    return v === "curriculos" || v === "meu-perfil" ? v : "disponiveis";
+  })();
+  const [tab, setTab] = useState<VagasTab>(initialTab);
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -159,6 +169,13 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
     };
     void load();
   }, []);
+
+  // Sincroniza a aba quando a URL muda (ex.: notificação abre ?vtab=meu-perfil).
+  useEffect(() => {
+    const v = new URLSearchParams(routerLocation.search).get("vtab");
+    if (v === "curriculos" || v === "meu-perfil") setTab(v);
+    else if (v === "disponiveis") setTab("disponiveis");
+  }, [routerLocation.search]);
 
   const filtered = jobs.filter(
     (j) =>
@@ -271,6 +288,30 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
           </Link>
         )}
 
+        {/* Sub-abas: Disponíveis (vagas) · Currículos (candidatos) · Meu currículo */}
+        <div className="flex items-center gap-1.5 mb-5 bg-muted/50 p-1 rounded-2xl">
+          {([
+            ["disponiveis", "Disponíveis"],
+            ["curriculos", "Currículos"],
+            ["meu-perfil", "Meu currículo"],
+          ] as [VagasTab, string][]).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${
+                tab === id ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "curriculos" && <CandidatesList />}
+        {tab === "meu-perfil" && <MyResumeEditor />}
+
+        {tab === "disponiveis" && (<>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
             <h1 className="text-xl font-bold text-foreground">Vagas</h1>
@@ -410,6 +451,7 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
             )}
           </DialogContent>
         </Dialog>
+        </>)}
       </main>
   );
   return embedded ? content : <AppLayout>{content}</AppLayout>;

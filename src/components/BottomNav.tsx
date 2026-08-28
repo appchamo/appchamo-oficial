@@ -208,11 +208,16 @@ const BottomNav = () => {
             if (onHomeComunidade) {
               e.preventDefault();
               navigate("/home", { replace: true });
+              try { window.scrollTo({ top: 0, behavior: "auto" }); } catch { /* ignore */ }
               return;
             }
             if (isActive) {
               e.preventDefault();
               window.scrollTo({ top: 0, behavior: "smooth" });
+              // Tocar em "Início" já estando na Home: recarrega o conteúdo (destaques + comunidade).
+              if (tab.path === MAIN_APP_TAB_PATHS[0] && location.pathname === "/home") {
+                window.dispatchEvent(new Event("chamo-home-refresh"));
+              }
             }
           };
           return (

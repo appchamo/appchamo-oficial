@@ -309,6 +309,8 @@ const Home = () => {
   const [showCoupon, setShowCoupon] = useState(false);
   const [isReady, setIsReady] = useState(false); // ✅ Controle de renderização global
   const [contentSeed, setContentSeed] = useState(0);
+  // Bumpado quando o usuário toca em "Início" já estando na Home: recarrega tbm a Comunidade.
+  const [homeRefreshKey, setHomeRefreshKey] = useState(0);
   const [locationOpen, setLocationOpen] = useState(false);
   const [locationCep, setLocationCep] = useState("");
   const [locationCepLoading, setLocationCepLoading] = useState(false);
@@ -532,6 +534,20 @@ const Home = () => {
   };
   useRefreshAtKey("/home", onRefresh);
 
+  // Tocar em "Início" (menu inferior) já estando na Home: sobe ao topo e recarrega
+  // o conteúdo (destaques, patrocinadores, categorias e a Comunidade).
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+  useEffect(() => {
+    const h = () => {
+      try { window.scrollTo({ top: 0, behavior: "auto" }); } catch { /* ignore */ }
+      setHomeRefreshKey((k) => k + 1);
+      void onRefreshRef.current();
+    };
+    window.addEventListener("chamo-home-refresh", h);
+    return () => window.removeEventListener("chamo-home-refresh", h);
+  }, []);
+
   const locationLabel = profile?.address_city && profile?.address_state
     ? `${profile.address_city}, ${profile.address_state}`
     : profile?.address_city || profile?.address_state || "Definir localização";
@@ -739,7 +755,7 @@ const Home = () => {
           <div className="px-4 pt-3 lg:px-0 lg:pt-0">
             <TermsReacceptBanner />
           </div>
-          <CommunityFeed variant="embedded" />
+          <CommunityFeed key={`community-${homeRefreshKey}`} variant="embedded" />
           {showClientSignupProEndCta ? (
             <div className="mt-8 px-4 pb-4 max-w-screen-lg mx-auto">
               <Link
@@ -968,7 +984,7 @@ const Home = () => {
           {user ? (
             <div className="mt-6 pt-5 border-t border-border/70">
               <h2 className="text-lg font-bold text-foreground mb-3">Comunidade</h2>
-              <CommunityFeed variant="embedded" />
+              <CommunityFeed key={`community-${homeRefreshKey}`} variant="embedded" />
             </div>
           ) : null}
 

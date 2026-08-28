@@ -253,7 +253,8 @@ const Messages = () => {
       return;
     }
 
-    const proIdsUniq = [...new Set(unique.map((r: any) => r.professional_id))] as string[];
+    // Filtra null (threads diretas têm professional_id nulo) — senão a query .in(...) quebra e nenhum nome/foto resolve.
+    const proIdsUniq = [...new Set(unique.map((r: any) => r.professional_id).filter(Boolean))] as string[];
     const [{ data: readStatuses }, { data: allPros }] = await Promise.all([
       supabase.from("chat_read_status" as any).select("request_id, last_read_at, is_archived, is_deleted, manual_unread, is_pinned, label_color, label_text").eq("user_id", user.id).in("request_id", threadIds),
       supabase.from("professionals").select("id, user_id").in("id", proIdsUniq),

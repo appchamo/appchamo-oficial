@@ -636,10 +636,15 @@ const ProfessionalProfile = ({ ownMode = false }: { ownMode?: boolean }) => {
     if (!u) { navigate("/login", { state: { from: location.pathname } }); return; }
     const nameFromMeta = (u.user_metadata?.full_name ?? u.user_metadata?.name ?? "") as string;
     const nameOk = (authProfile?.full_name?.trim() || nameFromMeta.trim()).length > 0;
-    // Cliente precisa apenas do NOME para chamar; foto e verificação de identidade
-    // deixaram de ser exigidas aqui (a verificação passou para a hora de pagar).
-    if (!nameOk) {
+    const hasAvatar = !!authProfile?.avatar_url;
+    // Pra chamar um profissional o cliente precisa do perfil completo:
+    // nome + foto + WhatsApp confirmado (substitui a verificação de identidade).
+    if (!nameOk || !hasAvatar) {
       setProfileGateOpen(true);
+      return;
+    }
+    if (!authProfile?.phone_verified) {
+      navigate("/verificar-whatsapp", { state: { from: location.pathname } });
       return;
     }
     // Gate de localização: precisa de cidade/estado para achar um profissional perto.

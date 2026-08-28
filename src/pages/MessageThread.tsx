@@ -1831,12 +1831,7 @@ const MessageThread = () => {
   };
 
   const openPayment = async (msg: Message) => {
-    // Verificação de identidade exigida somente na hora de pagar (cliente).
-    // Sem KYC concluído, redireciona e interrompe a abertura do pagamento.
-    if (profile && !profile.identity_verified) {
-      navigate("/verificar-identidade", { state: { from: location.pathname } });
-      return;
-    }
+    // Sem verificação de identidade no pagamento: após aceitar a política, vai direto pagar.
     await loadFeeSettings();
     const billing = parseBilling(msg.content);
     if (!billing) return;

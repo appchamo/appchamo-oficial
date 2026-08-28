@@ -690,7 +690,8 @@ const Home = () => {
     sponsors: "below_sponsors",
     search: "below_search",
     featured: "below_featured",
-    categories: "below_categories"
+    categories: "below_categories",
+    benefits: "below_benefits",
   };
 
   // ✅ 3. RESERVA DE ESPAÇO: Evita que os componentes empurrem uns aos outros ("Piscada")
@@ -940,6 +941,27 @@ const Home = () => {
               </div>
             );
           })}
+
+          {/* Fallback de banners: posições cujas seções-âncora estão ocultas para
+              este usuário (ex.: Categorias desligada). Renderiza aqui pra que um
+              banner ativado no admin NUNCA fique invisível. */}
+          {(() => {
+            const renderedIds = new Set(
+              sections
+                .filter((s) => s.visible && !(s.id === "benefits" && (isClientUser || (isPro && !!proId))))
+                .map((s) => s.id),
+            );
+            const orphanPositions = Object.entries(bannerAfter)
+              .filter(([sid]) => !renderedIds.has(sid))
+              .map(([, pos]) => pos);
+            return orphanPositions.length ? (
+              <div className="flex flex-col">
+                {orphanPositions.map((pos) => (
+                  <HomeBanners key={`orphan-${pos}`} position={pos} />
+                ))}
+              </div>
+            ) : null;
+          })()}
 
           {/* Feed contínuo: abaixo dos Destaques a home emenda na Comunidade e vai
               carregando mais posts conforme rola (scroll infinito). */}

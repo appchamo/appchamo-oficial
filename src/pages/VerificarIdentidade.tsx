@@ -152,7 +152,10 @@ const VerificarIdentidade = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border/60 px-4 py-3 flex items-center gap-3">
+      <div
+        className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border/60 px-4 py-3 flex items-center gap-3"
+        style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.75rem)" }}
+      >
         <button onClick={goBack} className="p-2 -ml-2 rounded-full hover:bg-muted transition-colors" aria-label="Voltar">
           <ArrowLeft className="w-5 h-5" />
         </button>

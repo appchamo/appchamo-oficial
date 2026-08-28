@@ -271,26 +271,20 @@ const VerificarIdentidade = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div
-            className="flex-1 overflow-y-auto rounded-xl border border-border bg-muted/30 p-3 text-[12px] leading-relaxed text-foreground/90 space-y-3"
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setTermsRead(true);
-            }}
-          >
-            <TermsBody />
+          <div className="rounded-xl border border-border bg-muted/30 p-3 text-[13px] leading-relaxed text-foreground/90 space-y-2">
+            <p>Para confirmar que é você, coletamos <strong>uma foto do seu documento</strong> e uma <strong>selfie</strong>.</p>
+            <p>Usamos <strong>só para a verificação</strong>. Nunca aparecem no seu perfil nem para outros usuários e ficam guardados de forma segura e criptografada.</p>
+            <button type="button" onClick={() => navigate("/privacy", { state: { from: location.pathname } })} className="text-primary font-semibold underline">
+              Ver Política de Privacidade
+            </button>
           </div>
-
-          {!termsRead && (
-            <p className="text-[11px] text-muted-foreground text-center">Role até o fim para habilitar o botão.</p>
-          )}
 
           <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
             <Button variant="outline" className="rounded-xl w-full sm:w-auto" onClick={() => setTermsOpen(false)}>
               Cancelar
             </Button>
-            <Button className="rounded-xl w-full sm:w-auto" disabled={!termsRead} onClick={acceptTerms}>
-              Li e aceito
+            <Button className="rounded-xl w-full sm:w-auto" onClick={acceptTerms}>
+              Aceitar e continuar
             </Button>
           </DialogFooter>
         </DialogContent>

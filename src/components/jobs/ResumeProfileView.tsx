@@ -139,8 +139,8 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
 
   return (
     <div className="max-w-md mx-auto pb-28">
-      {/* Cabeçalho cinza */}
-      <div className="-mx-4 bg-neutral-200/70 px-4 pt-3 pb-10 rounded-b-[28px]">
+      {/* Cabeçalho cinza com degradê e base ondulada */}
+      <div className="-mx-4 bg-gradient-to-b from-zinc-300 via-zinc-200 to-zinc-100 px-4 pt-3 pb-12 rounded-b-[44px]">
         <div className="flex items-center justify-between">
           <button type="button" onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-base font-bold text-foreground">
             <ArrowLeft className="w-5 h-5" /> Voltar
@@ -183,8 +183,15 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
         )}
       </div>
 
+      {/* Aviso: a foto vem da conta */}
+      {isOwner && (
+        <button type="button" onClick={() => navigate("/profile")} className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <User className="w-3 h-3" /> A foto é a mesma da sua conta. Toque para alterar em Perfil.
+        </button>
+      )}
+
       {/* Nome + localização */}
-      <div className="flex items-center gap-2 flex-wrap mt-3">
+      <div className="flex items-center gap-2 flex-wrap mt-2">
         <h1 className="text-2xl font-extrabold text-foreground leading-tight">{name}</h1>
         {cityLabel && <span className="text-sm text-primary flex items-center gap-0.5"><MapPin className="w-4 h-4" /> {cityLabel}</span>}
       </div>
@@ -285,15 +292,13 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
         </div>
       )}
 
-      {/* Barra salvar */}
+      {/* Barra salvar (no fluxo, sempre acessível ao rolar) */}
       {showSaveBar && (
-        <div className="fixed bottom-16 left-0 right-0 z-40 px-4 pb-2">
-          <div className="max-w-md mx-auto flex gap-2">
-            <button type="button" onClick={() => { setDraft(original); setEditing(false); }} className="flex-1 py-3 rounded-xl border bg-card text-sm font-semibold">Cancelar</button>
-            <button type="button" onClick={handleSaveAll} disabled={saving} className="flex-[2] py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar alterações
-            </button>
-          </div>
+        <div className="flex gap-2 mt-5">
+          <button type="button" onClick={() => { setDraft(original); setEditing(false); }} className="flex-1 py-3 rounded-xl border bg-card text-sm font-semibold">Cancelar</button>
+          <button type="button" onClick={handleSaveAll} disabled={saving} className="flex-[2] py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar alterações
+          </button>
         </div>
       )}
 

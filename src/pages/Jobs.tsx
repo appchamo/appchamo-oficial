@@ -282,7 +282,7 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
             className="flex-1 py-3 rounded-2xl bg-muted text-foreground/70 font-bold text-sm whitespace-nowrap text-center flex items-center justify-center hover:bg-muted/80 transition-colors">Publicar Vaga</Link>
           <button type="button" onClick={() => setTab(tab === "disponiveis" ? "curriculos" : "disponiveis")}
             className="flex-1 py-3 rounded-2xl bg-primary text-primary-foreground font-bold text-sm whitespace-nowrap hover:bg-primary/90 transition-colors">
-            {tab === "disponiveis" ? "Disponíveis" : "Currículos"}
+            {tab === "disponiveis" ? "Currículos" : "Vagas"}
           </button>
         </div>
 

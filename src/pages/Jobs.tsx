@@ -274,19 +274,16 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
 
   const content = (
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        {/* Ações: Meu perfil · Publicar Vaga */}
-        <div className="flex items-stretch gap-2 mb-3">
+        {/* Topo: Meu perfil (laranja) · Publicar Vaga (cinza) · Disponíveis/Currículos (laranja) */}
+        <div className="flex items-stretch gap-2 mb-5">
           <button type="button" onClick={() => navigate("/meu-curriculo")}
-            className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm whitespace-nowrap hover:bg-primary/90 transition-colors">Meu perfil</button>
+            className="flex-1 py-3 rounded-2xl bg-primary text-primary-foreground font-bold text-sm whitespace-nowrap hover:bg-primary/90 transition-colors">Meu perfil</button>
           <Link to="/my-jobs"
-            className="flex-1 py-3 rounded-xl bg-muted text-foreground font-bold text-sm whitespace-nowrap text-center hover:bg-muted/80 transition-colors flex items-center justify-center">Publicar Vaga</Link>
-        </div>
-        {/* Alternador: Disponíveis · Currículos */}
-        <div className="flex items-stretch gap-2 mb-5 bg-muted/50 p-1 rounded-2xl">
-          <button type="button" onClick={() => setTab("disponiveis")}
-            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-colors ${tab === "disponiveis" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"}`}>Disponíveis</button>
-          <button type="button" onClick={() => setTab("curriculos")}
-            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-colors ${tab === "curriculos" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"}`}>Currículos</button>
+            className="flex-1 py-3 rounded-2xl bg-muted text-foreground/70 font-bold text-sm whitespace-nowrap text-center flex items-center justify-center hover:bg-muted/80 transition-colors">Publicar Vaga</Link>
+          <button type="button" onClick={() => setTab(tab === "disponiveis" ? "curriculos" : "disponiveis")}
+            className="flex-1 py-3 rounded-2xl bg-primary text-primary-foreground font-bold text-sm whitespace-nowrap hover:bg-primary/90 transition-colors">
+            {tab === "disponiveis" ? "Disponíveis" : "Currículos"}
+          </button>
         </div>
 
         {tab === "curriculos" && <CandidatesList />}
@@ -300,21 +297,15 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
               {filtered.length === 1 ? "oportunidade disponível" : "oportunidades disponíveis"}{" "}
               <span className="text-muted-foreground/80">(todas as regiões)</span>
             </p>
-            <button type="button" onClick={loadMyCandidaturas} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary">
-              <FileText className="w-3 h-3" /> Minhas candidaturas
-            </button>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowFavorites((v) => !v)}
-              className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-bold transition-colors ${showFavorites ? "text-primary" : "text-foreground"}`}
-            >
-              Favoritos
-              <Bookmark className={`w-4 h-4 ${showFavorites ? "fill-primary text-primary" : "fill-amber-400 text-amber-500"}`} />
-            </button>
-            <span className="hidden">{jobs.length}</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowFavorites((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-sm font-bold text-foreground"
+          >
+            Favoritos
+            <Bookmark className={`w-5 h-5 ${showFavorites ? "fill-primary text-primary" : "fill-amber-400 text-amber-500"}`} />
+          </button>
         </div>
 
         <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30 mb-5">
@@ -346,8 +337,16 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
               <Link
                 key={job.id}
                 to={`/jobs/${job.id}`}
-                className="flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 hover:shadow-card transition-all active:scale-[0.99]"
+                className="relative flex items-center gap-3 bg-card border rounded-2xl p-4 hover:border-primary/30 hover:shadow-card transition-all active:scale-[0.99]"
               >
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleJobFav(job.id); }}
+                  aria-label="Favoritar vaga"
+                  className="absolute top-2.5 right-3"
+                >
+                  <Bookmark className={`w-5 h-5 ${favJobs.has(job.id) ? "fill-amber-400 text-amber-500" : "text-muted-foreground/40"}`} />
+                </button>
                 {job.company_avatar ? (
                   <img src={job.company_avatar} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
                 ) : (
@@ -372,16 +371,7 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
                     <span className="text-[10px] text-muted-foreground">{timeAgo(job.created_at)}</span>
                   </div>
                 </div>
-                <div className="flex flex-col items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleJobFav(job.id); }}
-                    aria-label="Favoritar vaga"
-                  >
-                    <Bookmark className={`w-5 h-5 ${favJobs.has(job.id) ? "fill-amber-400 text-amber-500" : "text-muted-foreground/40"}`} />
-                  </button>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                </div>
+                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
               </Link>
             ))}
           </div>

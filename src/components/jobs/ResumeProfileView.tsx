@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Loader2, User, MapPin, Send, Share2, X, Pencil, UserPlus, UserCheck, Plus, Check,
+  ArrowLeft, Loader2, User, MapPin, Send, Share2, X, Pencil, UserPlus, UserCheck, Plus, Check, Inbox, CornerUpLeft,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import {
-  fetchCandidate, saveMyResume, sendProposal, isFollowingUser, setFollowUser,
-  type CandidateCard, type JobSeekerProfile,
+  fetchCandidate, saveMyResume, sendProposal, isFollowingUser, setFollowUser, fetchReceivedProposals,
+  type CandidateCard, type JobSeekerProfile, type ReceivedProposal,
 } from "@/lib/jobSeeker";
 import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
 
@@ -38,6 +38,10 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
   const [chamarOpen, setChamarOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [proposals, setProposals] = useState<ReceivedProposal[]>([]);
+  const [replyTo, setReplyTo] = useState<ReceivedProposal | null>(null);
+  const [replyMsg, setReplyMsg] = useState("");
+  const [replying, setReplying] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -52,7 +56,18 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
     setDraft(d);
     setOriginal(d);
     if (!isOwner && user) setFollowing(await isFollowingUser(user.id, targetUserId));
+    if (isOwner && user) setProposals(await fetchReceivedProposals(user.id));
     setLoading(false);
+  };
+
+  const handleReply = async () => {
+    if (!user || !replyTo || replying) return;
+    setReplying(true);
+    const { error } = await sendProposal(user.id, replyTo.from_user, replyMsg);
+    setReplying(false);
+    if (error) { toast({ title: "Não foi possível responder", description: error, variant: "destructive" }); return; }
+    setReplyTo(null); setReplyMsg("");
+    toast({ title: "Resposta enviada!", description: "A pessoa foi notificada." });
   };
 
   useEffect(() => { void load(); /* eslint-disable-next-line */ }, [targetUserId]);
@@ -292,6 +307,38 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
         </div>
       )}
 
+      {/* Quem te chamou (propostas recebidas) — dono */}
+      {isOwner && (
+        <div className="rounded-2xl border bg-card p-4 mt-3">
+          <div className="flex items-center gap-2 mb-3">
+            <Inbox className="w-5 h-5 text-primary" />
+            <h3 className="text-lg font-bold text-foreground">Quem te chamou</h3>
+          </div>
+          {proposals.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-2">Ninguém te chamou ainda.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {proposals.map((p) => (
+                <div key={p.id} className="flex items-start gap-3 rounded-xl border bg-background p-3">
+                  {p.from_avatar ? (
+                    <img src={p.from_avatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0"><User className="w-5 h-5 text-primary" /></div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <button type="button" onClick={() => navigate(`/curriculos/${p.from_user}`)} className="text-sm font-semibold text-foreground truncate block text-left">{p.from_name || "Alguém"}</button>
+                    {p.message && <p className="text-sm text-foreground/70 mt-0.5">{p.message}</p>}
+                    <button type="button" onClick={() => { setReplyTo(p); setReplyMsg(""); }} className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-primary">
+                      <CornerUpLeft className="w-3.5 h-3.5" /> Responder
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Barra salvar (no fluxo, sempre acessível ao rolar) */}
       {showSaveBar && (
         <div className="flex gap-2 mt-5">
@@ -299,6 +346,25 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
           <button type="button" onClick={handleSaveAll} disabled={saving} className="flex-[2] py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar alterações
           </button>
+        </div>
+      )}
+
+      {/* Modal RESPONDER */}
+      {replyTo && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 px-4 py-6" onClick={() => setReplyTo(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-card p-5 shadow-xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-bold text-foreground">Responder {(replyTo.from_name || "").split(" ")[0]}</h3>
+              <button onClick={() => setReplyTo(null)} className="p-1.5 rounded-lg hover:bg-muted"><X className="w-5 h-5" /></button>
+            </div>
+            {replyTo.message && <p className="text-xs text-muted-foreground mb-3 rounded-lg bg-muted/50 px-3 py-2">"{replyTo.message}"</p>}
+            <textarea value={replyMsg} onChange={(e) => setReplyMsg(e.target.value)} rows={3} placeholder="Escreva sua resposta..."
+              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 resize-none mb-3" />
+            <button type="button" onClick={handleReply} disabled={replying}
+              className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+              {replying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}{replying ? "Enviando..." : "Enviar resposta"}
+            </button>
+          </div>
         </div>
       )}
 

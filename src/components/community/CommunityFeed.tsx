@@ -33,7 +33,6 @@ import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import SponsorCarousel from "@/components/SponsorCarousel";
 import ProVerifiedCommunityTeaser from "@/components/community/ProVerifiedCommunityTeaser";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -1972,15 +1971,7 @@ export default function CommunityFeed({
       )}
 
 
-      {user && !isSinglePostMode && (
-        <div className="mb-5 -mx-0.5">
-          <SponsorCarousel
-            key="community-sponsors"
-            section={getSection("sponsors")}
-            itemsPerPage={4}
-          />
-        </div>
-      )}
+      {/* Patrocinadores removidos da Comunidade: já aparecem no topo da Home (evita duplicação). */}
 
       {user && !isSinglePostMode && (
         <div className="flex flex-wrap items-center gap-2 lg:gap-3 mb-5 lg:mb-6 w-full">

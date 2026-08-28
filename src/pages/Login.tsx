@@ -501,8 +501,12 @@ const Login = () => {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) { toast({ title: "Digite seu e-mail para recuperar a senha." }); return; }
     setForgotLoading(true);
+    // No app nativo, aponta pra página-ponte que reabre o app (PKCE precisa do
+    // code_verifier do webview que pediu o reset). Na web, mantém a rota direta.
+    const base = getPublicAppBaseUrl();
+    const redirectTo = Capacitor.isNativePlatform() ? `${base}/auth/reset` : `${base}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-      redirectTo: `${getPublicAppBaseUrl()}/reset-password`,
+      redirectTo,
     });
     if (error) toast({ title: "Erro ao enviar", description: translateError(error.message), variant: "destructive" });
     else toast({ title: "E-mail de recuperação enviado!", description: "Verifique sua caixa de entrada." });

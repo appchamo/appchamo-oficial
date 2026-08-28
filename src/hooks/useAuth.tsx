@@ -443,8 +443,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true;
     };
 
+    /**
+     * Deep link de RECUPERAÇÃO de senha: `com.chamo.app://auth/reset?code=…` (ou token_hash).
+     * Abrir DENTRO do app é essencial no PKCE — o code_verifier fica no webview que
+     * pediu o reset; se o link abrisse no navegador, o exchange falharia. Aqui só
+     * levamos pra /reset-password preservando os parâmetros; o exchange é feito lá.
+     * Precisa rodar ANTES do handleUrl (OAuth), senão o `code=` seria trocado como login.
+     */
+    const isPasswordResetDeepLink = (urlStr: string): boolean =>
+      !!urlStr && urlStr.includes("com.chamo.app:") && /auth\/reset\b/i.test(urlStr);
+
+    const handlePasswordResetUrl = async (urlStr: string): Promise<boolean> => {
+      if (!Capacitor.isNativePlatform() || !isPasswordResetDeepLink(urlStr)) return false;
+      const qIdx = urlStr.indexOf("?");
+      const hIdx = urlStr.indexOf("#");
+      let search = "";
+      let hash = "";
+      if (qIdx >= 0) {
+        const end = hIdx > qIdx ? hIdx : urlStr.length;
+        search = urlStr.slice(qIdx, end);
+      }
+      if (hIdx >= 0) hash = urlStr.slice(hIdx);
+      const origin = window.location.origin || "";
+      window.location.replace(`${origin}/reset-password${search}${hash}`);
+      return true;
+    };
+
     const handleUrl = async (urlStr: string): Promise<boolean> => {
       if (!urlStr || !urlStr.includes('code=')) return false;
+      // Nunca tratar o link de reset de senha como login OAuth.
+      if (isPasswordResetDeepLink(urlStr)) return false;
       let fixedUrl = urlStr.replace('#', '?');
       if (fixedUrl.startsWith('com.chamo.app:?')) fixedUrl = fixedUrl.replace('com.chamo.app:?', 'com.chamo.app://?');
       let code: string | null = null;
@@ -625,6 +653,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const launch = await CapacitorApp.getLaunchUrl();
           const url = launch?.url;
           if (url) {
+            if (await handlePasswordResetUrl(url)) return;
             if (await handleEmailConfirmTokensUrl(url)) return;
             if (url.includes("code=")) {
               // Pode ser retorno do nosso próprio redirect após login ok (página recarregou em /home).
@@ -756,6 +785,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (Capacitor.isNativePlatform()) {
       urlListener = CapacitorApp.addListener("appUrlOpen", async (data: { url: string }) => {
+        if (await handlePasswordResetUrl(data.url)) return;
         if (await handleEmailConfirmTokensUrl(data.url)) return;
         const exchangeOk = await handleUrl(data.url);
         // Igual ao fluxo com getLaunchUrl: o exchange grava no storage mas o SIGNED_IN no contexto pode atrasar no iOS;

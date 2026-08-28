@@ -40,6 +40,7 @@ const Index = lazy(() => import("./pages/Index"));
 const SponsorDashboard = lazy(() => import("./pages/SponsorDashboard"));
 const Login = lazy(() => import("./pages/Login"));
 const AuthEmailConfirm = lazy(() => import("./pages/AuthEmailConfirm"));
+const AuthReset = lazy(() => import("./pages/AuthReset"));
 const Signup = lazy(() => import("./pages/Signup"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
@@ -583,6 +584,7 @@ const AppContent = () => {
         <Route path="/" element={session ? <RedirectLoggedIn /> : <Index />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth/email-confirm" element={<AuthEmailConfirm />} />
+        <Route path="/auth/reset" element={<AuthReset />} />
         <Route path="/oauth-callback" element={<OAuthCallback />} />
         <Route path="/post-login" element={<PostLoginGate />} />
         <Route path="/hard-reload" element={<HardReload />} />

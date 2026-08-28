@@ -140,7 +140,7 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
   return (
     <div className="max-w-md mx-auto pb-28">
       {/* Cabeçalho cinza */}
-      <div className="-mx-4 bg-muted px-4 pt-3 pb-16 rounded-b-[32px]">
+      <div className="-mx-4 bg-neutral-200/70 px-4 pt-3 pb-10 rounded-b-[28px]">
         <div className="flex items-center justify-between">
           <button type="button" onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-base font-bold text-foreground">
             <ArrowLeft className="w-5 h-5" /> Voltar
@@ -153,33 +153,31 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
       </div>
 
       {/* Avatar + visibilidade (dono) */}
-      <div className="flex gap-4 -mt-12">
+      <div className="flex gap-3 items-start">
         {avatar ? (
-          <img src={avatar} alt="" className="w-24 h-24 rounded-full object-cover border-[3px] border-primary bg-card shrink-0" />
+          <img src={avatar} alt="" className="w-20 h-20 rounded-full object-cover border-[3px] border-primary bg-card shrink-0 -mt-11" />
         ) : (
-          <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center border-[3px] border-primary shrink-0"><User className="w-10 h-10 text-primary" /></div>
+          <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center border-[3px] border-primary shrink-0 -mt-11"><User className="w-9 h-9 text-primary" /></div>
         )}
         {isOwner && (
-          <div className="flex-1 pt-12 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-base font-bold text-foreground">Perfil Público</span>
+          <div className="flex-1 min-w-0 pt-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-foreground">Perfil Público</span>
               <div className="inline-flex rounded-full bg-muted p-0.5">
-                <button type="button" onClick={() => set("is_public", true)} className={`px-3 py-1 rounded-full text-xs font-bold ${draft.is_public ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Sim</button>
-                <button type="button" onClick={() => set("is_public", false)} className={`px-3 py-1 rounded-full text-xs font-bold ${!draft.is_public ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Não</button>
+                <button type="button" onClick={() => set("is_public", true)} className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${draft.is_public ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Sim</button>
+                <button type="button" onClick={() => set("is_public", false)} className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${!draft.is_public ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Não</button>
               </div>
             </div>
-            <div className="mt-1.5">
-              <p className="text-sm font-semibold text-foreground mb-1">Quem pode ver seu perfil?</p>
-              <div className="flex items-center gap-3 flex-wrap">
-                {([["visible_to_all", "Todos"], ["visible_to_companies", "Empresas"], ["visible_to_pros", "Profissionais"]] as const).map(([k, label]) => (
-                  <button key={k} type="button" onClick={() => set(k, !draft[k])} className="inline-flex items-center gap-1.5">
-                    <span className={`w-4 h-4 rounded flex items-center justify-center border ${draft[k] ? "bg-primary border-primary" : "border-muted-foreground/40"}`}>
-                      {draft[k] && <Check className="w-3 h-3 text-primary-foreground" />}
-                    </span>
-                    <span className="text-xs text-foreground">{label}</span>
-                  </button>
-                ))}
-              </div>
+            <p className="text-sm font-bold text-foreground mt-1.5">Quem pode ver seu perfil?</p>
+            <div className="flex items-center gap-2 mt-1">
+              {([["visible_to_all", "Todos"], ["visible_to_companies", "Empresas"], ["visible_to_pros", "Profissionais"]] as const).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => set(k, !draft[k])} className="inline-flex items-center gap-1">
+                  <span className={`w-4 h-4 rounded flex items-center justify-center border ${draft[k] ? "bg-primary border-primary" : "border-muted-foreground/40"}`}>
+                    {draft[k] && <Check className="w-3 h-3 text-primary-foreground" />}
+                  </span>
+                  <span className="text-[11px] text-foreground">{label}</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -187,7 +185,7 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
 
       {/* Nome + localização */}
       <div className="flex items-center gap-2 flex-wrap mt-3">
-        <h1 className="text-3xl font-extrabold text-foreground leading-tight">{name}</h1>
+        <h1 className="text-2xl font-extrabold text-foreground leading-tight">{name}</h1>
         {cityLabel && <span className="text-sm text-primary flex items-center gap-0.5"><MapPin className="w-4 h-4" /> {cityLabel}</span>}
       </div>
 

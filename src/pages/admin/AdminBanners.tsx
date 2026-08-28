@@ -443,75 +443,16 @@ const AdminBanners = () => {
               />
             </div>
 
-            {/* ── SEÇÃO CARROSSEL ── */}
-            {isNew && availableBanners.length > 0 && (
-              <div className="border rounded-2xl overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => { setCarouselMode(v => !v); setLinkedBannerId(""); }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${carouselMode ? "bg-blue-50 dark:bg-blue-900/20" : "bg-muted/40 hover:bg-muted/60"}`}
-                >
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${carouselMode ? "border-blue-500 bg-blue-500" : "border-muted-foreground/40"}`}>
-                    {carouselMode && <div className="w-2 h-2 rounded-full bg-white" />}
-                  </div>
-                  <div className="flex-1">
-                    <p className={`text-sm font-semibold ${carouselMode ? "text-blue-700 dark:text-blue-400" : "text-foreground"}`}>
-                      Adicionar como carrossel com banner existente
-                    </p>
-                    <p className="text-xs text-muted-foreground">Este banner vai girar junto com outro</p>
-                  </div>
-                  <Layers className={`w-4 h-4 ${carouselMode ? "text-blue-500" : "text-muted-foreground"}`} />
-                </button>
+            {/* Carrossel agora é automático: 2+ banners ativos na MESMA posição giram juntos. */}
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400">
+              <Layers className="w-4 h-4 shrink-0 mt-0.5" />
+              <p className="text-xs font-medium">
+                Dica: coloque 2 ou mais banners <strong>ativos na mesma posição</strong> e eles viram um carrossel automaticamente (com bolinhas), sem precisar agrupar nada.
+              </p>
+            </div>
 
-                {carouselMode && (
-                  <div className="p-4 border-t bg-blue-50/50 dark:bg-blue-900/10 space-y-3">
-                    <p className="text-xs text-muted-foreground font-medium">Selecione o banner existente que vai girar junto:</p>
-                    <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-                      {availableBanners.map(b => {
-                        const gCount = b.carousel_group ? (groupCounts[b.carousel_group] || 1) : 1;
-                        return (
-                          <button
-                            key={b.id}
-                            type="button"
-                            onClick={() => handleLinkedBannerChange(b.id)}
-                            className={`flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors ${linkedBannerId === b.id ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20" : "border-border hover:bg-muted/50"}`}
-                          >
-                            <img
-                              src={b.image_url}
-                              alt={b.title || "Banner"}
-                              className="w-14 h-10 rounded-lg object-cover flex-shrink-0"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">{b.title || "Sem título"}</p>
-                              <p className="text-xs text-muted-foreground">{positionLabels[b.position] || b.position}</p>
-                              {b.carousel_group && gCount > 1 && (
-                                <span className="text-[10px] text-blue-600 font-semibold">
-                                  Já tem carrossel ({gCount} banners)
-                                </span>
-                              )}
-                            </div>
-                            {linkedBannerId === b.id && (
-                              <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-                                <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {linkedBannerId && (
-                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs font-medium">
-                        <Layers className="w-3.5 h-3.5 flex-shrink-0" />
-                        Posição herdada automaticamente do banner selecionado
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Posição na Home (visível quando não está em modo carrossel com banner selecionado) */}
-            {!(carouselMode && linkedBannerId) && (
+            {/* Posição na Home */}
+            {true && (
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Posição na Home</label>
                 <div className="relative">

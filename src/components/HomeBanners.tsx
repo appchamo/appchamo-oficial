@@ -126,29 +126,10 @@ const HomeBanners = ({ position }: Props) => {
 
   if (banners.length === 0) return null;
 
-  // Agrupa banners pelo carousel_group.
-  // Banners sem grupo aparecem individualmente (sem pontinhos).
-  // Banners com o mesmo carousel_group aparecem juntos (com pontinhos se > 1).
-  const groups: Banner[][] = [];
-  const seenGroups = new Set<string>();
-
-  banners.forEach((b) => {
-    if (!b.carousel_group) {
-      // Banner individual — sem carrossel
-      groups.push([b]);
-    } else if (!seenGroups.has(b.carousel_group)) {
-      seenGroups.add(b.carousel_group);
-      groups.push(banners.filter((x) => x.carousel_group === b.carousel_group));
-    }
-  });
-
-  return (
-    <>
-      {groups.map((group) => (
-        <BannerGroup key={group[0].id} banners={group} isMobile={isMobile} />
-      ))}
-    </>
-  );
+  // Todos os banners desta posição giram juntos como UM único carrossel
+  // (com pontinhos quando há mais de um). Assim, basta ativar 2+ banners na
+  // mesma posição para virarem carrossel — sem precisar agrupar manualmente.
+  return <BannerGroup banners={banners} isMobile={isMobile} />;
 };
 
 export default HomeBanners;

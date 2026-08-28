@@ -55,6 +55,11 @@ const AdminBanners = () => {
   const [carouselMode, setCarouselMode] = useState(false);
   const [linkedBannerId, setLinkedBannerId] = useState<string>("");
 
+  // ── Popups (formato/config próprios, separados dos banners) ──
+  const [popupItem, setPopupItem] = useState<Banner | null>(null);
+  const [popupIsNew, setPopupIsNew] = useState(false);
+  const [popupForm, setPopupForm] = useState({ title: "", image_url: "", link_url: "", active: true, sort_order: 0 });
+
   const fetchData = async () => {
     const { data, error } = await supabase.from("banners" as any).select("*").order("sort_order");
     if (error) {
@@ -191,13 +196,115 @@ const AdminBanners = () => {
     }
   });
 
-  // Banners disponíveis para linkar (todos ativos)
-  const availableBanners = banners.filter(b => !editItem || b.id !== (editItem as Banner).id);
+  // Separa popups dos banners de conteúdo (cada um tem sua seção/formulário).
+  const popups = banners.filter(b => b.position === "popup");
+  const contentBanners = banners.filter(b => b.position !== "popup");
+
+  // Banners disponíveis para linkar em carrossel (exclui o próprio e os popups).
+  const availableBanners = contentBanners.filter(b => !editItem || b.id !== (editItem as Banner).id);
+
+  const openNewPopup = () => {
+    setPopupIsNew(true);
+    setPopupForm({ title: "", image_url: "", link_url: "", active: true, sort_order: popups.length });
+    setPopupItem({} as Banner);
+  };
+
+  const openEditPopup = (item: Banner) => {
+    setPopupIsNew(false);
+    setPopupForm({
+      title: item.title || "",
+      image_url: item.image_url || "",
+      link_url: item.link_url && item.link_url !== "#" ? item.link_url : "",
+      active: item.active,
+      sort_order: item.sort_order,
+    });
+    setPopupItem(item);
+  };
+
+  const savePopup = async () => {
+    if (!popupForm.image_url) {
+      toast({ title: "Envie a imagem do popup", variant: "destructive" });
+      return;
+    }
+    // Máximo de 3 popups ativos ao mesmo tempo.
+    const otherActive = popups.filter(p => p.active && (!popupItem?.id || p.id !== popupItem.id)).length;
+    if (popupForm.active && otherActive >= 3) {
+      toast({ title: "Limite de 3 popups ativos", description: "Desative um popup antes de ativar outro.", variant: "destructive" });
+      return;
+    }
+    const payload = {
+      title: popupForm.title.trim(),
+      image_url: popupForm.image_url,
+      image_url_mobile: popupForm.image_url, // popup usa a mesma imagem vertical em todos os aparelhos
+      link_url: popupForm.link_url.trim() || "#",
+      position: "popup",
+      sort_order: popupForm.sort_order || 0,
+      width: "100%",
+      height: "auto",
+      active: popupForm.active,
+      carousel_group: null,
+    };
+    if (popupIsNew) {
+      const { error } = await supabase.from("banners" as any).insert(payload as any);
+      if (error) { toast({ title: "Erro ao criar popup", description: error.message, variant: "destructive" }); return; }
+      toast({ title: "Popup criado!" });
+    } else if (popupItem && popupItem.id) {
+      const { error } = await supabase.from("banners" as any).update(payload as any).eq("id", popupItem.id);
+      if (error) { toast({ title: "Erro ao atualizar popup", description: error.message, variant: "destructive" }); return; }
+      toast({ title: "Popup atualizado!" });
+    }
+    setPopupItem(null);
+    fetchData();
+  };
 
   return (
     <AdminLayout title="Banners">
+      {/* ── POPUPS (formato e config próprios) ── */}
+      <div className="mb-6 rounded-2xl border bg-card p-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-foreground">Popups (abre ao entrar no app)</h2>
+            <p className="text-xs text-muted-foreground">Imagem vertical em tela cheia, com legenda e link opcionais. Até 3 ativos.</p>
+          </div>
+          <button
+            onClick={openNewPopup}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors shrink-0"
+          >
+            <Plus className="w-4 h-4" /> Criar popup
+          </button>
+        </div>
+        {loading ? null : popups.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-3">Nenhum popup criado.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {popups.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 rounded-xl border bg-background p-3">
+                <div className="w-10 h-14 rounded-lg overflow-hidden bg-muted shrink-0">
+                  {p.image_url && <img src={p.image_url} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{p.title || "Sem legenda"}</p>
+                  <p className="text-xs text-muted-foreground truncate">{p.link_url && p.link_url !== "#" ? p.link_url : "Sem link"}</p>
+                </div>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${p.active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                  {p.active ? "Ativo" : "Inativo"}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => openEditPopup(p)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                    <Pencil className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <button onClick={() => handleDelete(p.id)} className="p-1.5 rounded-lg hover:bg-destructive/10 transition-colors">
+                    <Trash2 className="w-4 h-4 text-destructive" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-muted-foreground">{banners.length} banners</p>
+        <p className="text-sm text-muted-foreground">{contentBanners.length} banners</p>
         <button
           onClick={openNew}
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
@@ -210,11 +317,11 @@ const AdminBanners = () => {
         <div className="flex justify-center py-12">
           <div className="animate-spin w-6 h-6 border-4 border-primary border-t-transparent rounded-full" />
         </div>
-      ) : banners.length === 0 ? (
+      ) : contentBanners.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">Nenhum banner cadastrado</div>
       ) : (
         <div className="flex flex-col gap-3">
-          {banners.map((b) => {
+          {contentBanners.map((b) => {
             const groupCount = b.carousel_group ? (groupCounts[b.carousel_group] || 1) : 0;
             return (
               <div key={b.id} className="bg-card border rounded-xl p-4 flex items-center gap-4">
@@ -413,7 +520,7 @@ const AdminBanners = () => {
                     onChange={(e) => setForm(f => ({ ...f, position: e.target.value }))}
                     className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30 appearance-none"
                   >
-                    {Object.entries(positionLabels).map(([k, v]) => (
+                    {Object.entries(positionLabels).filter(([k]) => k !== "popup").map(([k, v]) => (
                       <option key={k} value={k}>{v}</option>
                     ))}
                   </select>
@@ -458,6 +565,92 @@ const AdminBanners = () => {
                 className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-black hover:bg-primary/90 transition-colors flex items-center justify-center gap-1"
               >
                 <Save className="w-4 h-4" /> SALVAR BANNER
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal do POPUP (formato/config próprios) ── */}
+      <Dialog open={!!popupItem} onOpenChange={(o) => !o && setPopupItem(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{popupIsNew ? "Novo popup" : "Editar popup"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+            {/* Imagem vertical (obrigatória) */}
+            <div className="p-3 border-2 border-dashed rounded-2xl bg-muted/20">
+              <label className="text-xs font-bold text-foreground mb-3 flex items-center gap-2 uppercase tracking-tighter">
+                <Smartphone className="w-4 h-4 text-primary" /> Imagem do popup (vertical, ex.: 1080x1920)
+              </label>
+              {popupForm.image_url ? (
+                <div className="relative rounded-xl overflow-hidden border mb-2 mx-auto w-40">
+                  <img src={popupForm.image_url} alt="Popup" className="w-full object-cover" />
+                  <button
+                    onClick={() => setPopupForm(f => ({ ...f, image_url: "" }))}
+                    className="absolute top-1 right-1 p-1 rounded-full bg-destructive text-destructive-foreground"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ) : (
+                <ImageCropUpload
+                  onUpload={(url) => setPopupForm(f => ({ ...f, image_url: url }))}
+                  aspect={1080 / 1920}
+                  shape="rect"
+                  bucketPath="branding"
+                  label="Upload imagem vertical"
+                  maxSize={1080}
+                  quality={0.7}
+                />
+              )}
+            </div>
+
+            {/* Legenda curta (opcional) */}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Legenda curta (opcional)</label>
+              <input
+                value={popupForm.title}
+                onChange={(e) => setPopupForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="Ex.: Promoção da semana!"
+                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+
+            {/* Link (opcional) */}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Link ao clicar (opcional)</label>
+              <input
+                value={popupForm.link_url}
+                onChange={(e) => setPopupForm(f => ({ ...f, link_url: e.target.value }))}
+                placeholder="https://... ou /assinar"
+                className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+
+            {/* Ativo */}
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={popupForm.active}
+                onChange={(e) => setPopupForm(f => ({ ...f, active: e.target.checked }))}
+                className="w-4 h-4 rounded border-border text-primary"
+              />
+              <span className="text-sm text-foreground">Popup ativo</span>
+            </label>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setPopupItem(null)}
+                className="flex-1 py-3 rounded-xl border text-sm font-medium hover:bg-muted transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={savePopup}
+                className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-black hover:bg-primary/90 transition-colors flex items-center justify-center gap-1"
+              >
+                <Save className="w-4 h-4" /> SALVAR POPUP
               </button>
             </div>
           </div>

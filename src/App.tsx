@@ -52,6 +52,7 @@ const MessageThread = lazy(() => import("./pages/MessageThread"));
 const Coupons = lazy(() => import("./pages/Coupons"));
 const Jobs = lazy(() => import("./pages/Jobs"));
 const CandidateDetail = lazy(() => import("./pages/CandidateDetail"));
+const MeuCurriculo = lazy(() => import("./pages/MeuCurriculo"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const JobDetail = lazy(() => import("./pages/JobDetail"));
 const MyJobPostings = lazy(() => import("./pages/MyJobPostings"));
@@ -615,6 +616,7 @@ const AppContent = () => {
         <Route path="/profile" element={<TabRoutePlaceholder />} />
         <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
         <Route path="/curriculos/:userId" element={<ProtectedRoute><CandidateDetail /></ProtectedRoute>} />
+        <Route path="/meu-curriculo" element={<ProtectedRoute><MeuCurriculo /></ProtectedRoute>} />
         <Route path="/rewards" element={<TabRoutePlaceholder />} />
         <Route path="/jobs/:id" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
         <Route path="/jobs/:id/apply" element={<JobApply />} />

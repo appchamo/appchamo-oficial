@@ -1,15 +1,12 @@
 import AppLayout from "@/components/AppLayout";
-import { Briefcase, MapPin, DollarSign, Clock, Search, Building2, ChevronRight, FileText, Plus } from "lucide-react";
+import { Briefcase, MapPin, DollarSign, Search, Building2, ChevronRight, FileText, Bookmark } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchActiveJobPostings } from "@/lib/jobRegionFilter";
 import { isMissingSponsorIdColumnError, jobPostingsSelectLegacyCompatible } from "@/lib/jobPostingsSelectCompat";
 import { useAuth } from "@/hooks/useAuth";
-import { Link, useLocation } from "react-router-dom";
-import CandidatesList from "@/components/jobs/CandidatesList";
-import MyResumeEditor from "@/components/jobs/MyResumeEditor";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { fetchFavoriteIds, toggleFavorite } from "@/lib/jobSeeker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface JobPosting {
@@ -49,16 +46,16 @@ type JobRowFlat = {
 const JOB_SELECT_FLAT =
   "id, title, description, location, salary_range, created_at, professional_id, sponsor_id";
 
-type VagasTab = "disponiveis" | "curriculos" | "meu-perfil";
+type VagasTab = "disponiveis" | "curriculos";
 
 const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
-  useAuth();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const routerLocation = useLocation();
-  const initialTab: VagasTab = (() => {
-    const v = new URLSearchParams(routerLocation.search).get("vtab");
-    return v === "curriculos" || v === "meu-perfil" ? v : "disponiveis";
-  })();
+  const initialTab: VagasTab = new URLSearchParams(routerLocation.search).get("vtab") === "curriculos" ? "curriculos" : "disponiveis";
   const [tab, setTab] = useState<VagasTab>(initialTab);
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [favJobs, setFavJobs] = useState<Set<string>>(new Set());
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -170,18 +167,37 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
     void load();
   }, []);
 
-  // Sincroniza a aba quando a URL muda (ex.: notificação abre ?vtab=meu-perfil).
+  // Sincroniza a aba quando a URL muda.
   useEffect(() => {
     const v = new URLSearchParams(routerLocation.search).get("vtab");
-    if (v === "curriculos" || v === "meu-perfil") setTab(v);
+    if (v === "curriculos") setTab("curriculos");
     else if (v === "disponiveis") setTab("disponiveis");
   }, [routerLocation.search]);
 
+  // Favoritos de vagas do usuário.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const ids = await fetchFavoriteIds(user.id, "job");
+      if (!cancelled) setFavJobs(ids);
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const toggleJobFav = async (jobId: string) => {
+    if (!user) return;
+    const on = !favJobs.has(jobId);
+    setFavJobs((prev) => { const n = new Set(prev); if (on) n.add(jobId); else n.delete(jobId); return n; });
+    await toggleFavorite(user.id, "job", jobId, on);
+  };
+
   const filtered = jobs.filter(
     (j) =>
-      j.title.toLowerCase().includes(search.toLowerCase()) ||
-      j.company_name.toLowerCase().includes(search.toLowerCase()) ||
-      (j.location || "").toLowerCase().includes(search.toLowerCase())
+      (!showFavorites || favJobs.has(j.id)) &&
+      (j.title.toLowerCase().includes(search.toLowerCase()) ||
+        j.company_name.toLowerCase().includes(search.toLowerCase()) ||
+        (j.location || "").toLowerCase().includes(search.toLowerCase()))
   );
 
   const timeAgo = (date: string) => {
@@ -257,59 +273,19 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
 
   const content = (
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        {canPost ? (
-          <div className="flex items-stretch gap-2 mb-5">
-            <Link
-              to="/my-jobs"
-              className="flex flex-1 items-center gap-3 rounded-xl bg-primary px-4 py-3 text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
-            >
-              <div className="w-9 h-9 rounded-lg bg-primary-foreground/20 flex items-center justify-center shrink-0">
-                <Plus className="w-5 h-5" />
-              </div>
-              <div className="min-w-0 text-left">
-                <p className="text-sm font-bold leading-tight">Publicar vaga grátis</p>
-                <p className="text-[11px] opacity-90 leading-snug">Sua 1ª vaga é grátis. Alcance gente da sua região.</p>
-              </div>
-            </Link>
-            <Link
-              to="/my-jobs"
-              className="flex items-center justify-center px-3 rounded-xl border-2 border-primary/30 text-primary font-semibold text-xs hover:bg-primary/5 transition-colors shrink-0"
-              title="Minhas vagas"
-            >
-              <Briefcase className="w-5 h-5" />
-            </Link>
-          </div>
-        ) : (
-          <Link
-            to="/my-jobs"
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-primary/30 text-primary font-bold text-sm hover:bg-primary/5 transition-colors mb-5"
-          >
-            <Briefcase className="w-5 h-5 shrink-0" /> Minhas vagas
-          </Link>
-        )}
-
-        {/* Sub-abas: Disponíveis (vagas) · Currículos (candidatos) · Meu currículo */}
-        <div className="flex items-center gap-1.5 mb-5 bg-muted/50 p-1 rounded-2xl">
-          {([
-            ["disponiveis", "Disponíveis"],
-            ["curriculos", "Currículos"],
-            ["meu-perfil", "Meu currículo"],
-          ] as [VagasTab, string][]).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${
-                tab === id ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        {/* Topo: Meu perfil · Publicar Vaga · Disponíveis · Currículos */}
+        <div className="flex items-stretch gap-2 mb-5">
+          <button type="button" onClick={() => navigate("/meu-curriculo")}
+            className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 transition-colors">Meu perfil</button>
+          <Link to="/my-jobs"
+            className="flex-1 py-2.5 rounded-xl bg-muted text-muted-foreground font-bold text-xs text-center hover:bg-muted/80 transition-colors flex items-center justify-center">Publicar Vaga</Link>
+          <button type="button" onClick={() => setTab("disponiveis")}
+            className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-colors ${tab === "disponiveis" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>Disponíveis</button>
+          <button type="button" onClick={() => setTab("curriculos")}
+            className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-colors ${tab === "curriculos" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>Currículos</button>
         </div>
 
         {tab === "curriculos" && <CandidatesList />}
-        {tab === "meu-perfil" && <MyResumeEditor />}
 
         {tab === "disponiveis" && (<>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -320,20 +296,20 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
               {filtered.length === 1 ? "oportunidade disponível" : "oportunidades disponíveis"}{" "}
               <span className="text-muted-foreground/80">(todas as regiões)</span>
             </p>
+            <button type="button" onClick={loadMyCandidaturas} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary">
+              <FileText className="w-3 h-3" /> Minhas candidaturas
+            </button>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-xl gap-1.5"
-              onClick={loadMyCandidaturas}
+            <button
+              type="button"
+              onClick={() => setShowFavorites((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-bold transition-colors ${showFavorites ? "text-primary" : "text-foreground"}`}
             >
-              <FileText className="w-3.5 h-3.5" />
-              Minhas candidaturas
-            </Button>
-            <Badge variant="secondary" className="text-xs gap-1">
-              <Briefcase className="w-3 h-3" /> {jobs.length}
-            </Badge>
+              Favoritos
+              <Bookmark className={`w-4 h-4 ${showFavorites ? "fill-primary text-primary" : "fill-amber-400 text-amber-500"}`} />
+            </button>
+            <span className="hidden">{jobs.length}</span>
           </div>
         </div>
 
@@ -392,7 +368,16 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
                     <span className="text-[10px] text-muted-foreground">{timeAgo(job.created_at)}</span>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex flex-col items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleJobFav(job.id); }}
+                    aria-label="Favoritar vaga"
+                  >
+                    <Bookmark className={`w-5 h-5 ${favJobs.has(job.id) ? "fill-amber-400 text-amber-500" : "text-muted-foreground/40"}`} />
+                  </button>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </div>
               </Link>
             ))}
           </div>

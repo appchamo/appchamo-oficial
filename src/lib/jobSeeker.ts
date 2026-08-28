@@ -42,7 +42,68 @@ export async function saveMyResume(
 ): Promise<{ error: string | null }> {
   const payload = { user_id: userId, ...patch, updated_at: new Date().toISOString() };
   const { error } = await supabase.from(TBL as never).upsert(payload as never, { onConflict: "user_id" } as never);
+  if (error) return { error: error.message };
+  // Notifica quem segue esta pessoa (alteração / saiu do ar).
+  try {
+    await notifyResumeFollowers(userId, patch.is_public === false ? "unpublished" : "updated");
+  } catch { /* não bloqueia o save */ }
+  return { error: null };
+}
+
+// ── Favoritos (vaga ou currículo) ──
+const FAV = "vagas_favorites";
+export async function fetchFavoriteIds(userId: string, kind: "job" | "candidate"): Promise<Set<string>> {
+  const { data } = await supabase.from(FAV as never).select("target_id").eq("user_id", userId).eq("kind", kind);
+  return new Set(((data as { target_id: string }[]) || []).map((r) => r.target_id));
+}
+export async function toggleFavorite(userId: string, kind: "job" | "candidate", targetId: string, on: boolean): Promise<void> {
+  if (on) {
+    await supabase.from(FAV as never).upsert({ user_id: userId, kind, target_id: targetId } as never, { onConflict: "user_id,kind,target_id" } as never);
+  } else {
+    await supabase.from(FAV as never).delete().eq("user_id", userId).eq("kind", kind).eq("target_id", targetId);
+  }
+}
+
+// ── Seguir (usuário ↔ usuário) ──
+export async function isFollowingUser(followerId: string, followedId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("user_follows" as never)
+    .select("follower_user_id")
+    .eq("follower_user_id", followerId)
+    .eq("followed_user_id", followedId)
+    .maybeSingle();
+  return !!data;
+}
+export async function setFollowUser(followerId: string, followedId: string, on: boolean): Promise<{ error: string | null }> {
+  if (on) {
+    const { error } = await supabase
+      .from("user_follows" as never)
+      .insert({ follower_user_id: followerId, followed_user_id: followedId } as never);
+    // ignora violação de unicidade (já segue)
+    if (error && !/duplicate|unique/i.test(error.message)) return { error: error.message };
+    return { error: null };
+  }
+  const { error } = await supabase
+    .from("user_follows" as never)
+    .delete()
+    .eq("follower_user_id", followerId)
+    .eq("followed_user_id", followedId);
   return { error: error?.message ?? null };
+}
+
+// Avisa os seguidores quando o currículo muda ou sai do ar.
+export async function notifyResumeFollowers(ownerId: string, kind: "updated" | "unpublished"): Promise<void> {
+  const { data: followers } = await supabase
+    .from("user_follows" as never)
+    .select("follower_user_id")
+    .eq("followed_user_id", ownerId);
+  const ids = ((followers as { follower_user_id: string }[]) || []).map((f) => f.follower_user_id);
+  if (!ids.length) return;
+  const { data: me } = await supabase.from("profiles_public" as never).select("full_name").eq("user_id", ownerId).maybeSingle();
+  const name = (me as { full_name?: string | null } | null)?.full_name?.trim() || "Um perfil que você segue";
+  const msg = kind === "unpublished" ? `${name} tirou o currículo do ar.` : `${name} atualizou o currículo.`;
+  const rows = ids.map((uid) => ({ user_id: uid, title: "Atualização de currículo", message: msg, type: "info", link: `/curriculos/${ownerId}` }));
+  await supabase.from("notifications").insert(rows as never);
 }
 
 export async function fetchCandidates(search: string): Promise<CandidateCard[]> {
@@ -115,7 +176,7 @@ export async function sendProposal(
     title: "💼 Alguém quer falar com você",
     message: `${fromName}: ${message.trim() || "Tenho uma oportunidade que pode te interessar."}`,
     type: "info",
-    link: "/home?feed=vagas&vtab=meu-perfil",
+    link: "/meu-curriculo",
   } as never);
   return { error: null };
 }

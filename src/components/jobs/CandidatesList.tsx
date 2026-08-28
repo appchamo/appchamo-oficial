@@ -1,49 +1,73 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, MapPin, User, ChevronRight, Briefcase } from "lucide-react";
-import { fetchCandidates, type CandidateCard } from "@/lib/jobSeeker";
+import { Search, MapPin, User, ChevronRight, Briefcase, Bookmark } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { fetchCandidates, fetchFavoriteIds, toggleFavorite, type CandidateCard } from "@/lib/jobSeeker";
 
 const CandidatesList = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [candidates, setCandidates] = useState<CandidateCard[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [favs, setFavs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const list = await fetchCandidates("");
-        if (!cancelled) setCandidates(list);
+        const [list, favIds] = await Promise.all([
+          fetchCandidates(""),
+          user ? fetchFavoriteIds(user.id, "candidate") : Promise.resolve(new Set<string>()),
+        ]);
+        if (!cancelled) { setCandidates(list); setFavs(favIds); }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [user]);
+
+  const toggleFav = async (id: string) => {
+    if (!user) return;
+    const on = !favs.has(id);
+    setFavs((prev) => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n; });
+    await toggleFavorite(user.id, "candidate", id, on);
+  };
 
   const t = search.trim().toLowerCase();
-  const filtered = !t
-    ? candidates
-    : candidates.filter(
-        (c) =>
-          (c.full_name || "").toLowerCase().includes(t) ||
-          (c.objetivo || "").toLowerCase().includes(t) ||
-          (c.headline || "").toLowerCase().includes(t) ||
-          (c.city || "").toLowerCase().includes(t) ||
-          (c.skills || []).some((s) => s.toLowerCase().includes(t)),
-      );
+  const filtered = candidates.filter((c) => {
+    if (showFavorites && !favs.has(c.user_id)) return false;
+    if (!t) return true;
+    return (
+      (c.full_name || "").toLowerCase().includes(t) ||
+      (c.objetivo || "").toLowerCase().includes(t) ||
+      (c.headline || "").toLowerCase().includes(t) ||
+      (c.city || "").toLowerCase().includes(t) ||
+      (c.skills || []).some((s) => s.toLowerCase().includes(t))
+    );
+  });
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h1 className="text-xl font-bold text-foreground">Currículos</h1>
           <p className="text-xs text-muted-foreground">
-            {filtered.length} {filtered.length === 1 ? "pessoa disponível" : "pessoas disponíveis"} pra proposta
+            {filtered.length} {filtered.length === 1 ? "pessoa disponível" : "pessoas disponíveis"}{" "}
+            <span className="text-muted-foreground/80">(todas as regiões)</span>
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowFavorites((v) => !v)}
+          className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-bold transition-colors ${showFavorites ? "text-primary" : "text-foreground"}`}
+        >
+          Favoritos
+          <Bookmark className={`w-4 h-4 ${showFavorites ? "fill-primary text-primary" : "fill-amber-400 text-amber-500"}`} />
+        </button>
       </div>
 
       <div className="flex items-center gap-2 border rounded-xl px-3 py-2.5 bg-card focus-within:ring-2 focus-within:ring-primary/30 mb-5">
@@ -52,7 +76,7 @@ const CandidatesList = () => {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nome, objetivo, habilidade ou cidade..."
+          placeholder="Buscar vagas, empresas ou cidades..."
           className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
         />
       </div>
@@ -66,7 +90,7 @@ const CandidatesList = () => {
           <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
             <Briefcase className="w-8 h-8 text-muted-foreground/40" />
           </div>
-          <p className="text-sm font-medium">Nenhum currículo disponível</p>
+          <p className="text-sm font-medium">{showFavorites ? "Nenhum favorito ainda" : "Nenhum currículo disponível"}</p>
           <p className="text-xs max-w-[240px]">Quando alguém publicar o currículo, aparece aqui pra você chamar.</p>
         </div>
       ) : (
@@ -98,7 +122,17 @@ const CandidatesList = () => {
                   </span>
                 )}
               </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div className="flex flex-col items-center gap-2 shrink-0">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFav(c.user_id); }}
+                  aria-label="Favoritar currículo"
+                >
+                  <Bookmark className={`w-5 h-5 ${favs.has(c.user_id) ? "fill-amber-400 text-amber-500" : "text-muted-foreground/40"}`} />
+                </span>
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </div>
             </button>
           ))}
         </div>

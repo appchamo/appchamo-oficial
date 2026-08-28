@@ -187,11 +187,13 @@ export async function startDirectChat(
   toUserId: string,
   firstMessage: string,
 ): Promise<{ threadId: string | null; error: string | null }> {
-  // Dedup: já existe uma conversa direta entre os dois? reaproveita.
+  // Dedup: reaproveita SÓ uma conversa direta ATIVA entre os dois.
+  // Se a anterior foi cancelada/encerrada, abre uma nova (a cancelada fica fechada).
   const { data: existing } = await supabase
     .from("service_requests" as never)
     .select("id")
     .eq("request_kind", "direct")
+    .in("status", ["pending", "accepted"])
     .or(`and(client_id.eq.${fromUserId},peer_user_id.eq.${toUserId}),and(client_id.eq.${toUserId},peer_user_id.eq.${fromUserId})`)
     .order("created_at", { ascending: false })
     .limit(1)

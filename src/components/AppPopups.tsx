@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
+import {
+  isFirstRunBlockedPath, phoneVerificationPending,
+  isSessionGateActive, useSessionGateSignal, setSessionGate, SESSION_GATE,
+} from "@/lib/sessionGates";
 
 interface Popup {
   id: string;
@@ -16,9 +22,28 @@ const SESSION_KEY = "chamo_popups_shown_v1";
 
 const AppPopups = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user, profile, loading } = useAuth();
+  useSessionGateSignal(); // re-avalia quando um overlay abre/fecha
   const [popups, setPopups] = useState<Popup[]>([]);
   const [idx, setIdx] = useState(0);
+  // Já foi mostrado nesta sessão? (lido uma vez no mount — estável, não reativo)
+  const [alreadyShown] = useState<boolean>(() => {
+    try { return !!sessionStorage.getItem(SESSION_KEY); } catch { return false; }
+  });
 
+  // Elegível só quando: logado, cadastro completo, WhatsApp já confirmado, fora de
+  // rota de auth/onboarding, e sem nenhum overlay bloqueando (atualização/bloqueio/região).
+  const eligible =
+    !!user &&
+    !loading &&
+    !!profile &&
+    isProfileSignupComplete(profile) &&
+    !phoneVerificationPending(profile) &&
+    !isFirstRunBlockedPath(location.pathname) &&
+    !isSessionGateActive([SESSION_GATE.forceUpdate, SESSION_GATE.blocked, SESSION_GATE.region]);
+
+  // Busca os popups uma vez por sessão (não exibe ainda — só carrega).
   useEffect(() => {
     if (sessionStorage.getItem(SESSION_KEY)) return;
     let cancelled = false;
@@ -32,16 +57,25 @@ const AppPopups = () => {
           .order("sort_order", { ascending: true })
           .limit(3);
         const list = (((data as unknown) as Popup[]) || []).filter((p) => p.image_url || p.image_url_mobile);
-        if (!cancelled && list.length) {
-          setPopups(list);
-          sessionStorage.setItem(SESSION_KEY, "1");
-        }
+        if (!cancelled && list.length) setPopups(list);
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  if (idx >= popups.length) return null;
+  const visible = eligible && !alreadyShown && idx < popups.length;
+
+  // Marca como "mostrado nesta sessão" só quando REALMENTE começa a exibir (não no fetch),
+  // e publica no controlador central que há popup na tela (a roleta cede a vez).
+  useEffect(() => {
+    if (visible) {
+      try { sessionStorage.setItem(SESSION_KEY, "1"); } catch { /* ignore */ }
+    }
+    setSessionGate(SESSION_GATE.popup, visible);
+    return () => setSessionGate(SESSION_GATE.popup, false);
+  }, [visible]);
+
+  if (!visible) return null;
   const p = popups[idx];
   const img = p.image_url_mobile || p.image_url;
   if (!img) return null;

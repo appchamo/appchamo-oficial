@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { fetchRegionGate, checkRegion } from "@/lib/regionGate";
 import { getDeviceLocation } from "@/lib/deviceLocation";
+import { setSessionGate, SESSION_GATE } from "@/lib/sessionGates";
 import { MapPin, Loader2 } from "lucide-react";
 
 const STAFF = ["admin@appchamo.com", "suporte@appchamo.com"];
@@ -61,6 +62,12 @@ export default function RegionGate() {
   }, [user, loading, isStaff]);
 
   useEffect(() => { void runCheck(); }, [runCheck]);
+
+  // Anuncia ao controlador central que este gate está bloqueando.
+  useEffect(() => {
+    setSessionGate(SESSION_GATE.region, blocked);
+    return () => setSessionGate(SESSION_GATE.region, false);
+  }, [blocked]);
 
   if (!blocked) return null;
 

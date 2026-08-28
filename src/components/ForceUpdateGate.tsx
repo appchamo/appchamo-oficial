@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
+import { setSessionGate, SESSION_GATE } from "@/lib/sessionGates";
 import { RefreshCw, ArrowDownToLine } from "lucide-react";
 
 const PLAY_DEFAULT = "https://play.google.com/store/apps/details?id=com.chamo.app";
@@ -69,6 +70,12 @@ export default function ForceUpdateGate() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Anuncia ao controlador central que este gate está bloqueando (some a roleta/popup).
+  useEffect(() => {
+    setSessionGate(SESSION_GATE.forceUpdate, blocked);
+    return () => setSessionGate(SESSION_GATE.forceUpdate, false);
+  }, [blocked]);
 
   const openStore = async () => {
     try {

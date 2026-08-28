@@ -17,34 +17,15 @@ import { AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { isProfileSignupComplete } from "@/lib/profileSignupComplete";
+import {
+  isFirstRunBlockedPath, phoneVerificationPending,
+  isSessionGateActive, useSessionGateSignal, setSessionGate, SESSION_GATE,
+} from "@/lib/sessionGates";
 import type { RoletaTrigger, RoletaPending } from "@/lib/roleta";
 
 const Roleta = lazy(() => import("@/components/Roleta"));
 
 const DISMISS_KEY = "roleta_dismissed_session";
-
-/** Rotas onde a roleta NUNCA pode aparecer (auth, cadastro, admin, fluxos). */
-function isBlockedPath(path: string): boolean {
-  if (path === "/") return true; // landing/redirect
-  const prefixes = [
-    "/login", "/signup", "/complete-signup", "/reset-password", "/oauth-callback",
-    "/post-login", "/auth", "/admin", "/suporte-desk", "/signup-pro", "/qr-auth",
-    "/checkout", "/c/", "/hard-reload", "/exclusao-de-conta", "/privacy", "/terms-of-use",
-    "/verificar-whatsapp",
-  ];
-  return prefixes.some((p) => path === p || path.startsWith(p));
-}
-
-// Verificação de WhatsApp pendente (mesma regra do PhoneVerificationGuard):
-// contas novas (a partir do CUTOFF) precisam confirmar o número antes de tudo.
-// Enquanto pendente, a roleta NÃO pode abrir (senão sobe por cima do formulário).
-const PHONE_VERIFY_CUTOFF = new Date("2026-08-17T00:00:00Z").getTime();
-function phoneVerificationPending(profile: { created_at?: string | null; phone_verified?: boolean | null } | null): boolean {
-  if (!profile) return false;
-  const isNew = profile.created_at ? new Date(profile.created_at).getTime() >= PHONE_VERIFY_CUTOFF : false;
-  if (!isNew) return false;
-  return !profile.phone_verified;
-}
 
 function signupInProgress(): boolean {
   try { return localStorage.getItem("signup_in_progress") === "true"; } catch { return false; }
@@ -66,6 +47,7 @@ function anyModalOpen(): boolean {
 export default function RoletaGate() {
   const { user, profile, loading } = useAuth();
   const location = useLocation();
+  useSessionGateSignal(); // re-avalia quando outro gate (overlay/popup) abre/fecha
   const [queue, setQueue] = useState<RoletaTrigger[]>([]);
   const [idx, setIdx] = useState(0);
   const [open, setOpen] = useState(false);
@@ -84,7 +66,9 @@ export default function RoletaGate() {
     isProfileSignupComplete(profile) &&
     !phoneVerificationPending(profile) &&
     !signupInProgress() &&
-    !isBlockedPath(location.pathname);
+    !isFirstRunBlockedPath(location.pathname) &&
+    // Cede a vez para overlays (atualização/bloqueio/região) e para os popups do admin.
+    !isSessionGateActive([SESSION_GATE.forceUpdate, SESSION_GATE.blocked, SESSION_GATE.region, SESSION_GATE.popup]);
 
   const isDismissed = () => {
     try { return sessionStorage.getItem(DISMISS_KEY) === "1"; } catch { return false; }
@@ -150,6 +134,15 @@ export default function RoletaGate() {
     setQueue([]);
     setIdx(0);
   };
+
+  // Publica no controlador central que a roleta está aberta (coordenação com popups).
+  // (efeito precisa vir antes de qualquer return condicional)
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    const isUp = open && queue.length > 0 && eligible;
+    setSessionGate(SESSION_GATE.roleta, isUp);
+    return () => setSessionGate(SESSION_GATE.roleta, false);
+  }, [open, queue.length, eligible]);
 
   // Some imediatamente se sair de elegibilidade (ex.: navegou pro cadastro com a roleta aberta).
   if (!open || queue.length === 0 || !eligible) return null;

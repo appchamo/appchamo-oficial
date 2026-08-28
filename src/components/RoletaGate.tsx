@@ -30,8 +30,20 @@ function isBlockedPath(path: string): boolean {
     "/login", "/signup", "/complete-signup", "/reset-password", "/oauth-callback",
     "/post-login", "/auth", "/admin", "/suporte-desk", "/signup-pro", "/qr-auth",
     "/checkout", "/c/", "/hard-reload", "/exclusao-de-conta", "/privacy", "/terms-of-use",
+    "/verificar-whatsapp",
   ];
   return prefixes.some((p) => path === p || path.startsWith(p));
+}
+
+// Verificação de WhatsApp pendente (mesma regra do PhoneVerificationGuard):
+// contas novas (a partir do CUTOFF) precisam confirmar o número antes de tudo.
+// Enquanto pendente, a roleta NÃO pode abrir (senão sobe por cima do formulário).
+const PHONE_VERIFY_CUTOFF = new Date("2026-08-17T00:00:00Z").getTime();
+function phoneVerificationPending(profile: { created_at?: string | null; phone_verified?: boolean | null } | null): boolean {
+  if (!profile) return false;
+  const isNew = profile.created_at ? new Date(profile.created_at).getTime() >= PHONE_VERIFY_CUTOFF : false;
+  if (!isNew) return false;
+  return !profile.phone_verified;
 }
 
 function signupInProgress(): boolean {
@@ -70,6 +82,7 @@ export default function RoletaGate() {
     !loading &&
     !!profile &&
     isProfileSignupComplete(profile) &&
+    !phoneVerificationPending(profile) &&
     !signupInProgress() &&
     !isBlockedPath(location.pathname);
 

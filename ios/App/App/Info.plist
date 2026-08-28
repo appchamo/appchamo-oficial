@@ -76,6 +76,10 @@
 	<string>O Chamô acessa suas fotos para você enviar documentos e imagens no cadastro.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>O Chamô usa sua localização para mostrar profissionais da sua região.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>O Chamô usa sua localização para mostrar profissionais e serviços da sua região.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>O Chamô usa sua localização para mostrar profissionais e serviços da sua região.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

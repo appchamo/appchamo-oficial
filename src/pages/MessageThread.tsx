@@ -1869,7 +1869,9 @@ const MessageThread = () => {
       setAvailableCoupons(valid);
     }
 
-    setBillingDataStep(true);
+    // Se os dados já estão salvos e completos, pula a etapa e vai direto ao pagamento.
+    // Senão, mostra o formulário pra preencher (fica salvo pras próximas).
+    setBillingDataStep(!isBillingComplete(initialBillingForm));
     setEditBilling(false);
     setBillingForm(initialBillingForm);
     setPaymentOpen(true);
@@ -4315,6 +4317,15 @@ const MessageThread = () => {
           {/* TELA 1: RESUMO E CUPOM */}
           {paymentData && !billingDataStep && !cardStep &&
           <div className="space-y-4">
+              {isBillingComplete(billingForm) && (
+                <div className="flex items-center justify-between gap-2 rounded-xl border bg-muted/30 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-muted-foreground">Dados de pagamento</p>
+                    <p className="text-xs font-medium text-foreground truncate">CPF {formatCpf(billingForm.cpf)} · {billingForm.city}/{billingForm.state}</p>
+                  </div>
+                  <button type="button" onClick={() => { setEditBilling(true); setBillingDataStep(true); }} className="shrink-0 text-xs font-semibold text-primary hover:underline">Editar</button>
+                </div>
+              )}
               <div className="text-center p-4 bg-muted/50 rounded-xl relative">
                 {hasAnyCouponApplied ?
               <>

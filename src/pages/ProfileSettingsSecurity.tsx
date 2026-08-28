@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Lock, FileText, CheckCircle2, Clock, XCircle, AlertTriangle, Camera, ImageIcon, X, Upload, Loader2, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Lock, FileText, CheckCircle2, Clock, XCircle, AlertTriangle, Camera, ImageIcon, X, Upload, Loader2, ShieldCheck, Smartphone, Monitor, LogOut, UserX } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -49,6 +49,14 @@ const ProfileSettingsSecurity = () => {
   const [pickForSlot, setPickForSlot] = useState<string | null>(null);
   const [missingSlotKeys, setMissingSlotKeys] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+
+  // Aparelhos conectados
+  interface DeviceRow { id: string; device_name: string | null; platform: string | null; last_active: string | null; device_id: string | null }
+  const [devices, setDevices] = useState<DeviceRow[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(true);
+  const [signingOutAll, setSigningOutAll] = useState(false);
+  const currentDeviceId = typeof localStorage !== "undefined" ? localStorage.getItem("chamo_device_id") : null;
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
@@ -90,6 +98,52 @@ const ProfileSettingsSecurity = () => {
   }, [user, isPro]);
 
   useEffect(() => { fetchProData(); }, [fetchProData]);
+
+  // Carrega os aparelhos conectados (todos os usuários).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingDevices(true);
+      const { data } = await supabase
+        .from("user_devices")
+        .select("id, device_name, platform, last_active, device_id")
+        .eq("user_id", user.id)
+        .order("last_active", { ascending: false });
+      if (!cancelled) {
+        setDevices((data as DeviceRow[]) || []);
+        setLoadingDevices(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const fmtLastActive = (iso: string | null): string => {
+    if (!iso) return "";
+    const diff = Date.now() - new Date(iso).getTime();
+    const min = Math.floor(diff / 60000);
+    if (min < 1) return "agora";
+    if (min < 60) return `há ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `há ${h} h`;
+    const d = Math.floor(h / 24);
+    return `há ${d} d`;
+  };
+
+  const handleSignOutAll = async () => {
+    if (!user || signingOutAll) return;
+    if (!window.confirm("Sair de todos os aparelhos? Você vai precisar entrar de novo em cada um.")) return;
+    setSigningOutAll(true);
+    // Remove os tokens de push de todos os aparelhos (para de notificar) e revoga
+    // todas as sessões no servidor (scope global) — some de todos os dispositivos.
+    try { await supabase.from("user_devices").delete().eq("user_id", user.id); } catch { /* nao bloqueia */ }
+    try { await supabase.auth.signOut({ scope: "global" }); } catch { /* nao bloqueia */ }
+    try {
+      localStorage.removeItem("chamo_cached_profile");
+      localStorage.removeItem("chamo_cached_roles");
+    } catch { /* ignore */ }
+    window.location.href = "/login";
+  };
 
   useEffect(() => {
     return () => {
@@ -234,6 +288,57 @@ const ProfileSettingsSecurity = () => {
             </div>
             <ArrowLeft className="w-4 h-4 text-muted-foreground shrink-0 rotate-180" />
           </Link>
+
+          {/* Aparelhos conectados */}
+          <div className="bg-card border rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Smartphone className="w-5 h-5 text-primary shrink-0" />
+              <h2 className="text-sm font-semibold text-foreground">Aparelhos conectados</h2>
+            </div>
+
+            {loadingDevices ? (
+              <div className="flex justify-center py-3">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : devices.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-1">Nenhum aparelho registrado ainda.</p>
+            ) : (
+              <div className="space-y-2">
+                {devices.map((d) => {
+                  const isMobile = (d.platform || "").toLowerCase() === "ios" || (d.platform || "").toLowerCase() === "android";
+                  const Icon = isMobile ? Smartphone : Monitor;
+                  const isCurrent = !!d.device_id && d.device_id === currentDeviceId;
+                  const meta = [d.platform || null, fmtLastActive(d.last_active) ? `ativo ${fmtLastActive(d.last_active)}` : null].filter(Boolean).join(" · ");
+                  return (
+                    <div key={d.id} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
+                      <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-foreground block truncate">
+                          {d.device_name || "Aparelho"}
+                          {isCurrent && (
+                            <span className="ml-2 text-[10px] font-semibold rounded-full bg-primary/10 text-primary px-1.5 py-0.5 align-middle">
+                              Este aparelho
+                            </span>
+                          )}
+                        </span>
+                        {meta && <span className="text-xs text-muted-foreground">{meta}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSignOutAll}
+              disabled={signingOutAll}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-destructive/40 text-destructive text-sm font-semibold hover:bg-destructive/10 transition-colors disabled:opacity-50"
+            >
+              {signingOutAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+              Sair de todos os aparelhos
+            </button>
+          </div>
 
           {/* Documentos — apenas para profissionais */}
           {isPro && (
@@ -380,6 +485,19 @@ const ProfileSettingsSecurity = () => {
               )}
             </div>
           )}
+
+          {/* Excluir conta (LGPD / exigência das lojas) */}
+          <Link
+            to="/exclusao-de-conta"
+            className="flex items-center gap-3 bg-card border rounded-xl p-4 hover:border-destructive/40 transition-all"
+          >
+            <UserX className="w-5 h-5 text-destructive shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-semibold text-destructive block">Excluir minha conta</span>
+              <span className="text-xs text-muted-foreground">Remove sua conta e seus dados de forma permanente</span>
+            </div>
+            <ArrowLeft className="w-4 h-4 text-muted-foreground shrink-0 rotate-180" />
+          </Link>
         </div>
       </main>
 

@@ -181,6 +181,46 @@ export async function sendProposal(
   return { error: null };
 }
 
+// Abre (ou reaproveita) uma conversa DIRETA no Chat com outra pessoa e envia a 1ª mensagem.
+export async function startDirectChat(
+  fromUserId: string,
+  toUserId: string,
+  firstMessage: string,
+): Promise<{ threadId: string | null; error: string | null }> {
+  // Dedup: já existe uma conversa direta entre os dois? reaproveita.
+  const { data: existing } = await supabase
+    .from("service_requests" as never)
+    .select("id")
+    .eq("request_kind", "direct")
+    .or(`and(client_id.eq.${fromUserId},peer_user_id.eq.${toUserId}),and(client_id.eq.${toUserId},peer_user_id.eq.${fromUserId})`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let threadId = (existing as { id?: string } | null)?.id;
+  if (!threadId) {
+    const { data: req, error } = await supabase
+      .from("service_requests" as never)
+      .insert({ client_id: fromUserId, peer_user_id: toUserId, request_kind: "direct", description: firstMessage.trim() || "Olá!" } as never)
+      .select("id")
+      .single();
+    if (error || !req) return { threadId: null, error: error?.message ?? "Não foi possível abrir a conversa." };
+    threadId = (req as { id: string }).id;
+  }
+  if (firstMessage.trim()) {
+    await supabase.from("chat_messages").insert({ request_id: threadId, sender_id: fromUserId, content: firstMessage.trim() } as never);
+  }
+  const { data: me } = await supabase.from("profiles_public" as never).select("full_name").eq("user_id", fromUserId).maybeSingle();
+  const fromName = (me as { full_name?: string | null } | null)?.full_name?.trim() || "Alguém";
+  await supabase.from("notifications").insert({
+    user_id: toUserId,
+    title: "💬 Nova mensagem",
+    message: `${fromName} quer falar com você.`,
+    type: "info",
+    link: `/messages/${threadId}`,
+  } as never);
+  return { threadId, error: null };
+}
+
 export async function fetchReceivedProposals(userId: string): Promise<ReceivedProposal[]> {
   const { data } = await supabase
     .from("job_proposals" as never)

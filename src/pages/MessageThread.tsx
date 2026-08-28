@@ -664,6 +664,15 @@ const MessageThread = () => {
               .from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", req.client_id).maybeSingle()) as { data: { full_name: string; avatar_url: string | null } | null };
             if (profile) setOtherParty({ name: profile.full_name || "Cliente", avatar_url: profile.avatar_url });
           }
+        } else if ((req as { peer_user_id?: string | null }).peer_user_id) {
+          // Conversa direta usuário↔usuário (ex.: chamar candidato). Sem ações de serviço.
+          const otherId = isClient ? (req as { peer_user_id: string }).peer_user_id : req.client_id;
+          setRecipientUserId(otherId);
+          setPeerProfileNavKey(null);
+          setPeerClientProId(null);
+          const { data: dprofile } = (await supabase
+            .from("profiles_public" as any).select("full_name, avatar_url").eq("user_id", otherId).maybeSingle()) as { data: { full_name: string; avatar_url: string | null } | null };
+          if (dprofile) setOtherParty({ name: dprofile.full_name || "Usuário", avatar_url: dprofile.avatar_url });
         }
       } else {
         setRequestKind("service");

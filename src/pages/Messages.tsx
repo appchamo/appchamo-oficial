@@ -236,8 +236,8 @@ const Messages = () => {
 
     const proIds = proData?.map((p: any) => p.id) || [];
     const reqQuery = proIds.length > 0
-      ? supabase.from("service_requests").select("*").or(`client_id.eq.${user.id},professional_id.in.(${proIds.join(",")})`).order("updated_at", { ascending: false }).limit(limitCount)
-      : supabase.from("service_requests").select("*").eq("client_id", user.id).order("updated_at", { ascending: false }).limit(limitCount);
+      ? supabase.from("service_requests").select("*").or(`client_id.eq.${user.id},professional_id.in.(${proIds.join(",")}),peer_user_id.eq.${user.id}`).order("updated_at", { ascending: false }).limit(limitCount)
+      : supabase.from("service_requests").select("*").or(`client_id.eq.${user.id},peer_user_id.eq.${user.id}`).order("updated_at", { ascending: false }).limit(limitCount);
 
     const { data: allReqsRaw } = await reqQuery;
     const allReqs = allReqsRaw || [];
@@ -261,7 +261,12 @@ const Messages = () => {
 
     const statusMap = new Map(((readStatuses || []) as any[]).map(rs => [rs.request_id, rs]));
     const proUserIdMap = new Map(((allPros || []) as any[]).map(p => [p.id, p.user_id]));
-    const usersToFetch = [...new Set(unique.map((req: any) => req.client_id === user.id ? proUserIdMap.get(req.professional_id) : req.client_id).filter(Boolean))] as string[];
+    // Resolve a "outra pessoa" da thread: em serviço = profissional; em direta (peer) = o peer; e se eu sou o peer/pro, a outra é o client.
+    const otherUserOf = (req: any): string | null =>
+      req.client_id === user.id
+        ? (req.professional_id ? (proUserIdMap.get(req.professional_id) ?? null) : (req.peer_user_id ?? null))
+        : req.client_id;
+    const usersToFetch = [...new Set(unique.map(otherUserOf).filter(Boolean))] as string[];
 
     const [profilesResult, sumsResult] = await Promise.all([
       supabase.from("profiles_public" as any).select("user_id, full_name, avatar_url").in("user_id", usersToFetch),
@@ -303,7 +308,7 @@ const Messages = () => {
       const statusData = statusMap.get(req.id) || { is_archived: false, is_deleted: false, manual_unread: false };
       if (statusData.is_deleted) return null as any;
       const isClientViewer = req.client_id === user.id;
-      const targetUserId = isClientViewer ? proUserIdMap.get(req.professional_id) : req.client_id;
+      const targetUserId = otherUserOf(req);
       const profile = targetUserId ? profileMap.get(targetUserId) : null;
       const proOwnerUserId = proUserIdMap.get(req.professional_id) ?? null;
       const otherPartyUserId = isClientViewer ? proOwnerUserId : req.client_id;

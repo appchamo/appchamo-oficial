@@ -90,10 +90,17 @@ const BottomNav = () => {
         proReqIds = (proReqs || []).map(r => r.id);
       }
 
+      // Conversas diretas (ex.: chamado de currículo) onde eu sou o peer.
+      const { data: peerReqs } = await supabase
+        .from("service_requests")
+        .select("id")
+        .eq("peer_user_id", user.id);
+
       const allReqIds = [
         ...new Set([
           ...(clientReqs || []).map(r => r.id),
           ...proReqIds,
+          ...((peerReqs as { id: string }[] | null) || []).map(r => r.id),
         ]),
       ];
 

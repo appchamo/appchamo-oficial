@@ -6,7 +6,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import {
-  fetchCandidate, saveMyResume, sendProposal, isFollowingUser, setFollowUser, fetchReceivedProposals,
+  fetchCandidate, saveMyResume, startDirectChat, isFollowingUser, setFollowUser, fetchReceivedProposals,
   type CandidateCard, type JobSeekerProfile, type ReceivedProposal,
 } from "@/lib/jobSeeker";
 import { getPublicAppBaseUrl } from "@/lib/publicAppUrl";
@@ -63,11 +63,11 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
   const handleReply = async () => {
     if (!user || !replyTo || replying) return;
     setReplying(true);
-    const { error } = await sendProposal(user.id, replyTo.from_user, replyMsg);
+    const { threadId, error } = await startDirectChat(user.id, replyTo.from_user, replyMsg);
     setReplying(false);
-    if (error) { toast({ title: "Não foi possível responder", description: error, variant: "destructive" }); return; }
+    if (error || !threadId) { toast({ title: "Não foi possível responder", description: error ?? "", variant: "destructive" }); return; }
     setReplyTo(null); setReplyMsg("");
-    toast({ title: "Resposta enviada!", description: "A pessoa foi notificada." });
+    navigate(`/messages/${threadId}`);
   };
 
   useEffect(() => { void load(); /* eslint-disable-next-line */ }, [targetUserId]);
@@ -110,11 +110,11 @@ const ResumeProfileView = ({ targetUserId, isOwner }: Props) => {
   const handleSend = async () => {
     if (!user || sending) return;
     setSending(true);
-    const { error } = await sendProposal(user.id, targetUserId, message);
+    const { threadId, error } = await startDirectChat(user.id, targetUserId, message);
     setSending(false);
-    if (error) { toast({ title: "Não foi possível enviar", description: error, variant: "destructive" }); return; }
+    if (error || !threadId) { toast({ title: "Não foi possível abrir a conversa", description: error ?? "", variant: "destructive" }); return; }
     setChamarOpen(false); setMessage("");
-    toast({ title: "Proposta enviada!", description: "A pessoa foi notificada e verá sua mensagem." });
+    navigate(`/messages/${threadId}`);
   };
 
   const handleShare = async () => {

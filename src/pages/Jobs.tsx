@@ -273,16 +273,19 @@ const Jobs = ({ embedded = false }: { embedded?: boolean } = {}) => {
 
   const content = (
       <main className="max-w-screen-lg mx-auto px-4 py-5">
-        {/* Topo: Meu perfil · Publicar Vaga · Disponíveis · Currículos */}
-        <div className="flex items-stretch gap-2 mb-5">
+        {/* Ações: Meu perfil · Publicar Vaga */}
+        <div className="flex items-stretch gap-2 mb-3">
           <button type="button" onClick={() => navigate("/meu-curriculo")}
-            className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 transition-colors">Meu perfil</button>
+            className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm whitespace-nowrap hover:bg-primary/90 transition-colors">Meu perfil</button>
           <Link to="/my-jobs"
-            className="flex-1 py-2.5 rounded-xl bg-muted text-muted-foreground font-bold text-xs text-center hover:bg-muted/80 transition-colors flex items-center justify-center">Publicar Vaga</Link>
+            className="flex-1 py-3 rounded-xl bg-muted text-foreground font-bold text-sm whitespace-nowrap text-center hover:bg-muted/80 transition-colors flex items-center justify-center">Publicar Vaga</Link>
+        </div>
+        {/* Alternador: Disponíveis · Currículos */}
+        <div className="flex items-stretch gap-2 mb-5 bg-muted/50 p-1 rounded-2xl">
           <button type="button" onClick={() => setTab("disponiveis")}
-            className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-colors ${tab === "disponiveis" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>Disponíveis</button>
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-colors ${tab === "disponiveis" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"}`}>Disponíveis</button>
           <button type="button" onClick={() => setTab("curriculos")}
-            className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-colors ${tab === "curriculos" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>Currículos</button>
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-colors ${tab === "curriculos" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"}`}>Currículos</button>
         </div>
 
         {tab === "curriculos" && <CandidatesList />}
